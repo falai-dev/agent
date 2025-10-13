@@ -1,14 +1,21 @@
 {
   "name": "@falai/agent",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
     }
   },
   "files": [
@@ -31,7 +38,10 @@
   },
   "homepage": "https://github.com/gusnips/falai#readme",
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:esm && npm run build:cjs && npm run fix:cjs",
+    "build:esm": "tsc",
+    "build:cjs": "tsc --project tsconfig.cjs.json",
+    "fix:cjs": "echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
