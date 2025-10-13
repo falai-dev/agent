@@ -2,10 +2,10 @@
  * Route (Journey) DSL implementation
  */
 
-import type { RouteOptions, RouteRef } from "@/types/route";
-import type { Guideline } from "@/types/agent";
+import type { RouteOptions, RouteRef } from "../types/route";
+import type { Guideline } from "../types/agent";
 
-import { State } from "@/core/State";
+import { State } from "./State";
 
 let routeIdCounter = 0;
 

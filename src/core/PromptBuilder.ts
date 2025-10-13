@@ -2,13 +2,13 @@
  * Prompt construction and management
  */
 
-import type { Event, EmittedEvent, MessageEventData } from "@/types/history";
-import { EventKind, EventSource } from "@/types/history";
-import type { Term, Capability, GuidelineMatch } from "@/types/agent";
-import type { PromptSection, ContextVariableValue } from "@/types/prompt";
-import { SectionStatus } from "@/types/prompt";
+import type { Event, EmittedEvent, MessageEventData } from "../types/history";
+import { EventKind, EventSource } from "../types/history";
+import type { Term, Capability, GuidelineMatch } from "../types/agent";
+import type { PromptSection, ContextVariableValue } from "../types/prompt";
+import { SectionStatus } from "../types/prompt";
 
-import { adaptEvent } from "@/core/Events";
+import { adaptEvent } from "./Events";
 
 /**
  * Built-in section identifiers

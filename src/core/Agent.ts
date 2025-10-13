@@ -8,14 +8,14 @@ import type {
   Guideline,
   GuidelineMatch,
   Capability,
-} from "@/types/agent";
-import type { Event, StateRef } from "@/types/index";
-import type { RouteOptions } from "@/types/route";
+} from "../types/agent";
+import type { Event, StateRef } from "../types/index";
+import type { RouteOptions } from "../types/route";
 
-import { Route } from "@/core/Route";
-import { DomainRegistry } from "@/core/DomainRegistry";
-import { PromptBuilder } from "@/core/PromptBuilder";
-import { Observation } from "@/core/Observation";
+import { Route } from "./Route";
+import { DomainRegistry } from "./DomainRegistry";
+import { PromptBuilder } from "./PromptBuilder";
+import { Observation } from "./Observation";
 
 /**
  * Main Agent class with generic context support

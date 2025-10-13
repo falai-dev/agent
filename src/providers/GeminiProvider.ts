@@ -14,8 +14,8 @@ import type {
   GenerateMessageInput,
   GenerateMessageOutput,
   AgentStructuredResponse,
-} from "@/types/ai";
-import { withTimeoutAndRetry } from "@/utils/retry";
+} from "../types/ai";
+import { withTimeoutAndRetry } from "../utils/retry";
 
 const DEFAULT_RETRY_CONFIG = {
   timeout: 60000,

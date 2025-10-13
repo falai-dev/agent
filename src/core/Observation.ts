@@ -5,9 +5,9 @@
 import type {
   Observation as IObservation,
   ObservationOptions,
-} from "@/types/observation";
-import type { RouteRef } from "@/types/route";
-import type { Route } from "@/core/Route";
+} from "../types/observation";
+import type { RouteRef } from "../types/route";
+import type { Route } from "./Route";
 
 let observationIdCounter = 0;
 

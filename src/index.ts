@@ -35,8 +35,8 @@ export type {
   Guideline,
   Capability,
   GuidelineMatch,
-} from "@/types/agent";
-export { CompositionMode } from "@/types/agent";
+} from "./types/agent";
+export { CompositionMode } from "./types/agent";
 
 export type {
   Event,
@@ -45,8 +45,8 @@ export type {
   ToolEventData,
   StatusEventData,
   Participant,
-} from "@/types/history";
-export { EventKind, EventSource } from "@/types/history";
+} from "./types/history";
+export { EventKind, EventSource } from "./types/history";
 
 export type {
   RouteRef,
@@ -54,14 +54,14 @@ export type {
   RouteOptions,
   TransitionSpec,
   TransitionResult,
-} from "@/types/route";
+} from "./types/route";
 
 export type {
   ToolContext,
   ToolResult,
   ToolHandler,
   ToolRef,
-} from "@/types/tool";
+} from "./types/tool";
 
 export type {
   AiProvider,
@@ -69,16 +69,16 @@ export type {
   GenerateMessageOutput,
   AgentStructuredResponse,
   ReasoningConfig,
-} from "@/types/ai";
+} from "./types/ai";
 
 export type {
   PromptSection,
   ContextVariable,
   ContextVariableValue,
-} from "@/types/prompt";
-export { SectionStatus } from "@/types/prompt";
+} from "./types/prompt";
+export { SectionStatus } from "./types/prompt";
 
 export type {
   Observation as IObservation,
   ObservationOptions,
-} from "@/types/observation";
+} from "./types/observation";

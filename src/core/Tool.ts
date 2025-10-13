@@ -7,7 +7,7 @@ import type {
   ToolHandler,
   ToolRef,
   ToolResult,
-} from "@/types/tool";
+} from "../types/tool";
 
 let toolIdCounter = 0;
 

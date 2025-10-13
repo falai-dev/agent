@@ -2,8 +2,8 @@
  * Transition between states in the route DSL
  */
 
-import type { StateRef, TransitionSpec } from "@/types/route";
-import type { State } from "@/core/State";
+import type { StateRef, TransitionSpec } from "../types/route";
+import type { State } from "./State";
 
 /**
  * Represents a transition from one state to another

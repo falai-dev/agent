@@ -9,10 +9,10 @@
     "baseUrl": "./src",
     "paths": {
       "@/types": ["types/index"],
-      "@/types/*": ["types/*"],
-      "@/core/*": ["core/*"],
+      "@types/*": ["types/*"],
+      "@core/*": ["core/*"],
       "@/providers/*": ["providers/*"],
-      "@/utils/*": ["utils/*"],
+      "@utils/*": ["utils/*"],
       "@/constants": ["constants/index"]
     },
     "declaration": true,

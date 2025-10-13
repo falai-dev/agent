@@ -2,11 +2,15 @@
  * State in the route DSL
  */
 
-import type { StateRef, TransitionSpec, TransitionResult } from "@/types/route";
-import type { Guideline } from "@/types/agent";
+import type {
+  StateRef,
+  TransitionSpec,
+  TransitionResult,
+} from "../types/route";
+import type { Guideline } from "../types/agent";
 
-import { END_ROUTE } from "@/constants";
-import { Transition } from "@/core/Transition";
+import { END_ROUTE } from "../constants";
+import { Transition } from "./Transition";
 
 let stateIdCounter = 0;
 

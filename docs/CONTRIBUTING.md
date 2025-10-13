@@ -324,8 +324,8 @@ const agent = new Agent<any>({
 
 // Imports - group by: external, internal types, internal code
 import { ExternalLib } from "external-lib";
-import type { MyType } from "@/types/mytype";
-import { MyClass } from "@/core/MyClass";
+import type { MyType } from "@types/mytype";
+import { MyClass } from "@core/MyClass";
 
 // Constants
 const DEFAULT_VALUE = 10;
