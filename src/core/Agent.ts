@@ -175,7 +175,12 @@ export class Agent<TContext = unknown> {
     state?: StateRef;
     contextOverride?: Partial<TContext>;
     signal?: AbortSignal;
-  }): Promise<{ message: string }> {
+  }): Promise<{
+    message: string;
+    route?: { id: string; title: string } | null;
+    state?: { id: string; description?: string } | null;
+    toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+  }> {
     const { history, contextOverride, signal } = params;
 
     // Merge context
@@ -247,19 +252,70 @@ export class Agent<TContext = unknown> {
       );
     }
 
+    // Add JSON response schema instructions
+    promptBuilder.addJsonResponseSchema();
+
     // Build final prompt
     const prompt = promptBuilder.build();
 
-    // Generate message using AI provider
+    // Generate message using AI provider with JSON mode enabled
     const result = await this.options.ai.generateMessage({
       prompt,
       history,
       context: effectiveContext,
       signal,
+      parameters: {
+        jsonMode: true,
+      },
     });
 
+    // Parse structured response
+    let message = result.message;
+    let route: { id: string; title: string } | null = null;
+    let state: { id: string; description?: string } | null = null;
+    let toolCalls:
+      | Array<{ toolName: string; arguments: Record<string, unknown> }>
+      | undefined;
+
+    if (result.structured) {
+      // Extract data from structured response
+      message = result.structured.message || message;
+
+      // Find route by title
+      if (result.structured.route) {
+        const foundRoute = this.routes.find(
+          (r) => r.title === result.structured?.route
+        );
+        if (foundRoute) {
+          route = {
+            id: foundRoute.id,
+            title: foundRoute.title,
+          };
+        }
+      }
+
+      // Create state reference if provided
+      if (result.structured.state) {
+        state = {
+          id: "dynamic_state",
+          description: result.structured.state,
+        };
+      }
+
+      // Extract tool calls
+      if (
+        result.structured.toolCalls &&
+        result.structured.toolCalls.length > 0
+      ) {
+        toolCalls = result.structured.toolCalls;
+      }
+    }
+
     return {
-      message: result.message,
+      message,
+      route: route || undefined,
+      state: state || undefined,
+      toolCalls,
     };
   }
 

@@ -13,6 +13,7 @@ import type {
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
+  AgentStructuredResponse,
 } from "@/types/ai";
 import { withTimeoutAndRetry } from "@/utils/retry";
 
@@ -187,16 +188,33 @@ export class GeminiProvider implements AiProvider {
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput> {
     const operation = async (): Promise<GenerateMessageOutput> => {
+      // Enable JSON mode if requested
+      const configOverride: Partial<GenerateContentConfig> = { ...this.config };
+      if (input.parameters?.jsonMode) {
+        configOverride.responseMimeType = "application/json";
+      }
+
       const response: GenerateContentResponse =
         await this.genAI.models.generateContent({
           model,
           contents: input.prompt,
-          config: this.config,
+          config: configOverride,
         });
 
       const message = response.text;
       if (!message) {
         throw new Error("No response from Gemini");
+      }
+
+      // Parse JSON response if JSON mode was enabled
+      let structured;
+      if (input.parameters?.jsonMode) {
+        try {
+          structured = JSON.parse(message) as AgentStructuredResponse;
+        } catch (error) {
+          console.warn("[GEMINI] Failed to parse JSON response:", error);
+          // Fall back to treating the message as plain text
+        }
       }
 
       return {
@@ -207,6 +225,7 @@ export class GeminiProvider implements AiProvider {
           promptTokens: response.usageMetadata?.promptTokenCount,
           completionTokens: response.usageMetadata?.candidatesTokenCount,
         },
+        structured,
       };
     };
 

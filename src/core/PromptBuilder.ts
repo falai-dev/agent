@@ -460,6 +460,45 @@ These routes represent different paths the conversation can take. Choose the mos
     return this;
   }
 
+  /**
+   * Add JSON response schema instructions
+   */
+  addJsonResponseSchema(): this {
+    const schema = {
+      message: "The actual message to send to the user",
+      route: "The title of the route you chose (or null if no specific route)",
+      state: "The current state within the route (or null if not in a route)",
+      toolCalls: [
+        {
+          toolName: "Name of the tool to call",
+          arguments: "Object with tool arguments",
+        },
+      ],
+      reasoning: "Optional: Your internal reasoning for this response",
+    };
+
+    this.addSection(
+      "json_response_format",
+      `IMPORTANT: You must respond with valid JSON in the following format:
+
+\`\`\`json
+${JSON.stringify(schema, null, 2)}
+\`\`\`
+
+Instructions:
+- "message": The actual message to send to the user (required)
+- "route": If you chose a specific conversation route, provide its exact title. If not in a route, use null.
+- "state": The current state within the chosen route. If not in a route or at initial state, use null.
+- "toolCalls": If you need to call any tools, provide an array of tool calls. If no tools needed, use an empty array or omit.
+- "reasoning": Optional field for your internal thinking process.
+
+Your entire response must be valid JSON. Do not include any text before or after the JSON object.`,
+      {},
+      SectionStatus.ACTIVE
+    );
+    return this;
+  }
+
   // Helper methods
 
   private formatTemplate(

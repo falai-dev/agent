@@ -46,17 +46,58 @@ Registers a domain with tools/methods. Returns `this` for chaining.
 
 ##### `respond(input: RespondInput<TContext>): Promise<RespondOutput>`
 
-Generates an AI response based on conversation history.
+Generates an AI response based on conversation history with structured output including route, state, and tool call information.
 
 ```typescript
 interface RespondInput<TContext> {
   history: Event[];
+  state?: StateRef;
   contextOverride?: Partial<TContext>;
+  signal?: AbortSignal;
 }
 
 interface RespondOutput {
+  /** The message to send to the user */
   message: string;
-  // ... additional fields
+  /** Route chosen by the agent (if applicable) */
+  route?: { id: string; title: string };
+  /** Current state within the route (if applicable) */
+  state?: { id: string; description?: string };
+  /** Tool calls requested by the agent */
+  toolCalls?: Array<{
+    toolName: string;
+    arguments: Record<string, unknown>;
+  }>;
+}
+```
+
+**Enhanced Response Information:**
+
+- Uses structured JSON output via `responses.parse()` API (OpenAI/OpenRouter) or JSON mode (Gemini)
+- Automatically detects which route the agent chose based on conversation context
+- Provides current state information for tracking conversation flow
+- Returns tool calls for execution in your application
+
+**Example:**
+
+```typescript
+const response = await agent.respond({
+  history: conversationHistory,
+});
+
+// Save to database
+await db.agentMessages.create({
+  sessionId: session.id,
+  role: "agent",
+  content: response.message,
+  route: response.route?.title,
+  state: response.state?.description,
+  toolCalls: response.toolCalls || [],
+});
+
+// Check if conversation is complete
+if (response.route?.title === END_ROUTE) {
+  await markSessionComplete(session.id);
 }
 ```
 
@@ -429,6 +470,34 @@ interface ToolResult<TReturn> {
   error?: string;
 }
 ```
+
+---
+
+## Types
+
+### `AgentStructuredResponse`
+
+The structured response format returned by AI providers when JSON mode is enabled.
+
+```typescript
+interface AgentStructuredResponse {
+  /** The actual message to send to the user */
+  message: string;
+  /** Route chosen by the agent (route title or null if no route) */
+  route?: string | null;
+  /** Current state within the route (state description or null) */
+  state?: string | null;
+  /** Tool calls the agent wants to execute */
+  toolCalls?: Array<{
+    toolName: string;
+    arguments: Record<string, unknown>;
+  }>;
+  /** Additional reasoning or internal thoughts (optional) */
+  reasoning?: string;
+}
+```
+
+This type represents the structured JSON output that AI providers return when using the enhanced response format. The `Agent.respond()` method automatically parses this and returns a more convenient format.
 
 ---
 

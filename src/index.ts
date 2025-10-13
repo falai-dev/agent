@@ -67,6 +67,7 @@ export type {
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
+  AgentStructuredResponse,
   ReasoningConfig,
 } from "@/types/ai";
 

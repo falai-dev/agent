@@ -8,6 +8,7 @@ import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/ch
 
 import type {
   AiProvider,
+  AgentStructuredResponse,
   GenerateMessageInput,
   GenerateMessageOutput,
 } from "@/types/ai";
@@ -253,6 +254,89 @@ export class OpenRouterProvider implements AiProvider {
         params.max_tokens = input.parameters.maxOutputTokens;
       }
 
+      // Use structured output API if JSON mode is enabled
+      if (input.parameters?.jsonMode) {
+        // Define the JSON schema for agent response
+        const agentResponseSchema = {
+          type: "object",
+          properties: {
+            message: {
+              type: "string",
+              description: "The actual message to send to the user",
+            },
+            route: {
+              type: ["string", "null"],
+              description:
+                "The title of the route chosen (or null if no specific route)",
+            },
+            state: {
+              type: ["string", "null"],
+              description:
+                "The current state within the route (or null if not in a route)",
+            },
+            toolCalls: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  toolName: {
+                    type: "string",
+                    description: "Name of the tool to call",
+                  },
+                  arguments: {
+                    type: "object",
+                    description: "Arguments to pass to the tool",
+                  },
+                },
+                required: ["toolName", "arguments"],
+              },
+              description: "Tool calls the agent wants to execute",
+            },
+            reasoning: {
+              type: "string",
+              description: "Optional: Internal reasoning for this response",
+            },
+          },
+          required: ["message"],
+          additionalProperties: false,
+        };
+
+        const response = await this.client.responses.parse({
+          model,
+          instructions: input.prompt,
+          input: "",
+          reasoning: {
+            effort: input.parameters?.reasoning?.effort || "low",
+          },
+          text: {
+            format: {
+              type: "json_schema",
+              name: "agentResponseSchema",
+              schema: agentResponseSchema,
+            },
+          },
+        });
+
+        if (!response.output_parsed) {
+          throw new Error("No parsed output returned from OpenRouter");
+        }
+
+        const structured = response.output_parsed as AgentStructuredResponse;
+        const message = structured.message;
+
+        return {
+          message,
+          metadata: {
+            model: response.model,
+            tokensUsed: response.usage?.total_tokens,
+            promptTokens: response.usage?.input_tokens,
+            completionTokens: response.usage?.output_tokens,
+          },
+          structured,
+        };
+      }
+
+      // Fall back to regular chat completions API if JSON mode not enabled
       const response = await this.client.chat.completions.create(params);
 
       const message = response.choices[0]?.message?.content;

@@ -45,9 +45,32 @@ export interface GenerateMessageInput<TContext = unknown> {
     maxOutputTokens?: number;
     /** Reasoning/thinking configuration */
     reasoning?: ReasoningConfig;
+    /** Enable structured JSON output mode */
+    jsonMode?: boolean;
   };
   /** Abort signal for cancellation */
   signal?: AbortSignal;
+}
+
+/**
+ * Structured response from AI containing message and metadata
+ */
+export interface AgentStructuredResponse {
+  /** The actual message to send to the user */
+  message: string;
+  /** Route chosen by the agent (route title or null if no route) */
+  route?: string | null;
+  /** Current state within the route (state description or null) */
+  state?: string | null;
+  /** Tool calls the agent wants to execute */
+  toolCalls?: Array<{
+    /** Name of the tool to call */
+    toolName: string;
+    /** Arguments to pass to the tool */
+    arguments: Record<string, unknown>;
+  }>;
+  /** Additional reasoning or internal thoughts (optional) */
+  reasoning?: string;
 }
 
 /**
@@ -67,6 +90,8 @@ export interface GenerateMessageOutput {
     /** Additional provider-specific data */
     [key: string]: unknown;
   };
+  /** Structured response data (when JSON mode is enabled) */
+  structured?: AgentStructuredResponse;
 }
 
 /**
