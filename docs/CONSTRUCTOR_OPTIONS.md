@@ -18,16 +18,16 @@ interface AgentOptions<TContext = unknown> {
   // Required
   name: string;
   ai: AiProvider;
-  
+
   // Optional metadata
   description?: string;
   goal?: string;
   context?: TContext;
-  
+
   // Configuration
   maxEngineIterations?: number;
   compositionMode?: CompositionMode;
-  
+
   // Declarative initialization (NEW!)
   terms?: Term[];
   guidelines?: Guideline[];
@@ -44,43 +44,47 @@ const agent = new Agent({
   name: "SupportBot",
   description: "Helpful customer support",
   goal: "Resolve issues efficiently",
-  ai: new GeminiProvider({ apiKey: "..." }),
+  ai: new GeminiProvider({ apiKey: "...", model: "..." }),
   context: { userId: "123" },
-  
+
   terms: [
-    { name: "SLA", description: "Service Level Agreement", synonyms: ["response time"] }
+    {
+      name: "SLA",
+      description: "Service Level Agreement",
+      synonyms: ["response time"],
+    },
   ],
-  
+
   guidelines: [
     {
       condition: "User is frustrated",
       action: "Show empathy and offer escalation",
       tags: ["support"],
-      enabled: true
-    }
+      enabled: true,
+    },
   ],
-  
+
   capabilities: [
-    { title: "Ticket Management", description: "Create and track tickets" }
+    { title: "Ticket Management", description: "Create and track tickets" },
   ],
-  
+
   routes: [
     {
       title: "Create Ticket",
       description: "Help user create a support ticket",
       conditions: ["User wants to report an issue"],
       guidelines: [
-        { condition: "Issue is urgent", action: "Prioritize immediately" }
-      ]
-    }
+        { condition: "Issue is urgent", action: "Prioritize immediately" },
+      ],
+    },
   ],
-  
+
   observations: [
     {
       description: "User mentions problem but unclear what kind",
-      routeRefs: ["Create Ticket", "Check Ticket Status"] // By title!
-    }
-  ]
+      routeRefs: ["Create Ticket", "Check Ticket Status"], // By title!
+    },
+  ],
 });
 ```
 
@@ -92,7 +96,7 @@ const agent = new Agent({
 interface RouteOptions {
   // Required
   title: string;
-  
+
   // Optional
   description?: string;
   conditions?: string[];
@@ -115,16 +119,16 @@ const agent = new Agent({
         {
           condition: "User skips a step",
           action: "Gently remind them it's important",
-          tags: ["onboarding"]
+          tags: ["onboarding"],
         },
         {
           condition: "User seems confused",
           action: "Offer a quick tutorial video",
-          tags: ["help"]
-        }
-      ]
-    }
-  ]
+          tags: ["help"],
+        },
+      ],
+    },
+  ],
 });
 ```
 
@@ -187,18 +191,21 @@ obs.disambiguate([route1, route2]);
 ## 🎨 Best Practices
 
 ### Use Declarative When:
+
 - ✅ Configuration is **static** and known upfront
 - ✅ Loading config from **JSON/YAML files**
 - ✅ Building **reusable agent templates**
 - ✅ You want **clean, readable initialization**
 
 ### Use Fluent When:
+
 - ✅ Logic is **dynamic** or **conditional**
 - ✅ Building routes with **complex state machines**
 - ✅ Adding features **based on runtime conditions**
 - ✅ You prefer **step-by-step construction**
 
 ### Mix Both!
+
 ```typescript
 // Start with static config
 const agent = new Agent({
@@ -212,7 +219,7 @@ const agent = new Agent({
 if (user.isPremium) {
   agent.createGuideline({
     condition: "User asks for priority support",
-    action: "Escalate immediately to premium team"
+    action: "Escalate immediately to premium team",
   });
 }
 ```
@@ -221,15 +228,15 @@ if (user.isPremium) {
 
 ## 📊 Complete Comparison
 
-| Feature | Declarative (Constructor) | Fluent (Methods) |
-|---------|--------------------------|------------------|
-| **Terms** | `terms: Term[]` | `agent.createTerm(...)` |
-| **Guidelines** | `guidelines: Guideline[]` | `agent.createGuideline(...)` |
-| **Capabilities** | `capabilities: Capability[]` | `agent.createCapability(...)` |
-| **Routes** | `routes: RouteOptions[]` | `agent.createRoute(...)` |
-| **Route Guidelines** | `route.guidelines: Guideline[]` | `route.createGuideline(...)` |
-| **Observations** | `observations: ObservationOptions[]` | `agent.createObservation(...)` |
-| **Disambiguation** | `routeRefs: string[]` | `obs.disambiguate([...])` |
+| Feature              | Declarative (Constructor)            | Fluent (Methods)               |
+| -------------------- | ------------------------------------ | ------------------------------ |
+| **Terms**            | `terms: Term[]`                      | `agent.createTerm(...)`        |
+| **Guidelines**       | `guidelines: Guideline[]`            | `agent.createGuideline(...)`   |
+| **Capabilities**     | `capabilities: Capability[]`         | `agent.createCapability(...)`  |
+| **Routes**           | `routes: RouteOptions[]`             | `agent.createRoute(...)`       |
+| **Route Guidelines** | `route.guidelines: Guideline[]`      | `route.createGuideline(...)`   |
+| **Observations**     | `observations: ObservationOptions[]` | `agent.createObservation(...)` |
+| **Disambiguation**   | `routeRefs: string[]`                | `obs.disambiguate([...])`      |
 
 ---
 

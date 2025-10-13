@@ -281,6 +281,7 @@ const geminiAgent = new Agent({
   name: "Gemini Assistant",
   ai: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
+    model: "models/gemini-2.5-flash",
   }),
 });
 
@@ -315,10 +316,12 @@ config();
 
 const geminiProvider = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
+  model: "models/gemini-2.5-flash",
 });
 
 const openaiProvider = new OpenAIProvider({
   apiKey: process.env.OPENAI_API_KEY!,
+  model: "gpt-5",
 });
 ```
 

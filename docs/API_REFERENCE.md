@@ -129,7 +129,17 @@ Represents a conversation flow with states and transitions.
 
 ```typescript
 new Route(options: RouteOptions)
+
+interface RouteOptions {
+  id?: string;              // Optional custom ID (deterministic ID generated from title if not provided)
+  title: string;            // Route title
+  description?: string;     // Route description
+  conditions?: string[];    // Conditions that activate this route
+  guidelines?: Guideline[]; // Initial guidelines for this route
+}
 ```
+
+**Note on IDs:** Route IDs are deterministic by default, generated from the title using a hash function. This ensures consistency across server restarts. You can provide a custom ID if you need specific control over the identifier.
 
 #### Methods
 
@@ -223,7 +233,15 @@ Handles disambiguation between multiple routes.
 
 ```typescript
 new Observation(options: ObservationOptions)
+
+interface ObservationOptions {
+  id?: string;          // Optional custom ID (deterministic ID generated from description if not provided)
+  description: string;  // The observation description
+  routeRefs?: string[]; // Route IDs or titles to disambiguate between
+}
 ```
+
+**Note on IDs:** Observation IDs are deterministic by default, generated from the description using a hash function. This ensures consistency across server restarts.
 
 #### Methods
 
@@ -326,11 +344,14 @@ defineTool<TContext, TArgs extends unknown[], TReturn>(
   name: string,
   handler: ToolHandler<TContext, TArgs, TReturn>,
   options?: {
+    id?: string;              // Optional custom ID (deterministic ID generated from name if not provided)
     description?: string;
-    metadata?: Record<string, unknown>;
+    parameters?: unknown;
   }
 ): ToolRef<TContext, TArgs, TReturn>
 ```
+
+**Note on IDs:** Tool IDs are deterministic by default, generated from the name using a hash function. This ensures consistency across server restarts.
 
 **Example:**
 
@@ -340,7 +361,10 @@ const getTool = defineTool<MyContext, [id: string], Data>(
   async ({ context }, id) => {
     return { data: await fetchData(id) };
   },
-  { description: "Fetches data by ID" }
+  {
+    id: "custom_get_data_tool", // Optional: provide your own ID
+    description: "Fetches data by ID",
+  }
 );
 ```
 
@@ -353,9 +377,25 @@ Creates a message event for conversation history.
 ```typescript
 createMessageEvent(
   source: EventSource,
-  name: string,
-  message: string
+  participantName: string,
+  message: string,
+  timestamp?: string  // Optional: provide custom timestamp (ISO 8601 format)
 ): Event
+```
+
+**Example:**
+
+```typescript
+// With auto-generated timestamp
+createMessageEvent(EventSource.CUSTOMER, "Alice", "Hello!");
+
+// With custom timestamp (useful for historical data)
+createMessageEvent(
+  EventSource.CUSTOMER,
+  "Alice",
+  "Hello!",
+  "2025-10-13T10:30:00Z"
+);
 ```
 
 ---
@@ -366,9 +406,26 @@ Creates a tool execution event.
 
 ```typescript
 createToolEvent(
-  toolName: string,
-  data: unknown
+  source: EventSource,
+  toolCalls: ToolCall[],
+  timestamp?: string  // Optional: provide custom timestamp (ISO 8601 format)
 ): Event
+```
+
+**Example:**
+
+```typescript
+// With auto-generated timestamp
+createToolEvent(EventSource.AI_AGENT, [
+  { tool_id: "get_data", arguments: { id: "123" }, result: { data: {...} } }
+]);
+
+// With custom timestamp
+createToolEvent(
+  EventSource.AI_AGENT,
+  [{ tool_id: "get_data", arguments: { id: "123" }, result: { data: {...} } }],
+  "2025-10-13T10:30:00Z"
+);
 ```
 
 ---
@@ -498,6 +555,65 @@ interface AgentStructuredResponse {
 ```
 
 This type represents the structured JSON output that AI providers return when using the enhanced response format. The `Agent.respond()` method automatically parses this and returns a more convenient format.
+
+---
+
+### ID Generation Utilities
+
+Generate deterministic IDs for consistency across server restarts.
+
+#### `generateRouteId(title: string): string`
+
+Generates a deterministic route ID from a title.
+
+```typescript
+import { generateRouteId } from "@falai/agent";
+
+const routeId = generateRouteId("User Onboarding");
+// Returns: "route_user_onboarding_{hash}"
+```
+
+#### `generateStateId(routeId: string, description?: string, index?: number): string`
+
+Generates a deterministic state ID.
+
+```typescript
+import { generateStateId } from "@falai/agent";
+
+const stateId = generateStateId("route_123", "Ask for name");
+// Returns: "state_ask_for_name_{hash}"
+```
+
+#### `generateObservationId(description: string): string`
+
+Generates a deterministic observation ID from a description.
+
+```typescript
+import { generateObservationId } from "@falai/agent";
+
+const obsId = generateObservationId("User intent is unclear");
+// Returns: "observation_user_intent_is_unclear_{hash}"
+```
+
+#### `generateToolId(name: string): string`
+
+Generates a deterministic tool ID from a name.
+
+```typescript
+import { generateToolId } from "@falai/agent";
+
+const toolId = generateToolId("get_user_data");
+// Returns: "tool_get_user_data_{hash}"
+```
+
+**Why Deterministic IDs?**
+
+All IDs are generated deterministically using a hash function of their content (title, name, description). This ensures:
+
+- **Consistency** - Same input always produces the same ID
+- **Server Restart Safe** - IDs remain stable across application restarts
+- **Persistence Friendly** - Safe to store in databases and reference later
+- **Custom Control** - You can always provide your own IDs when needed
 
 ---
 

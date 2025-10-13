@@ -20,6 +20,8 @@ export interface Observation {
  * Options for creating an observation
  */
 export interface ObservationOptions {
+  /** Custom ID for the observation (optional - will generate deterministic ID from description if not provided) */
+  id?: string;
   /** The observation description */
   description: string;
   /** Route IDs or titles to disambiguate between (can be set later with disambiguate()) */

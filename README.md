@@ -103,6 +103,7 @@ interface SupportContext {
 // 2️⃣ Create AI provider (choose one)
 const ai = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
+  model: "models/gemini-2.5-flash",
 });
 
 // Or use OpenAI:
@@ -236,6 +237,7 @@ const fetchUserProfile = defineTool<
     return { data: profile };
   },
   {
+    id: "tool_fetch_user_profile", // Optional: custom ID for persistence
     description: "Retrieves user profile information from the database",
   }
 );
@@ -261,6 +263,7 @@ const agent = new Agent({
   ai: provider,
   routes: [
     {
+      id: "route_user_onboarding", // Optional: custom ID for consistency
       title: "User Onboarding",
       description: "Guide new users through account setup",
       conditions: ["User is new and needs onboarding"],
@@ -277,6 +280,7 @@ const agent = new Agent({
 
 // Option B: Programmatic (build flows dynamically)
 const onboardingRoute = agent.createRoute({
+  id: "route_user_onboarding", // Optional: custom ID
   title: "User Onboarding",
   description: "Guide new users through account setup",
   conditions: ["User is new and needs onboarding"],
@@ -324,14 +328,20 @@ const agent = new Agent({
   name: "HealthBot",
   ai: provider,
   routes: [
-    { title: "Schedule Appointment", conditions: ["User wants to schedule"] },
     {
+      id: "route_schedule", // Custom ID
+      title: "Schedule Appointment",
+      conditions: ["User wants to schedule"],
+    },
+    {
+      id: "route_reschedule", // Custom ID
       title: "Reschedule Appointment",
       conditions: ["User wants to reschedule"],
     },
   ],
   observations: [
     {
+      id: "obs_appointment_intent", // Custom ID for tracking
       description: "User mentions appointment but intent is unclear",
       routeRefs: ["Schedule Appointment", "Reschedule Appointment"], // By title
     },
@@ -340,11 +350,13 @@ const agent = new Agent({
 
 // Option B: Programmatic
 const scheduleRoute = agent.createRoute({
+  id: "route_schedule", // Custom ID
   title: "Schedule Appointment",
   conditions: ["User wants to schedule"],
 });
 
 const rescheduleRoute = agent.createRoute({
+  id: "route_reschedule", // Custom ID
   title: "Reschedule Appointment",
   conditions: ["User wants to reschedule"],
 });
@@ -387,6 +399,49 @@ agent
     synonyms: ["premium support", "fast track"],
   });
 ```
+
+### 🆔 Deterministic IDs & Persistence
+
+All entities (routes, states, observations, tools) have **deterministic IDs** by default, ensuring consistency across server restarts:
+
+```typescript
+import {
+  generateRouteId,
+  generateToolId,
+  generateObservationId,
+} from "@falai/agent";
+
+// Auto-generated deterministic IDs (recommended)
+const route = agent.createRoute({
+  title: "User Onboarding",
+  // ID will be: route_user_onboarding_{hash}
+});
+
+// Or provide custom IDs when you need specific control
+const route = agent.createRoute({
+  id: "my_custom_route_id", // Custom ID for database persistence
+  title: "User Onboarding",
+});
+
+// Generate IDs manually if needed
+const routeId = generateRouteId("User Onboarding");
+const toolId = generateToolId("fetch_user_data");
+
+// Custom timestamps for events (useful for historical data)
+const event = createMessageEvent(
+  EventSource.CUSTOMER,
+  "Alice",
+  "Hello!",
+  "2025-10-13T10:30:00Z" // Optional: custom timestamp
+);
+```
+
+**Why this matters:**
+
+- ✅ **Database Safe** - Store IDs in your database without worrying about changes
+- ✅ **Analytics Ready** - Track metrics and user journeys reliably
+- ✅ **Multi-Instance** - Deploy multiple server instances with consistent IDs
+- ✅ **Migration Friendly** - IDs remain stable during deployments
 
 ### ⚙️ Advanced Configuration
 

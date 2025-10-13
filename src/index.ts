@@ -28,6 +28,14 @@ export type { OpenRouterProviderOptions } from "./providers/OpenRouterProvider";
 // Constants
 export { END_ROUTE } from "./constants";
 
+// Utils
+export {
+  generateRouteId,
+  generateStateId,
+  generateObservationId,
+  generateToolId,
+} from "./utils/id";
+
 // Types
 export type {
   AgentOptions,

@@ -31,6 +31,8 @@ import type { Guideline } from "./agent";
  * Options for creating a route
  */
 export interface RouteOptions {
+  /** Custom ID for the route (optional - will generate deterministic ID from title if not provided) */
+  id?: string;
   /** Title of the route */
   title: string;
   /** Description of what this route accomplishes */

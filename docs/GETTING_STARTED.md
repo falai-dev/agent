@@ -58,6 +58,7 @@ interface MyContext {
 // Create AI provider
 const ai = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
+  model: "models/gemini-2.5-pro",
 });
 
 // Create your agent
@@ -307,6 +308,7 @@ Increase timeout in provider config:
 ```typescript
 new GeminiProvider({
   apiKey: "...",
+  model: "models/gemini-2.5-flash",
   retryConfig: {
     timeout: 120000, // 2 minutes
     retries: 5,

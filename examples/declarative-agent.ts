@@ -6,8 +6,9 @@
  * - Terms (glossary)
  * - Guidelines (behavior rules)
  * - Capabilities
- * - Routes with nested guidelines
- * - Observations with route references
+ * - Routes with nested guidelines and custom IDs
+ * - Observations with route references and custom IDs
+ * - Custom timestamps for events
  */
 
 import {
@@ -29,13 +30,16 @@ interface HealthcareContext {
   patientName: string;
 }
 
-// Define tools
+// Define tools with custom IDs (optional - IDs are deterministic by default)
 const getInsuranceProviders = defineTool<HealthcareContext, [], string[]>(
   "get_insurance_providers",
   async () => {
     return { data: ["MegaCare Insurance", "HealthFirst", "WellnessPlus"] };
   },
-  { description: "Retrieves list of accepted insurance providers" }
+  {
+    id: "healthcare_insurance_providers", // Custom ID for persistence
+    description: "Retrieves list of accepted insurance providers",
+  }
 );
 
 const getAvailableSlots = defineTool<
@@ -53,7 +57,10 @@ const getAvailableSlots = defineTool<
       ],
     };
   },
-  { description: "Gets available appointment slots" }
+  {
+    id: "healthcare_available_slots", // Custom ID
+    description: "Gets available appointment slots",
+  }
 );
 
 const getLabResults = defineTool<
@@ -70,7 +77,10 @@ const getLabResults = defineTool<
       },
     };
   },
-  { description: "Retrieves patient lab results" }
+  {
+    id: "healthcare_lab_results", // Custom ID
+    description: "Retrieves patient lab results",
+  }
 );
 
 // Declarative configuration
@@ -126,6 +136,7 @@ const capabilities: Capability[] = [
 
 const routes: RouteOptions[] = [
   {
+    id: "route_schedule_appointment", // Custom ID ensures consistency across restarts
     title: "Schedule Appointment",
     description: "Helps the patient schedule an appointment",
     conditions: ["The patient wants to schedule an appointment"],
@@ -139,6 +150,7 @@ const routes: RouteOptions[] = [
     ],
   },
   {
+    id: "route_check_lab_results", // Custom ID
     title: "Check Lab Results",
     description: "Retrieves and explains patient lab results",
     conditions: ["The patient wants to see their lab results"],
@@ -155,6 +167,7 @@ const routes: RouteOptions[] = [
 
 const observations: ObservationOptions[] = [
   {
+    id: "obs_visit_followup", // Custom ID for tracking
     description:
       "The patient asks to follow up on their visit, but it's not clear in which way",
     routeRefs: ["Schedule Appointment", "Check Lab Results"], // Reference by title
@@ -172,6 +185,7 @@ const agent = new Agent<HealthcareContext>({
   },
   ai: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY || "demo-key",
+    model: "models/gemini-2.5-flash",
   }),
   // Declarative initialization
   terms,
@@ -196,19 +210,29 @@ agent
 
 // Example usage
 async function main() {
+  // Create events with custom timestamps (useful for historical data)
   const history = [
     createMessageEvent(
       EventSource.CUSTOMER,
       "Alice",
-      "Hi, I need to follow up on my recent visit"
+      "Hi, I need to follow up on my recent visit",
+      "2025-10-13T14:30:00Z" // Optional custom timestamp
     ),
   ];
 
   const response = await agent.respond({ history });
   console.log("Agent:", response.message);
+  console.log("Route chosen:", response.route?.title);
+  console.log("Route ID:", response.route?.id); // Custom ID is preserved
 
   // The agent will use the observation to disambiguate
   // and ask which type of follow-up the patient needs
+
+  // Note: Custom IDs ensure consistency across server restarts
+  // This is crucial for:
+  // - Storing conversation state in databases
+  // - Tracking metrics and analytics
+  // - Referencing routes in external systems
 }
 
 // Uncomment to run:

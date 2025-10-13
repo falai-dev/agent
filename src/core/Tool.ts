@@ -8,8 +8,7 @@ import type {
   ToolRef,
   ToolResult,
 } from "../types/tool";
-
-let toolIdCounter = 0;
+import { generateToolId } from "../utils/id";
 
 /**
  * Define a new tool with type-safe context and arguments
@@ -33,11 +32,13 @@ export function defineTool<TContext, TArgs extends unknown[], TResult>(
   name: string,
   handler: ToolHandler<TContext, TArgs, TResult>,
   options?: {
+    id?: string;
     description?: string;
     parameters?: unknown;
   }
 ): ToolRef<TContext, TArgs, TResult> {
-  const id = `tool_${++toolIdCounter}_${name}`;
+  // Use provided ID or generate a deterministic one from the name
+  const id = options?.id || generateToolId(name);
 
   return {
     id,

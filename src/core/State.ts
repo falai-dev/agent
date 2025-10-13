@@ -11,8 +11,7 @@ import type { Guideline } from "../types/agent";
 
 import { END_ROUTE } from "../constants";
 import { Transition } from "./Transition";
-
-let stateIdCounter = 0;
+import { generateStateId } from "../utils/id";
 
 /**
  * Represents a state within a route
@@ -24,9 +23,11 @@ export class State<TContext = unknown> {
 
   constructor(
     public readonly routeId: string,
-    public readonly description?: string
+    public readonly description?: string,
+    customId?: string
   ) {
-    this.id = `state_${++stateIdCounter}`;
+    // Use provided ID or generate a deterministic one
+    this.id = customId || generateStateId(routeId, description);
   }
 
   /**

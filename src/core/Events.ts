@@ -70,7 +70,8 @@ export function adaptEvent(e: Event | EmittedEvent): string {
 export function createMessageEvent(
   source: EventSource,
   participantName: string,
-  message: string
+  message: string,
+  timestamp?: string
 ): Event<MessageEventData> {
   return {
     kind: EventKind.MESSAGE,
@@ -79,7 +80,7 @@ export function createMessageEvent(
       participant: { display_name: participantName },
       message,
     },
-    timestamp: new Date().toISOString(),
+    timestamp: timestamp || new Date().toISOString(),
   };
 }
 
@@ -88,7 +89,8 @@ export function createMessageEvent(
  */
 export function createToolEvent(
   source: EventSource,
-  toolCalls: ToolCall[]
+  toolCalls: ToolCall[],
+  timestamp?: string
 ): Event<ToolEventData> {
   return {
     kind: EventKind.TOOL,
@@ -96,6 +98,6 @@ export function createToolEvent(
     data: {
       tool_calls: toolCalls,
     },
-    timestamp: new Date().toISOString(),
+    timestamp: timestamp || new Date().toISOString(),
   };
 }

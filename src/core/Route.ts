@@ -6,8 +6,7 @@ import type { RouteOptions, RouteRef } from "../types/route";
 import type { Guideline } from "../types/agent";
 
 import { State } from "./State";
-
-let routeIdCounter = 0;
+import { generateRouteId } from "../utils/id";
 
 /**
  * Represents a conversational route/journey
@@ -21,9 +20,8 @@ export class Route<TContext = unknown> {
   private guidelines: Guideline[] = [];
 
   constructor(options: RouteOptions) {
-    this.id = `route_${++routeIdCounter}_${options.title
-      .toLowerCase()
-      .replace(/\s+/g, "_")}`;
+    // Use provided ID or generate a deterministic one from the title
+    this.id = options.id || generateRouteId(options.title);
     this.title = options.title;
     this.description = options.description;
     this.conditions = options.conditions || [];

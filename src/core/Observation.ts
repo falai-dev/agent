@@ -8,8 +8,7 @@ import type {
 } from "../types/observation";
 import type { RouteRef } from "../types/route";
 import type { Route } from "./Route";
-
-let observationIdCounter = 0;
+import { generateObservationId } from "../utils/id";
 
 /**
  * An observation that can trigger disambiguation between routes
@@ -20,7 +19,8 @@ export class Observation implements IObservation {
   public routes: RouteRef[] = [];
 
   constructor(options: ObservationOptions) {
-    this.id = `observation_${++observationIdCounter}`;
+    // Use provided ID or generate a deterministic one from the description
+    this.id = options.id || generateObservationId(options.description);
     this.description = options.description;
   }
 

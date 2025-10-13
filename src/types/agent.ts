@@ -82,7 +82,8 @@ export interface Guideline {
   /** Tags for organizing and filtering guidelines */
   tags?: string[];
   /** Tools available when following this guideline */
-  tools?: ToolRef<unknown, unknown[], unknown>[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools?: ToolRef<any, any[], any>[];
   /** Additional metadata */
   metadata?: Record<string, unknown>;
 }
@@ -98,7 +99,8 @@ export interface Capability {
   /** Description of what the capability does */
   description: string;
   /** Tools used by this capability */
-  tools?: ToolRef<unknown, unknown[], unknown>[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools?: ToolRef<any, any[], any>[];
 }
 
 /**
