@@ -24,7 +24,7 @@ export class Agent<TContext = unknown> {
   private terms: Term[] = [];
   private guidelines: Guideline[] = [];
   private capabilities: Capability[] = [];
-  private routes: Route[] = [];
+  private routes: Route<TContext>[] = [];
   private observations: Observation[] = [];
   private domainRegistry = new DomainRegistry();
 
@@ -73,7 +73,7 @@ export class Agent<TContext = unknown> {
               // Try to find route by ID or title
               return this.routes.find((r) => r.id === ref || r.title === ref);
             })
-            .filter((r): r is Route => r !== undefined);
+            .filter((r): r is Route<TContext> => r !== undefined);
 
           if (resolvedRoutes.length > 0) {
             obs.disambiguate(resolvedRoutes);
@@ -107,8 +107,8 @@ export class Agent<TContext = unknown> {
   /**
    * Create a new route (journey)
    */
-  createRoute(options: RouteOptions): Route {
-    const route = new Route(options);
+  createRoute(options: RouteOptions): Route<TContext> {
+    const route = new Route<TContext>(options);
     this.routes.push(route);
     return route;
   }
@@ -322,7 +322,7 @@ export class Agent<TContext = unknown> {
   /**
    * Get all routes
    */
-  getRoutes(): Route[] {
+  getRoutes(): Route<TContext>[] {
     return [...this.routes];
   }
 

@@ -44,11 +44,12 @@ export interface RouteOptions {
 /**
  * Specification for a state transition
  */
-export interface TransitionSpec {
+export interface TransitionSpec<TContext = unknown> {
   /** Transition to a chat state with this description */
   chatState?: string;
   /** Transition to execute a tool */
-  toolState?: ToolRef<unknown, unknown[], unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  toolState?: ToolRef<TContext, any[], any>;
   /** Transition to a specific state or end marker */
   state?: StateRef | symbol;
 }
@@ -56,13 +57,13 @@ export interface TransitionSpec {
 /**
  * Result of a transition operation
  */
-export interface TransitionResult {
+export interface TransitionResult<TContext = unknown> {
   /** The target state after transition */
   target: StateRef & {
     /** Allow chaining transitions */
     transitionTo: (
-      spec: TransitionSpec,
+      spec: TransitionSpec<TContext>,
       condition?: string
-    ) => TransitionResult;
+    ) => TransitionResult<TContext>;
   };
 }

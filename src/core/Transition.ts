@@ -8,26 +8,26 @@ import type { State } from "./State";
 /**
  * Represents a transition from one state to another
  */
-export class Transition {
-  private target?: State;
+export class Transition<TContext = unknown> {
+  private target?: State<TContext>;
 
   constructor(
     public readonly source: StateRef,
-    public readonly spec: TransitionSpec,
+    public readonly spec: TransitionSpec<TContext>,
     public readonly condition?: string
   ) {}
 
   /**
    * Set the target state for this transition
    */
-  setTarget(state: State): void {
+  setTarget(state: State<TContext>): void {
     this.target = state;
   }
 
   /**
    * Get the target state
    */
-  getTarget(): State | undefined {
+  getTarget(): State<TContext> | undefined {
     return this.target;
   }
 

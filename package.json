@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
   "main": "./dist/index.js",

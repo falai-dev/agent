@@ -12,12 +12,12 @@ let routeIdCounter = 0;
 /**
  * Represents a conversational route/journey
  */
-export class Route {
+export class Route<TContext = unknown> {
   public readonly id: string;
   public readonly title: string;
   public readonly description?: string;
   public readonly conditions: string[];
-  public readonly initialState: State;
+  public readonly initialState: State<TContext>;
   private guidelines: Guideline[] = [];
 
   constructor(options: RouteOptions) {
@@ -27,7 +27,7 @@ export class Route {
     this.title = options.title;
     this.description = options.description;
     this.conditions = options.conditions || [];
-    this.initialState = new State(this.id, "Initial state");
+    this.initialState = new State<TContext>(this.id, "Initial state");
 
     // Initialize guidelines from options
     if (options.guidelines) {
@@ -69,7 +69,7 @@ export class Route {
    * Create a route reference that includes this route instance
    * Useful for disambiguation
    */
-  toRef(): RouteRef & { route: Route } {
+  toRef(): RouteRef & { route: Route<TContext> } {
     return {
       id: this.id,
       route: this,
@@ -79,10 +79,10 @@ export class Route {
   /**
    * Get all states in this route (via traversal from initial state)
    */
-  getAllStates(): State[] {
+  getAllStates(): State<TContext>[] {
     const visited = new Set<string>();
-    const states: State[] = [];
-    const queue: State[] = [this.initialState];
+    const states: State<TContext>[] = [];
+    const queue: State<TContext>[] = [this.initialState];
 
     while (queue.length > 0) {
       const current = queue.shift()!;

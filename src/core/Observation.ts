@@ -27,7 +27,8 @@ export class Observation implements IObservation {
   /**
    * Set routes that this observation can disambiguate between
    */
-  disambiguate(routes: (Route | RouteRef)[]): this {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  disambiguate(routes: (Route<any> | RouteRef)[]): this {
     this.routes = routes.map((r) => {
       if ("getRef" in r) {
         return r.getRef();

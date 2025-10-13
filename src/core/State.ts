@@ -17,9 +17,9 @@ let stateIdCounter = 0;
 /**
  * Represents a state within a route
  */
-export class State {
+export class State<TContext = unknown> {
   public readonly id: string;
-  private transitions: Transition[] = [];
+  private transitions: Transition<TContext>[] = [];
   private guidelines: Guideline[] = [];
 
   constructor(
@@ -36,14 +36,17 @@ export class State {
    * @param condition - Optional condition for this transition
    * @returns Object with target state that supports chaining
    */
-  transitionTo(spec: TransitionSpec, condition?: string): TransitionResult {
+  transitionTo(
+    spec: TransitionSpec<TContext>,
+    condition?: string
+  ): TransitionResult<TContext> {
     // Handle END_ROUTE
     if (
       spec.state &&
       typeof spec.state === "symbol" &&
       spec.state === END_ROUTE
     ) {
-      const endTransition = new Transition(
+      const endTransition = new Transition<TContext>(
         this.getRef(),
         { state: END_ROUTE },
         condition
@@ -58,7 +61,11 @@ export class State {
 
     // Handle direct state reference
     if (spec.state && typeof spec.state !== "symbol") {
-      const transition = new Transition(this.getRef(), spec, condition);
+      const transition = new Transition<TContext>(
+        this.getRef(),
+        spec,
+        condition
+      );
       this.transitions.push(transition);
 
       return {
@@ -67,8 +74,8 @@ export class State {
     }
 
     // Create new target state for chatState or toolState
-    const targetState = new State(this.routeId, spec.chatState);
-    const transition = new Transition(this.getRef(), spec, condition);
+    const targetState = new State<TContext>(this.routeId, spec.chatState);
+    const transition = new Transition<TContext>(this.getRef(), spec, condition);
     transition.setTarget(targetState);
 
     this.transitions.push(transition);
@@ -98,7 +105,7 @@ export class State {
   /**
    * Get all transitions from this state
    */
-  getTransitions(): Transition[] {
+  getTransitions(): Transition<TContext>[] {
     return [...this.transitions];
   }
 
@@ -117,18 +124,18 @@ export class State {
    */
   private createStateRefWithTransition(
     ref: StateRef,
-    state?: State
+    state?: State<TContext>
   ): StateRef & {
     transitionTo: (
-      spec: TransitionSpec,
+      spec: TransitionSpec<TContext>,
       condition?: string
-    ) => TransitionResult;
+    ) => TransitionResult<TContext>;
   } {
     const stateInstance = state || this;
 
     return {
       ...ref,
-      transitionTo: (spec: TransitionSpec, condition?: string) =>
+      transitionTo: (spec: TransitionSpec<TContext>, condition?: string) =>
         stateInstance.transitionTo(spec, condition),
     };
   }
@@ -138,9 +145,9 @@ export class State {
    */
   private createTerminalRef(): StateRef & {
     transitionTo: (
-      spec: TransitionSpec,
+      spec: TransitionSpec<TContext>,
       condition?: string
-    ) => TransitionResult;
+    ) => TransitionResult<TContext>;
   } {
     const terminalRef: StateRef = {
       id: "END",
