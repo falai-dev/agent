@@ -1,0 +1,73 @@
+{
+  "name": "@falai/agent",
+  "version": "0.1.0",
+  "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gusnips/falai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gusnips/falai/issues"
+  },
+  "homepage": "https://github.com/gusnips/falai#readme",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean",
+    "prepublishOnly": "npm run lint && npm run type-check && npm run build",
+    "release:patch": "npm version patch && npm publish",
+    "release:minor": "npm version minor && npm publish",
+    "release:major": "npm version major && npm publish",
+    "release": "npm publish",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "typescript",
+    "conversational-ai",
+    "gemini",
+    "llm",
+    "chatbot",
+    "framework",
+    "routes",
+    "dsl"
+  ],
+  "author": "Gustavo Salomé <gusnips>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.18.2"
+  },
+  "dependencies": {
+    "@google/genai": "^0.3.0",
+    "openai": "^6.3.0"
+  }
+}

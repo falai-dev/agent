@@ -1,0 +1,516 @@
+<div align="center">
+
+# 🤖 @falai/agent
+
+### Build intelligent, conversational AI agents with TypeScript
+
+**Standalone • Strongly-Typed • Production-Ready**
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![Bun](https://img.shields.io/badge/bun-compatible-orange.svg)](https://bun.sh)
+
+[Features](#-features) • [Installation](#-installation) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Examples](#-examples)
+
+</div>
+
+---
+
+## 🌟 Features
+
+<table>
+<tr>
+<td width="50%">
+
+### 🎯 **Developer Experience**
+
+- **Fully Type-Safe** - Generic `Agent<TContext>` with complete inference
+- **Fluent API** - Chainable methods for elegant code
+- **Modular Design** - Use what you need, when you need it
+
+</td>
+<td width="50%">
+
+### 🚀 **Production Ready**
+
+- **Robust Retry Logic** - Exponential backoff & backup models
+- **AI Provider Strategy** - Pluggable backends (Gemini, OpenAI, OpenRouter)
+- **Prompt Composition** - Sophisticated prompt building system
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🛤️ **Conversation Flows**
+
+- **Route DSL** - Declarative state machines for conversations
+- **Smart Transitions** - Conditional flows with `transitionTo`
+- **Disambiguation** - Observations for handling ambiguous intent
+
+</td>
+<td width="50%">
+
+### 🔧 **Tools & Capabilities**
+
+- **Type-Safe Tools** - Define tools with full type inference
+- **Domain Registry** - Organize capabilities by domain
+- **Context Awareness** - Tools receive typed context automatically
+
+</td>
+</tr>
+</table>
+
+---
+
+## 📦 Installation
+
+```bash
+# Using bun (recommended)
+bun add @falai/agent
+
+# Using npm
+npm install @falai/agent
+
+# Using yarn
+yarn add @falai/agent
+```
+
+> **Requirements:** Node.js 18+ or Bun 1.0+
+
+---
+
+## 🚀 Quick Start
+
+Get up and running in 60 seconds:
+
+```typescript
+import {
+  Agent,
+  GeminiProvider,
+  OpenAIProvider, // or use OpenAI
+  createMessageEvent,
+  EventSource,
+} from "@falai/agent";
+
+// 1️⃣ Define your custom context
+interface SupportContext {
+  userId: string;
+  userName: string;
+  tier: "free" | "premium";
+}
+
+// 2️⃣ Create AI provider (choose one)
+const ai = new GeminiProvider({
+  apiKey: process.env.GEMINI_API_KEY!,
+});
+
+// Or use OpenAI:
+// const ai = new OpenAIProvider({
+//   apiKey: process.env.OPENAI_API_KEY!,
+//   model: "gpt-5", // Required - specify your model
+// });
+
+// 3️⃣ Initialize your agent - two ways!
+
+// Option A: Declarative initialization (recommended for complex setups)
+const agent = new Agent<SupportContext>({
+  name: "SupportBot",
+  description: "A helpful and empathetic customer support assistant",
+  goal: "Resolve customer issues efficiently while maintaining a positive experience",
+  ai,
+  context: {
+    userId: "usr_123",
+    userName: "Alex",
+    tier: "premium",
+  },
+  // Initialize with arrays
+  terms: [
+    {
+      name: "Premium Support",
+      description: "24/7 priority support with dedicated account manager",
+    },
+  ],
+  guidelines: [
+    {
+      condition: "Customer asks about account issues",
+      action: "Prioritize account security and verify identity first",
+      tags: ["security", "account"],
+    },
+  ],
+  routes: [
+    {
+      title: "Account Recovery",
+      description: "Help users regain access to their accounts",
+      conditions: ["User cannot access their account"],
+    },
+  ],
+});
+
+// Option B: Fluent chaining (great for dynamic additions)
+agent
+  .createGuideline({
+    condition: "Customer is frustrated",
+    action: "Show extra empathy and offer immediate escalation",
+    tags: ["support", "escalation"],
+  })
+  .createTerm({
+    name: "SLA",
+    description: "Service Level Agreement - our response time commitment",
+  });
+
+// 4️⃣ Generate intelligent responses
+const response = await agent.respond({
+  history: [
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Alex",
+      "I can't access my dashboard"
+    ),
+  ],
+});
+
+console.log(response.message); // 🎉 AI-powered response ready!
+```
+
+---
+
+## 📚 Documentation
+
+### 📖 Guides
+
+- **[Getting Started](./docs/GETTING_STARTED.md)** - Your first agent in 5 minutes
+- **[Constructor Options](./docs/CONSTRUCTOR_OPTIONS.md)** - Declarative vs Fluent API patterns
+- **[API Reference](./docs/API_REFERENCE.md)** - Complete API documentation
+- **[Architecture](./docs/STRUCTURE.md)** - Package structure and design principles
+
+### 💡 Key Concepts
+
+### 💬 Working with Conversation History
+
+Build rich conversation contexts:
+
+```typescript
+import { EventSource, createMessageEvent, createToolEvent } from "@falai/agent";
+
+const history = [
+  createMessageEvent(
+    EventSource.CUSTOMER,
+    "Alice",
+    "Book me a flight to Paris"
+  ),
+  createMessageEvent(
+    EventSource.AI_AGENT,
+    "TravelBot",
+    "I'd love to help! When would you like to travel?"
+  ),
+  createMessageEvent(EventSource.CUSTOMER, "Alice", "Next Friday"),
+  // Tool calls are tracked too
+  createToolEvent("search_flights", {
+    destination: "Paris",
+    date: "2025-10-20",
+  }),
+];
+
+const response = await agent.respond({ history });
+```
+
+### 🔧 Defining Type-Safe Tools
+
+Tools are first-class citizens:
+
+```typescript
+import { defineTool } from "@falai/agent";
+
+const fetchUserProfile = defineTool<
+  SupportContext,
+  [userId: string],
+  { name: string; email: string; tier: string }
+>(
+  "fetch_user_profile",
+  async ({ context }, userId) => {
+    // Full access to typed context
+    console.log(`Fetching for ${context.userName}`);
+
+    const profile = await db.users.findById(userId);
+    return { data: profile };
+  },
+  {
+    description: "Retrieves user profile information from the database",
+  }
+);
+
+// Use in guidelines
+agent.createGuideline({
+  condition: "Customer asks about their account details",
+  action: "Fetch and present their profile information",
+  tools: [fetchUserProfile],
+});
+```
+
+### 🛤️ Creating Conversation Routes
+
+Build sophisticated conversation flows - declaratively or programmatically:
+
+```typescript
+import { END_ROUTE } from "@falai/agent";
+
+// Option A: Declarative (in constructor)
+const agent = new Agent({
+  name: "OnboardingBot",
+  ai: provider,
+  routes: [
+    {
+      title: "User Onboarding",
+      description: "Guide new users through account setup",
+      conditions: ["User is new and needs onboarding"],
+      guidelines: [
+        {
+          condition: "User provides invalid email",
+          action: "Politely ask for a valid email format",
+          tags: ["validation"],
+        },
+      ],
+    },
+  ],
+});
+
+// Option B: Programmatic (build flows dynamically)
+const onboardingRoute = agent.createRoute({
+  title: "User Onboarding",
+  description: "Guide new users through account setup",
+  conditions: ["User is new and needs onboarding"],
+});
+
+// Build the flow
+const askName = onboardingRoute.initialState.transitionTo({
+  chatState: "Ask for user's full name",
+});
+
+const askEmail = askName.target.transitionTo({
+  chatState: "Request email address",
+  condition: "User provided their name",
+});
+
+const confirmDetails = askEmail.target.transitionTo({
+  chatState: "Confirm all details before proceeding",
+});
+
+// Add guidelines dynamically (can also be in route options)
+onboardingRoute.createGuideline({
+  condition: "User provides invalid email",
+  action: "Politely ask for a valid email format",
+  enabled: true,
+  tags: ["validation"],
+});
+
+// Happy path completion
+confirmDetails.target.transitionTo({
+  chatState: "Welcome message and next steps",
+  condition: "User confirms details",
+});
+
+// End the route
+confirmDetails.target.transitionTo({ state: END_ROUTE });
+```
+
+### 🔀 Disambiguation with Observations
+
+Handle ambiguous user intent gracefully - declaratively or programmatically:
+
+```typescript
+// Option A: Declarative (reference routes by title)
+const agent = new Agent({
+  name: "HealthBot",
+  ai: provider,
+  routes: [
+    { title: "Schedule Appointment", conditions: ["User wants to schedule"] },
+    {
+      title: "Reschedule Appointment",
+      conditions: ["User wants to reschedule"],
+    },
+  ],
+  observations: [
+    {
+      description: "User mentions appointment but intent is unclear",
+      routeRefs: ["Schedule Appointment", "Reschedule Appointment"], // By title
+    },
+  ],
+});
+
+// Option B: Programmatic
+const scheduleRoute = agent.createRoute({
+  title: "Schedule Appointment",
+  conditions: ["User wants to schedule"],
+});
+
+const rescheduleRoute = agent.createRoute({
+  title: "Reschedule Appointment",
+  conditions: ["User wants to reschedule"],
+});
+
+const appointmentInquiry = agent.createObservation(
+  "User mentions appointment but intent is unclear"
+);
+
+// Agent will ask user to clarify between these routes
+appointmentInquiry.disambiguate([scheduleRoute, rescheduleRoute]);
+```
+
+### 🎨 Context Override
+
+Dynamically update context per request:
+
+```typescript
+const response = await agent.respond({
+  history,
+  contextOverride: {
+    tier: "premium", // Temporarily upgrade user for this request
+  },
+});
+```
+
+### 📖 Domain Glossary
+
+Teach your agent business-specific language:
+
+```typescript
+agent
+  .createTerm({
+    name: "SLA",
+    description: "Service Level Agreement - our commitment to response times",
+    synonyms: ["service agreement", "support guarantee"],
+  })
+  .createTerm({
+    name: "Priority Support",
+    description: "Premium tier feature with <1hr response time",
+    synonyms: ["premium support", "fast track"],
+  });
+```
+
+### ⚙️ Advanced Configuration
+
+Fine-tune AI provider behavior - works with both Gemini and OpenAI:
+
+```typescript
+// Gemini configuration
+const geminiProvider = new GeminiProvider({
+  apiKey: process.env.GEMINI_API_KEY!,
+  model: "models/gemini-2.5-flash", // Primary model
+  backupModels: [
+    "models/gemini-2.5-pro", // Backup if primary fails
+    "models/gemini-2.0-flash",
+  ],
+  retryConfig: {
+    timeout: 60000, // 60s timeout
+    retries: 3, // 3 attempts with exponential backoff
+  },
+});
+
+// OpenAI configuration
+const openaiProvider = new OpenAIProvider({
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: "gpt-5",
+  backupModels: ["gpt-5-mini", "gpt-5-nano"],
+  retryConfig: {
+    timeout: 60000,
+    retries: 3,
+  },
+});
+```
+
+---
+
+## 🎯 Examples
+
+### 📋 [Declarative Agent](./examples/declarative-agent.ts)
+
+**Comprehensive declarative configuration example:**
+
+- 📦 Everything configured in constructor
+- 📚 Terms, guidelines, capabilities, routes, observations
+- 🔗 Route references by title in observations
+- ➕ Dynamic additions after construction
+
+### 🌍 [Travel Booking Agent](./examples/travel-agent.ts)
+
+A complete travel agent implementation featuring:
+
+- ✈️ Multi-step flight booking flow
+- 🔄 Alternative options handling
+- 🛠️ Real-world tool integration
+- 📋 Status checking route
+- 🎭 Edge case guidelines
+
+### 🏥 [Healthcare Assistant](./examples/healthcare-agent.ts)
+
+Healthcare-focused agent demonstrating:
+
+- 🩺 Appointment scheduling with alternatives
+- 🔬 Lab results retrieval
+- 🤔 Observation-based disambiguation
+- 🔐 Sensitive data handling
+- ⚠️ Urgent case prioritization
+
+### 🌐 [OpenAI Agent](./examples/openai-agent.ts)
+
+Using OpenAI provider instead of Gemini:
+
+- 🤖 OpenAI GPT-4o integration
+- 🔄 Backup model configuration
+- ⚙️ Custom retry settings
+- 🌤️ Weather checking example
+
+---
+
+## 🏗️ Architecture
+
+```
+src/
+├── types/          # Type definitions (strongly typed contracts)
+├── core/           # Core framework (Agent, Route, State, Tools, etc.)
+├── providers/      # AI providers (Gemini with retry/backup logic)
+├── utils/          # Utilities (retry, timeout, helpers)
+├── constants/      # Constants (END_ROUTE, symbols)
+└── index.ts        # Public API exports
+```
+
+**Design Principles:**
+
+- **Modularity** - Clean separation of concerns
+- **Type Safety** - TypeScript generics throughout
+- **Extensibility** - Pluggable providers & tools
+- **Developer Experience** - Fluent APIs & clear patterns
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! See our [Contributing Guide](./docs/CONTRIBUTING.md) for details on:
+
+- 🐛 Reporting bugs
+- 💡 Suggesting features
+- 📝 Improving documentation
+- 🔨 Submitting pull requests
+
+## 🎓 Inspired By
+
+This framework draws inspiration from [**Parlant**](https://github.com/emcie-co/parlant) by Emcie Co., an excellent Python framework for conversational AI agents. We've adapted and enhanced these concepts for the TypeScript ecosystem with additional type safety and modern patterns.
+
+---
+
+## 📄 License
+
+MIT © 2025
+
+---
+
+<div align="center">
+
+**Made with ❤️ for the community**
+
+[Report Bug](https://github.com/gusnips/falai/issues) • [Request Feature](https://github.com/gusnips/falai/issues) • [Contribute](https://github.com/gusnips/falai/pulls)
+
+⭐ Star us on [GitHub](https://github.com/gusnips/falai) if this helped you build amazing agents!
+
+</div>
