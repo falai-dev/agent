@@ -27,6 +27,7 @@ export class Agent<TContext = unknown> {
   private routes: Route<TContext>[] = [];
   private observations: Observation[] = [];
   private domainRegistry = new DomainRegistry();
+  private context: TContext | undefined;
 
   /**
    * Dynamic domain property - populated via addDomain
@@ -38,6 +39,16 @@ export class Agent<TContext = unknown> {
     if (!this.options.maxEngineIterations) {
       this.options.maxEngineIterations = 1;
     }
+
+    // Validate context configuration
+    if (options.context !== undefined && options.contextProvider) {
+      throw new Error(
+        "Cannot provide both 'context' and 'contextProvider'. Choose one."
+      );
+    }
+
+    // Initialize context if provided
+    this.context = options.context;
 
     // Initialize from options
     if (options.terms) {
@@ -168,6 +179,39 @@ export class Agent<TContext = unknown> {
   }
 
   /**
+   * Update the agent's context
+   * Triggers the onContextUpdate lifecycle hook if configured
+   */
+  async updateContext(updates: Partial<TContext>): Promise<void> {
+    const previousContext = this.context;
+
+    // Merge updates with current context
+    this.context = {
+      ...(this.context as Record<string, unknown>),
+      ...(updates as Record<string, unknown>),
+    } as TContext;
+
+    // Trigger lifecycle hook if configured
+    if (this.options.hooks?.onContextUpdate && previousContext !== undefined) {
+      await this.options.hooks.onContextUpdate(this.context, previousContext);
+    }
+  }
+
+  /**
+   * Get current context (fetches from provider if configured)
+   * @internal
+   */
+  private async getContext(): Promise<TContext | undefined> {
+    // If context provider is configured, use it to fetch fresh context
+    if (this.options.contextProvider) {
+      return await this.options.contextProvider();
+    }
+
+    // Otherwise return the stored context
+    return this.context;
+  }
+
+  /**
    * Generate a response based on history and context
    */
   async respond(params: {
@@ -183,9 +227,19 @@ export class Agent<TContext = unknown> {
   }> {
     const { history, contextOverride, signal } = params;
 
-    // Merge context
+    // Get current context (may fetch from provider)
+    let currentContext = await this.getContext();
+
+    // Call beforeRespond hook if configured
+    if (this.options.hooks?.beforeRespond && currentContext !== undefined) {
+      currentContext = await this.options.hooks.beforeRespond(currentContext);
+      // Update stored context with the result from beforeRespond
+      this.context = currentContext;
+    }
+
+    // Merge context with override
     const effectiveContext = {
-      ...(this.options.context as Record<string, unknown>),
+      ...(currentContext as Record<string, unknown>),
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
 

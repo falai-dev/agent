@@ -43,6 +43,8 @@ export type {
   Guideline,
   Capability,
   GuidelineMatch,
+  ContextLifecycleHooks,
+  ContextProvider,
 } from "./types/agent";
 export { CompositionMode } from "./types/agent";
 

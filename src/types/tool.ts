@@ -10,6 +10,8 @@ import type { Event, StateRef } from "./index";
 export interface ToolContext<TContext = unknown> {
   /** The agent's context data */
   context: TContext;
+  /** Update the agent's context (triggers lifecycle hooks if configured) */
+  updateContext: (updates: Partial<TContext>) => Promise<void>;
   /** Current state reference (if in a route) */
   state?: StateRef;
   /** Interaction history */
@@ -21,9 +23,11 @@ export interface ToolContext<TContext = unknown> {
 /**
  * Result returned by a tool
  */
-export interface ToolResult<TData = unknown> {
+export interface ToolResult<TData = unknown, TContext = unknown> {
   /** The result data */
   data: TData;
+  /** Optional context update to be merged with current context */
+  contextUpdate?: Partial<TContext>;
   /** Optional metadata about the execution */
   meta?: Record<string, unknown>;
 }
@@ -34,7 +38,7 @@ export interface ToolResult<TData = unknown> {
 export type ToolHandler<TContext, TArgs extends unknown[], TResult> = (
   context: ToolContext<TContext>,
   ...args: TArgs
-) => Promise<ToolResult<TResult>> | ToolResult<TResult>;
+) => Promise<ToolResult<TResult, TContext>> | ToolResult<TResult, TContext>;
 
 /**
  * Reference to a defined tool

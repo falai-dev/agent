@@ -26,6 +26,34 @@ export enum CompositionMode {
 import type { ObservationOptions } from "./observation";
 
 /**
+ * Context lifecycle hooks for managing state persistence
+ */
+export interface ContextLifecycleHooks<TContext = unknown> {
+  /**
+   * Called before respond() to get fresh context
+   * Useful for loading context from a database or cache
+   */
+  beforeRespond?: (currentContext: TContext) => Promise<TContext> | TContext;
+
+  /**
+   * Called after context is updated via updateContext() or tool execution
+   * Useful for persisting context to a database or cache
+   */
+  onContextUpdate?: (
+    newContext: TContext,
+    previousContext: TContext
+  ) => Promise<void> | void;
+}
+
+/**
+ * Context provider function for always-fresh context
+ * Alternative to static context, useful for loading from external sources
+ */
+export type ContextProvider<TContext = unknown> = () =>
+  | Promise<TContext>
+  | TContext;
+
+/**
  * Options for creating an Agent
  */
 export interface AgentOptions<TContext = unknown> {
@@ -37,6 +65,10 @@ export interface AgentOptions<TContext = unknown> {
   goal?: string;
   /** Default context data available to the agent */
   context?: TContext;
+  /** Context provider function for always-fresh context (alternative to static context) */
+  contextProvider?: ContextProvider<TContext>;
+  /** Lifecycle hooks for context management */
+  hooks?: ContextLifecycleHooks<TContext>;
   /** AI provider strategy for generating responses */
   ai: AiProvider;
   /** Maximum number of processing iterations per request */

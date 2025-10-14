@@ -182,6 +182,7 @@ console.log(response.message); // 🎉 AI-powered response ready!
 
 - **[Getting Started](./docs/GETTING_STARTED.md)** - Your first agent in 5 minutes
 - **[Constructor Options](./docs/CONSTRUCTOR_OPTIONS.md)** - Declarative vs Fluent API patterns
+- **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Persistent conversations & state management
 - **[API Reference](./docs/API_REFERENCE.md)** - Complete API documentation
 - **[Architecture](./docs/STRUCTURE.md)** - Package structure and design principles
 
@@ -382,6 +383,56 @@ const response = await agent.respond({
 });
 ```
 
+### 🔄 Persistent Context Management
+
+For **multi-turn conversations** that persist across requests, use lifecycle hooks:
+
+```typescript
+import { Agent, type ContextLifecycleHooks } from "@falai/agent";
+
+// Define persistence hooks
+const hooks: ContextLifecycleHooks<MyContext> = {
+  // Load fresh context before each response
+  beforeRespond: async (currentContext) => {
+    return await database.loadContext(sessionId);
+  },
+
+  // Persist context after updates
+  onContextUpdate: async (newContext, previousContext) => {
+    await database.saveContext(sessionId, newContext);
+  },
+};
+
+const agent = new Agent({
+  name: "PersistentBot",
+  ai: provider,
+  context: initialContext,
+  hooks, // Enable automatic persistence
+});
+
+// Tools can update context
+const saveTool = defineTool("save_data", async (ctx, data) => {
+  // Option 1: Return context update
+  return {
+    data: true,
+    contextUpdate: { savedData: data },
+  };
+
+  // Option 2: Call updateContext directly
+  // await ctx.updateContext({ savedData: data });
+  // return { data: true };
+});
+```
+
+**Key patterns:**
+
+- ✅ **Recreate agents** for each request (context loaded fresh via hooks)
+- ✅ **Use `onContextUpdate`** to persist to database/cache
+- ✅ **Use `beforeRespond`** to load fresh context before responding
+- ❌ **Don't cache agent instances** across requests (context gets stale)
+
+See [Context Management Guide](./docs/CONTEXT_MANAGEMENT.md) for complete patterns and best practices.
+
 ### 📖 Domain Glossary
 
 Teach your agent business-specific language:
@@ -486,6 +537,16 @@ const openaiProvider = new OpenAIProvider({
 - 📚 Terms, guidelines, capabilities, routes, observations
 - 🔗 Route references by title in observations
 - ➕ Dynamic additions after construction
+
+### 💾 [Persistent Onboarding Agent](./examples/persistent-onboarding.ts)
+
+**Multi-turn conversation with state persistence:**
+
+- 🔄 Context lifecycle hooks for database integration
+- 💾 Automatic persistence on context updates
+- 🏭 Factory pattern for agent creation
+- 🔧 Two approaches: lifecycle hooks vs context provider
+- 📝 Complete onboarding flow across multiple turns
 
 ### 🌍 [Travel Booking Agent](./examples/travel-agent.ts)
 
