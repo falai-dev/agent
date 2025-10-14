@@ -72,7 +72,7 @@ export interface OpenSearchClient {
   deleteByQuery(params: {
     index: string;
     body: { query: Record<string, unknown> };
-    refresh?: boolean | "wait_for";
+    refresh?: boolean;
   }): Promise<{ body: { deleted: number } }>;
 
   search(params: {
@@ -611,7 +611,7 @@ class OpenSearchMessageRepository implements MessageRepository {
           term: { sessionId },
         },
       },
-      refresh: this.refresh,
+      refresh: this.refresh === "wait_for" ? false : this.refresh,
     });
 
     return response.body.deleted;
@@ -625,7 +625,7 @@ class OpenSearchMessageRepository implements MessageRepository {
           term: { userId },
         },
       },
-      refresh: this.refresh,
+      refresh: this.refresh === "wait_for" ? false : this.refresh,
     });
 
     return response.body.deleted;
