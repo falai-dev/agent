@@ -40,9 +40,17 @@ Adds an agent capability. Returns `this` for chaining.
 
 Creates an observation for disambiguation.
 
-##### `addDomain<TName, TDomain>(name: TName, domainObject: TDomain): this`
+##### `addDomain<TName, TDomain>(name: TName, domainObject: TDomain): void`
 
-Registers a domain with tools/methods. Returns `this` for chaining.
+Registers a domain with tools/methods.
+
+##### `getDomainsForRoute(routeId: string): Record<string, Record<string, unknown>>`
+
+Gets allowed domains for a specific route by ID. Returns filtered domains based on route's `domains` property, or all domains if route has no restrictions.
+
+##### `getDomainsForRouteByTitle(routeTitle: string): Record<string, Record<string, unknown>>`
+
+Gets allowed domains for a specific route by title. Returns filtered domains based on route's `domains` property, or all domains if route has no restrictions.
 
 ##### `respond(input: RespondInput<TContext>): Promise<RespondOutput>`
 
@@ -136,6 +144,9 @@ interface RouteOptions {
   description?: string;     // Route description
   conditions?: string[];    // Conditions that activate this route
   guidelines?: Guideline[]; // Initial guidelines for this route
+  domains?: string[];       // Domain names allowed in this route (undefined = all domains)
+  rules?: string[];         // Absolute rules the agent MUST follow in this route
+  prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do in this route
 }
 ```
 
@@ -150,6 +161,18 @@ Adds a guideline specific to this route. Returns `this` for chaining.
 ##### `getGuidelines(): Guideline[]`
 
 Returns all guidelines for this route.
+
+##### `getDomains(): string[] | undefined`
+
+Returns allowed domain names for this route. Returns `undefined` if all domains are allowed, or an array of domain names if restricted.
+
+##### `getRules(): string[]`
+
+Returns the rules that must be followed in this route.
+
+##### `getProhibitions(): string[]`
+
+Returns the prohibitions that must never be done in this route.
 
 ##### `getRef(): RouteRef`
 
@@ -308,6 +331,58 @@ Unique identifier (readonly).
 ##### `description: string`
 
 Observation description (readonly).
+
+---
+
+### `DomainRegistry`
+
+Registry for organizing agent tools and methods by domain.
+
+#### Methods
+
+##### `register<TDomain>(name: string, domain: TDomain): void`
+
+Registers a new domain with its tools/methods. Throws error if domain name already exists.
+
+##### `get<TDomain>(name: string): TDomain | undefined`
+
+Gets a registered domain by name. Returns `undefined` if not found.
+
+##### `has(name: string): boolean`
+
+Checks if a domain is registered.
+
+##### `all(): Record<string, Record<string, unknown>>`
+
+Returns all registered domains as a single object.
+
+##### `getFiltered(allowedNames?: string[]): Record<string, Record<string, unknown>>`
+
+Returns filtered domains by names. If `allowedNames` is `undefined`, returns all domains.
+
+**Example:**
+
+```typescript
+const registry = new DomainRegistry();
+
+registry.register("payment", {
+  processPayment: async (amount: number) => { /* ... */ },
+});
+
+registry.register("shipping", {
+  calculateShipping: (zipCode: string) => { /* ... */ },
+});
+
+// Get specific domains
+const filtered = registry.getFiltered(["payment"]); // Only payment domain
+
+// Get all domains
+const all = registry.getFiltered(); // payment + shipping
+```
+
+##### `getDomainNames(): string[]`
+
+Returns list of all registered domain names.
 
 ---
 

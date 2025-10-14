@@ -26,6 +26,7 @@ export enum BuiltInSection {
   OBSERVATIONS = "observations",
   CAPABILITIES = "capabilities",
   ACTIVE_ROUTES = "active_routes",
+  DOMAINS = "domains",
 }
 
 /**
@@ -431,7 +432,14 @@ When you detect any of these situations, consider which route would be most appr
    * Add active routes information
    */
   addActiveRoutes(
-    routes: Array<{ title: string; description?: string; conditions: string[] }>
+    routes: Array<{
+      title: string;
+      description?: string;
+      conditions: string[];
+      domains?: string[];
+      rules?: string[];
+      prohibitions?: string[];
+    }>
   ): this {
     if (routes.length > 0) {
       const routesString = routes
@@ -441,7 +449,29 @@ When you detect any of these situations, consider which route would be most appr
               ? `\n  Triggered when: ${route.conditions.join(" OR ")}`
               : "";
           const desc = route.description ? `\n  ${route.description}` : "";
-          return `${i + 1}) ${route.title}${desc}${conditions}`;
+          
+          let domainInfo = "";
+          if (route.domains !== undefined) {
+            if (route.domains.length === 0) {
+              domainInfo = "\n  Available tools: None (conversation only)";
+            } else {
+              domainInfo = `\n  Available tools: ${route.domains.join(", ")}`;
+            }
+          }
+
+          let rulesInfo = "";
+          if (route.rules && route.rules.length > 0) {
+            const rulesList = route.rules.map((r, idx) => `${idx + 1}. ${r}`).join("; ");
+            rulesInfo = `\n  RULES: ${rulesList}`;
+          }
+
+          let prohibitionsInfo = "";
+          if (route.prohibitions && route.prohibitions.length > 0) {
+            const prohibitionsList = route.prohibitions.map((p, idx) => `${idx + 1}. ${p}`).join("; ");
+            prohibitionsInfo = `\n  PROHIBITIONS: ${prohibitionsList}`;
+          }
+
+          return `${i + 1}) ${route.title}${desc}${conditions}${domainInfo}${rulesInfo}${prohibitionsInfo}`;
         })
         .join("\n\n");
 
@@ -452,13 +482,50 @@ When you detect any of these situations, consider which route would be most appr
 {routes_string}
 ###
 
-These routes represent different paths the conversation can take. Choose the most appropriate route based on the user's needs.`,
+These routes represent different paths the conversation can take. Choose the most appropriate route based on the user's needs.
+IMPORTANT: 
+- If a route specifies available tools, you can ONLY call tools from those domains when following that route.
+- If a route has RULES, you MUST follow them when you choose that route.
+- If a route has PROHIBITIONS, you MUST NEVER do those things when you choose that route.`,
         { routes_string: routesString },
         SectionStatus.ACTIVE
       );
     }
     return this;
   }
+
+  /**
+   * Add domains (tools) information
+   */
+  addDomains(
+    domains: Record<string, Record<string, unknown>>
+  ): this {
+    const domainNames = Object.keys(domains);
+    if (domainNames.length > 0) {
+      const domainsString = domainNames
+        .map((name, i) => {
+          const toolNames = Object.keys(domains[name]);
+          const tools = toolNames.join(", ");
+          return `${i + 1}) Domain "${name}": ${tools}`;
+        })
+        .join("\n");
+
+      this.addSection(
+        BuiltInSection.DOMAINS,
+        `Available tool domains:
+###
+{domains_string}
+###
+
+These are the tool domains registered in the system. Each domain contains specific tools/methods.
+When calling tools, use the format: domain.toolName (e.g., "payment.processPayment").`,
+        { domains_string: domainsString },
+        SectionStatus.ACTIVE
+      );
+    }
+    return this;
+  }
+
 
   /**
    * Add JSON response schema instructions

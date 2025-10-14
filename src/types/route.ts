@@ -41,6 +41,12 @@ export interface RouteOptions {
   conditions?: string[];
   /** Initial guidelines for this route */
   guidelines?: Guideline[];
+  /** Domain names that are allowed in this route (undefined = all domains) */
+  domains?: string[];
+  /** Absolute rules the agent must follow in this route */
+  rules?: string[];
+  /** Absolute prohibitions the agent must never do in this route */
+  prohibitions?: string[];
 }
 
 /**

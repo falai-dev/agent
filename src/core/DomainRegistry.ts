@@ -47,4 +47,34 @@ export class DomainRegistry {
     }
     return result;
   }
+
+  /**
+   * Get filtered domains by names
+   * @param allowedNames - Array of domain names to include (undefined = all domains)
+   * @returns Object with only the specified domains
+   */
+  getFiltered(
+    allowedNames?: string[]
+  ): Record<string, Record<string, unknown>> {
+    // If no filter specified, return all domains
+    if (!allowedNames) {
+      return this.all();
+    }
+
+    const result: Record<string, Record<string, unknown>> = {};
+    for (const name of allowedNames) {
+      const domain = this.domains.get(name);
+      if (domain) {
+        result[name] = domain;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Get list of all registered domain names
+   */
+  getDomainNames(): string[] {
+    return Array.from(this.domains.keys());
+  }
 }

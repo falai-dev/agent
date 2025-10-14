@@ -41,48 +41,48 @@ interface AgentOptions<TContext = unknown> {
 
 ```typescript
 const agent = new Agent({
-  name: "SupportBot",
-  description: "Helpful customer support",
-  goal: "Resolve issues efficiently",
-  ai: new GeminiProvider({ apiKey: "...", model: "..." }),
-  context: { userId: "123" },
+  name: 'SupportBot',
+  description: 'Helpful customer support',
+  goal: 'Resolve issues efficiently',
+  ai: new GeminiProvider({ apiKey: '...', model: '...' }),
+  context: { userId: '123' },
 
   terms: [
     {
-      name: "SLA",
-      description: "Service Level Agreement",
-      synonyms: ["response time"],
+      name: 'SLA',
+      description: 'Service Level Agreement',
+      synonyms: ['response time'],
     },
   ],
 
   guidelines: [
     {
-      condition: "User is frustrated",
-      action: "Show empathy and offer escalation",
-      tags: ["support"],
+      condition: 'User is frustrated',
+      action: 'Show empathy and offer escalation',
+      tags: ['support'],
       enabled: true,
     },
   ],
 
   capabilities: [
-    { title: "Ticket Management", description: "Create and track tickets" },
+    { title: 'Ticket Management', description: 'Create and track tickets' },
   ],
 
   routes: [
     {
-      title: "Create Ticket",
-      description: "Help user create a support ticket",
-      conditions: ["User wants to report an issue"],
+      title: 'Create Ticket',
+      description: 'Help user create a support ticket',
+      conditions: ['User wants to report an issue'],
       guidelines: [
-        { condition: "Issue is urgent", action: "Prioritize immediately" },
+        { condition: 'Issue is urgent', action: 'Prioritize immediately' },
       ],
     },
   ],
 
   observations: [
     {
-      description: "User mentions problem but unclear what kind",
-      routeRefs: ["Create Ticket", "Check Ticket Status"], // By title!
+      description: 'User mentions problem but unclear what kind',
+      routeRefs: ['Create Ticket', 'Check Ticket Status'], // By title!
     },
   ],
 });
@@ -98,39 +98,180 @@ interface RouteOptions {
   title: string;
 
   // Optional
+  id?: string;              // Custom ID (auto-generated from title if not provided)
   description?: string;
   conditions?: string[];
-  guidelines?: Guideline[]; // NEW!
+  guidelines?: Guideline[];
+  domains?: string[];       // Restrict which domains are available in this route
+  rules?: string[];         // Absolute rules the agent MUST follow
+  prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do
 }
 ```
+
+**Domain Scoping:**
+- Use `domains` to limit which registered domains (tools/methods) can be accessed during this route
+- If `undefined` or omitted, all registered domains are available
+- Useful for security (preventing unauthorized tool calls) and performance (reducing AI decision space)
+
+**Rules & Prohibitions:**
+- **Rules**: Absolute requirements the agent must follow in this route (style, format, behavior)
+- **Prohibitions**: Things the agent must never do in this route
+- These override general guidelines if there's any conflict
+- Applied automatically when the route is active
+- Perfect for controlling message style, tone, length, emoji usage, etc.
 
 ### Example: Route with Nested Guidelines
 
 ```typescript
 const agent = new Agent({
-  name: "Bot",
+  name: 'Bot',
   ai: provider,
   routes: [
     {
-      title: "Onboarding",
-      description: "Guide new users",
-      conditions: ["User is new"],
+      title: 'Onboarding',
+      description: 'Guide new users',
+      conditions: ['User is new'],
       guidelines: [
         {
-          condition: "User skips a step",
+          condition: 'User skips a step',
           action: "Gently remind them it's important",
-          tags: ["onboarding"],
+          tags: ['onboarding'],
         },
         {
-          condition: "User seems confused",
-          action: "Offer a quick tutorial video",
-          tags: ["help"],
+          condition: 'User seems confused',
+          action: 'Offer a quick tutorial video',
+          tags: ['help'],
         },
       ],
     },
   ],
 });
 ```
+
+### Example: Route with Domain Scoping
+
+```typescript
+// Register domains
+agent.addDomain('scraping', {
+  scrapeSite: async (url: string) => {
+    /* ... */
+  },
+  extractData: async (html: string) => {
+    /* ... */
+  },
+});
+
+agent.addDomain('calendar', {
+  scheduleEvent: async (date: Date, title: string) => {
+    /* ... */
+  },
+  listEvents: async () => {
+    /* ... */
+  },
+});
+
+agent.addDomain('payment', {
+  processPayment: async (amount: number) => {
+    /* ... */
+  },
+});
+
+// Create routes with domain restrictions
+agent.createRoute({
+  title: 'Data Collection',
+  description: 'Collect and process web data',
+  domains: ['scraping'], // ✅ Only scraping tools available
+});
+
+agent.createRoute({
+  title: 'Schedule Meeting',
+  description: 'Book appointments',
+  domains: ['calendar'], // ✅ Only calendar tools available
+});
+
+agent.createRoute({
+  title: 'Checkout',
+  description: 'Process purchase',
+  domains: ['payment', 'calendar'], // ✅ Multiple domains allowed
+});
+
+agent.createRoute({
+  title: 'FAQ Support',
+  description: 'Answer general questions',
+  domains: [], // ✅ No tools available (conversation only)
+});
+
+agent.createRoute({
+  title: 'Admin Support',
+  description: 'Administrative tasks',
+  // domains not specified = all domains available (for demo purposes)
+});
+```
+
+### Example: Route with Rules & Prohibitions
+
+```typescript
+// WhatsApp support bot with different styles per route
+agent.createRoute({
+  title: 'Customer Support',
+  description: 'Help customers with issues',
+  domains: [],
+  rules: [
+    'Keep messages short (maximum 2 lines per message)',
+    'Use maximum 1 emoji per message',
+    'Always ask if the issue is resolved before ending',
+    'Professional but friendly tone'
+  ],
+  prohibitions: [
+    'Never send messages longer than 3 paragraphs',
+    'Do not use slang or informal language',
+    'Never promise what you cannot deliver',
+    'Do not ask for sensitive information via chat'
+  ]
+});
+
+agent.createRoute({
+  title: 'Sales Consultation',
+  description: 'Help customer discover needs and present solutions',
+  domains: ['calendar', 'analytics'],
+  rules: [
+    'Ask open-ended questions to discover needs',
+    'Use storytelling when presenting solutions',
+    'Emoji only to reinforce positive emotions 😊',
+    'Always present value before mentioning price'
+  ],
+  prohibitions: [
+    'Never talk about price before showing value',
+    'Do not pressure the customer',
+    'Avoid complex technical terms',
+    'Never send more than 2 messages in a row without customer response'
+  ]
+});
+
+agent.createRoute({
+  title: 'Emergency Support',
+  description: 'Handle urgent customer issues',
+  domains: ['notifications', 'ticketing'],
+  rules: [
+    'Respond immediately and acknowledge urgency',
+    'Use clear, direct language',
+    'Provide concrete next steps',
+    'Set clear expectations on resolution time'
+  ],
+  prohibitions: [
+    'Never downplay the customer\'s concern',
+    'Do not use emojis',
+    'Never say "calm down" or similar phrases',
+    'Do not transfer without explaining why'
+  ]
+});
+```
+
+**How it works:**
+- Rules and prohibitions are automatically applied when the route is active
+- They override general guidelines if there's any conflict
+- Perfect for controlling communication style per context
+- Applied in the AI prompt to ensure compliance
 
 ---
 
@@ -175,14 +316,14 @@ All constructor options also have fluent methods that **return `this`** for chai
 
 ```typescript
 agent
-  .createTerm({ name: "API", description: "..." })
-  .createGuideline({ condition: "...", action: "..." })
-  .createCapability({ title: "...", description: "..." });
+  .createTerm({ name: 'API', description: '...' })
+  .createGuideline({ condition: '...', action: '...' })
+  .createCapability({ title: '...', description: '...' });
 
-const route = agent.createRoute({ title: "..." });
-route.createGuideline({ condition: "...", action: "..." });
+const route = agent.createRoute({ title: '...' });
+route.createGuideline({ condition: '...', action: '...' });
 
-const obs = agent.createObservation("User intent unclear");
+const obs = agent.createObservation('User intent unclear');
 obs.disambiguate([route1, route2]);
 ```
 
@@ -209,7 +350,7 @@ obs.disambiguate([route1, route2]);
 ```typescript
 // Start with static config
 const agent = new Agent({
-  name: "Bot",
+  name: 'Bot',
   ai: provider,
   terms: loadTermsFromFile(),
   guidelines: loadGuidelinesFromDB(),
@@ -218,8 +359,8 @@ const agent = new Agent({
 // Add dynamic features
 if (user.isPremium) {
   agent.createGuideline({
-    condition: "User asks for priority support",
-    action: "Escalate immediately to premium team",
+    condition: 'User asks for priority support',
+    action: 'Escalate immediately to premium team',
   });
 }
 ```

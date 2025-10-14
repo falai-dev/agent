@@ -295,15 +295,24 @@ export class Agent<TContext = unknown> {
       }
     }
 
-    // Add active routes
+    // Add active routes with their rules and prohibitions
     if (this.routes.length > 0) {
       promptBuilder.addActiveRoutes(
         this.routes.map((r) => ({
           title: r.title,
           description: r.description,
           conditions: r.conditions,
+          domains: r.getDomains(),
+          rules: r.getRules(),
+          prohibitions: r.getProhibitions(),
         }))
       );
+    }
+
+    // Add domains (tools) information if any domains are registered
+    const allDomains = this.domainRegistry.all();
+    if (Object.keys(allDomains).length > 0) {
+      promptBuilder.addDomains(allDomains);
     }
 
     // Add JSON response schema instructions
@@ -413,5 +422,43 @@ export class Agent<TContext = unknown> {
    */
   getDomainRegistry(): DomainRegistry {
     return this.domainRegistry;
+  }
+
+  /**
+   * Get allowed domains for a specific route
+   * @param routeId - Route ID to check
+   * @returns Filtered domains object, or all domains if route has no restrictions
+   */
+  getDomainsForRoute(
+    routeId: string
+  ): Record<string, Record<string, unknown>> {
+    const route = this.routes.find((r) => r.id === routeId);
+    
+    if (!route) {
+      // Route not found, return all domains
+      return this.domainRegistry.all();
+    }
+
+    const allowedDomains = route.getDomains();
+    return this.domainRegistry.getFiltered(allowedDomains);
+  }
+
+  /**
+   * Get allowed domains for a specific route by title
+   * @param routeTitle - Route title to check
+   * @returns Filtered domains object, or all domains if route has no restrictions
+   */
+  getDomainsForRouteByTitle(
+    routeTitle: string
+  ): Record<string, Record<string, unknown>> {
+    const route = this.routes.find((r) => r.title === routeTitle);
+    
+    if (!route) {
+      // Route not found, return all domains
+      return this.domainRegistry.all();
+    }
+
+    const allowedDomains = route.getDomains();
+    return this.domainRegistry.getFiltered(allowedDomains);
   }
 }

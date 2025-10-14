@@ -16,6 +16,9 @@ export class Route<TContext = unknown> {
   public readonly title: string;
   public readonly description?: string;
   public readonly conditions: string[];
+  public readonly domains?: string[];
+  public readonly rules: string[];
+  public readonly prohibitions: string[];
   public readonly initialState: State<TContext>;
   private guidelines: Guideline[] = [];
 
@@ -25,6 +28,9 @@ export class Route<TContext = unknown> {
     this.title = options.title;
     this.description = options.description;
     this.conditions = options.conditions || [];
+    this.domains = options.domains;
+    this.rules = options.rules || [];
+    this.prohibitions = options.prohibitions || [];
     this.initialState = new State<TContext>(this.id, "Initial state");
 
     // Initialize guidelines from options
@@ -52,6 +58,28 @@ export class Route<TContext = unknown> {
    */
   getGuidelines(): Guideline[] {
     return [...this.guidelines];
+  }
+
+  /**
+   * Get allowed domain names for this route
+   * @returns Array of domain names, or undefined if all domains are allowed
+   */
+  getDomains(): string[] | undefined {
+    return this.domains ? [...this.domains] : undefined;
+  }
+
+  /**
+   * Get rules for this route
+   */
+  getRules(): string[] {
+    return [...this.rules];
+  }
+
+  /**
+   * Get prohibitions for this route
+   */
+  getProhibitions(): string[] {
+    return [...this.prohibitions];
   }
 
   /**
