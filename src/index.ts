@@ -16,6 +16,7 @@ export { adaptEvent, createMessageEvent, createToolEvent } from "./core/Events";
 export { PromptBuilder } from "./core/PromptBuilder";
 export type { Customer, AgentInfo } from "./core/PromptBuilder";
 export { BuiltInSection } from "./core/PromptBuilder";
+export { PersistenceManager } from "./core/PersistenceManager";
 
 // Providers
 export { GeminiProvider } from "./providers/GeminiProvider";
@@ -26,6 +27,14 @@ export { OpenRouterProvider } from "./providers/OpenRouterProvider";
 export type { OpenRouterProviderOptions } from "./providers/OpenRouterProvider";
 export { AnthropicProvider } from "./providers/AnthropicProvider";
 export type { AnthropicProviderOptions } from "./providers/AnthropicProvider";
+
+// Adapters
+export { PrismaAdapter } from "./adapters/PrismaAdapter";
+export type {
+  PrismaClient,
+  FieldMappings,
+  PrismaAdapterOptions,
+} from "./adapters/PrismaAdapter";
 
 // Constants
 export { END_ROUTE } from "./constants";
@@ -94,3 +103,15 @@ export type {
   Observation as IObservation,
   ObservationOptions,
 } from "./types/observation";
+
+export type {
+  SessionData,
+  MessageData,
+  SessionStatus,
+  MessageRole,
+  SessionRepository,
+  MessageRepository,
+  PersistenceConfig,
+  CreateSessionOptions,
+  SaveMessageOptions,
+} from "./types/persistence";

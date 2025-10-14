@@ -54,3 +54,17 @@ export { SectionStatus } from "./prompt";
 
 // Observation types
 export type { Observation, ObservationOptions } from "./observation";
+
+// Persistence types
+export type {
+  SessionData,
+  MessageData,
+  SessionStatus,
+  MessageRole,
+  SessionRepository,
+  MessageRepository,
+  PersistenceAdapter,
+  PersistenceConfig,
+  CreateSessionOptions,
+  SaveMessageOptions,
+} from "./persistence";

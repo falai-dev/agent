@@ -59,6 +59,27 @@
 
 </td>
 </tr>
+<tr>
+<td width="50%">
+
+### 💾 **Optional Persistence**
+
+- **Provider Pattern** - Simple API like AI providers
+- **Prisma Ready** - Built-in ORM adapter
+- **Auto-save** - Automatic session & message persistence
+- **Extensible** - Create adapters for any database
+
+</td>
+<td width="50%">
+
+### 🎯 **Smart Routing**
+
+- **Deterministic IDs** - Consistent identifiers across restarts
+- **Route Scoping** - Control tool access per route
+- **Rules & Prohibitions** - Fine-grained behavior control
+
+</td>
+</tr>
 </table>
 
 ---
@@ -225,6 +246,7 @@ See [streaming-agent.ts](./examples/streaming-agent.ts) for complete examples.
 - **[Getting Started](./docs/GETTING_STARTED.md)** - Your first agent in 5 minutes
 - **[Constructor Options](./docs/CONSTRUCTOR_OPTIONS.md)** - Declarative vs Fluent API patterns
 - **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Persistent conversations & state management
+- **[Persistence](./docs/PERSISTENCE.md)** - Optional database persistence with Prisma **(NEW!)**
 - **[API Reference](./docs/API_REFERENCE.md)** - Complete API documentation
 - **[Architecture](./docs/STRUCTURE.md)** - Package structure and design principles
 
@@ -595,6 +617,66 @@ const saveTool = defineTool("save_data", async (ctx, data) => {
 
 See [Context Management Guide](./docs/CONTEXT_MANAGEMENT.md) for complete patterns and best practices.
 
+### 💾 Optional Database Persistence (NEW!)
+
+For **production applications** that need to persist sessions and messages:
+
+```typescript
+import { Agent, PrismaAdapter } from "@falai/agent";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
+
+const agent = new Agent({
+  name: "My Agent",
+  ai: provider,
+  // ✨ Just add this!
+  persistence: {
+    adapter: new PrismaAdapter({ prisma }),
+    autoSave: true,
+    userId: "user_123",
+  },
+});
+
+// Access persistence manager
+const persistence = agent.getPersistenceManager();
+
+// Create a session
+const session = await persistence.createSession({
+  userId: "user_123",
+  agentName: "My Agent",
+});
+
+// Load history
+const history = await persistence.loadSessionHistory(session.id);
+
+// Generate response
+const response = await agent.respond({ history });
+
+// Optionally Save message (automatically saves if autoSave: true)
+await persistence.saveMessage({
+  sessionId: session.id,
+  role: "agent",
+  content: response.message,
+});
+```
+
+**Features:**
+
+- ✅ **Provider Pattern** - Simple API like AI providers
+- ✅ **Prisma Built-in** - Ready-to-use ORM adapter
+- ✅ **Auto-save** - Automatic message tracking
+- ✅ **Custom Adapters** - Create for any database (MongoDB, Redis, etc.)
+- ✅ **Lifecycle Integration** - Works seamlessly with context hooks
+
+**Setup (3 steps):**
+
+1. Install: `npm install @prisma/client prisma`
+2. Copy schema from `examples/prisma-schema.example.prisma`
+3. Run: `npx prisma generate && npx prisma migrate dev`
+
+See [Persistence Guide](./docs/PERSISTENCE.md) for complete documentation and custom adapter examples.
+
 ### 📖 Domain Glossary
 
 Teach your agent business-specific language:
@@ -750,6 +832,16 @@ const openrouterProvider = new OpenRouterProvider({
 - 🏭 Factory pattern for agent creation
 - 🔧 Two approaches: lifecycle hooks vs context provider
 - 📝 Complete onboarding flow across multiple turns
+
+### 💾 [Prisma Persistence](./examples/prisma-persistence.ts) **(NEW!)**
+
+**Production-ready database persistence:**
+
+- ✨ Provider pattern - simple as `new PrismaAdapter({ prisma })`
+- 🗄️ Automatic session and message persistence
+- 🔄 Seamless lifecycle hook integration
+- 📊 Complete examples: basic, advanced, and minimal
+- 🎯 3-step setup with Prisma ORM
 
 ### 🏢 [Business Onboarding](./examples/business-onboarding.ts)
 

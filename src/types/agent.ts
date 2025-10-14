@@ -5,6 +5,7 @@
 import type { AiProvider } from "./ai";
 import type { ToolRef } from "./tool";
 import type { RouteOptions } from "./route";
+import type { PersistenceConfig } from "./persistence";
 
 /**
  * Composition mode determines how the agent processes and structures responses
@@ -85,6 +86,8 @@ export interface AgentOptions<TContext = unknown> {
   routes?: RouteOptions[];
   /** Initial observations for disambiguation */
   observations?: ObservationOptions[];
+  /** Optional persistence configuration for auto-saving sessions and messages */
+  persistence?: PersistenceConfig;
 }
 
 /**

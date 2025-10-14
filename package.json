@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -80,5 +80,13 @@
     "@anthropic-ai/sdk": "^0.65.0",
     "@google/genai": "^0.3.0",
     "openai": "^6.3.0"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    }
   }
 }

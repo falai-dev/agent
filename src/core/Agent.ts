@@ -16,6 +16,7 @@ import { Route } from "./Route";
 import { DomainRegistry } from "./DomainRegistry";
 import { PromptBuilder } from "./PromptBuilder";
 import { Observation } from "./Observation";
+import { PersistenceManager } from "./PersistenceManager";
 
 /**
  * Main Agent class with generic context support
@@ -28,6 +29,7 @@ export class Agent<TContext = unknown> {
   private observations: Observation[] = [];
   private domainRegistry = new DomainRegistry();
   private context: TContext | undefined;
+  private persistenceManager: PersistenceManager | undefined;
 
   /**
    * Dynamic domain property - populated via addDomain
@@ -49,6 +51,21 @@ export class Agent<TContext = unknown> {
 
     // Initialize context if provided
     this.context = options.context;
+
+    // Initialize persistence if configured
+    if (options.persistence) {
+      this.persistenceManager = new PersistenceManager(options.persistence);
+
+      // Initialize the adapter if it has an initialize method
+      if (options.persistence.adapter.initialize) {
+        options.persistence.adapter.initialize().catch((error) => {
+          console.error(
+            "[Agent] Persistence adapter initialization failed:",
+            error
+          );
+        });
+      }
+    }
 
     // Initialize from options
     if (options.terms) {
@@ -596,6 +613,20 @@ export class Agent<TContext = unknown> {
    */
   getDomainRegistry(): DomainRegistry {
     return this.domainRegistry;
+  }
+
+  /**
+   * Get the persistence manager (if configured)
+   */
+  getPersistenceManager(): PersistenceManager | undefined {
+    return this.persistenceManager;
+  }
+
+  /**
+   * Check if persistence is enabled
+   */
+  hasPersistence(): boolean {
+    return this.persistenceManager !== undefined;
   }
 
   /**
