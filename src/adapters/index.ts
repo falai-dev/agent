@@ -35,3 +35,9 @@ export type {
 } from "./SQLiteAdapter";
 
 export { MemoryAdapter } from "./MemoryAdapter";
+
+export { OpenSearchAdapter } from "./OpenSearchAdapter";
+export type {
+  OpenSearchClient,
+  OpenSearchAdapterOptions,
+} from "./OpenSearchAdapter";

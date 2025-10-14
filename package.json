@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -88,7 +88,8 @@
     "mongodb": "^6.0.0 || ^7.0.0",
     "pg": "^8.11.0",
     "mysql2": "^3.2.0",
-    "better-sqlite3": "^11.0.0 || ^12.0.0"
+    "better-sqlite3": "^11.0.0 || ^12.0.0",
+    "@opensearch-project/opensearch": "^2.0.0"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {
@@ -110,6 +111,9 @@
       "optional": true
     },
     "better-sqlite3": {
+      "optional": true
+    },
+    "@opensearch-project/opensearch": {
       "optional": true
     }
   }

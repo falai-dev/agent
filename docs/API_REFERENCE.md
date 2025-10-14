@@ -994,6 +994,74 @@ const agent = new Agent({
 
 ---
 
+### `OpenSearchAdapter`
+
+Full-text search and analytics-powered persistence. Compatible with OpenSearch and Elasticsearch 7.x.
+
+#### Constructor
+
+```typescript
+new OpenSearchAdapter(client: OpenSearchClient, options?: OpenSearchAdapterOptions)
+
+interface OpenSearchAdapterOptions {
+  indices?: {
+    sessions?: string;        // Default: "agent_sessions"
+    messages?: string;        // Default: "agent_messages"
+  };
+  autoCreateIndices?: boolean; // Default: true
+  refresh?: boolean | "wait_for"; // Default: false
+}
+```
+
+#### Methods
+
+##### `initialize(): Promise<void>`
+
+Creates indices with proper mappings if they don't exist.
+
+##### `disconnect(): Promise<void>`
+
+Gracefully disconnect (no-op for OpenSearch - connection pooling is automatic).
+
+#### Example
+
+```typescript
+import { OpenSearchAdapter } from "@falai/agent";
+import { Client } from "@opensearch-project/opensearch";
+
+const client = new Client({
+  node: "https://localhost:9200",
+  auth: {
+    username: "admin",
+    password: "admin",
+  },
+});
+
+const adapter = new OpenSearchAdapter(client, {
+  indices: {
+    sessions: "agent_sessions",
+    messages: "agent_messages",
+  },
+  autoCreateIndices: true,
+  refresh: "wait_for", // Wait for documents to be searchable
+});
+
+// Auto-create indices with mappings
+await adapter.initialize();
+
+const agent = new Agent({
+  persistence: { adapter },
+});
+```
+
+**Install:** `npm install @opensearch-project/opensearch`
+
+**Perfect for:** Full-text search, analytics, time-series analysis, AWS OpenSearch Service, Elasticsearch 7.x users
+
+**Full Example:** See [examples/opensearch-persistence.ts](../examples/opensearch-persistence.ts)
+
+---
+
 ### `MemoryAdapter`
 
 Zero-dependency in-memory storage for testing and development.

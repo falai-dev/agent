@@ -57,6 +57,11 @@ export type {
   SQLiteAdapterOptions,
 } from "./adapters/SQLiteAdapter";
 export { MemoryAdapter } from "./adapters/MemoryAdapter";
+export { OpenSearchAdapter } from "./adapters/OpenSearchAdapter";
+export type {
+  OpenSearchClient,
+  OpenSearchAdapterOptions,
+} from "./adapters/OpenSearchAdapter";
 
 // Constants
 export { END_ROUTE } from "./constants";

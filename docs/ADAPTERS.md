@@ -50,7 +50,18 @@ All adapters follow the **provider pattern** - no dependencies required in the p
   - Auto table/index creation
   - Zero configuration
 
-### 6. **MemoryAdapter**
+### 6. **OpenSearchAdapter**
+
+- **Use case:** Full-text search & analytics
+- **Install:** `npm install @opensearch-project/opensearch`
+- **Features:**
+  - Built-in full-text search
+  - Powerful aggregations
+  - Auto index/mapping creation
+  - Compatible with Elasticsearch 7.x
+  - AWS OpenSearch Service ready
+
+### 7. **MemoryAdapter**
 
 - **Use case:** Testing & development
 - **Install:** Built-in (no dependencies required) ✨
@@ -94,7 +105,8 @@ All database clients are **optional peer dependencies** - they won't be installe
     "mongodb": "^6.0.0 || ^7.0.0",
     "pg": "^8.11.0",
     "mysql2": "^3.2.0",
-    "better-sqlite3": "^11.0.0 || ^12.0.0"
+    "better-sqlite3": "^11.0.0 || ^12.0.0",
+    "@opensearch-project/opensearch": "^2.0.0"
   },
   "peerDependenciesMeta": {
     "@prisma/client": { "optional": true },

@@ -434,16 +434,17 @@ const agent = new Agent({
 
 **Install:** `npm install ioredis` or `npm install redis`
 
-### Coming Soon
+### More Adapters
 
-Create your own adapter for:
+All adapters are production-ready and available now:
 
-- **MongoDB**: Document-based storage ✅ **Available!**
-- **PostgreSQL**: Raw SQL for custom schemas ✅ **Available!**
-- **MySQL**: Traditional relational database (coming soon)
-- **Elasticsearch**: Full-text search integration (coming soon)
+- **MongoDB**: Document-based storage ✅
+- **PostgreSQL**: Raw SQL for custom schemas ✅
+- **SQLite**: Lightweight file-based database ✅
+- **OpenSearch**: Full-text search & analytics ✅
+- **Memory**: Built-in for testing ✅
 
-Just implement the `PersistenceAdapter` interface!
+Create your own adapter by implementing the `PersistenceAdapter` interface!
 
 ### MongoDB
 
@@ -540,6 +541,76 @@ const agent = new Agent({
 - Testing
 - Desktop applications
 - Single-user apps
+
+### OpenSearch
+
+Full-text search and analytics-powered persistence. Also compatible with Elasticsearch 7.x:
+
+```typescript
+import { OpenSearchAdapter } from "@falai/agent";
+import { Client } from "@opensearch-project/opensearch";
+
+const client = new Client({
+  node: "https://localhost:9200",
+  auth: {
+    username: "admin",
+    password: "admin",
+  },
+});
+
+const adapter = new OpenSearchAdapter(client, {
+  indices: {
+    sessions: "agent_sessions",
+    messages: "agent_messages",
+  },
+  autoCreateIndices: true, // Auto-create indices with mappings
+  refresh: "wait_for", // Ensure documents are searchable immediately
+});
+
+// Auto-create indices with mappings
+await adapter.initialize();
+
+const agent = new Agent({
+  persistence: { adapter },
+});
+```
+
+**Install:** `npm install @opensearch-project/opensearch`
+
+**Perfect for:**
+
+- Full-text search across conversations
+- Analytics and aggregations
+- Time-series analysis
+- AWS OpenSearch Service
+- Elasticsearch 7.x users
+
+**Advanced features:**
+
+```typescript
+// Get OpenSearch client for custom queries
+const pm = agent.getPersistenceManager();
+if (pm) {
+  const messages = await pm.getSessionMessages(sessionId);
+
+  // Now use the client directly for advanced queries
+  const results = await client.search({
+    index: "agent_messages",
+    body: {
+      query: {
+        match: {
+          content: "flight booking",
+        },
+      },
+      aggregations: {
+        by_route: {
+          terms: { field: "route" },
+        },
+      },
+    },
+  });
+}
+```
 
 ### Memory (Built-in)
 

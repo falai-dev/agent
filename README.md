@@ -921,6 +921,15 @@ Fast, in-memory persistence for high-throughput applications:
 - 🔑 Custom key prefixes
 - 💨 Perfect for real-time chat applications
 
+### 🔍 [OpenSearch Persistence](./examples/opensearch-persistence.ts)
+
+Full-text search and analytics-powered persistence:
+
+- 🔍 Built-in full-text search across all messages
+- 📊 Powerful aggregations and analytics
+- 🌐 Compatible with Elasticsearch 7.x
+- ☁️ AWS OpenSearch Service ready
+
 ---
 
 ## 💾 Database Adapters
@@ -929,14 +938,15 @@ Fast, in-memory persistence for high-throughput applications:
 
 ### 🎯 Available Adapters
 
-| Adapter               | Use Case                           | Install                       |
-| --------------------- | ---------------------------------- | ----------------------------- |
-| **PrismaAdapter**     | Type-safe ORM with migrations      | `npm install @prisma/client`  |
-| **RedisAdapter**      | Fast in-memory for real-time apps  | `npm install ioredis`         |
-| **MongoAdapter**      | Flexible document storage          | `npm install mongodb`         |
-| **PostgreSQLAdapter** | Raw SQL with auto table creation   | `npm install pg`              |
-| **SQLiteAdapter**     | Lightweight local database         | `npm install better-sqlite3`  |
-| **MemoryAdapter**     | Testing & development (no install) | Built-in (no dependencies) ✨ |
+| Adapter               | Use Case                           | Install                                      |
+| --------------------- | ---------------------------------- | -------------------------------------------- |
+| **PrismaAdapter**     | Type-safe ORM with migrations      | `npm install @prisma/client`                 |
+| **RedisAdapter**      | Fast in-memory for real-time apps  | `npm install ioredis`                        |
+| **MongoAdapter**      | Flexible document storage          | `npm install mongodb`                        |
+| **PostgreSQLAdapter** | Raw SQL with auto table creation   | `npm install pg`                             |
+| **SQLiteAdapter**     | Lightweight local database         | `npm install better-sqlite3`                 |
+| **OpenSearchAdapter** | Full-text search & analytics       | `npm install @opensearch-project/opensearch` |
+| **MemoryAdapter**     | Testing & development (no install) | Built-in (no dependencies) ✨                |
 
 ### ⚡ Quick Setup
 
