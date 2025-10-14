@@ -1,6 +1,6 @@
 # Package Structure
 
-\`\`\`
+```
 src/
 ├── types/          # Type definitions (interfaces, types, enums)
 ├── core/           # Core framework classes
@@ -20,7 +20,7 @@ src/
 ├── constants/      # Constants and symbols
 │   └── index.ts           # END_ROUTE, etc.
 └── index.ts        # Public API exports
-\`\`\`
+```
 
 ## Design Principles
 
