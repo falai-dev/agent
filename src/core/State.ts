@@ -35,7 +35,7 @@ export class State<TContext = unknown> {
    *
    * @param spec - Transition specification (chatState, toolState, or direct state)
    * @param condition - Optional condition for this transition
-   * @returns Object with target state that supports chaining
+   * @returns TransitionResult that supports chaining
    */
   transitionTo(
     spec: TransitionSpec<TContext>,
@@ -55,9 +55,7 @@ export class State<TContext = unknown> {
       this.transitions.push(endTransition);
 
       // Return a terminal state reference
-      return {
-        target: this.createTerminalRef(),
-      };
+      return this.createTerminalRef();
     }
 
     // Handle direct state reference
@@ -69,9 +67,7 @@ export class State<TContext = unknown> {
       );
       this.transitions.push(transition);
 
-      return {
-        target: this.createStateRefWithTransition(spec.state),
-      };
+      return this.createStateRefWithTransition(spec.state);
     }
 
     // Create new target state for chatState or toolState
@@ -81,12 +77,7 @@ export class State<TContext = unknown> {
 
     this.transitions.push(transition);
 
-    return {
-      target: this.createStateRefWithTransition(
-        targetState.getRef(),
-        targetState
-      ),
-    };
+    return this.createStateRefWithTransition(targetState.getRef(), targetState);
   }
 
   /**
@@ -126,12 +117,7 @@ export class State<TContext = unknown> {
   private createStateRefWithTransition(
     ref: StateRef,
     state?: State<TContext>
-  ): StateRef & {
-    transitionTo: (
-      spec: TransitionSpec<TContext>,
-      condition?: string
-    ) => TransitionResult<TContext>;
-  } {
+  ): TransitionResult<TContext> {
     const stateInstance = state || this;
 
     return {
@@ -144,12 +130,7 @@ export class State<TContext = unknown> {
   /**
    * Create a terminal state reference (for END_ROUTE)
    */
-  private createTerminalRef(): StateRef & {
-    transitionTo: (
-      spec: TransitionSpec<TContext>,
-      condition?: string
-    ) => TransitionResult<TContext>;
-  } {
+  private createTerminalRef(): TransitionResult<TContext> {
     const terminalRef: StateRef = {
       id: "END",
       routeId: this.routeId,

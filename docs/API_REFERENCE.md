@@ -195,7 +195,7 @@ Represents a state within a conversation route.
 
 ##### `transitionTo(spec: TransitionSpec, condition?: string): TransitionResult`
 
-Creates a transition from this state.
+Creates a transition from this state and returns a chainable result.
 
 ```typescript
 interface TransitionSpec {
@@ -203,6 +203,30 @@ interface TransitionSpec {
   toolState?: ToolRef; // Transition to execute a tool
   state?: StateRef | symbol; // Transition to specific state or END_ROUTE
 }
+
+interface TransitionResult {
+  id: string; // State identifier
+  routeId: string; // Route identifier
+  transitionTo: (spec: TransitionSpec, condition?: string) => TransitionResult;
+}
+```
+
+**Returns:** A `TransitionResult` that includes the target state's reference (`id`, `routeId`) and a `transitionTo` method for chaining additional transitions.
+
+**Example:**
+
+```typescript
+const t0 = route.initialState.transitionTo({
+  chatState: "Ask for user name",
+});
+
+const t1 = t0.transitionTo({
+  chatState: "Ask for email",
+});
+
+// Access state properties
+console.log(t1.id); // State ID
+console.log(t1.routeId); // Route ID
 ```
 
 ##### `addGuideline(guideline: Guideline): void`

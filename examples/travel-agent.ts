@@ -162,20 +162,20 @@ async function createTravelAgent() {
     chatState: "Ask about the destination",
   });
 
-  const t1 = t0.target.transitionTo({
+  const t1 = t0.transitionTo({
     chatState: "Ask about preferred travel dates",
   });
 
-  const t2 = t1.target.transitionTo({
+  const t2 = t1.transitionTo({
     toolState: getAvailableFlights,
   });
 
-  const t3 = t2.target.transitionTo({
+  const t3 = t2.transitionTo({
     chatState: "Present available flights and ask which one works for them",
   });
 
   // Happy path: customer selects a flight
-  const t4 = t3.target.transitionTo(
+  const t4 = t3.transitionTo(
     {
       chatState:
         "Collect passenger information and confirm booking details before proceeding",
@@ -183,41 +183,41 @@ async function createTravelAgent() {
     "The customer selects a flight"
   );
 
-  const t5 = t4.target.transitionTo(
+  const t5 = t4.transitionTo(
     {
       toolState: bookFlight,
     },
     "The customer confirms the booking details"
   );
 
-  const t6 = t5.target.transitionTo({
+  const t6 = t5.transitionTo({
     chatState: "Provide confirmation number and booking summary",
   });
 
-  t6.target.transitionTo({ state: END_ROUTE });
+  t6.transitionTo({ state: END_ROUTE });
 
   // Alternative path: no flights work
-  const t7 = t3.target.transitionTo(
+  const t7 = t3.transitionTo(
     {
       toolState: getAlternativeFlights,
     },
     "None of the flights work for the customer"
   );
 
-  const t8 = t7.target.transitionTo({
+  const t8 = t7.transitionTo({
     chatState: "Present alternative flights and ask if any work",
   });
 
   // Link back to happy path
-  t8.target.transitionTo(
+  t8.transitionTo(
     {
-      state: t4.target,
+      state: t4,
     },
     "The customer selects a flight"
   );
 
   // No alternative flights work either
-  const t9 = t8.target.transitionTo(
+  const t9 = t8.transitionTo(
     {
       chatState:
         "Suggest calling our office or visiting our website for more options",
@@ -225,7 +225,7 @@ async function createTravelAgent() {
     "None of the alternative flights work either"
   );
 
-  t9.target.transitionTo({ state: END_ROUTE });
+  t9.transitionTo({ state: END_ROUTE });
 
   // Add route-specific guidelines
   flightBookingRoute.createGuideline({
@@ -253,11 +253,11 @@ async function createTravelAgent() {
     chatState: "Ask for the confirmation number or booking reference",
   });
 
-  const s1 = s0.target.transitionTo({
+  const s1 = s0.transitionTo({
     toolState: getBookingStatus,
   });
 
-  s1.target.transitionTo(
+  s1.transitionTo(
     {
       chatState:
         "Tell the customer that the booking could not be found and ask them to verify the confirmation number or call the office",
@@ -265,7 +265,7 @@ async function createTravelAgent() {
     "The booking could not be found"
   );
 
-  s1.target.transitionTo(
+  s1.transitionTo(
     {
       chatState:
         "Provide the booking details and confirm everything is in order",
@@ -273,7 +273,7 @@ async function createTravelAgent() {
     "The booking is confirmed and all details are correct"
   );
 
-  s1.target.transitionTo(
+  s1.transitionTo(
     {
       chatState:
         "Present the booking information and mention any issues or pending actions required",

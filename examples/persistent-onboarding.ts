@@ -243,34 +243,34 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     chatState: "Ask for business name and a brief description",
   });
 
-  const saveBusinessStep = askBusinessInfo.target.transitionTo({
+  const saveBusinessStep = askBusinessInfo.transitionTo({
     toolState: saveBusinessInfo,
   });
 
   // Step 2: Collect industry
-  const askIndustry = saveBusinessStep.target.transitionTo({
+  const askIndustry = saveBusinessStep.transitionTo({
     chatState: "Ask what industry the business operates in",
   });
 
-  const saveIndustryStep = askIndustry.target.transitionTo({
+  const saveIndustryStep = askIndustry.transitionTo({
     toolState: saveIndustry,
   });
 
   // Step 3: Collect contact
-  const askContact = saveIndustryStep.target.transitionTo({
+  const askContact = saveIndustryStep.transitionTo({
     chatState: "Ask for their contact email",
   });
 
-  const saveContactStep = askContact.target.transitionTo({
+  const saveContactStep = askContact.transitionTo({
     toolState: saveContactEmail,
   });
 
   // Step 4: Confirmation
-  const confirm = saveContactStep.target.transitionTo({
+  const confirm = saveContactStep.transitionTo({
     chatState: "Summarize all collected information and ask for confirmation",
   });
 
-  confirm.target.transitionTo({ state: END_ROUTE });
+  confirm.transitionTo({ state: END_ROUTE });
 
   // Guidelines
   onboardingRoute.createGuideline({

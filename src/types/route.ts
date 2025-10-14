@@ -58,14 +58,12 @@ export interface TransitionSpec<TContext = unknown> {
 
 /**
  * Result of a transition operation
+ * Combines state reference with the ability to chain transitions
  */
-export interface TransitionResult<TContext = unknown> {
-  /** The target state after transition */
-  target: StateRef & {
-    /** Allow chaining transitions */
-    transitionTo: (
-      spec: TransitionSpec<TContext>,
-      condition?: string
-    ) => TransitionResult<TContext>;
-  };
+export interface TransitionResult<TContext = unknown> extends StateRef {
+  /** Allow chaining transitions */
+  transitionTo: (
+    spec: TransitionSpec<TContext>,
+    condition?: string
+  ) => TransitionResult<TContext>;
 }

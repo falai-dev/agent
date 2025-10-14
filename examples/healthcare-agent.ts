@@ -107,54 +107,54 @@ async function createHealthcareAgent() {
     chatState: "Determine the reason for the visit",
   });
 
-  const t1 = t0.target.transitionTo({
+  const t1 = t0.transitionTo({
     toolState: getUpcomingSlots,
   });
 
-  const t2 = t1.target.transitionTo({
+  const t2 = t1.transitionTo({
     chatState: "List available times and ask which ones works for them",
   });
 
-  const t3 = t2.target.transitionTo(
+  const t3 = t2.transitionTo(
     {
       chatState: "Confirm the details with the patient before scheduling",
     },
     "The patient picks a time"
   );
 
-  const t4 = t3.target.transitionTo(
+  const t4 = t3.transitionTo(
     {
       toolState: scheduleAppointment,
     },
     "The patient confirms the details"
   );
 
-  const t5 = t4.target.transitionTo({
+  const t5 = t4.transitionTo({
     chatState: "Confirm the appointment has been scheduled",
   });
 
-  t5.target.transitionTo({ state: END_ROUTE });
+  t5.transitionTo({ state: END_ROUTE });
 
   // Alternative path: no times work
-  const t6 = t2.target.transitionTo(
+  const t6 = t2.transitionTo(
     {
       toolState: getLaterSlots,
     },
     "None of those times work for the patient"
   );
 
-  const t7 = t6.target.transitionTo({
+  const t7 = t6.transitionTo({
     chatState: "List later times and ask if any of them works",
   });
 
-  t7.target.transitionTo(
+  t7.transitionTo(
     {
-      state: t3.target,
+      state: t3,
     },
     "The patient picks a time"
   );
 
-  const t8 = t7.target.transitionTo(
+  const t8 = t7.transitionTo(
     {
       chatState:
         "Ask the patient to call the office to schedule an appointment",
@@ -162,7 +162,7 @@ async function createHealthcareAgent() {
     "None of those times work for the patient either"
   );
 
-  t8.target.transitionTo({ state: END_ROUTE });
+  t8.transitionTo({ state: END_ROUTE });
 
   schedulingRoute.createGuideline({
     condition: "The patient says their visit is urgent",
@@ -180,7 +180,7 @@ async function createHealthcareAgent() {
     toolState: getLabResults,
   });
 
-  l0.target.transitionTo(
+  l0.transitionTo(
     {
       chatState:
         "Tell the patient that the results are not available yet, and to try again later",
@@ -188,7 +188,7 @@ async function createHealthcareAgent() {
     "The lab results could not be found"
   );
 
-  l0.target.transitionTo(
+  l0.transitionTo(
     {
       chatState:
         "Explain the lab results to the patient - that they are normal",
@@ -196,7 +196,7 @@ async function createHealthcareAgent() {
     "The lab results are good - i.e., nothing to worry about"
   );
 
-  l0.target.transitionTo(
+  l0.transitionTo(
     {
       chatState:
         "Present the results and ask them to call the office for clarifications on the results as you are not a doctor",

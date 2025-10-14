@@ -292,12 +292,12 @@ const askName = onboardingRoute.initialState.transitionTo({
   chatState: "Ask for user's full name",
 });
 
-const askEmail = askName.target.transitionTo({
+const askEmail = askName.transitionTo({
   chatState: "Request email address",
   condition: "User provided their name",
 });
 
-const confirmDetails = askEmail.target.transitionTo({
+const confirmDetails = askEmail.transitionTo({
   chatState: "Confirm all details before proceeding",
 });
 
@@ -310,13 +310,13 @@ onboardingRoute.createGuideline({
 });
 
 // Happy path completion
-confirmDetails.target.transitionTo({
+confirmDetails.transitionTo({
   chatState: "Welcome message and next steps",
   condition: "User confirms details",
 });
 
 // End the route
-confirmDetails.target.transitionTo({ state: END_ROUTE });
+confirmDetails.transitionTo({ state: END_ROUTE });
 ```
 
 ### 🔀 Disambiguation with Observations

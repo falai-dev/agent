@@ -108,12 +108,12 @@ async function main() {
     chatState: "Ask which city they want weather for",
   });
 
-  const fetchWeather = askLocation.target.transitionTo({
+  const fetchWeather = askLocation.transitionTo({
     toolState: getWeather,
     condition: "User provides a city name",
   });
 
-  const showWeather = fetchWeather.target.transitionTo({
+  const showWeather = fetchWeather.transitionTo({
     chatState:
       "Present the weather information in a friendly way with temperature and condition",
   });

@@ -159,16 +159,16 @@ const step1 = onboardingRoute.initialState.transitionTo({
   chatState: "Ask for user's name",
 });
 
-const step2 = step1.target.transitionTo({
+const step2 = step1.transitionTo({
   chatState: "Ask for user's email",
 });
 
-const step3 = step2.target.transitionTo({
+const step3 = step2.transitionTo({
   chatState: "Confirm details and welcome user",
 });
 
 // End the route
-step3.target.transitionTo({ state: END_ROUTE });
+step3.transitionTo({ state: END_ROUTE });
 ```
 
 ### Handle Context Dynamically
