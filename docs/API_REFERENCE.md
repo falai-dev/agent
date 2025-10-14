@@ -216,6 +216,7 @@ interface TransitionResult {
 **Example:**
 
 ```typescript
+// Approach 1: Step-by-step (ideal for complex flows with branching)
 const t0 = route.initialState.transitionTo({
   chatState: "Ask for user name",
 });
@@ -224,9 +225,30 @@ const t1 = t0.transitionTo({
   chatState: "Ask for email",
 });
 
+const t2 = t1.transitionTo({
+  chatState: "Confirm details",
+});
+
 // Access state properties
 console.log(t1.id); // State ID
 console.log(t1.routeId); // Route ID
+
+// Use saved references for branching
+t1.transitionTo(
+  { chatState: "Handle invalid email" },
+  "Email validation failed"
+);
+
+// Approach 2: Fluent chaining (elegant for linear flows)
+route.initialState
+  .transitionTo({ chatState: "Ask for user name" })
+  .transitionTo({ chatState: "Ask for email" })
+  .transitionTo({ chatState: "Confirm details" })
+  .transitionTo({ state: END_ROUTE });
+
+// Both approaches are equivalent - choose based on your needs:
+// - Use step-by-step for complex flows with conditional branches
+// - Use chaining for simple linear flows for conciseness
 ```
 
 ##### `addGuideline(guideline: Guideline): void`

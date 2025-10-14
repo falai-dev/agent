@@ -154,7 +154,9 @@ const onboardingRoute = agent.createRoute({
   conditions: ["User is new and needs onboarding"],
 });
 
-// Build the flow
+// Build the flow - two approaches:
+
+// Approach 1: Step-by-step (great for complex flows with branching)
 const step1 = onboardingRoute.initialState.transitionTo({
   chatState: "Ask for user's name",
 });
@@ -167,8 +169,14 @@ const step3 = step2.transitionTo({
   chatState: "Confirm details and welcome user",
 });
 
-// End the route
 step3.transitionTo({ state: END_ROUTE });
+
+// Approach 2: Fluent chaining (concise for linear flows)
+onboardingRoute.initialState
+  .transitionTo({ chatState: "Ask for user's name" })
+  .transitionTo({ chatState: "Ask for user's email" })
+  .transitionTo({ chatState: "Confirm details and welcome user" })
+  .transitionTo({ state: END_ROUTE });
 ```
 
 ### Handle Context Dynamically

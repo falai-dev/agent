@@ -287,19 +287,29 @@ const onboardingRoute = agent.createRoute({
   conditions: ["User is new and needs onboarding"],
 });
 
-// Build the flow
+// Option 1: Step-by-step (clear and explicit)
 const askName = onboardingRoute.initialState.transitionTo({
   chatState: "Ask for user's full name",
 });
 
 const askEmail = askName.transitionTo({
   chatState: "Request email address",
-  condition: "User provided their name",
 });
 
 const confirmDetails = askEmail.transitionTo({
   chatState: "Confirm all details before proceeding",
 });
+
+confirmDetails.transitionTo({ state: END_ROUTE });
+
+// Option 2: Fluent chaining (concise and elegant)
+onboardingRoute.initialState
+  .transitionTo({ chatState: "Ask for user's full name" })
+  .transitionTo({ chatState: "Request email address" })
+  .transitionTo({ chatState: "Confirm all details before proceeding" })
+  .transitionTo({ state: END_ROUTE });
+
+// Both approaches work identically - choose what fits your style!
 
 // Add guidelines dynamically (can also be in route options)
 onboardingRoute.createGuideline({
@@ -308,15 +318,6 @@ onboardingRoute.createGuideline({
   enabled: true,
   tags: ["validation"],
 });
-
-// Happy path completion
-confirmDetails.transitionTo({
-  chatState: "Welcome message and next steps",
-  condition: "User confirms details",
-});
-
-// End the route
-confirmDetails.transitionTo({ state: END_ROUTE });
 ```
 
 ### 🔀 Disambiguation with Observations
@@ -547,6 +548,17 @@ const openaiProvider = new OpenAIProvider({
 - 🏭 Factory pattern for agent creation
 - 🔧 Two approaches: lifecycle hooks vs context provider
 - 📝 Complete onboarding flow across multiple turns
+
+### 🏢 [Business Onboarding](./examples/business-onboarding.ts)
+
+**Production-ready business onboarding with advanced patterns:**
+
+- 🎯 Real-world multi-step business setup flow
+- 🔀 Complex branching logic (physical vs online business)
+- 🔄 Tools with `contextUpdate` for automatic state management
+- 🔗 Both step-by-step and fluent chaining approaches
+- 🎨 Lifecycle hooks for agent caching and persistence
+- 📊 Dynamic route creation based on collected data
 
 ### 🌍 [Travel Booking Agent](./examples/travel-agent.ts)
 
