@@ -109,6 +109,107 @@ if (response.route?.title === END_ROUTE) {
 }
 ```
 
+##### `respondStream(input: RespondInput<TContext>): AsyncGenerator<StreamChunk>`
+
+Generates an AI response as a real-time stream for better user experience. Provides the same structured output as `respond()` but delivers it incrementally.
+
+```typescript
+interface StreamChunk {
+  /** The incremental text delta */
+  delta: string;
+  /** Full accumulated text so far */
+  accumulated: string;
+  /** Whether this is the final chunk */
+  done: boolean;
+  /** Route chosen by the agent (only in final chunk) */
+  route?: { id: string; title: string };
+  /** Current state within the route (only in final chunk) */
+  state?: { id: string; description?: string };
+  /** Tool calls requested by the agent (only in final chunk) */
+  toolCalls?: Array<{
+    toolName: string;
+    arguments: Record<string, unknown>;
+  }>;
+}
+```
+
+**Key Features:**
+
+- 🌊 Real-time streaming for better perceived performance
+- 📊 Access to route, state, and tool information in final chunk
+- 🛑 Cancellable with AbortSignal
+- ✅ Supported by all providers (Anthropic, OpenAI, Gemini, OpenRouter)
+
+**Example:**
+
+```typescript
+// Basic streaming
+for await (const chunk of agent.respondStream({ history })) {
+  if (chunk.delta) {
+    // Display incremental text to user
+    process.stdout.write(chunk.delta);
+  }
+
+  if (chunk.done) {
+    console.log("\n✅ Complete!");
+    // Access final metadata
+    if (chunk.route) {
+      console.log("Route:", chunk.route.title);
+    }
+    if (chunk.toolCalls) {
+      console.log("Tool calls:", chunk.toolCalls.length);
+    }
+  }
+}
+```
+
+**With Cancellation:**
+
+```typescript
+const abortController = new AbortController();
+
+// Cancel after 5 seconds
+setTimeout(() => abortController.abort(), 5000);
+
+try {
+  for await (const chunk of agent.respondStream({
+    history,
+    signal: abortController.signal,
+  })) {
+    console.log(chunk.delta);
+  }
+} catch (error) {
+  if (error.name === "AbortError") {
+    console.log("Stream cancelled");
+  }
+}
+```
+
+**Collecting Full Response:**
+
+```typescript
+let fullMessage = "";
+let finalChunk;
+
+for await (const chunk of agent.respondStream({ history })) {
+  fullMessage += chunk.delta;
+  if (chunk.done) {
+    finalChunk = chunk;
+  }
+}
+
+// Save to database
+await db.agentMessages.create({
+  sessionId: session.id,
+  role: "agent",
+  content: fullMessage,
+  route: finalChunk.route?.title,
+  toolCalls: finalChunk.toolCalls || [],
+});
+```
+
+**See Also:** [streaming-agent.ts](../examples/streaming-agent.ts) for comprehensive examples.
+
 #### Properties
 
 ##### `name: string`

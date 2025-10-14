@@ -13,10 +13,10 @@
 
 import {
   Agent,
-  GeminiProvider,
   defineTool,
   createMessageEvent,
   EventSource,
+  GeminiProvider,
   type Term,
   type Guideline,
   type Capability,

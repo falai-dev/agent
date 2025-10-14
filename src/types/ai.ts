@@ -95,6 +95,31 @@ export interface GenerateMessageOutput {
 }
 
 /**
+ * Stream chunk from AI message generation
+ */
+export interface GenerateMessageStreamChunk {
+  /** The delta/chunk of the message */
+  delta: string;
+  /** Accumulated message so far */
+  accumulated: string;
+  /** Whether this is the final chunk */
+  done: boolean;
+  /** Optional metadata about generation */
+  metadata?: {
+    /** Model used */
+    model?: string;
+    /** Tokens consumed */
+    tokensUsed?: number;
+    /** Finish reason */
+    finishReason?: string;
+    /** Additional provider-specific data */
+    [key: string]: unknown;
+  };
+  /** Structured response data (only available when done=true and JSON mode is enabled) */
+  structured?: AgentStructuredResponse;
+}
+
+/**
  * AI provider interface (strategy pattern)
  */
 export interface AiProvider {
@@ -107,4 +132,11 @@ export interface AiProvider {
   generateMessage<TContext = unknown>(
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput>;
+
+  /**
+   * Generate a message as a stream based on prompt and context
+   */
+  generateMessageStream<TContext = unknown>(
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk>;
 }

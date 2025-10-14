@@ -9,6 +9,7 @@ import type {
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
+  GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types/ai";
 import { withTimeoutAndRetry } from "../utils/retry";
@@ -162,6 +163,12 @@ export class OpenAIProvider implements AiProvider {
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput> {
     return this.generateWithBackup(input);
+  }
+
+  async *generateMessageStream<TContext = unknown>(
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    yield* this.generateStreamWithBackup(input);
   }
 
   private async generateWithBackup<TContext = unknown>(
@@ -352,5 +359,155 @@ export class OpenAIProvider implements AiProvider {
       this.retryConfig.retries,
       `OpenAI ${model}`
     );
+  }
+
+  private async *generateStreamWithBackup<TContext = unknown>(
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    // Try primary model first
+    try {
+      yield* this.generateStreamWithModel(this.primaryModel, input);
+    } catch (primaryError: unknown) {
+      const primaryErrMsg = getErrorMessage(primaryError);
+      console.warn(
+        `[OPENAI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
+      );
+
+      if (!shouldUseBackupModel(primaryError)) {
+        throw primaryError;
+      }
+
+      console.log(`[OPENAI] Trying backup models for streaming`);
+
+      let lastBackupError: unknown = primaryError;
+
+      for (let i = 0; i < this.backupModels.length; i++) {
+        const backupModel = this.backupModels[i];
+        console.log(
+          `[OPENAI] Trying backup model ${i + 1}/${
+            this.backupModels.length
+          }: ${backupModel}`
+        );
+
+        try {
+          yield* this.generateStreamWithModel(backupModel, input);
+          console.log(`[OPENAI] Backup model ${backupModel} succeeded`);
+          return;
+        } catch (backupError: unknown) {
+          const backupErrMsg = getErrorMessage(backupError);
+          console.warn(
+            `[OPENAI] Backup model ${backupModel} failed: ${backupErrMsg}`
+          );
+          lastBackupError = backupError;
+
+          if (
+            !shouldUseBackupModel(backupError) &&
+            i < this.backupModels.length - 1
+          ) {
+            console.log(
+              `[OPENAI] Backup model error doesn't qualify for further attempts`
+            );
+            break;
+          }
+        }
+      }
+
+      const lastBackupErrMsg = getErrorMessage(lastBackupError);
+      console.error(
+        `[OPENAI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
+      );
+      throw lastBackupError;
+    }
+  }
+
+  private async *generateStreamWithModel<TContext = unknown>(
+    model: string,
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    const params = {
+      ...this.config,
+      model,
+      messages: [
+        {
+          role: "user" as const,
+          content: input.prompt,
+        },
+      ],
+      stream: true as const,
+    };
+
+    // Override with input parameters if provided
+    if (input.parameters?.maxOutputTokens !== undefined) {
+      params.max_tokens = input.parameters.maxOutputTokens;
+    }
+
+    // Use JSON mode if requested
+    // Note: OpenAI streaming doesn't support the responses.parse API,
+    // so we use response_format with JSON mode instead
+    if (input.parameters?.jsonMode) {
+      params.response_format = { type: "json_object" };
+    }
+
+    const stream = await this.client.chat.completions.create(params);
+
+    let accumulated = "";
+    let currentModel = model;
+    let finishReason: string | undefined;
+    let promptTokens: number | undefined;
+    let completionTokens: number | undefined;
+    let totalTokens: number | undefined;
+
+    for await (const chunk of stream) {
+      currentModel = chunk.model;
+      const delta = chunk.choices[0]?.delta?.content || "";
+
+      if (delta) {
+        accumulated += delta;
+        yield {
+          delta,
+          accumulated,
+          done: false,
+        };
+      }
+
+      if (chunk.choices[0]?.finish_reason) {
+        finishReason = chunk.choices[0].finish_reason;
+      }
+
+      // OpenAI includes usage in the final chunk for some models
+      if (chunk.usage) {
+        promptTokens = chunk.usage.prompt_tokens;
+        completionTokens = chunk.usage.completion_tokens;
+        totalTokens = chunk.usage.total_tokens;
+      }
+    }
+
+    // Parse JSON response if JSON mode was enabled
+    let structured: AgentStructuredResponse | undefined;
+    if (input.parameters?.jsonMode && accumulated) {
+      try {
+        structured = JSON.parse(accumulated) as AgentStructuredResponse;
+      } catch (error) {
+        console.warn(
+          "[OPENAI] Failed to parse JSON response in stream:",
+          error
+        );
+      }
+    }
+
+    // Yield final chunk
+    yield {
+      delta: "",
+      accumulated,
+      done: true,
+      metadata: {
+        model: currentModel,
+        finishReason,
+        tokensUsed: totalTokens,
+        promptTokens,
+        completionTokens,
+      },
+      structured,
+    };
   }
 }

@@ -6,12 +6,12 @@
  */
 
 import { Agent, createMessageEvent, EventSource } from "../src/index";
-import { GeminiProvider } from "../src/providers/GeminiProvider";
+import { AnthropicProvider } from "../src/providers";
 
 // Initialize AI provider
-const ai = new GeminiProvider({
-  apiKey: process.env.GEMINI_API_KEY || "your-api-key-here",
-  model: "gemini-2.0-flash-exp",
+const ai = new AnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY || "your-api-key-here",
+  model: "claude-sonnet-4-5",
 });
 
 // Create WhatsApp support bot with different styles per route

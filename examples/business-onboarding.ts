@@ -13,10 +13,10 @@
 import {
   Agent,
   defineTool,
-  GeminiProvider,
   END_ROUTE,
   EventSource,
   createMessageEvent,
+  OpenAIProvider,
   type ToolContext,
 } from "../src/index";
 
@@ -362,9 +362,10 @@ async function createBusinessOnboardingAgent(
   sessionId: string,
   initialData: OnboardingData = { routes: [] }
 ): Promise<Agent<OnboardingContext>> {
-  const provider = new GeminiProvider({
-    apiKey: process.env.GEMINI_API_KEY || "test-key",
-    model: "models/gemini-2.0-flash-exp",
+  const provider = new OpenAIProvider({
+    apiKey: process.env.OPENAI_API_KEY || "test-key",
+    model: "gpt-5",
+    backupModels: ["gpt-5-mini"],
     retryConfig: {
       timeout: 60000,
       retries: 3,

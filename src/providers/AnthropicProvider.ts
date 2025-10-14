@@ -9,6 +9,7 @@ import type {
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
+  GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types/ai";
 import { withTimeoutAndRetry } from "../utils/retry";
@@ -30,9 +31,7 @@ export interface AnthropicProviderOptions {
   /** Backup models to try if primary fails (default: []) */
   backupModels?: string[];
   /** Default parameters - uses MessageCreateParamsNonStreaming from @anthropic-ai/sdk */
-  config?: Partial<
-    Omit<MessageCreateParamsNonStreaming, "model" | "messages" | "max_tokens">
-  >;
+  config?: Partial<Omit<MessageCreateParamsNonStreaming, "model" | "messages">>;
   /** Retry configuration */
   retryConfig?: {
     timeout?: number;
@@ -154,6 +153,12 @@ export class AnthropicProvider implements AiProvider {
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput> {
     return this.generateWithBackup(input);
+  }
+
+  async *generateMessageStream<TContext = unknown>(
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    yield* this.generateStreamWithBackup(input);
   }
 
   private async generateWithBackup<TContext = unknown>(
@@ -302,5 +307,161 @@ export class AnthropicProvider implements AiProvider {
       this.retryConfig.retries,
       `Anthropic ${model}`
     );
+  }
+
+  private async *generateStreamWithBackup<TContext = unknown>(
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    // Try primary model first
+    try {
+      yield* this.generateStreamWithModel(this.primaryModel, input);
+    } catch (primaryError: unknown) {
+      const primaryErrMsg = getErrorMessage(primaryError);
+      console.warn(
+        `[ANTHROPIC] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
+      );
+
+      if (!shouldUseBackupModel(primaryError)) {
+        throw primaryError;
+      }
+
+      console.log(`[ANTHROPIC] Trying backup models for streaming`);
+
+      let lastBackupError: unknown = primaryError;
+
+      for (let i = 0; i < this.backupModels.length; i++) {
+        const backupModel = this.backupModels[i];
+        console.log(
+          `[ANTHROPIC] Trying backup model ${i + 1}/${
+            this.backupModels.length
+          }: ${backupModel}`
+        );
+
+        try {
+          yield* this.generateStreamWithModel(backupModel, input);
+          console.log(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
+          return;
+        } catch (backupError: unknown) {
+          const backupErrMsg = getErrorMessage(backupError);
+          console.warn(
+            `[ANTHROPIC] Backup model ${backupModel} failed: ${backupErrMsg}`
+          );
+          lastBackupError = backupError;
+
+          if (
+            !shouldUseBackupModel(backupError) &&
+            i < this.backupModels.length - 1
+          ) {
+            console.log(
+              `[ANTHROPIC] Backup model error doesn't qualify for further attempts`
+            );
+            break;
+          }
+        }
+      }
+
+      const lastBackupErrMsg = getErrorMessage(lastBackupError);
+      console.error(
+        `[ANTHROPIC] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
+      );
+      throw lastBackupError;
+    }
+  }
+
+  private async *generateStreamWithModel<TContext = unknown>(
+    model: string,
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    // Anthropic requires max_tokens to be specified
+    const maxTokens = input.parameters?.maxOutputTokens || 4096;
+
+    const params = {
+      model,
+      max_tokens: maxTokens,
+      messages: [
+        {
+          role: "user" as const,
+          content: input.prompt,
+        },
+      ],
+      stream: true,
+      ...this.config,
+    };
+
+    // Handle JSON mode if requested
+    if (input.parameters?.jsonMode) {
+      const systemPrompt =
+        "You must respond with valid JSON only. Do not include any text outside the JSON structure.";
+
+      if (typeof this.config?.system === "string") {
+        params.system = `${this.config.system}\n\n${systemPrompt}`;
+      } else if (Array.isArray(this.config?.system)) {
+        params.system = [
+          ...this.config.system,
+          {
+            type: "text" as const,
+            text: systemPrompt,
+          },
+        ];
+      } else {
+        params.system = systemPrompt;
+      }
+    }
+
+    const stream = this.client.messages.stream(params);
+
+    let accumulated = "";
+    let currentModel = model;
+    let stopReason: string | undefined;
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    for await (const chunk of stream) {
+      if (chunk.type === "message_start") {
+        currentModel = chunk.message.model;
+        inputTokens = chunk.message.usage.input_tokens;
+      } else if (chunk.type === "content_block_delta") {
+        if (chunk.delta.type === "text_delta") {
+          const delta = chunk.delta.text;
+          accumulated += delta;
+          yield {
+            delta,
+            accumulated,
+            done: false,
+          };
+        }
+      } else if (chunk.type === "message_delta") {
+        stopReason = chunk.delta.stop_reason || undefined;
+        outputTokens = chunk.usage.output_tokens;
+      }
+    }
+
+    // Parse JSON response if JSON mode was enabled
+    let structured: AgentStructuredResponse | undefined;
+    if (input.parameters?.jsonMode && accumulated) {
+      try {
+        structured = JSON.parse(accumulated) as AgentStructuredResponse;
+      } catch (error) {
+        console.warn(
+          "[ANTHROPIC] Failed to parse JSON response in stream:",
+          error
+        );
+      }
+    }
+
+    // Yield final chunk
+    yield {
+      delta: "",
+      accumulated,
+      done: true,
+      metadata: {
+        model: currentModel,
+        stopReason,
+        tokensUsed: inputTokens + outputTokens,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+      },
+      structured,
+    };
   }
 }

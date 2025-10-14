@@ -186,6 +186,36 @@ const response = await agent.respond({
 console.log(response.message); // 🎉 AI-powered response ready!
 ```
 
+### ⚡ Streaming Responses (NEW!)
+
+Stream AI responses in real-time for better user experience:
+
+```typescript
+// Use respondStream for real-time streaming
+for await (const chunk of agent.respondStream({ history })) {
+  // chunk.delta contains the new text
+  process.stdout.write(chunk.delta);
+
+  if (chunk.done) {
+    // Stream complete - access final metadata
+    console.log("\n✅ Complete!");
+    console.log("Route:", chunk.route?.title);
+    console.log("Tool calls:", chunk.toolCalls?.length);
+  }
+}
+```
+
+**Benefits:**
+
+- ✨ Real-time response generation
+- 🎯 Better perceived performance
+- 🛑 Cancellable with AbortSignal
+- 📊 Access to route/state/tool information in final chunk
+
+**Supported Providers:** All providers support streaming (Anthropic, OpenAI, Gemini, OpenRouter)
+
+See [streaming-agent.ts](./examples/streaming-agent.ts) for complete examples.
+
 ---
 
 ## 📚 Documentation
@@ -700,6 +730,16 @@ const openrouterProvider = new OpenRouterProvider({
 - 📚 Terms, guidelines, capabilities, routes, observations
 - 🔗 Route references by title in observations
 - ➕ Dynamic additions after construction
+
+### ⚡ [Streaming Responses](./examples/streaming-agent.ts) **(NEW!)**
+
+**Real-time streaming responses for better UX:**
+
+- 🌊 Stream responses from all providers (Anthropic, OpenAI, Gemini, OpenRouter)
+- 📡 Real-time text generation with `respondStream`
+- 🛑 Cancellable streams with AbortSignal
+- 📊 Access route, state, and tool information
+- 🎯 5 comprehensive examples covering different use cases
 
 ### 💾 [Persistent Onboarding Agent](./examples/persistent-onboarding.ts)
 

@@ -13,6 +13,7 @@ import type {
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
+  GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types/ai";
 import { withTimeoutAndRetry } from "../utils/retry";
@@ -122,6 +123,12 @@ export class GeminiProvider implements AiProvider {
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput> {
     return this.generateWithBackup(input);
+  }
+
+  async *generateMessageStream<TContext = unknown>(
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    yield* this.generateStreamWithBackup(input);
   }
 
   private async generateWithBackup<TContext = unknown>(
@@ -235,5 +242,133 @@ export class GeminiProvider implements AiProvider {
       this.retryConfig.retries,
       `Gemini ${model}`
     );
+  }
+
+  private async *generateStreamWithBackup<TContext = unknown>(
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    // Try primary model first
+    try {
+      yield* this.generateStreamWithModel(this.primaryModel, input);
+    } catch (primaryError: unknown) {
+      const primaryErrMsg = String(primaryError);
+      console.warn(
+        `[GEMINI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
+      );
+
+      if (!shouldUseBackupModel(primaryError)) {
+        throw primaryError;
+      }
+
+      console.log(`[GEMINI] Trying backup models for streaming`);
+
+      let lastBackupError: unknown = primaryError;
+
+      for (let i = 0; i < this.backupModels.length; i++) {
+        const backupModel = this.backupModels[i];
+        console.log(
+          `[GEMINI] Trying backup model ${i + 1}/${
+            this.backupModels.length
+          }: ${backupModel}`
+        );
+
+        try {
+          yield* this.generateStreamWithModel(backupModel, input);
+          console.log(`[GEMINI] Backup model ${backupModel} succeeded`);
+          return;
+        } catch (backupError: unknown) {
+          const backupErrMsg = String(backupError);
+          console.warn(
+            `[GEMINI] Backup model ${backupModel} failed: ${backupErrMsg}`
+          );
+          lastBackupError = backupError;
+
+          if (
+            !shouldUseBackupModel(backupError) &&
+            i < this.backupModels.length - 1
+          ) {
+            console.log(
+              `[GEMINI] Backup model error doesn't qualify for further attempts`
+            );
+            break;
+          }
+        }
+      }
+
+      const lastBackupErrMsg = String(lastBackupError);
+      console.error(
+        `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
+      );
+      throw lastBackupError;
+    }
+  }
+
+  private async *generateStreamWithModel<TContext = unknown>(
+    model: string,
+    input: GenerateMessageInput<TContext>
+  ): AsyncGenerator<GenerateMessageStreamChunk> {
+    // Enable JSON mode if requested
+    const configOverride: Partial<GenerateContentConfig> = { ...this.config };
+    if (input.parameters?.jsonMode) {
+      configOverride.responseMimeType = "application/json";
+    }
+
+    const stream = await this.genAI.models.generateContentStream({
+      model,
+      contents: input.prompt,
+      config: configOverride,
+    });
+
+    let accumulated = "";
+    let promptTokenCount = 0;
+    let candidatesTokenCount = 0;
+    let totalTokenCount = 0;
+
+    for await (const chunk of stream) {
+      const delta = chunk.text || "";
+
+      if (delta) {
+        accumulated += delta;
+        yield {
+          delta,
+          accumulated,
+          done: false,
+        };
+      }
+
+      // Update token counts if available
+      if (chunk.usageMetadata) {
+        promptTokenCount = chunk.usageMetadata.promptTokenCount || 0;
+        candidatesTokenCount = chunk.usageMetadata.candidatesTokenCount || 0;
+        totalTokenCount = chunk.usageMetadata.totalTokenCount || 0;
+      }
+    }
+
+    // Parse JSON response if JSON mode was enabled
+    let structured: AgentStructuredResponse | undefined;
+    if (input.parameters?.jsonMode && accumulated) {
+      try {
+        structured = JSON.parse(accumulated) as AgentStructuredResponse;
+      } catch (error) {
+        console.warn(
+          "[GEMINI] Failed to parse JSON response in stream:",
+          error
+        );
+      }
+    }
+
+    // Yield final chunk
+    yield {
+      delta: "",
+      accumulated,
+      done: true,
+      metadata: {
+        model,
+        tokensUsed: totalTokenCount,
+        promptTokens: promptTokenCount,
+        completionTokens: candidatesTokenCount,
+      },
+      structured,
+    };
   }
 }

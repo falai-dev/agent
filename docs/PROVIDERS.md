@@ -10,6 +10,34 @@ This guide covers the available AI providers and how to configure them for optim
 - ✅ Configure provider-specific settings
 - ✅ Use backup models for failover
 - ✅ Customize retry logic and timeouts
+- ⚡ **Stream responses in real-time** (all providers)
+
+## Streaming Support
+
+**All providers support real-time streaming** via the `respondStream()` method on the Agent class.
+
+Streaming provides:
+
+- 🌊 Real-time text generation for better UX
+- 📊 Incremental delivery with `delta` and `accumulated` properties
+- 🛑 Cancellable streams using AbortSignal
+- ✅ Full compatibility with routes, states, and tool calls
+
+**Example:**
+
+```typescript
+for await (const chunk of agent.respondStream({ history })) {
+  process.stdout.write(chunk.delta); // Print incremental text
+
+  if (chunk.done) {
+    // Access final metadata
+    console.log("Route:", chunk.route?.title);
+    console.log("Tool calls:", chunk.toolCalls?.length);
+  }
+}
+```
+
+See [streaming-agent.ts](../examples/streaming-agent.ts) for comprehensive examples with all providers.
 
 ---
 

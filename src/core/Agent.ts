@@ -212,6 +212,180 @@ export class Agent<TContext = unknown> {
   }
 
   /**
+   * Generate a response based on history and context as a stream
+   */
+  async *respondStream(params: {
+    history: Event[];
+    state?: StateRef;
+    contextOverride?: Partial<TContext>;
+    signal?: AbortSignal;
+  }): AsyncGenerator<{
+    delta: string;
+    accumulated: string;
+    done: boolean;
+    route?: { id: string; title: string } | null;
+    state?: { id: string; description?: string } | null;
+    toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+  }> {
+    const { history, contextOverride, signal } = params;
+
+    // Get current context (may fetch from provider)
+    let currentContext = await this.getContext();
+
+    // Call beforeRespond hook if configured
+    if (this.options.hooks?.beforeRespond && currentContext !== undefined) {
+      currentContext = await this.options.hooks.beforeRespond(currentContext);
+      // Update stored context with the result from beforeRespond
+      this.context = currentContext;
+    }
+
+    // Merge context with override
+    const effectiveContext = {
+      ...(currentContext as Record<string, unknown>),
+      ...(contextOverride as Record<string, unknown>),
+    } as TContext;
+
+    // Build prompt (same as respond method)
+    const promptBuilder = new PromptBuilder();
+
+    // Add agent identity
+    if (this.options.description) {
+      promptBuilder.addAgentIdentity({
+        name: this.options.name,
+        description: this.options.description,
+      });
+    }
+
+    // Add interaction history
+    promptBuilder.addInteractionHistoryForMessageGeneration(history);
+
+    // Add glossary
+    if (this.terms.length > 0) {
+      promptBuilder.addGlossary(this.terms);
+    }
+
+    // Add guidelines (convert to GuidelineMatch format, filter enabled only)
+    const enabledGuidelines = this.guidelines.filter(
+      (g) => g.enabled !== false
+    );
+    if (enabledGuidelines.length > 0) {
+      const guidelineMatches: GuidelineMatch[] = enabledGuidelines.map((g) => ({
+        guideline: g,
+      }));
+      promptBuilder.addGuidelinesForMessageGeneration(guidelineMatches);
+    }
+
+    // Add capabilities
+    if (this.capabilities.length > 0) {
+      promptBuilder.addCapabilitiesForMessageGeneration(this.capabilities);
+    }
+
+    // Add observations
+    if (this.observations.length > 0) {
+      const observationsWithRoutes = this.observations
+        .map((obs) => ({
+          description: obs.description,
+          routes: obs.getRoutes().map((routeRef) => {
+            const route = this.routes.find((r) => r.id === routeRef.id);
+            return { title: route?.title || routeRef.id };
+          }),
+        }))
+        .filter((obs) => obs.routes.length > 0);
+
+      if (observationsWithRoutes.length > 0) {
+        promptBuilder.addObservations(observationsWithRoutes);
+      }
+    }
+
+    // Add active routes with their rules and prohibitions
+    if (this.routes.length > 0) {
+      promptBuilder.addActiveRoutes(
+        this.routes.map((r) => ({
+          title: r.title,
+          description: r.description,
+          conditions: r.conditions,
+          domains: r.getDomains(),
+          rules: r.getRules(),
+          prohibitions: r.getProhibitions(),
+        }))
+      );
+    }
+
+    // Add domains (tools) information if any domains are registered
+    const allDomains = this.domainRegistry.all();
+    if (Object.keys(allDomains).length > 0) {
+      promptBuilder.addDomains(allDomains);
+    }
+
+    // Add JSON response schema instructions
+    promptBuilder.addJsonResponseSchema();
+
+    // Build final prompt
+    const prompt = promptBuilder.build();
+
+    // Generate message stream using AI provider with JSON mode enabled
+    const stream = this.options.ai.generateMessageStream({
+      prompt,
+      history,
+      context: effectiveContext,
+      signal,
+      parameters: {
+        jsonMode: true,
+      },
+    });
+
+    // Stream chunks to caller
+    for await (const chunk of stream) {
+      // Extract route and state from structured response on final chunk
+      let route: { id: string; title: string } | null = null;
+      let state: { id: string; description?: string } | null = null;
+      let toolCalls:
+        | Array<{ toolName: string; arguments: Record<string, unknown> }>
+        | undefined;
+
+      if (chunk.done && chunk.structured) {
+        // Find route by title
+        if (chunk.structured.route) {
+          const foundRoute = this.routes.find(
+            (r) => r.title === chunk.structured?.route
+          );
+          if (foundRoute) {
+            route = {
+              id: foundRoute.id,
+              title: foundRoute.title,
+            };
+          }
+        }
+
+        // Create state reference if provided
+        if (chunk.structured.state) {
+          state = {
+            id: "dynamic_state",
+            description: chunk.structured.state,
+          };
+        }
+
+        // Extract tool calls
+        if (
+          chunk.structured.toolCalls &&
+          chunk.structured.toolCalls.length > 0
+        ) {
+          toolCalls = chunk.structured.toolCalls;
+        }
+      }
+
+      yield {
+        delta: chunk.delta,
+        accumulated: chunk.accumulated,
+        done: chunk.done,
+        route: route || undefined,
+        state: state || undefined,
+        toolCalls,
+      };
+    }
+  }
+
+  /**
    * Generate a response based on history and context
    */
   async respond(params: {
