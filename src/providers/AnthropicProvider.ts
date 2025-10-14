@@ -122,7 +122,7 @@ export class AnthropicProvider implements AiProvider {
   private primaryModel: string;
   private backupModels: string[];
   private config?: Partial<
-    Omit<MessageCreateParamsNonStreaming, "model" | "messages" | "max_tokens">
+    Omit<MessageCreateParamsNonStreaming, "model" | "messages">
   >;
   private retryConfig: { timeout: number; retries: number };
 
