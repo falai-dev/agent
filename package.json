@@ -82,10 +82,30 @@
     "openai": "^6.3.0"
   },
   "peerDependencies": {
-    "@prisma/client": "^5.0.0 || ^6.0.0"
+    "@prisma/client": "^6.0.0",
+    "ioredis": "^5.7.0",
+    "redis": "^4.6.0 || ^5.0.0",
+    "mongodb": "^6.0.0 || ^7.0.0",
+    "pg": "^8.11.0",
+    "mysql2": "^3.2.0"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    },
+    "mongodb": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "mysql2": {
       "optional": true
     }
   }

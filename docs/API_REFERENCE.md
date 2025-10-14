@@ -672,6 +672,343 @@ const provider = new OpenRouterProvider({
 
 ---
 
+## Persistence Adapters
+
+Optional persistence for auto-saving sessions and messages. All adapters implement the `PersistenceAdapter` interface.
+
+### `PersistenceManager`
+
+Manages persistence operations for sessions and messages.
+
+#### Constructor
+
+```typescript
+new PersistenceManager(config: PersistenceConfig)
+
+interface PersistenceConfig {
+  adapter: PersistenceAdapter;
+  autoSave?: boolean;    // Default: true
+  userId?: string;       // Optional: associate with user
+}
+```
+
+#### Methods
+
+##### `createSession(data: Partial<SessionData>): Promise<SessionData>`
+
+Creates a new conversation session.
+
+```typescript
+const session = await persistence.createSession({
+  userId: "user_123",
+  agentName: "Support Bot",
+  initialData: { channel: "web" },
+});
+```
+
+##### `getSession(sessionId: string): Promise<SessionData | null>`
+
+Retrieves a session by ID.
+
+##### `findActiveSession(userId: string): Promise<SessionData | null>`
+
+Finds the active session for a user.
+
+##### `getUserSessions(userId: string, limit?: number): Promise<SessionData[]>`
+
+Gets all sessions for a user.
+
+##### `updateSessionStatus(sessionId: string, status: SessionStatus): Promise<SessionData | null>`
+
+Updates session status ("active" | "completed" | "abandoned").
+
+##### `saveMessage(data: Partial<MessageData>): Promise<MessageData>`
+
+Saves a message to the database.
+
+```typescript
+await persistence.saveMessage({
+  sessionId: session.id,
+  role: "user",
+  content: "Hello!",
+});
+```
+
+##### `getSessionMessages(sessionId: string, limit?: number): Promise<MessageData[]>`
+
+Gets all messages for a session.
+
+##### `loadSessionHistory(sessionId: string, limit?: number): Promise<Event[]>`
+
+Loads session history in Event format for agent.respond().
+
+```typescript
+const history = await persistence.loadSessionHistory(sessionId);
+const response = await agent.respond({ history });
+```
+
+##### `completeSession(sessionId: string): Promise<SessionData | null>`
+
+Marks a session as completed.
+
+##### `abandonSession(sessionId: string): Promise<SessionData | null>`
+
+Marks a session as abandoned.
+
+---
+
+### `PrismaAdapter`
+
+Type-safe ORM adapter with migrations support.
+
+#### Constructor
+
+```typescript
+new PrismaAdapter(options: PrismaAdapterOptions)
+
+interface PrismaAdapterOptions {
+  prisma: PrismaClient;
+  autoMigrate?: boolean;      // Default: false
+  tables?: {
+    sessions?: string;        // Default: "AgentSession"
+    messages?: string;        // Default: "AgentMessage"
+  };
+  fieldMappings?: FieldMappings;  // Custom field names
+}
+```
+
+#### Example
+
+```typescript
+import { PrismaAdapter } from "@falai/agent";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
+
+const agent = new Agent({
+  persistence: {
+    adapter: new PrismaAdapter({
+      prisma,
+      autoMigrate: true, // Auto-run migrations
+      tables: {
+        sessions: "CustomSessions",
+        messages: "CustomMessages",
+      },
+    }),
+    userId: "user_123",
+  },
+});
+```
+
+**Schema Example:** See [examples/prisma-schema.example.prisma](../examples/prisma-schema.example.prisma)
+
+**Full Example:** See [examples/prisma-persistence.ts](../examples/prisma-persistence.ts)
+
+---
+
+### `RedisAdapter`
+
+Fast, in-memory persistence for high-throughput applications.
+
+#### Constructor
+
+```typescript
+new RedisAdapter(options: RedisAdapterOptions)
+
+interface RedisAdapterOptions {
+  redis: RedisClient;         // ioredis or redis client
+  keyPrefix?: string;         // Default: "agent:"
+  sessionTTL?: number;        // Default: 7 days (in seconds)
+  messageTTL?: number;        // Default: 30 days (in seconds)
+}
+```
+
+#### Example
+
+```typescript
+import { RedisAdapter } from "@falai/agent";
+import Redis from "ioredis";
+
+const redis = new Redis();
+
+const agent = new Agent({
+  persistence: {
+    adapter: new RedisAdapter({
+      redis,
+      keyPrefix: "chat:",
+      sessionTTL: 24 * 60 * 60, // 24 hours
+      messageTTL: 7 * 24 * 60 * 60, // 7 days
+    }),
+  },
+});
+```
+
+**Install:** `npm install ioredis` or `npm install redis`
+
+**Full Example:** See [examples/redis-persistence.ts](../examples/redis-persistence.ts)
+
+---
+
+### `MongoAdapter`
+
+Document-based storage with flexible schema.
+
+#### Constructor
+
+```typescript
+new MongoAdapter(options: MongoAdapterOptions)
+
+interface MongoAdapterOptions {
+  client: MongoClient;
+  databaseName: string;
+  collections?: {
+    sessions?: string;        // Default: "agent_sessions"
+    messages?: string;        // Default: "agent_messages"
+  };
+}
+```
+
+#### Example
+
+```typescript
+import { MongoAdapter } from "@falai/agent";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient("mongodb://localhost:27017");
+await client.connect();
+
+const agent = new Agent({
+  persistence: {
+    adapter: new MongoAdapter({
+      client,
+      databaseName: "myapp",
+      collections: {
+        sessions: "chat_sessions",
+        messages: "chat_messages",
+      },
+    }),
+  },
+});
+```
+
+**Install:** `npm install mongodb`
+
+---
+
+### `PostgreSQLAdapter`
+
+Raw SQL adapter with auto table/index creation.
+
+#### Constructor
+
+```typescript
+new PostgreSQLAdapter(options: PostgreSQLAdapterOptions)
+
+interface PostgreSQLAdapterOptions {
+  client: PgClient;           // pg client
+  tables?: {
+    sessions?: string;        // Default: "agent_sessions"
+    messages?: string;        // Default: "agent_messages"
+  };
+}
+```
+
+#### Methods
+
+##### `initialize(): Promise<void>`
+
+Creates tables and indexes if they don't exist.
+
+#### Example
+
+```typescript
+import { PostgreSQLAdapter } from "@falai/agent";
+import { Client } from "pg";
+
+const client = new Client({
+  host: "localhost",
+  database: "myapp",
+  user: "postgres",
+  password: "password",
+});
+await client.connect();
+
+const adapter = new PostgreSQLAdapter({ client });
+
+// Auto-create tables
+await adapter.initialize();
+
+const agent = new Agent({
+  persistence: { adapter },
+});
+```
+
+**Install:** `npm install pg`
+
+---
+
+### Persistence Types
+
+#### `SessionData`
+
+```typescript
+interface SessionData {
+  id: string;
+  userId?: string;
+  agentName?: string;
+  status: SessionStatus; // "active" | "completed" | "abandoned"
+  currentRoute?: string;
+  currentState?: string;
+  collectedData?: Record<string, unknown>;
+  messageCount: number;
+  lastMessageAt?: Date;
+  completedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+#### `MessageData`
+
+```typescript
+interface MessageData {
+  id: string;
+  sessionId: string;
+  userId?: string;
+  role: MessageRole; // "user" | "agent" | "system"
+  content: string;
+  route?: string;
+  state?: string;
+  toolCalls?: Array<{
+    toolName: string;
+    arguments: Record<string, unknown>;
+    result?: unknown;
+  }>;
+  event?: Event;
+  createdAt: Date;
+}
+```
+
+#### `PersistenceAdapter`
+
+Interface for creating custom adapters:
+
+```typescript
+interface PersistenceAdapter {
+  sessionRepository: SessionRepository;
+  messageRepository: MessageRepository;
+  initialize?(): Promise<void>; // Optional: setup tables/indexes
+  disconnect?(): Promise<void>; // Optional: cleanup
+}
+```
+
+**See Also:**
+
+- [docs/PERSISTENCE.md](./PERSISTENCE.md) - Complete persistence guide
+- [docs/ADAPTERS.md](./ADAPTERS.md) - Adapter comparison and details
+
+---
+
 ### `PromptBuilder`
 
 Constructs prompts for AI generation.

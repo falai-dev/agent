@@ -35,6 +35,21 @@ export type {
   FieldMappings,
   PrismaAdapterOptions,
 } from "./adapters/PrismaAdapter";
+export { RedisAdapter } from "./adapters/RedisAdapter";
+export type { RedisClient, RedisAdapterOptions } from "./adapters/RedisAdapter";
+export { MongoAdapter } from "./adapters/MongoAdapter";
+export type {
+  MongoClient,
+  MongoDatabase,
+  MongoCollection,
+  MongoAdapterOptions,
+} from "./adapters/MongoAdapter";
+export { PostgreSQLAdapter } from "./adapters/PostgreSQLAdapter";
+export type {
+  PgClient,
+  PgQueryResult,
+  PostgreSQLAdapterOptions,
+} from "./adapters/PostgreSQLAdapter";
 
 // Constants
 export { END_ROUTE } from "./constants";

@@ -902,6 +902,78 @@ Control agent behavior and communication style per route:
 - 💬 Different communication styles per route
 - 🎨 Perfect for multi-channel bots (WhatsApp, email, chat)
 
+### 💾 [Prisma Persistence](./examples/prisma-persistence.ts)
+
+Complete example of auto-saving sessions and messages with Prisma ORM:
+
+- 💾 Auto-save sessions and messages to database
+- 🔄 Load conversation history on agent initialization
+- 📊 Track conversation state across restarts
+- 🎯 Full example with lifecycle hooks
+- 📝 Includes schema example
+
+### ⚡ [Redis Persistence](./examples/redis-persistence.ts)
+
+Fast, in-memory persistence for high-throughput applications:
+
+- 🚀 Lightning-fast session storage
+- ⏰ Configurable TTLs for auto-cleanup
+- 🔑 Custom key prefixes
+- 💨 Perfect for real-time chat applications
+
+---
+
+## 💾 Database Adapters
+
+**Optional persistence** - Choose the database that fits your needs. All adapters follow the same simple provider pattern:
+
+### 🎯 Available Adapters
+
+| Adapter               | Use Case                          | Install                      |
+| --------------------- | --------------------------------- | ---------------------------- |
+| **PrismaAdapter**     | Type-safe ORM with migrations     | `npm install @prisma/client` |
+| **RedisAdapter**      | Fast in-memory for real-time apps | `npm install ioredis`        |
+| **MongoAdapter**      | Flexible document storage         | `npm install mongodb`        |
+| **PostgreSQLAdapter** | Raw SQL with auto table creation  | `npm install pg`             |
+
+### ⚡ Quick Setup
+
+```typescript
+import { Agent, PrismaAdapter } from "@falai/agent";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
+
+const agent = new Agent({
+  name: "My Agent",
+  ai: provider,
+  persistence: {
+    adapter: new PrismaAdapter({ prisma }),
+    userId: "user_123",
+    autoSave: true, // Automatically save all messages
+  },
+});
+```
+
+That's it! Sessions and messages are now automatically persisted.
+
+### 📚 Full Documentation
+
+See [**docs/PERSISTENCE.md**](./docs/PERSISTENCE.md) for:
+
+- Complete adapter API reference
+- Custom table names & field mappings
+- Lifecycle hooks for persistence
+- Creating custom adapters
+- Migration guides
+
+See [**docs/ADAPTERS.md**](./docs/ADAPTERS.md) for:
+
+- Detailed adapter comparison
+- Configuration examples for each database
+- Performance characteristics
+- Type safety guarantees
+
 ---
 
 ## 🏗️ Architecture

@@ -408,12 +408,106 @@ Check your field mappings match your actual database schema.
 
 ## Other Databases
 
-The adapter pattern works with any database. Examples:
+The adapter pattern works with any database. Built-in adapters:
 
-- **MongoDB**: Create `MongoAdapter`
-- **PostgreSQL (raw)**: Create `PostgresAdapter`
-- **MySQL**: Create `MySQLAdapter`
-- **Redis**: Create `RedisAdapter`
-- **Elasticsearch**: Create `ElasticsearchAdapter`
+### Redis
+
+Perfect for high-throughput, real-time applications:
+
+```typescript
+import { RedisAdapter } from "@falai/agent";
+import Redis from "ioredis";
+
+const redis = new Redis();
+
+const agent = new Agent({
+  persistence: {
+    adapter: new RedisAdapter({
+      redis,
+      keyPrefix: "agent:", // Optional: custom prefix
+      sessionTTL: 24 * 60 * 60, // Optional: 24 hours
+      messageTTL: 7 * 24 * 60 * 60, // Optional: 7 days
+    }),
+  },
+});
+```
+
+**Install:** `npm install ioredis` or `npm install redis`
+
+### Coming Soon
+
+Create your own adapter for:
+
+- **MongoDB**: Document-based storage ✅ **Available!**
+- **PostgreSQL**: Raw SQL for custom schemas ✅ **Available!**
+- **MySQL**: Traditional relational database (coming soon)
+- **Elasticsearch**: Full-text search integration (coming soon)
 
 Just implement the `PersistenceAdapter` interface!
+
+### MongoDB
+
+Document-based storage with flexible schema:
+
+```typescript
+import { MongoAdapter } from "@falai/agent";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient("mongodb://localhost:27017");
+await client.connect();
+
+const agent = new Agent({
+  persistence: {
+    adapter: new MongoAdapter({
+      client,
+      databaseName: "myapp",
+      collections: {
+        // Optional: custom names
+        sessions: "agent_sessions",
+        messages: "agent_messages",
+      },
+    }),
+  },
+});
+```
+
+**Install:** `npm install mongodb`
+
+### PostgreSQL
+
+Raw SQL adapter with auto-table creation:
+
+```typescript
+import { PostgreSQLAdapter } from "@falai/agent";
+import { Client } from "pg";
+
+const client = new Client({
+  host: "localhost",
+  database: "myapp",
+  user: "postgres",
+  password: "password",
+});
+await client.connect();
+
+const adapter = new PostgreSQLAdapter({
+  client,
+  tables: {
+    // Optional: custom names
+    sessions: "agent_sessions",
+    messages: "agent_messages",
+  },
+});
+
+// Auto-create tables with indexes
+await adapter.initialize();
+
+const agent = new Agent({
+  persistence: {
+    adapter,
+  },
+});
+```
+
+**Install:** `npm install pg`
+
+**Note:** PostgreSQL adapter includes `initialize()` method to auto-create tables with proper indexes and foreign keys.
