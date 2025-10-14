@@ -24,6 +24,8 @@ export { OpenAIProvider } from "./providers/OpenAIProvider";
 export type { OpenAIProviderOptions } from "./providers/OpenAIProvider";
 export { OpenRouterProvider } from "./providers/OpenRouterProvider";
 export type { OpenRouterProviderOptions } from "./providers/OpenRouterProvider";
+export { AnthropicProvider } from "./providers/AnthropicProvider";
+export type { AnthropicProviderOptions } from "./providers/AnthropicProvider";
 
 // Constants
 export { END_ROUTE } from "./constants";

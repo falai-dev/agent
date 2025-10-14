@@ -5,7 +5,7 @@
 import {
   Agent,
   defineTool,
-  GeminiProvider,
+  AnthropicProvider,
   END_ROUTE,
   EventSource,
   createMessageEvent,
@@ -63,9 +63,9 @@ const getLabResults = defineTool<HealthcareContext, [], object>(
 );
 
 async function createHealthcareAgent() {
-  const provider = new GeminiProvider({
-    apiKey: process.env.GEMINI_API_KEY || "test-key",
-    model: "models/gemini-2.5-flash",
+  const provider = new AnthropicProvider({
+    apiKey: process.env.ANTHROPIC_API_KEY || "test-key",
+    model: "claude-sonnet-4-5",
   });
 
   const agent = new Agent<HealthcareContext>({

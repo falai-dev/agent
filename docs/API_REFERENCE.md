@@ -366,11 +366,15 @@ Returns filtered domains by names. If `allowedNames` is `undefined`, returns all
 const registry = new DomainRegistry();
 
 registry.register("payment", {
-  processPayment: async (amount: number) => { /* ... */ },
+  processPayment: async (amount: number) => {
+    /* ... */
+  },
 });
 
 registry.register("shipping", {
-  calculateShipping: (zipCode: string) => { /* ... */ },
+  calculateShipping: (zipCode: string) => {
+    /* ... */
+  },
 });
 
 // Get specific domains
@@ -383,6 +387,61 @@ const all = registry.getFiltered(); // payment + shipping
 ##### `getDomainNames(): string[]`
 
 Returns list of all registered domain names.
+
+---
+
+### `AnthropicProvider`
+
+AI provider implementation for Anthropic (Claude models).
+
+#### Constructor
+
+```typescript
+new AnthropicProvider(options: AnthropicProviderOptions)
+
+interface AnthropicProviderOptions {
+  apiKey: string;
+  model: string;               // Required: e.g., "claude-sonnet-4-5"
+  backupModels?: string[];     // Fallback models
+  config?: Partial<Omit<MessageCreateParamsNonStreaming, "model" | "messages" | "max_tokens">>;
+  retryConfig?: {
+    timeout?: number;          // Default: 60000ms
+    retries?: number;          // Default: 3
+  };
+}
+```
+
+**Note:** `model` is required for AnthropicProvider. Available models include:
+
+- `claude-sonnet-4-5` - Latest Claude Sonnet 4.5 (most capable)
+- `claude-opus-4-1` - Claude Opus 4.1 (powerful for complex tasks)
+- `claude-sonnet-4-0` - Claude Sonnet 4.0 (stable, production-ready)
+
+#### Methods
+
+##### `generateMessage<TContext>(input: GenerateMessageInput<TContext>): Promise<GenerateMessageOutput>`
+
+Generates a message with retry logic and backup models using Anthropic's API.
+
+**Example:**
+
+```typescript
+import { AnthropicProvider } from "@falai/agent";
+
+const provider = new AnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: "claude-sonnet-4-5",
+  backupModels: ["claude-opus-4-1", "claude-sonnet-4-0"],
+  config: {
+    temperature: 0.7,
+    top_p: 0.9,
+  },
+  retryConfig: {
+    timeout: 60000,
+    retries: 3,
+  },
+});
+```
 
 ---
 
@@ -411,6 +470,104 @@ interface GeminiProviderOptions {
 ##### `generateMessage<TContext>(input: GenerateMessageInput<TContext>): Promise<GenerateMessageOutput>`
 
 Generates a message with retry logic and backup models.
+
+---
+
+### `OpenAIProvider`
+
+AI provider implementation for OpenAI (GPT models).
+
+#### Constructor
+
+```typescript
+new OpenAIProvider(options: OpenAIProviderOptions)
+
+interface OpenAIProviderOptions {
+  apiKey: string;
+  model: string;               // Required: e.g., "gpt-4o", "gpt-5"
+  backupModels?: string[];     // Fallback models
+  retryConfig?: {
+    timeout?: number;          // Default: 60000ms
+    retries?: number;          // Default: 3
+  };
+}
+```
+
+**Note:** Unlike GeminiProvider, `model` is required for OpenAIProvider. Choose from available OpenAI models like "gpt-4o", "gpt-5", "gpt-4-turbo", etc.
+
+#### Methods
+
+##### `generateMessage<TContext>(input: GenerateMessageInput<TContext>): Promise<GenerateMessageOutput>`
+
+Generates a message with retry logic and backup models using OpenAI's API.
+
+**Example:**
+
+```typescript
+import { OpenAIProvider } from "@falai/agent";
+
+const provider = new OpenAIProvider({
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: "gpt-5",
+  backupModels: ["gpt-4o", "gpt-4-turbo"],
+  retryConfig: {
+    timeout: 60000,
+    retries: 3,
+  },
+});
+```
+
+---
+
+### `OpenRouterProvider`
+
+AI provider implementation for OpenRouter (access to 200+ models).
+
+#### Constructor
+
+```typescript
+new OpenRouterProvider(options: OpenRouterProviderOptions)
+
+interface OpenRouterProviderOptions {
+  apiKey: string;
+  model: string;               // Required: e.g., "openai/gpt-5", "anthropic/claude-sonnet-4-5"
+  backupModels?: string[];     // Fallback models
+  siteUrl?: string;            // Optional: your app URL for OpenRouter rankings
+  siteName?: string;           // Optional: your app name for OpenRouter rankings
+  retryConfig?: {
+    timeout?: number;          // Default: 60000ms
+    retries?: number;          // Default: 3
+  };
+}
+```
+
+**Note:** OpenRouter provides access to models from multiple providers. Model names follow the format `provider/model-name` (e.g., "openai/gpt-5", "anthropic/claude-sonnet-4-5", "google/gemini-pro").
+
+#### Methods
+
+##### `generateMessage<TContext>(input: GenerateMessageInput<TContext>): Promise<GenerateMessageOutput>`
+
+Generates a message with retry logic and backup models using OpenRouter's API.
+
+**Example:**
+
+```typescript
+import { OpenRouterProvider } from "@falai/agent";
+
+const provider = new OpenRouterProvider({
+  apiKey: process.env.OPENROUTER_API_KEY!,
+  model: "openai/gpt-5",
+  backupModels: ["anthropic/claude-sonnet-4-5", "google/gemini-pro"],
+  siteUrl: "https://yourapp.com",
+  siteName: "Your App Name",
+  retryConfig: {
+    timeout: 60000,
+    retries: 3,
+  },
+});
+```
+
+**See Also:** [Providers Guide](./PROVIDERS.md) for detailed provider comparison and configuration examples.
 
 ---
 

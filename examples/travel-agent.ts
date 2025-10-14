@@ -6,7 +6,7 @@
 import {
   Agent,
   defineTool,
-  GeminiProvider,
+  OpenRouterProvider,
   END_ROUTE,
   EventSource,
   createMessageEvent,
@@ -113,9 +113,12 @@ const getBookingStatus = defineTool<
 
 // Initialize agent
 async function createTravelAgent() {
-  const provider = new GeminiProvider({
-    apiKey: process.env.GEMINI_API_KEY || "test-key",
-    model: "models/gemini-2.0-flash-exp",
+  const provider = new OpenRouterProvider({
+    apiKey: process.env.OPENROUTER_API_KEY || "test-key",
+    model: "google/gemini-2.0-flash-exp",
+    backupModels: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    siteUrl: "https://github.com/gusnips/falai",
+    siteName: "Falai Travel Agent Example",
     retryConfig: {
       timeout: 60000,
       retries: 3,

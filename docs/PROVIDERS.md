@@ -15,6 +15,78 @@ This guide covers the available AI providers and how to configure them for optim
 
 ## Available Providers
 
+### 🤖 Anthropic (Claude)
+
+**Package:** `@anthropic-ai/sdk`
+
+#### Overview
+
+Anthropic's Claude models are known for their exceptional reasoning, analysis, and long context windows. Claude 3.5 Sonnet offers:
+
+- State-of-the-art reasoning and analysis
+- 200K context window
+- Excellent at following complex instructions
+- Strong coding and writing capabilities
+
+#### Installation
+
+```bash
+bun add @anthropic-ai/sdk
+# or
+npm install @anthropic-ai/sdk
+```
+
+#### Basic Usage
+
+```typescript
+import { AnthropicProvider } from "@falai/agent";
+
+const provider = new AnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: "claude-sonnet-4-5", // Latest Claude 4.5 Sonnet
+});
+```
+
+#### Configuration Options
+
+All models are specified by the user - see [Anthropic Models](https://docs.anthropic.com/en/docs/models-overview) for available options.
+
+```typescript
+const provider = new AnthropicProvider({
+  // Required
+  apiKey: string;
+  model: string; // e.g., "claude-sonnet-4-5", "claude-opus-4-1", etc.
+
+  // Optional
+  backupModels?: string[]; // Default: []
+  config?: Partial<Omit<MessageCreateParamsNonStreaming, "model" | "messages" | "max_tokens">>; // Uses @anthropic-ai/sdk types
+  retryConfig?: {
+    timeout?: number; // Default: 60000ms (60s)
+    retries?: number; // Default: 3
+  };
+});
+```
+
+#### Example: Advanced Configuration
+
+```typescript
+const provider = new AnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: "claude-sonnet-4-5",
+  backupModels: ["claude-opus-4-1", "claude-sonnet-4-0"],
+  config: {
+    temperature: 0.7,
+    top_p: 0.9,
+  },
+  retryConfig: {
+    timeout: 45000,
+    retries: 2,
+  },
+});
+```
+
+---
+
 ### 🌐 OpenRouter (Multi-Model Access)
 
 **Package:** `openai` (OpenRouter uses OpenAI-compatible API)
@@ -274,7 +346,22 @@ const provider = new OpenAIProvider({
 You can easily switch between providers:
 
 ```typescript
-import { Agent, GeminiProvider, OpenAIProvider } from "@falai/agent";
+import {
+  Agent,
+  AnthropicProvider,
+  GeminiProvider,
+  OpenAIProvider,
+  OpenRouterProvider,
+} from "@falai/agent";
+
+// Use Anthropic (Claude)
+const claudeAgent = new Agent({
+  name: "Claude Assistant",
+  ai: new AnthropicProvider({
+    apiKey: process.env.ANTHROPIC_API_KEY!,
+    model: "claude-sonnet-4-5",
+  }),
+});
 
 // Use Gemini
 const geminiAgent = new Agent({
@@ -290,10 +377,20 @@ const openaiAgent = new Agent({
   name: "OpenAI Assistant",
   ai: new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY!,
+    model: "gpt-5",
   }),
 });
 
-// Both agents have the same interface!
+// Use OpenRouter (access to 200+ models)
+const openrouterAgent = new Agent({
+  name: "OpenRouter Assistant",
+  ai: new OpenRouterProvider({
+    apiKey: process.env.OPENROUTER_API_KEY!,
+    model: "anthropic/claude-sonnet-4-5",
+  }),
+});
+
+// All agents have the same interface!
 ```
 
 ---
@@ -304,8 +401,10 @@ It's recommended to store API keys in environment variables:
 
 ```bash
 # .env
+ANTHROPIC_API_KEY=your-anthropic-api-key-here
 GEMINI_API_KEY=your-gemini-api-key-here
 OPENAI_API_KEY=your-openai-api-key-here
+OPENROUTER_API_KEY=your-openrouter-api-key-here
 ```
 
 Then load them:
@@ -313,6 +412,11 @@ Then load them:
 ```typescript
 import { config } from "dotenv";
 config();
+
+const anthropicProvider = new AnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: "claude-sonnet-4-5",
+});
 
 const geminiProvider = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -322,6 +426,11 @@ const geminiProvider = new GeminiProvider({
 const openaiProvider = new OpenAIProvider({
   apiKey: process.env.OPENAI_API_KEY!,
   model: "gpt-5",
+});
+
+const openrouterProvider = new OpenRouterProvider({
+  apiKey: process.env.OPENROUTER_API_KEY!,
+  model: "anthropic/claude-sonnet-4-5",
 });
 ```
 

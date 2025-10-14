@@ -34,7 +34,7 @@
 ### 🚀 **Production Ready**
 
 - **Robust Retry Logic** - Exponential backoff & backup models
-- **AI Provider Strategy** - Pluggable backends (Gemini, OpenAI, OpenRouter)
+- **AI Provider Strategy** - Pluggable backends (Claude, Gemini, OpenAI, OpenRouter)
 - **Prompt Composition** - Sophisticated prompt building system
 
 </td>
@@ -87,8 +87,10 @@ Get up and running in 60 seconds:
 ```typescript
 import {
   Agent,
+  AnthropicProvider,
   GeminiProvider,
-  OpenAIProvider, // or use OpenAI
+  OpenAIProvider,
+  OpenRouterProvider,
   createMessageEvent,
   EventSource,
 } from "@falai/agent";
@@ -101,15 +103,25 @@ interface SupportContext {
 }
 
 // 2️⃣ Create AI provider (choose one)
-const ai = new GeminiProvider({
-  apiKey: process.env.GEMINI_API_KEY!,
-  model: "models/gemini-2.5-flash",
+const ai = new AnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: "claude-sonnet-4-5",
 });
 
-// Or use OpenAI:
+// Or use other providers:
+// const ai = new GeminiProvider({
+//   apiKey: process.env.GEMINI_API_KEY!,
+//   model: "models/gemini-2.5-flash",
+// });
+
 // const ai = new OpenAIProvider({
 //   apiKey: process.env.OPENAI_API_KEY!,
-//   model: "gpt-5", // Required - specify your model
+//   model: "gpt-5",
+// });
+
+// const ai = new OpenRouterProvider({
+//   apiKey: process.env.OPENROUTER_API_KEY!,
+//   model: "anthropic/claude-sonnet-4-5", // Access to 200+ models
 // });
 
 // 3️⃣ Initialize your agent - two ways!
@@ -616,9 +628,27 @@ const event = createMessageEvent(
 
 ### ⚙️ Advanced Configuration
 
-Fine-tune AI provider behavior - works with both Gemini and OpenAI:
+Fine-tune AI provider behavior - works with all providers:
 
 ```typescript
+// Anthropic (Claude) configuration
+const anthropicProvider = new AnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: "claude-sonnet-4-5", // Primary model
+  backupModels: [
+    "claude-opus-4-1", // Backup if primary fails
+    "claude-sonnet-4-0", // Stable fallback
+  ],
+  config: {
+    temperature: 0.7,
+    top_p: 0.9,
+  },
+  retryConfig: {
+    timeout: 60000, // 60s timeout
+    retries: 3, // 3 attempts with exponential backoff
+  },
+});
+
 // Gemini configuration
 const geminiProvider = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -628,8 +658,8 @@ const geminiProvider = new GeminiProvider({
     "models/gemini-2.0-flash",
   ],
   retryConfig: {
-    timeout: 60000, // 60s timeout
-    retries: 3, // 3 attempts with exponential backoff
+    timeout: 60000,
+    retries: 3,
   },
 });
 
@@ -638,6 +668,19 @@ const openaiProvider = new OpenAIProvider({
   apiKey: process.env.OPENAI_API_KEY!,
   model: "gpt-5",
   backupModels: ["gpt-5-mini", "gpt-5-nano"],
+  retryConfig: {
+    timeout: 60000,
+    retries: 3,
+  },
+});
+
+// OpenRouter configuration (access to 200+ models)
+const openrouterProvider = new OpenRouterProvider({
+  apiKey: process.env.OPENROUTER_API_KEY!,
+  model: "anthropic/claude-sonnet-4-5",
+  backupModels: ["openai/gpt-5", "google/gemini-2.5-flash"],
+  siteUrl: "https://yourapp.com",
+  siteName: "Your App Name",
   retryConfig: {
     timeout: 60000,
     retries: 3,
@@ -699,13 +742,14 @@ Healthcare-focused agent demonstrating:
 - 🔐 Sensitive data handling
 - ⚠️ Urgent case prioritization
 
-### 🌐 [OpenAI Agent](./examples/openai-agent.ts)
+### 🌐 Multiple Provider Examples
 
-Using OpenAI provider instead of Gemini:
+See how different AI providers work:
 
-- 🤖 OpenAI GPT-5 integration
-- 🔄 Backup model configuration
-- ⚙️ Custom retry settings
+- **[OpenAI Agent](./examples/openai-agent.ts)** - GPT-5 integration
+- **[Healthcare Agent](./examples/healthcare-agent.ts)** - Claude 3.5 Sonnet
+- **[Travel Agent](./examples/travel-agent.ts)** - OpenRouter with backup models
+- 🔄 All with backup model configuration and retry settings
 - 🌤️ Weather checking example
 
 ### 🔐 [Domain Scoping](./examples/domain-scoping.ts)
@@ -734,7 +778,7 @@ Control agent behavior and communication style per route:
 src/
 ├── types/          # Type definitions (strongly typed contracts)
 ├── core/           # Core framework (Agent, Route, State, Tools, etc.)
-├── providers/      # AI providers (Gemini with retry/backup logic)
+├── providers/      # AI providers (Anthropic, Gemini, OpenAI, OpenRouter)
 ├── utils/          # Utilities (retry, timeout, helpers)
 ├── constants/      # Constants (END_ROUTE, symbols)
 └── index.ts        # Public API exports
