@@ -429,11 +429,9 @@ export class Agent<TContext = unknown> {
    * @param routeId - Route ID to check
    * @returns Filtered domains object, or all domains if route has no restrictions
    */
-  getDomainsForRoute(
-    routeId: string
-  ): Record<string, Record<string, unknown>> {
+  getDomainsForRoute(routeId: string): Record<string, Record<string, unknown>> {
     const route = this.routes.find((r) => r.id === routeId);
-    
+
     if (!route) {
       // Route not found, return all domains
       return this.domainRegistry.all();
@@ -452,7 +450,7 @@ export class Agent<TContext = unknown> {
     routeTitle: string
   ): Record<string, Record<string, unknown>> {
     const route = this.routes.find((r) => r.title === routeTitle);
-    
+
     if (!route) {
       // Route not found, return all domains
       return this.domainRegistry.all();

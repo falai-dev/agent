@@ -1,6 +1,6 @@
 /**
  * Rules & Prohibitions Example
- * 
+ *
  * Demonstrates how to use rules and prohibitions to control agent behavior
  * in different conversation routes (e.g., WhatsApp bot with different styles)
  */
@@ -44,7 +44,10 @@ agent.createRoute({
 agent.createRoute({
   title: "Sales Consultation",
   description: "Help customer discover needs and present solutions",
-  conditions: ["User is interested in buying", "User wants product information"],
+  conditions: [
+    "User is interested in buying",
+    "User wants product information",
+  ],
   rules: [
     "Ask open-ended questions to discover needs",
     "Use storytelling when presenting solutions",
@@ -127,9 +130,13 @@ async function demonstrateRulesAndProhibitions() {
   // Example 1: Quick Support - Should be short and direct
   console.log("1️⃣  Quick Support Route (short, direct)");
   const history1 = [
-    createMessageEvent(EventSource.CUSTOMER, "Alice", "What are your business hours?"),
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Alice",
+      "What are your business hours?"
+    ),
   ];
-  
+
   const response1 = await agent.respond({ history: history1 });
   console.log(`Route: ${response1.route?.title}`);
   console.log(`Response: ${response1.message}`);
@@ -138,9 +145,13 @@ async function demonstrateRulesAndProhibitions() {
   // Example 2: Sales Consultation - Should be engaging and value-focused
   console.log("2️⃣  Sales Consultation Route (conversational, value-first)");
   const history2 = [
-    createMessageEvent(EventSource.CUSTOMER, "Bob", "I'm interested in your premium plan"),
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Bob",
+      "I'm interested in your premium plan"
+    ),
   ];
-  
+
   const response2 = await agent.respond({ history: history2 });
   console.log(`Route: ${response2.route?.title}`);
   console.log(`Response: ${response2.message}`);
@@ -149,9 +160,13 @@ async function demonstrateRulesAndProhibitions() {
   // Example 3: Technical Support - Should be detailed and step-by-step
   console.log("3️⃣  Technical Support Route (detailed, step-by-step)");
   const history3 = [
-    createMessageEvent(EventSource.CUSTOMER, "Charlie", "My app keeps crashing when I try to login"),
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Charlie",
+      "My app keeps crashing when I try to login"
+    ),
   ];
-  
+
   const response3 = await agent.respond({ history: history3 });
   console.log(`Route: ${response3.route?.title}`);
   console.log(`Response: ${response3.message}`);
@@ -160,9 +175,13 @@ async function demonstrateRulesAndProhibitions() {
   // Example 4: Emergency Support - Should be calm and action-oriented
   console.log("4️⃣  Emergency Support Route (urgent, professional)");
   const history4 = [
-    createMessageEvent(EventSource.CUSTOMER, "Diana", "This is urgent! My payment failed and I need access NOW!"),
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Diana",
+      "This is urgent! My payment failed and I need access NOW!"
+    ),
   ];
-  
+
   const response4 = await agent.respond({ history: history4 });
   console.log(`Route: ${response4.route?.title}`);
   console.log(`Response: ${response4.message}`);
@@ -173,7 +192,7 @@ async function demonstrateRulesAndProhibitions() {
   const history5 = [
     createMessageEvent(EventSource.CUSTOMER, "Eve", "Hey! How's it going?"),
   ];
-  
+
   const response5 = await agent.respond({ history: history5 });
   console.log(`Route: ${response5.route?.title}`);
   console.log(`Response: ${response5.message}`);
@@ -184,17 +203,19 @@ async function demonstrateRulesAndProhibitions() {
 console.log("\n📋 Route Configurations:\n");
 for (const route of agent.getRoutes()) {
   console.log(`\n🛤️  ${route.title}`);
-  
+
   const rules = route.getRules();
   if (rules.length > 0) {
     console.log(`  ✅ Rules (${rules.length}):`);
     rules.forEach((rule, i) => console.log(`     ${i + 1}. ${rule}`));
   }
-  
+
   const prohibitions = route.getProhibitions();
   if (prohibitions.length > 0) {
     console.log(`  ❌ Prohibitions (${prohibitions.length}):`);
-    prohibitions.forEach((prohibition, i) => console.log(`     ${i + 1}. ${prohibition}`));
+    prohibitions.forEach((prohibition, i) =>
+      console.log(`     ${i + 1}. ${prohibition}`)
+    );
   }
 }
 
@@ -230,7 +251,7 @@ console.log(`
 `);
 
 // Run demonstration
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   demonstrateRulesAndProhibitions().catch(console.error);
 }
 

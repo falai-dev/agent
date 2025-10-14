@@ -320,6 +320,125 @@ onboardingRoute.createGuideline({
 });
 ```
 
+### 📜 Rules & Prohibitions Per Route
+
+Control agent behavior and communication style for each route:
+
+```typescript
+// WhatsApp support bot with different styles per route
+agent.createRoute({
+  title: "Quick Support",
+  description: "Fast answers for common questions",
+  conditions: ["User has a simple question"],
+  rules: [
+    "Keep messages extremely short (1-2 lines maximum)",
+    "Use bullet points for lists",
+    "Maximum 1 emoji per message 👍",
+    "Be direct and to the point",
+  ],
+  prohibitions: [
+    "Never send long paragraphs",
+    "Do not over-explain",
+    "Never use more than 2 emojis",
+  ],
+});
+
+agent.createRoute({
+  title: "Sales Consultation",
+  description: "Help customer discover needs",
+  conditions: ["User is interested in buying"],
+  rules: [
+    "Ask open-ended questions to discover needs",
+    "Use storytelling when presenting solutions",
+    "Present value before mentioning price",
+  ],
+  prohibitions: [
+    "Never talk about price before showing value",
+    "Do not pressure or push",
+    "Avoid technical jargon",
+  ],
+});
+
+agent.createRoute({
+  title: "Emergency Support",
+  description: "Handle urgent issues",
+  conditions: ["Customer is frustrated", "Urgent issue"],
+  rules: [
+    "Acknowledge the urgency immediately",
+    "Express empathy and understanding",
+    "Set clear expectations on resolution time",
+  ],
+  prohibitions: [
+    "Never downplay the customer's concern",
+    "Do not use emojis (keep it professional)",
+    'Never say "calm down"',
+  ],
+});
+```
+
+**Use Cases:**
+
+- 📱 Different message styles per channel (WhatsApp, email, chat)
+- 🎭 Context-specific tone and behavior
+- 🎨 Brand consistency across routes
+- ⚡ Automatic enforcement without manual checking
+
+### 🔐 Domain Scoping for Security
+
+Restrict which tools are available in each route:
+
+```typescript
+// Register different tool domains
+agent.addDomain("payment", {
+  processPayment: async (amount: number) => {
+    /* ... */
+  },
+  refund: async (txId: string) => {
+    /* ... */
+  },
+});
+
+agent.addDomain("calendar", {
+  scheduleEvent: async (date: Date, title: string) => {
+    /* ... */
+  },
+});
+
+agent.addDomain("analytics", {
+  trackEvent: async (name: string) => {
+    /* ... */
+  },
+});
+
+// Route 1: Customer Support - NO access to payment tools
+agent.createRoute({
+  title: "Customer Support",
+  description: "Answer general questions",
+  domains: [], // 🔒 No tools (conversation only)
+});
+
+// Route 2: Checkout - ONLY payment and analytics
+agent.createRoute({
+  title: "Checkout Process",
+  description: "Process purchases",
+  domains: ["payment", "analytics"], // 🔒 Limited access
+});
+
+// Route 3: Admin - ALL tools available
+agent.createRoute({
+  title: "Admin Support",
+  description: "Full system access",
+  // domains not specified = all domains available
+});
+```
+
+**Benefits:**
+
+- 🔒 Prevent unauthorized tool calls
+- ⚡ Improve AI performance (reduced decision space)
+- 📋 Clear documentation of route capabilities
+- 🛡️ Security by design
+
 ### 🔀 Disambiguation with Observations
 
 Handle ambiguous user intent gracefully - declaratively or programmatically:
@@ -584,10 +703,28 @@ Healthcare-focused agent demonstrating:
 
 Using OpenAI provider instead of Gemini:
 
-- 🤖 OpenAI GPT-4o integration
+- 🤖 OpenAI GPT-5 integration
 - 🔄 Backup model configuration
 - ⚙️ Custom retry settings
 - 🌤️ Weather checking example
+
+### 🔐 [Domain Scoping](./examples/domain-scoping.ts)
+
+Control tool access per route for security and clarity:
+
+- 🔒 Restrict which tools are available in each route
+- 🎯 Prevent unauthorized tool calls
+- ⚡ Improve AI performance by reducing decision space
+- 📋 Clear documentation of route capabilities
+
+### 📜 [Rules & Prohibitions](./examples/rules-prohibitions.ts)
+
+Control agent behavior and communication style per route:
+
+- ✅ Define absolute rules the agent must follow
+- ❌ Set prohibitions for what agent must never do
+- 💬 Different communication styles per route
+- 🎨 Perfect for multi-channel bots (WhatsApp, email, chat)
 
 ---
 

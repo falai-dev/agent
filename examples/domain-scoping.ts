@@ -5,28 +5,28 @@
  * are available in different conversation routes for security and clarity.
  */
 
-import { Agent, createMessageEvent, EventSource } from '../src/index';
-import { GeminiProvider } from '../src/providers/GeminiProvider';
+import { Agent, createMessageEvent, EventSource } from "../src/index";
+import { GeminiProvider } from "../src/providers/GeminiProvider";
 
 // Initialize AI provider
 const ai = new GeminiProvider({
-  apiKey: process.env.GEMINI_API_KEY || 'your-api-key-here',
-  model: 'gemini-2.0-flash-exp',
+  apiKey: process.env.GEMINI_API_KEY || "your-api-key-here",
+  model: "gemini-2.0-flash-exp",
 });
 
 // Create agent
 const agent = new Agent({
-  name: 'Multi-Domain Assistant',
+  name: "Multi-Domain Assistant",
   description:
-    'An assistant that handles different tasks with domain-scoped tools',
+    "An assistant that handles different tasks with domain-scoped tools",
   ai,
 });
 
 // Register different domains with their tools
-agent.addDomain('scraping', {
+agent.addDomain("scraping", {
   scrapeSite: async (url: string) => {
     console.log(`[Scraping] Scraping site: ${url}`);
-    return { success: true, data: 'Scraped content...' };
+    return { success: true, data: "Scraped content..." };
   },
   extractData: async (html: string, selector: string) => {
     console.log(`[Scraping] Extracting data with selector: ${selector}`);
@@ -34,10 +34,10 @@ agent.addDomain('scraping', {
   },
 });
 
-agent.addDomain('calendar', {
+agent.addDomain("calendar", {
   scheduleEvent: async (date: Date, title: string, description?: string) => {
     console.log(`[Calendar] Scheduling event: ${title} on ${date}`);
-    return { eventId: 'evt_123', success: true };
+    return { eventId: "evt_123", success: true };
   },
   listEvents: async (startDate: Date, endDate: Date) => {
     console.log(`[Calendar] Listing events from ${startDate} to ${endDate}`);
@@ -49,10 +49,10 @@ agent.addDomain('calendar', {
   },
 });
 
-agent.addDomain('payment', {
+agent.addDomain("payment", {
   processPayment: async (amount: number, currency: string) => {
     console.log(`[Payment] Processing payment: ${amount} ${currency}`);
-    return { transactionId: 'txn_456', success: true };
+    return { transactionId: "txn_456", success: true };
   },
   refund: async (transactionId: string) => {
     console.log(`[Payment] Processing refund for: ${transactionId}`);
@@ -60,11 +60,11 @@ agent.addDomain('payment', {
   },
   checkBalance: async () => {
     console.log(`[Payment] Checking balance`);
-    return { balance: 1000, currency: 'USD' };
+    return { balance: 1000, currency: "USD" };
   },
 });
 
-agent.addDomain('analytics', {
+agent.addDomain("analytics", {
   trackEvent: async (
     eventName: string,
     properties: Record<string, unknown>
@@ -83,51 +83,51 @@ agent.addDomain('analytics', {
 
 // Create routes with domain scoping
 agent.createRoute({
-  title: 'Data Collection',
-  description: 'Collect and process web data',
-  conditions: ['User wants to scrape or extract data from websites'],
-  domains: ['scraping'], // ✅ Only scraping tools available
+  title: "Data Collection",
+  description: "Collect and process web data",
+  conditions: ["User wants to scrape or extract data from websites"],
+  domains: ["scraping"], // ✅ Only scraping tools available
 });
 
 agent.createRoute({
-  title: 'Schedule Meeting',
-  description: 'Book and manage appointments',
-  conditions: ['User wants to schedule, view, or cancel events'],
-  domains: ['calendar'], // ✅ Only calendar tools available
+  title: "Schedule Meeting",
+  description: "Book and manage appointments",
+  conditions: ["User wants to schedule, view, or cancel events"],
+  domains: ["calendar"], // ✅ Only calendar tools available
 });
 
 agent.createRoute({
-  title: 'Checkout Process',
-  description: 'Process purchases and payments',
-  conditions: ['User wants to make a purchase or payment'],
-  domains: ['payment', 'analytics'], // ✅ Multiple domains allowed
+  title: "Checkout Process",
+  description: "Process purchases and payments",
+  conditions: ["User wants to make a purchase or payment"],
+  domains: ["payment", "analytics"], // ✅ Multiple domains allowed
 });
 
 agent.createRoute({
-  title: 'Customer Support',
-  description: 'Answer general questions and provide help',
-  conditions: ['User has general questions or needs support'],
+  title: "Customer Support",
+  description: "Answer general questions and provide help",
+  conditions: ["User has general questions or needs support"],
   domains: [], // ✅ No tools available (conversation only)
 });
 
 agent.createRoute({
-  title: 'Admin Support',
-  description: 'Administrative tasks with full access',
-  conditions: ['User is admin and needs full system access'],
+  title: "Admin Support",
+  description: "Administrative tasks with full access",
+  conditions: ["User is admin and needs full system access"],
   // domains not specified = all domains available
 });
 
 // Example conversations
 async function demonstrateScoping() {
-  console.log('\n=== Domain Scoping Demo ===\n');
+  console.log("\n=== Domain Scoping Demo ===\n");
 
   // Example 1: Data Collection route - only scraping tools available
-  console.log('1️⃣  Example: User wants to scrape data');
+  console.log("1️⃣  Example: User wants to scrape data");
   const history1 = [
     createMessageEvent(
       EventSource.CUSTOMER,
-      'Alice',
-      'Can you scrape the homepage of example.com?'
+      "Alice",
+      "Can you scrape the homepage of example.com?"
     ),
   ];
 
@@ -137,12 +137,12 @@ async function demonstrateScoping() {
   console.log(`Response: ${response1.message}\n`);
 
   // Example 2: Schedule Meeting route - only calendar tools available
-  console.log('2️⃣  Example: User wants to schedule a meeting');
+  console.log("2️⃣  Example: User wants to schedule a meeting");
   const history2 = [
     createMessageEvent(
       EventSource.CUSTOMER,
-      'Bob',
-      'Schedule a meeting for tomorrow at 2pm'
+      "Bob",
+      "Schedule a meeting for tomorrow at 2pm"
     ),
   ];
 
@@ -152,12 +152,12 @@ async function demonstrateScoping() {
   console.log(`Response: ${response2.message}\n`);
 
   // Example 3: Customer Support route - NO tools available
-  console.log('3️⃣  Example: User has a general question');
+  console.log("3️⃣  Example: User has a general question");
   const history3 = [
     createMessageEvent(
       EventSource.CUSTOMER,
-      'Charlie',
-      'What are your business hours?'
+      "Charlie",
+      "What are your business hours?"
     ),
   ];
 
@@ -167,12 +167,12 @@ async function demonstrateScoping() {
   console.log(`Response: ${response3.message}\n`);
 
   // Example 4: Admin Support route - ALL tools available (for demo purposes)
-  console.log('4️⃣  Example: Admin needs full access');
+  console.log("4️⃣  Example: Admin needs full access");
   const history4 = [
     createMessageEvent(
       EventSource.CUSTOMER,
-      'Admin',
-      'I need to generate a report and process a refund'
+      "Admin",
+      "I need to generate a report and process a refund"
     ),
   ];
 
@@ -201,15 +201,15 @@ console.log(`
 `);
 
 // Inspect route configurations
-console.log('\n📋 Route Configurations:\n');
+console.log("\n📋 Route Configurations:\n");
 for (const route of agent.getRoutes()) {
   const domains = route.getDomains();
   const domainsText =
     domains === undefined
-      ? 'all domains'
+      ? "all domains"
       : domains.length === 0
-      ? 'no tools (conversation only)'
-      : domains.join(', ');
+      ? "no tools (conversation only)"
+      : domains.join(", ");
 
   console.log(`• ${route.title}: ${domainsText}`);
 }
@@ -228,37 +228,39 @@ function validateToolCall(toolName: string, routeTitle: string): boolean {
   if (allowedDomains.length === 0) return false;
 
   // Check if tool's domain is in allowed list
-  const [domain] = toolName.split('.');
+  const [domain] = toolName.split(".");
   return allowedDomains.includes(domain);
 }
 
-console.log('\n✅ Validation Examples:');
+console.log("\n✅ Validation Examples:");
 console.log(
   `- scraping.scrapeSite in "Data Collection": ${validateToolCall(
-    'scraping.scrapeSite',
-    'Data Collection'
+    "scraping.scrapeSite",
+    "Data Collection"
   )}`
 );
 console.log(
   `- calendar.scheduleEvent in "Data Collection": ${validateToolCall(
-    'calendar.scheduleEvent',
-    'Data Collection'
+    "calendar.scheduleEvent",
+    "Data Collection"
   )}`
 );
 console.log(
   `- payment.processPayment in "Customer Support": ${validateToolCall(
-    'payment.processPayment',
-    'Customer Support'
+    "payment.processPayment",
+    "Customer Support"
   )}`
 );
 console.log(
   `- analytics.trackEvent in "Admin Support": ${validateToolCall(
-    'analytics.trackEvent',
-    'Admin Support'
+    "analytics.trackEvent",
+    "Admin Support"
   )}`
 );
 
 // Run demonstration
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   demonstrateScoping().catch(console.error);
 }
+
+export { agent };

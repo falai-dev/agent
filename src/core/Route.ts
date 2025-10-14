@@ -29,8 +29,8 @@ export class Route<TContext = unknown> {
     this.description = options.description;
     this.conditions = options.conditions || [];
     this.domains = options.domains;
-    this.rules = options.rules || [];
-    this.prohibitions = options.prohibitions || [];
+    this.rules = options.rules || ([] as string[]);
+    this.prohibitions = options.prohibitions || ([] as string[]);
     this.initialState = new State<TContext>(this.id, "Initial state");
 
     // Initialize guidelines from options
