@@ -511,3 +511,79 @@ const agent = new Agent({
 **Install:** `npm install pg`
 
 **Note:** PostgreSQL adapter includes `initialize()` method to auto-create tables with proper indexes and foreign keys.
+
+### SQLite
+
+Lightweight, file-based database for local development:
+
+```typescript
+import { SQLiteAdapter } from "@falai/agent";
+import Database from "better-sqlite3";
+
+const db = new Database("agent.db");
+
+const adapter = new SQLiteAdapter({ db });
+
+// Auto-create tables
+await adapter.initialize();
+
+const agent = new Agent({
+  persistence: { adapter },
+});
+```
+
+**Install:** `npm install better-sqlite3`
+
+**Perfect for:**
+
+- Local development
+- Testing
+- Desktop applications
+- Single-user apps
+
+### Memory (Built-in)
+
+Zero-dependency in-memory storage for testing:
+
+```typescript
+import { MemoryAdapter } from "@falai/agent";
+
+const agent = new Agent({
+  persistence: {
+    adapter: new MemoryAdapter(),
+    userId: "test_user",
+  },
+});
+
+// Perfect for unit tests - no database setup required!
+```
+
+**Features:**
+
+- No installation required ✨
+- Perfect for testing
+- Data snapshot for debugging
+- Clear method for test cleanup
+
+**Example test:**
+
+```typescript
+describe("Agent persistence", () => {
+  const adapter = new MemoryAdapter();
+
+  afterEach(() => {
+    adapter.clear(); // Clean state between tests
+  });
+
+  it("should save session", async () => {
+    const agent = new Agent({
+      persistence: { adapter },
+    });
+
+    // Test your logic...
+
+    const snapshot = adapter.getSnapshot();
+    expect(snapshot.sessions).toHaveLength(1);
+  });
+});
+```

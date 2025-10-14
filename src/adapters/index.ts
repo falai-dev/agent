@@ -26,3 +26,12 @@ export type {
   PgQueryResult,
   PostgreSQLAdapterOptions,
 } from "./PostgreSQLAdapter";
+
+export { SQLiteAdapter } from "./SQLiteAdapter";
+export type {
+  SqliteDatabase,
+  SqliteStatement,
+  SQLiteAdapterOptions,
+} from "./SQLiteAdapter";
+
+export { MemoryAdapter } from "./MemoryAdapter";

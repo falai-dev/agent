@@ -947,6 +947,117 @@ const agent = new Agent({
 
 ---
 
+### `SQLiteAdapter`
+
+Lightweight, file-based database for local development.
+
+#### Constructor
+
+```typescript
+new SQLiteAdapter(options: SQLiteAdapterOptions)
+
+interface SQLiteAdapterOptions {
+  db: SqliteDatabase;           // better-sqlite3 database
+  tables?: {
+    sessions?: string;          // Default: "agent_sessions"
+    messages?: string;          // Default: "agent_messages"
+  };
+}
+```
+
+#### Methods
+
+##### `initialize(): Promise<void>`
+
+Creates tables and indexes if they don't exist.
+
+#### Example
+
+```typescript
+import { SQLiteAdapter } from "@falai/agent";
+import Database from "better-sqlite3";
+
+const db = new Database("agent.db");
+const adapter = new SQLiteAdapter({ db });
+
+// Auto-create tables
+await adapter.initialize();
+
+const agent = new Agent({
+  persistence: { adapter },
+});
+```
+
+**Install:** `npm install better-sqlite3`
+
+**Perfect for:** Local development, testing, desktop apps, single-user applications
+
+---
+
+### `MemoryAdapter`
+
+Zero-dependency in-memory storage for testing and development.
+
+#### Constructor
+
+```typescript
+new MemoryAdapter();
+```
+
+No options needed - it's ready to go! ✨
+
+#### Methods
+
+##### `clear(): void`
+
+Clears all stored data (useful for testing).
+
+##### `getSnapshot(): { sessions: SessionData[]; messages: MessageData[] }`
+
+Returns a snapshot of all data (useful for debugging/testing).
+
+#### Example
+
+```typescript
+import { MemoryAdapter } from "@falai/agent";
+
+const adapter = new MemoryAdapter();
+
+const agent = new Agent({
+  persistence: { adapter },
+});
+
+// Perfect for unit tests!
+```
+
+**Testing Example:**
+
+```typescript
+describe("Agent", () => {
+  const adapter = new MemoryAdapter();
+
+  afterEach(() => {
+    adapter.clear(); // Reset between tests
+  });
+
+  it("should persist messages", async () => {
+    const agent = new Agent({
+      persistence: { adapter },
+    });
+
+    // ... test logic ...
+
+    const { sessions, messages } = adapter.getSnapshot();
+    expect(sessions).toHaveLength(1);
+    expect(messages).toHaveLength(2);
+  });
+});
+```
+
+**No installation required** - built into the framework!
+
+---
+
 ### Persistence Types
 
 #### `SessionData`

@@ -40,6 +40,26 @@ All adapters follow the **provider pattern** - no dependencies required in the p
   - Foreign key constraints
   - Full SQL control
 
+### 5. **SQLiteAdapter**
+
+- **Use case:** Lightweight local database
+- **Install:** `npm install better-sqlite3`
+- **Features:**
+  - File-based database
+  - Perfect for local development
+  - Auto table/index creation
+  - Zero configuration
+
+### 6. **MemoryAdapter**
+
+- **Use case:** Testing & development
+- **Install:** Built-in (no dependencies required) ✨
+- **Features:**
+  - In-memory storage
+  - No setup required
+  - Perfect for unit tests
+  - Data snapshot/clear utilities
+
 ## 🎯 Usage Pattern
 
 All adapters follow the same simple pattern:
@@ -73,7 +93,8 @@ All database clients are **optional peer dependencies** - they won't be installe
     "redis": "^4.6.0 || ^5.0.0",
     "mongodb": "^6.0.0 || ^7.0.0",
     "pg": "^8.11.0",
-    "mysql2": "^3.2.0"
+    "mysql2": "^3.2.0",
+    "better-sqlite3": "^11.0.0 || ^12.0.0"
   },
   "peerDependenciesMeta": {
     "@prisma/client": { "optional": true },
@@ -81,7 +102,8 @@ All database clients are **optional peer dependencies** - they won't be installe
     "redis": { "optional": true },
     "mongodb": { "optional": true },
     "pg": { "optional": true },
-    "mysql2": { "optional": true }
+    "mysql2": { "optional": true },
+    "better-sqlite3": { "optional": true }
   }
 }
 ```
@@ -122,6 +144,8 @@ All adapters are fully typed with **zero `any` types** (except for Prisma's dyna
 
 ## 🚀 Coming Soon
 
-- **MySQLAdapter**: Traditional relational database
+- **MySQLAdapter**: Traditional relational database (similar to PostgreSQL)
 - **ElasticsearchAdapter**: Full-text search integration
 - **DynamoDBAdapter**: AWS serverless storage
+
+All adapters are production-ready and fully tested!

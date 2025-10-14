@@ -929,12 +929,14 @@ Fast, in-memory persistence for high-throughput applications:
 
 ### 🎯 Available Adapters
 
-| Adapter               | Use Case                          | Install                      |
-| --------------------- | --------------------------------- | ---------------------------- |
-| **PrismaAdapter**     | Type-safe ORM with migrations     | `npm install @prisma/client` |
-| **RedisAdapter**      | Fast in-memory for real-time apps | `npm install ioredis`        |
-| **MongoAdapter**      | Flexible document storage         | `npm install mongodb`        |
-| **PostgreSQLAdapter** | Raw SQL with auto table creation  | `npm install pg`             |
+| Adapter               | Use Case                           | Install                       |
+| --------------------- | ---------------------------------- | ----------------------------- |
+| **PrismaAdapter**     | Type-safe ORM with migrations      | `npm install @prisma/client`  |
+| **RedisAdapter**      | Fast in-memory for real-time apps  | `npm install ioredis`         |
+| **MongoAdapter**      | Flexible document storage          | `npm install mongodb`         |
+| **PostgreSQLAdapter** | Raw SQL with auto table creation   | `npm install pg`              |
+| **SQLiteAdapter**     | Lightweight local database         | `npm install better-sqlite3`  |
+| **MemoryAdapter**     | Testing & development (no install) | Built-in (no dependencies) ✨ |
 
 ### ⚡ Quick Setup
 

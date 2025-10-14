@@ -50,6 +50,13 @@ export type {
   PgQueryResult,
   PostgreSQLAdapterOptions,
 } from "./adapters/PostgreSQLAdapter";
+export { SQLiteAdapter } from "./adapters/SQLiteAdapter";
+export type {
+  SqliteDatabase,
+  SqliteStatement,
+  SQLiteAdapterOptions,
+} from "./adapters/SQLiteAdapter";
+export { MemoryAdapter } from "./adapters/MemoryAdapter";
 
 // Constants
 export { END_ROUTE } from "./constants";
