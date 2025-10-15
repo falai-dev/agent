@@ -54,6 +54,14 @@ export interface MessageEventData {
   flagged?: boolean;
   /** Tags/reasons if flagged */
   tags?: string[];
+  /** Session metadata attached to this message */
+  session?: {
+    routeId?: string;
+    routeTitle?: string;
+    stateId?: string;
+    stateDescription?: string;
+    extracted?: Record<string, unknown>;
+  };
 }
 
 /**

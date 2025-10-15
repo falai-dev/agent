@@ -24,76 +24,144 @@ interface AgentOptions<TContext = unknown> {
   goal?: string;
   context?: TContext;
 
+  // Context provider for always-fresh context
+  contextProvider?: () => Promise<TContext> | TContext;
+
   // Configuration
-  maxEngineIterations?: number;
   compositionMode?: CompositionMode;
 
-  // Declarative initialization (NEW!)
+  // Enhanced lifecycle hooks
+  hooks?: {
+    beforeRespond?: (currentContext: TContext) => Promise<TContext> | TContext;
+    onContextUpdate?: (
+      newContext: TContext,
+      previousContext: TContext
+    ) => Promise<void> | void;
+    onExtractedUpdate?: (
+      extracted: Record<string, unknown>,
+      previousExtracted: Record<string, unknown>
+    ) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  };
+
+  // Declarative initialization
   terms?: Term[];
   guidelines?: Guideline[];
   capabilities?: Capability[];
   routes?: RouteOptions[];
-  observations?: ObservationOptions[];
 }
 ```
 
-### Example: Full Declarative Agent
+### Example: Data-Driven Agent with Session State
 
 ```typescript
-const agent = new Agent({
-  name: 'SupportBot',
-  description: 'Helpful customer support',
-  goal: 'Resolve issues efficiently',
-  ai: new GeminiProvider({ apiKey: '...', model: '...' }),
-  context: { userId: '123' },
+// Define your data extraction types
+interface FlightData {
+  destination: string;
+  departureDate: string;
+  passengers: number;
+  cabinClass: "economy" | "business" | "first";
+}
 
-  terms: [
+const agent = new Agent<FlightBookingContext>({
+  name: 'FlightBot',
+  description: 'Helpful flight booking assistant',
+  goal: 'Book flights efficiently',
+  ai: new GeminiProvider({ apiKey: '...', model: '...' }),
+
+  // Static context
+  context: {
+    userId: '123',
+    availableFlights: [],
+  },
+
+  // Enhanced lifecycle hooks
+  hooks: {
+    // Refresh context before each response
+    beforeRespond: async (ctx) => {
+      const freshUser = await db.getUser(ctx.userId);
+      return { ...ctx, userCredits: freshUser.credits };
+    },
+
+    // Validate and enrich extracted data
+    onExtractedUpdate: async (extracted, previous) => {
+      // Normalize passenger count
+      if (extracted.passengers < 1) extracted.passengers = 1;
+      if (extracted.passengers > 9) extracted.passengers = 9;
+
+      // Auto-trigger flight search when we have enough data
+      if (extracted.destination && extracted.departureDate && extracted.passengers) {
+        extracted.shouldSearchFlights = true;
+      }
+
+      return extracted;
+    },
+  },
+
+  // Declarative routes with data extraction
+  routes: [
     {
-      name: 'SLA',
-      description: 'Service Level Agreement',
-      synonyms: ['response time'],
+      title: 'Book Flight',
+      description: 'Help user book a flight',
+      conditions: ['User wants to book a flight'],
+      gatherSchema: {
+        type: 'object',
+        properties: {
+          destination: { type: 'string' },
+          departureDate: { type: 'string' },
+          passengers: { type: 'number', minimum: 1, maximum: 9 },
+          cabinClass: {
+            type: 'string',
+            enum: ['economy', 'business', 'first'],
+            default: 'economy',
+          },
+        },
+        required: ['destination', 'departureDate', 'passengers'],
+      },
     },
   ],
 
+  // Domain glossary
+  terms: [
+    {
+      name: 'Premium Plan',
+      description: 'Our top-tier subscription at $99/month',
+      synonyms: ['pro plan', 'premium subscription'],
+    },
+  ],
+
+  // Behavioral guidelines
   guidelines: [
     {
-      condition: 'User is frustrated',
-      action: 'Show empathy and offer escalation',
-      tags: ['support'],
+      action: 'Always be polite and professional',
       enabled: true,
     },
+    {
+      condition: 'User seems frustrated',
+      action: 'Apologize sincerely and offer to escalate to human support',
+      enabled: true,
+    },
+  ],
   ],
 
   capabilities: [
     { title: 'Ticket Management', description: 'Create and track tickets' },
   ],
-
-  routes: [
-    {
-      title: 'Create Ticket',
-      description: 'Help user create a support ticket',
-      conditions: ['User wants to report an issue'],
-      guidelines: [
-        { condition: 'Issue is urgent', action: 'Prioritize immediately' },
-      ],
-    },
-  ],
-
-  observations: [
-    {
-      description: 'User mentions problem but unclear what kind',
-      routeRefs: ['Create Ticket', 'Check Ticket Status'], // By title!
-    },
-  ],
 });
+
+// Use with session state
+let session = createSession<FlightData>();
+const response = await agent.respond({ history, session });
+console.log(response.session?.extracted); // Extracted flight data
 ```
+
+````
 
 ---
 
 ## 🛤️ Route Constructor Options
 
 ```typescript
-interface RouteOptions {
+interface RouteOptions<TExtracted = unknown> {
   // Required
   title: string;
 
@@ -105,15 +173,28 @@ interface RouteOptions {
   domains?: string[];       // Restrict which domains are available in this route
   rules?: string[];         // Absolute rules the agent MUST follow
   prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do
+
+  // NEW: Schema-first data extraction
+  gatherSchema?: {
+    type: "object";
+    properties: Record<string, any>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+
+  // NEW: Pre-populate extracted data when entering route
+  initialData?: Partial<TExtracted>;
 }
-```
+````
 
 **Domain Scoping:**
+
 - Use `domains` to limit which registered domains (tools/methods) can be accessed during this route
 - If `undefined` or omitted, all registered domains are available
 - Useful for security (preventing unauthorized tool calls) and performance (reducing AI decision space)
 
 **Rules & Prohibitions:**
+
 - **Rules**: Absolute requirements the agent must follow in this route (style, format, behavior)
 - **Prohibitions**: Things the agent must never do in this route
 - These override general guidelines if there's any conflict
@@ -124,23 +205,23 @@ interface RouteOptions {
 
 ```typescript
 const agent = new Agent({
-  name: 'Bot',
+  name: "Bot",
   ai: provider,
   routes: [
     {
-      title: 'Onboarding',
-      description: 'Guide new users',
-      conditions: ['User is new'],
+      title: "Onboarding",
+      description: "Guide new users",
+      conditions: ["User is new"],
       guidelines: [
         {
-          condition: 'User skips a step',
+          condition: "User skips a step",
           action: "Gently remind them it's important",
-          tags: ['onboarding'],
+          tags: ["onboarding"],
         },
         {
-          condition: 'User seems confused',
-          action: 'Offer a quick tutorial video',
-          tags: ['help'],
+          condition: "User seems confused",
+          action: "Offer a quick tutorial video",
+          tags: ["help"],
         },
       ],
     },
@@ -152,7 +233,7 @@ const agent = new Agent({
 
 ```typescript
 // Register domains
-agent.addDomain('scraping', {
+agent.addDomain("scraping", {
   scrapeSite: async (url: string) => {
     /* ... */
   },
@@ -161,7 +242,7 @@ agent.addDomain('scraping', {
   },
 });
 
-agent.addDomain('calendar', {
+agent.addDomain("calendar", {
   scheduleEvent: async (date: Date, title: string) => {
     /* ... */
   },
@@ -170,7 +251,7 @@ agent.addDomain('calendar', {
   },
 });
 
-agent.addDomain('payment', {
+agent.addDomain("payment", {
   processPayment: async (amount: number) => {
     /* ... */
   },
@@ -178,32 +259,32 @@ agent.addDomain('payment', {
 
 // Create routes with domain restrictions
 agent.createRoute({
-  title: 'Data Collection',
-  description: 'Collect and process web data',
-  domains: ['scraping'], // ✅ Only scraping tools available
+  title: "Data Collection",
+  description: "Collect and process web data",
+  domains: ["scraping"], // ✅ Only scraping tools available
 });
 
 agent.createRoute({
-  title: 'Schedule Meeting',
-  description: 'Book appointments',
-  domains: ['calendar'], // ✅ Only calendar tools available
+  title: "Schedule Meeting",
+  description: "Book appointments",
+  domains: ["calendar"], // ✅ Only calendar tools available
 });
 
 agent.createRoute({
-  title: 'Checkout',
-  description: 'Process purchase',
-  domains: ['payment', 'calendar'], // ✅ Multiple domains allowed
+  title: "Checkout",
+  description: "Process purchase",
+  domains: ["payment", "calendar"], // ✅ Multiple domains allowed
 });
 
 agent.createRoute({
-  title: 'FAQ Support',
-  description: 'Answer general questions',
+  title: "FAQ Support",
+  description: "Answer general questions",
   domains: [], // ✅ No tools available (conversation only)
 });
 
 agent.createRoute({
-  title: 'Admin Support',
-  description: 'Administrative tasks',
+  title: "Admin Support",
+  description: "Administrative tasks",
   // domains not specified = all domains available (for demo purposes)
 });
 ```
@@ -213,61 +294,62 @@ agent.createRoute({
 ```typescript
 // WhatsApp support bot with different styles per route
 agent.createRoute({
-  title: 'Customer Support',
-  description: 'Help customers with issues',
+  title: "Customer Support",
+  description: "Help customers with issues",
   domains: [],
   rules: [
-    'Keep messages short (maximum 2 lines per message)',
-    'Use maximum 1 emoji per message',
-    'Always ask if the issue is resolved before ending',
-    'Professional but friendly tone'
+    "Keep messages short (maximum 2 lines per message)",
+    "Use maximum 1 emoji per message",
+    "Always ask if the issue is resolved before ending",
+    "Professional but friendly tone",
   ],
   prohibitions: [
-    'Never send messages longer than 3 paragraphs',
-    'Do not use slang or informal language',
-    'Never promise what you cannot deliver',
-    'Do not ask for sensitive information via chat'
-  ]
+    "Never send messages longer than 3 paragraphs",
+    "Do not use slang or informal language",
+    "Never promise what you cannot deliver",
+    "Do not ask for sensitive information via chat",
+  ],
 });
 
 agent.createRoute({
-  title: 'Sales Consultation',
-  description: 'Help customer discover needs and present solutions',
-  domains: ['calendar', 'analytics'],
+  title: "Sales Consultation",
+  description: "Help customer discover needs and present solutions",
+  domains: ["calendar", "analytics"],
   rules: [
-    'Ask open-ended questions to discover needs',
-    'Use storytelling when presenting solutions',
-    'Emoji only to reinforce positive emotions 😊',
-    'Always present value before mentioning price'
+    "Ask open-ended questions to discover needs",
+    "Use storytelling when presenting solutions",
+    "Emoji only to reinforce positive emotions 😊",
+    "Always present value before mentioning price",
   ],
   prohibitions: [
-    'Never talk about price before showing value',
-    'Do not pressure the customer',
-    'Avoid complex technical terms',
-    'Never send more than 2 messages in a row without customer response'
-  ]
+    "Never talk about price before showing value",
+    "Do not pressure the customer",
+    "Avoid complex technical terms",
+    "Never send more than 2 messages in a row without customer response",
+  ],
 });
 
 agent.createRoute({
-  title: 'Emergency Support',
-  description: 'Handle urgent customer issues',
-  domains: ['notifications', 'ticketing'],
+  title: "Emergency Support",
+  description: "Handle urgent customer issues",
+  domains: ["notifications", "ticketing"],
   rules: [
-    'Respond immediately and acknowledge urgency',
-    'Use clear, direct language',
-    'Provide concrete next steps',
-    'Set clear expectations on resolution time'
+    "Respond immediately and acknowledge urgency",
+    "Use clear, direct language",
+    "Provide concrete next steps",
+    "Set clear expectations on resolution time",
   ],
   prohibitions: [
-    'Never downplay the customer\'s concern',
-    'Do not use emojis',
+    "Never downplay the customer's concern",
+    "Do not use emojis",
     'Never say "calm down" or similar phrases',
-    'Do not transfer without explaining why'
-  ]
+    "Do not transfer without explaining why",
+  ],
 });
 ```
 
 **How it works:**
+
 - Rules and prohibitions are automatically applied when the route is active
 - They override general guidelines if there's any conflict
 - Perfect for controlling communication style per context
@@ -275,16 +357,7 @@ agent.createRoute({
 
 ---
 
-## 🔍 Observation Options
-
-```typescript
-interface ObservationOptions {
-  description: string;
-  routeRefs?: string[]; // NEW! Reference routes by ID or title
-}
-```
-
-### Example: Observations with Route References
+### Example: With Route References
 
 ```typescript
 const agent = new Agent({
@@ -295,16 +368,6 @@ const agent = new Agent({
     { title: "Cancel Appointment", conditions: [...] },
     { title: "Reschedule Appointment", conditions: [...] }
   ],
-  observations: [
-    {
-      description: "User mentions appointment but intent unclear",
-      routeRefs: ["Schedule Appointment", "Reschedule Appointment"]
-    },
-    {
-      description: "User wants to change something about their visit",
-      routeRefs: ["Cancel Appointment", "Reschedule Appointment"]
-    }
-  ]
 });
 ```
 
@@ -316,15 +379,12 @@ All constructor options also have fluent methods that **return `this`** for chai
 
 ```typescript
 agent
-  .createTerm({ name: 'API', description: '...' })
-  .createGuideline({ condition: '...', action: '...' })
-  .createCapability({ title: '...', description: '...' });
+  .createTerm({ name: "API", description: "..." })
+  .createGuideline({ condition: "...", action: "..." })
+  .createCapability({ title: "...", description: "..." });
 
-const route = agent.createRoute({ title: '...' });
-route.createGuideline({ condition: '...', action: '...' });
-
-const obs = agent.createObservation('User intent unclear');
-obs.disambiguate([route1, route2]);
+const route = agent.createRoute({ title: "..." });
+route.createGuideline({ condition: "...", action: "..." });
 ```
 
 ---
@@ -350,7 +410,7 @@ obs.disambiguate([route1, route2]);
 ```typescript
 // Start with static config
 const agent = new Agent({
-  name: 'Bot',
+  name: "Bot",
   ai: provider,
   terms: loadTermsFromFile(),
   guidelines: loadGuidelinesFromDB(),
@@ -359,8 +419,8 @@ const agent = new Agent({
 // Add dynamic features
 if (user.isPremium) {
   agent.createGuideline({
-    condition: 'User asks for priority support',
-    action: 'Escalate immediately to premium team',
+    condition: "User asks for priority support",
+    action: "Escalate immediately to premium team",
   });
 }
 ```
@@ -369,15 +429,13 @@ if (user.isPremium) {
 
 ## 📊 Complete Comparison
 
-| Feature              | Declarative (Constructor)            | Fluent (Methods)               |
-| -------------------- | ------------------------------------ | ------------------------------ |
-| **Terms**            | `terms: Term[]`                      | `agent.createTerm(...)`        |
-| **Guidelines**       | `guidelines: Guideline[]`            | `agent.createGuideline(...)`   |
-| **Capabilities**     | `capabilities: Capability[]`         | `agent.createCapability(...)`  |
-| **Routes**           | `routes: RouteOptions[]`             | `agent.createRoute(...)`       |
-| **Route Guidelines** | `route.guidelines: Guideline[]`      | `route.createGuideline(...)`   |
-| **Observations**     | `observations: ObservationOptions[]` | `agent.createObservation(...)` |
-| **Disambiguation**   | `routeRefs: string[]`                | `obs.disambiguate([...])`      |
+| Feature              | Declarative (Constructor)       | Fluent (Methods)              |
+| -------------------- | ------------------------------- | ----------------------------- |
+| **Terms**            | `terms: Term[]`                 | `agent.createTerm(...)`       |
+| **Guidelines**       | `guidelines: Guideline[]`       | `agent.createGuideline(...)`  |
+| **Capabilities**     | `capabilities: Capability[]`    | `agent.createCapability(...)` |
+| **Routes**           | `routes: RouteOptions[]`        | `agent.createRoute(...)`      |
+| **Route Guidelines** | `route.guidelines: Guideline[]` | `route.createGuideline(...)`  |
 
 ---
 
@@ -397,7 +455,6 @@ const agent = new Agent<MyContext>({
   guidelines?: Guideline[],
   capabilities?: Capability[],
   routes?: RouteOptions[],      // Can include nested guidelines
-  observations?: ObservationOptions[]  // Can reference routes by title
 });
 ```
 

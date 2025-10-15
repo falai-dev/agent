@@ -9,14 +9,12 @@ export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
 export { State } from "./core/State";
 export { Transition } from "./core/Transition";
-export { Observation } from "./core/Observation";
 export { defineTool } from "./core/Tool";
 export { DomainRegistry } from "./core/DomainRegistry";
 export { adaptEvent, createMessageEvent, createToolEvent } from "./core/Events";
-export { PromptBuilder } from "./core/PromptBuilder";
-export type { Customer, AgentInfo } from "./core/PromptBuilder";
-export { BuiltInSection } from "./core/PromptBuilder";
 export { PersistenceManager } from "./core/PersistenceManager";
+export { ToolExecutor } from "./core/ToolExecutor";
+export type { ToolExecutionResult } from "./core/ToolExecutor";
 
 // Providers
 export { GeminiProvider } from "./providers/GeminiProvider";
@@ -67,12 +65,7 @@ export type {
 export { END_ROUTE } from "./constants";
 
 // Utils
-export {
-  generateRouteId,
-  generateStateId,
-  generateObservationId,
-  generateToolId,
-} from "./utils/id";
+export { generateRouteId, generateStateId, generateToolId } from "./utils/id";
 
 // Types
 export type {
@@ -104,6 +97,14 @@ export type {
   TransitionResult,
 } from "./types/route";
 
+export type { SessionState } from "./types/session";
+export {
+  createSession,
+  enterRoute,
+  enterState,
+  mergeExtracted,
+} from "./types/session";
+
 export type {
   ToolContext,
   ToolResult,
@@ -119,17 +120,7 @@ export type {
   ReasoningConfig,
 } from "./types/ai";
 
-export type {
-  PromptSection,
-  ContextVariable,
-  ContextVariableValue,
-} from "./types/prompt";
-export { SectionStatus } from "./types/prompt";
-
-export type {
-  Observation as IObservation,
-  ObservationOptions,
-} from "./types/observation";
+export type { StructuredSchema } from "./types/schema";
 
 export type {
   SessionData,

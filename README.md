@@ -43,21 +43,22 @@
 <tr>
 <td width="50%">
 
-### 🛤️ **Conversation Flows**
+### 🛤️ **Data-Driven Conversations**
 
-- **Route DSL** - Declarative state machines for conversations
-- **Smart Transitions** - Conditional flows with `transitionTo`
-- **Disambiguation** - Observations for handling ambiguous intent
+- **Schema-First Extraction** - Define data contracts with JSON Schema
+- **Session State Management** - Track conversation progress across turns
+- **Code-Based Logic** - Deterministic state progression with `skipIf`
+- **Always-On Routing** - Context-aware routing respects user intent changes
 
 </td>
 <td width="50%">
 
-### 🔧 **Tools & Domains**
+### 🔧 **Tools & Data Integration**
 
+- **Data-Aware Tools** - Tools access extracted data directly via `extracted` context
+- **Enrichment Hooks** - Tools can modify extracted data with `extractedUpdate`
+- **Action Flags** - Tools set flags for conditional execution
 - **Type-Safe Tools** - Define tools with full type inference
-- **Domain Registry** - Optional security & organization by domain
-- **Context Awareness** - Tools receive typed context automatically
-- **Automatic Execution** - Tools run based on state machine, not AI
 
 </td>
 </tr>
@@ -66,19 +67,22 @@
 
 ### 💾 **Optional Persistence**
 
+- **Session State Integration** - Automatic saving of extracted data & conversation progress
 - **Provider Pattern** - Simple API like AI providers
-- **Prisma Ready** - Built-in ORM adapter
-- **Auto-save** - Automatic session & message persistence
+- **Multiple Adapters** - Prisma, Redis, MongoDB, PostgreSQL, SQLite, OpenSearch, Memory
+- **Auto-save** - Automatic session state & message persistence
+- **Type-Safe** - Full TypeScript support with generics
 - **Extensible** - Create adapters for any database
 
 </td>
 <td width="50%">
 
-### 🎯 **Smart Routing**
+### 🎯 **Session-Aware Routing**
 
+- **Always-On Routing** - Users can change their mind mid-conversation
+- **Context Awareness** - Router sees current progress and extracted data
+- **Session State** - Track conversation progress across turns
 - **Deterministic IDs** - Consistent identifiers across restarts
-- **Route Scoping** - Control tool access per route
-- **Rules & Prohibitions** - Fine-grained behavior control
 
 </td>
 </tr>
@@ -343,7 +347,6 @@ onboardingRoute.initialState
 - **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Persistent conversations & state management
 - **[Persistence](./docs/PERSISTENCE.md)** - Optional database persistence with Prisma **(NEW!)**
 - **[API Reference](./docs/API_REFERENCE.md)** - Complete API documentation
-- **[Package Structure](./docs/STRUCTURE.md)** - Package structure and design principles
 
 ### 💡 Key Concepts
 
@@ -598,57 +601,6 @@ agent.createRoute({
 - 📋 Clear documentation of route capabilities
 - 🛡️ Security by design
 
-### 🔀 Disambiguation with Observations
-
-Handle ambiguous user intent gracefully - declaratively or programmatically:
-
-```typescript
-// Option A: Declarative (reference routes by title)
-const agent = new Agent({
-  name: "HealthBot",
-  ai: provider,
-  routes: [
-    {
-      id: "route_schedule", // Custom ID
-      title: "Schedule Appointment",
-      conditions: ["User wants to schedule"],
-    },
-    {
-      id: "route_reschedule", // Custom ID
-      title: "Reschedule Appointment",
-      conditions: ["User wants to reschedule"],
-    },
-  ],
-  observations: [
-    {
-      id: "obs_appointment_intent", // Custom ID for tracking
-      description: "User mentions appointment but intent is unclear",
-      routeRefs: ["Schedule Appointment", "Reschedule Appointment"], // By title
-    },
-  ],
-});
-
-// Option B: Programmatic
-const scheduleRoute = agent.createRoute({
-  id: "route_schedule", // Custom ID
-  title: "Schedule Appointment",
-  conditions: ["User wants to schedule"],
-});
-
-const rescheduleRoute = agent.createRoute({
-  id: "route_reschedule", // Custom ID
-  title: "Reschedule Appointment",
-  conditions: ["User wants to reschedule"],
-});
-
-const appointmentInquiry = agent.createObservation(
-  "User mentions appointment but intent is unclear"
-);
-
-// Agent will ask user to clarify between these routes
-appointmentInquiry.disambiguate([scheduleRoute, rescheduleRoute]);
-```
-
 ### 🎨 Context Override
 
 Dynamically update context per request:
@@ -792,14 +744,10 @@ agent
 
 ### 🆔 Deterministic IDs & Persistence
 
-All entities (routes, states, observations, tools) have **deterministic IDs** by default, ensuring consistency across server restarts:
+All entities (routes, states, tools) have **deterministic IDs** by default, ensuring consistency across server restarts:
 
 ```typescript
-import {
-  generateRouteId,
-  generateToolId,
-  generateObservationId,
-} from "@falai/agent";
+import { generateRouteId, generateToolId } from "@falai/agent";
 
 // Auto-generated deterministic IDs (recommended)
 const route = agent.createRoute({
@@ -904,8 +852,7 @@ const openrouterProvider = new OpenRouterProvider({
 **Comprehensive declarative configuration example:**
 
 - 📦 Everything configured in constructor
-- 📚 Terms, guidelines, capabilities, routes, observations
-- 🔗 Route references by title in observations
+- 📚 Terms, guidelines, capabilities, routes
 - ➕ Dynamic additions after construction
 
 ### ⚡ [Streaming Responses](./examples/streaming-agent.ts) **(NEW!)**
@@ -965,7 +912,7 @@ Healthcare-focused agent demonstrating:
 
 - 🩺 Appointment scheduling with alternatives
 - 🔬 Lab results retrieval
-- 🤔 Observation-based disambiguation
+- 🤔 Route-based disambiguation with conditions
 - 🔐 Sensitive data handling
 - ⚠️ Urgent case prioritization
 

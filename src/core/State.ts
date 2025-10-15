@@ -16,18 +16,27 @@ import { generateStateId } from "../utils/id";
 /**
  * Represents a state within a route
  */
-export class State<TContext = unknown> {
+export class State<TContext = unknown, TExtracted = unknown> {
   public readonly id: string;
-  private transitions: Transition<TContext>[] = [];
+  private transitions: Transition<TContext, TExtracted>[] = [];
   private guidelines: Guideline[] = [];
+  public readonly gatherFields?: string[];
+  public readonly skipIf?: (extracted: Partial<TExtracted>) => boolean;
+  public readonly requiredData?: string[];
 
   constructor(
     public readonly routeId: string,
     public readonly description?: string,
-    customId?: string
+    customId?: string,
+    gatherFields?: string[],
+    skipIf?: (extracted: Partial<TExtracted>) => boolean,
+    requiredData?: string[]
   ) {
     // Use provided ID or generate a deterministic one
     this.id = customId || generateStateId(routeId, description);
+    this.gatherFields = gatherFields;
+    this.skipIf = skipIf;
+    this.requiredData = requiredData;
   }
 
   /**
@@ -38,16 +47,16 @@ export class State<TContext = unknown> {
    * @returns TransitionResult that supports chaining
    */
   transitionTo(
-    spec: TransitionSpec<TContext>,
+    spec: TransitionSpec<TContext, TExtracted>,
     condition?: string
-  ): TransitionResult<TContext> {
+  ): TransitionResult<TContext, TExtracted> {
     // Handle END_ROUTE
     if (
       spec.state &&
       typeof spec.state === "symbol" &&
       spec.state === END_ROUTE
     ) {
-      const endTransition = new Transition<TContext>(
+      const endTransition = new Transition<TContext, TExtracted>(
         this.getRef(),
         { state: END_ROUTE },
         condition
@@ -60,7 +69,7 @@ export class State<TContext = unknown> {
 
     // Handle direct state reference
     if (spec.state && typeof spec.state !== "symbol") {
-      const transition = new Transition<TContext>(
+      const transition = new Transition<TContext, TExtracted>(
         this.getRef(),
         spec,
         condition
@@ -71,8 +80,19 @@ export class State<TContext = unknown> {
     }
 
     // Create new target state for chatState or toolState
-    const targetState = new State<TContext>(this.routeId, spec.chatState);
-    const transition = new Transition<TContext>(this.getRef(), spec, condition);
+    const targetState = new State<TContext, TExtracted>(
+      this.routeId,
+      spec.chatState,
+      undefined,
+      spec.gather,
+      spec.skipIf,
+      spec.requiredData
+    );
+    const transition = new Transition<TContext, TExtracted>(
+      this.getRef(),
+      spec,
+      condition
+    );
     transition.setTarget(targetState);
 
     this.transitions.push(transition);
@@ -97,8 +117,26 @@ export class State<TContext = unknown> {
   /**
    * Get all transitions from this state
    */
-  getTransitions(): Transition<TContext>[] {
+  getTransitions(): Transition<TContext, TExtracted>[] {
     return [...this.transitions];
+  }
+
+  /**
+   * Check if this state should be skipped based on extracted data
+   */
+  shouldSkip(extracted: Partial<TExtracted>): boolean {
+    if (!this.skipIf) return false;
+    return this.skipIf(extracted);
+  }
+
+  /**
+   * Check if this state has all required data to proceed
+   */
+  hasRequiredData(extracted: Partial<TExtracted>): boolean {
+    if (!this.requiredData || this.requiredData.length === 0) return true;
+    return this.requiredData.every(
+      (key) => extracted[key as keyof TExtracted] !== undefined
+    );
   }
 
   /**
@@ -116,21 +154,23 @@ export class State<TContext = unknown> {
    */
   private createStateRefWithTransition(
     ref: StateRef,
-    state?: State<TContext>
-  ): TransitionResult<TContext> {
+    state?: State<TContext, TExtracted>
+  ): TransitionResult<TContext, TExtracted> {
     const stateInstance = state || this;
 
     return {
       ...ref,
-      transitionTo: (spec: TransitionSpec<TContext>, condition?: string) =>
-        stateInstance.transitionTo(spec, condition),
+      transitionTo: (
+        spec: TransitionSpec<TContext, TExtracted>,
+        condition?: string
+      ) => stateInstance.transitionTo(spec, condition),
     };
   }
 
   /**
    * Create a terminal state reference (for END_ROUTE)
    */
-  private createTerminalRef(): TransitionResult<TContext> {
+  private createTerminalRef(): TransitionResult<TContext, TExtracted> {
     const terminalRef: StateRef = {
       id: "END",
       routeId: this.routeId,

@@ -1,11 +1,17 @@
 /**
  * Rules & Prohibitions Example
+ * Updated for v2 architecture with session state management
  *
  * Demonstrates how to use rules and prohibitions to control agent behavior
  * in different conversation routes (e.g., WhatsApp bot with different styles)
  */
 
-import { Agent, createMessageEvent, EventSource } from "../src/index";
+import {
+  Agent,
+  createMessageEvent,
+  EventSource,
+  createSession,
+} from "../src/index";
 import { AnthropicProvider } from "../src/providers";
 
 // Initialize AI provider
@@ -137,10 +143,16 @@ async function demonstrateRulesAndProhibitions() {
     ),
   ];
 
-  const response1 = await agent.respond({ history: history1 });
-  console.log(`Route: ${response1.route?.title}`);
+  // Initialize session state for multi-turn conversation
+  let session = createSession();
+
+  const response1 = await agent.respond({ history: history1, session });
+  console.log(`Route: ${response1.session?.currentRoute?.title}`);
   console.log(`Response: ${response1.message}`);
   console.log(`Expected: Short, direct, max 1 emoji\n`);
+
+  // Update session with progress
+  session = response1.session!;
 
   // Example 2: Sales Consultation - Should be engaging and value-focused
   console.log("2️⃣  Sales Consultation Route (conversational, value-first)");
@@ -152,10 +164,13 @@ async function demonstrateRulesAndProhibitions() {
     ),
   ];
 
-  const response2 = await agent.respond({ history: history2 });
-  console.log(`Route: ${response2.route?.title}`);
+  const response2 = await agent.respond({ history: history2, session });
+  console.log(`Route: ${response2.session?.currentRoute?.title}`);
   console.log(`Response: ${response2.message}`);
   console.log(`Expected: Ask about needs, show value before price\n`);
+
+  // Update session again
+  session = response2.session!;
 
   // Example 3: Technical Support - Should be detailed and step-by-step
   console.log("3️⃣  Technical Support Route (detailed, step-by-step)");
@@ -167,10 +182,13 @@ async function demonstrateRulesAndProhibitions() {
     ),
   ];
 
-  const response3 = await agent.respond({ history: history3 });
-  console.log(`Route: ${response3.route?.title}`);
+  const response3 = await agent.respond({ history: history3, session });
+  console.log(`Route: ${response3.session?.currentRoute?.title}`);
   console.log(`Response: ${response3.message}`);
   console.log(`Expected: Clear steps, simple language, patient\n`);
+
+  // Update session again
+  session = response3.session!;
 
   // Example 4: Emergency Support - Should be calm and action-oriented
   console.log("4️⃣  Emergency Support Route (urgent, professional)");
@@ -182,10 +200,13 @@ async function demonstrateRulesAndProhibitions() {
     ),
   ];
 
-  const response4 = await agent.respond({ history: history4 });
-  console.log(`Route: ${response4.route?.title}`);
+  const response4 = await agent.respond({ history: history4, session });
+  console.log(`Route: ${response4.session?.currentRoute?.title}`);
   console.log(`Response: ${response4.message}`);
   console.log(`Expected: Acknowledge urgency, no emojis, concrete steps\n`);
+
+  // Update session again
+  session = response4.session!;
 
   // Example 5: General Chat - Should be friendly and casual
   console.log("5️⃣  General Chat Route (friendly, casual)");
@@ -193,8 +214,8 @@ async function demonstrateRulesAndProhibitions() {
     createMessageEvent(EventSource.CUSTOMER, "Eve", "Hey! How's it going?"),
   ];
 
-  const response5 = await agent.respond({ history: history5 });
-  console.log(`Route: ${response5.route?.title}`);
+  const response5 = await agent.respond({ history: history5, session });
+  console.log(`Route: ${response5.session?.currentRoute?.title}`);
   console.log(`Response: ${response5.message}`);
   console.log(`Expected: Friendly, emojis, mirrors customer tone\n`);
 }

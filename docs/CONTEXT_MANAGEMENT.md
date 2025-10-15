@@ -1,57 +1,340 @@
-# Context Management & Persistence
+# Session State & Data Management
 
 ## Overview
 
-The `@falai/agent` framework provides flexible patterns for managing context in both **single-turn** and **multi-turn persistent** conversations. This guide explains how to handle stateful conversations that persist across requests.
+The `@falai/agent` framework provides **session state management** for tracking conversation progress, extracted data, and user intent across multiple turns. This enables sophisticated data-driven conversations with intelligent state progression.
 
 ---
 
-## 🤔 The Context Lifecycle Problem
+## 🎯 Session State: The Foundation
 
-### Single-Turn Conversations (Simple)
+Session state tracks three key aspects of a conversation:
 
-```typescript
-// ✅ Works great for single-turn conversations
-const agent = new Agent({
-  name: "Bot",
-  ai: provider,
-  context: { userId: "123", preferences: {} },
-});
-
-const response = await agent.respond({ history });
-```
-
-**Works because:** Agent is used once and discarded.
-
-### Multi-Turn Conversations (Complex)
+1. **Current Route** - Which conversation flow the user is in
+2. **Current State** - Where in the flow they currently are
+3. **Extracted Data** - Structured data collected so far
 
 ```typescript
-// ❌ PROBLEM: Context updates don't persist
-const agent = new Agent({
-  name: "Bot",
-  ai: provider,
-  context: { userId: "123", preferences: {} },
-});
+import { createSession, SessionState } from "@falai/agent";
 
-// Turn 1
-await agent.respond({ history: [message1] });
-// Tool modifies context in memory...
+// Define your data extraction type
+interface FlightData {
+  destination: string;
+  departureDate: string;
+  passengers: number;
+  cabinClass: "economy" | "business" | "first";
+}
 
-// Turn 2 (new request, agent recreated)
-const agent2 = new Agent({ context: { userId: "123", preferences: {} } });
-await agent2.respond({ history: [message2] });
-// ❌ Lost the context changes from Turn 1!
+// Initialize session state
+let session = createSession<FlightData>();
+
+// Session starts empty
+console.log(session.currentRoute); // undefined
+console.log(session.currentState); // undefined
+console.log(session.extracted); // {}
+
+// Use in conversation
+const response = await agent.respond({ history, session });
+
+// Session updated with progress and extracted data
+console.log(response.session?.currentRoute?.title); // "Book Flight"
+console.log(response.session?.currentState?.id); // "ask_destination"
+console.log(response.session?.extracted); // { destination: "Paris", ... }
 ```
 
-**Problem:** When agents are recreated (e.g., across HTTP requests), context updates are lost.
+**Benefits of Session State:**
+
+- **Always-On Routing** - Users can change their mind mid-conversation
+- **Data Persistence** - Extracted data survives across turns
+- **Context Awareness** - Router sees current progress and extracted data
+- **State Recovery** - Resume conversations from any point
 
 ---
 
-## 💡 Solution: Context Lifecycle Hooks
+## 🔄 Session State Helpers
 
-The framework provides **lifecycle hooks** to integrate with your persistence layer (database, cache, etc.).
+### Creating and Managing Sessions
 
-### Pattern 1: `beforeRespond` + `onContextUpdate` (Recommended)
+```typescript
+import {
+  createSession,
+  enterRoute,
+  enterState,
+  mergeExtracted,
+  type SessionState,
+} from "@falai/agent";
+
+// Create a new session
+let session = createSession<FlightData>();
+
+// Enter a route (when routing decides to switch)
+session = enterRoute(session, "book_flight", "Book Flight");
+
+// Enter a state (when progressing through the flow)
+session = enterState(session, "ask_destination", "Ask where they want to fly");
+
+// Merge extracted data (when AI extracts new information)
+session = mergeExtracted(session, {
+  destination: "Paris",
+  departureDate: "2025-10-15",
+  passengers: 2,
+});
+```
+
+### Session State Structure
+
+```typescript
+interface SessionState<TExtracted = unknown> {
+  currentRoute?: {
+    id: string;
+    title: string;
+    enteredAt: Date;
+  };
+  currentState?: {
+    id: string;
+    description?: string;
+    enteredAt: Date;
+  };
+  extracted: Partial<TExtracted>; // Data collected so far
+  routeHistory: Array<{
+    routeId: string;
+    routeTitle: string;
+    enteredAt: Date;
+    exitedAt?: Date;
+  }>;
+  metadata?: Record<string, unknown>;
+}
+```
+
+## 🔄 Enhanced Lifecycle Hooks
+
+### Context Hooks (Traditional Context Management)
+
+```typescript
+const agent = new Agent({
+  // ... other options
+  hooks: {
+    // Refresh context before each response
+    beforeRespond: async (currentContext) => {
+      const freshData = await loadUserData(currentContext.userId);
+      return { ...currentContext, ...freshData };
+    },
+
+    // Persist context updates
+    onContextUpdate: async (newContext, previousContext) => {
+      await saveUserData(newContext.userId, newContext);
+    },
+
+    // NEW: Validate and enrich extracted data
+    onExtractedUpdate: async (extracted, previousExtracted) => {
+      // Normalize passenger count
+      if (extracted.passengers < 1) extracted.passengers = 1;
+      if (extracted.passengers > 9) extracted.passengers = 9;
+
+      // Enrich with computed fields
+      if (extracted.destination) {
+        extracted.destinationCode = await lookupAirportCode(
+          extracted.destination
+        );
+      }
+
+      // Auto-trigger actions
+      if (hasAllRequiredData(extracted)) {
+        extracted.shouldSearchFlights = true;
+      }
+
+      return extracted;
+    },
+  },
+});
+```
+
+### Context Provider Pattern
+
+For always-fresh context from external sources:
+
+```typescript
+const agent = new Agent({
+  // ... other options
+  contextProvider: async () => {
+    // Load fresh context for each response
+    return await loadFullContextFromDatabase();
+  },
+});
+```
+
+## 📊 Data Extraction Pipeline
+
+Schema-first data extraction with intelligent state progression:
+
+### 1. Define Your Data Schema
+
+```typescript
+interface FlightData {
+  destination: string;
+  destinationCode?: string; // Enriched by tools
+  departureDate: string;
+  departureDateParsed?: string; // Enriched by tools
+  passengers: number;
+  cabinClass: "economy" | "business" | "first";
+  shouldSearchFlights?: boolean; // Action flag
+}
+
+const route = agent.createRoute<FlightData>({
+  title: "Book Flight",
+  gatherSchema: {
+    type: "object",
+    properties: {
+      destination: { type: "string" },
+      departureDate: { type: "string" },
+      passengers: { type: "number", minimum: 1, maximum: 9 },
+      cabinClass: {
+        type: "string",
+        enum: ["economy", "business", "first"],
+        default: "economy",
+      },
+    },
+    required: ["destination", "departureDate", "passengers"],
+  },
+  initialData: {
+    cabinClass: "economy", // Pre-populate defaults
+  },
+});
+```
+
+### 2. Create Smart State Machines
+
+```typescript
+// State with code-based logic (no fuzzy LLM conditions!)
+const askDestination = route.initialState.transitionTo({
+  chatState: "Ask where they want to fly",
+  gather: ["destination"],
+  skipIf: (extracted) => !!extracted.destination, // Skip if already have destination
+});
+
+const enrichDestination = askDestination.transitionTo({
+  toolState: lookupAirportCode, // Tool executes automatically
+  requiredData: ["destination"], // Prerequisites
+});
+
+const askDates = enrichDestination.transitionTo({
+  chatState: "Ask about travel dates",
+  gather: ["departureDate"],
+  skipIf: (extracted) => !!extracted.departureDate,
+  requiredData: ["destination"], // Must have destination first
+});
+
+const validateDate = askDates.transitionTo({
+  toolState: parseAndValidateDate,
+  requiredData: ["departureDate"],
+});
+
+const askPassengers = validateDate.transitionTo({
+  chatState: "How many passengers?",
+  gather: ["passengers"],
+  skipIf: (extracted) => !!extracted.passengers,
+});
+
+const searchFlights = askPassengers.transitionTo({
+  toolState: searchFlightAPI,
+  // Triggered when shouldSearchFlights flag is set by hook
+});
+```
+
+### 3. Tools Access Extracted Data
+
+```typescript
+const searchFlights = defineTool<Context, [], void, FlightData>(
+  "search_flights",
+  async ({ context, extracted }) => {
+    // Access extracted data directly (no LLM extraction needed!)
+    if (!extracted.destination || !extracted.departureDate) {
+      return { data: undefined };
+    }
+
+    const flights = await searchFlightAPI(
+      extracted.destination,
+      extracted.departureDate
+    );
+
+    return {
+      data: undefined,
+      contextUpdate: { availableFlights: flights },
+      extractedUpdate: {
+        shouldSearchFlights: false, // Clear the flag
+      },
+    };
+  }
+);
+```
+
+### 4. Lifecycle Hooks for Validation & Enrichment
+
+```typescript
+const agent = new Agent({
+  // ... other options
+  hooks: {
+    onExtractedUpdate: async (extracted, previous) => {
+      // Normalize data
+      if (extracted.passengers < 1) extracted.passengers = 1;
+      if (extracted.passengers > 9) extracted.passengers = 9;
+
+      // Enrich data
+      if (extracted.destination && !extracted.destinationCode) {
+        extracted.destinationCode = await lookupAirportCode(
+          extracted.destination
+        );
+      }
+
+      // Auto-trigger actions
+      if (hasAllRequiredData(extracted) && !extracted.shouldSearchFlights) {
+        extracted.shouldSearchFlights = true;
+      }
+
+      return extracted;
+    },
+  },
+});
+```
+
+## 🎯 Always-On Routing with Context
+
+Routing happens every turn with full session context:
+
+```typescript
+// User starts booking a flight
+const response1 = await agent.respond({
+  history: [
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "User",
+      "I want to fly to Paris tomorrow with 2 people"
+    ),
+  ],
+  session,
+});
+
+// User changes mind mid-conversation
+const response2 = await agent.respond({
+  history: [
+    ...previousHistory,
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "User",
+      "Actually, make that Tokyo instead"
+    ),
+  ],
+  session: response1.session, // Router sees context and switches appropriately
+});
+
+// Router understands:
+// - Current route: "Book Flight"
+// - Current state: "ask_passengers"
+// - Extracted data: { destination: "Paris", departureDate: "tomorrow", passengers: 2 }
+// - User intent: "Tokyo instead" → switches to new destination
+```
+
+## 📋 Multi-Turn Conversation Patterns
 
 ```typescript
 import { Agent, type ContextLifecycleHooks } from "@falai/agent";

@@ -22,12 +22,6 @@ export enum CompositionMode {
 }
 
 /**
- * Forward declare observation types
- */
-import type { ObservationOptions } from "./observation";
-import { PreparationEngineOptions } from "@core/PreparationEngine";
-
-/**
  * Context lifecycle hooks for managing state persistence
  */
 export interface ContextLifecycleHooks<TContext = unknown> {
@@ -45,6 +39,19 @@ export interface ContextLifecycleHooks<TContext = unknown> {
     newContext: TContext,
     previousContext: TContext
   ) => Promise<void> | void;
+
+  /**
+   * Called after extracted data is updated (from AI response or tool execution)
+   * Useful for validation, enrichment, or persistence of gathered data
+   * Return modified extracted data or the same data to keep it unchanged
+   *
+   * Note: This hook works with ANY route's extracted data (since an agent can have
+   * multiple routes with different extraction schemas). Use type guards or runtime
+   * checks if you need type-specific logic.
+   */
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onExtractedUpdate?: (extracted: any, previousExtracted: any) => any;
 }
 
 /**
@@ -65,6 +72,8 @@ export interface AgentOptions<TContext = unknown> {
   description?: string;
   /** The agent's primary goal or objective */
   goal?: string;
+  /** Optional personality/tone instructions used in prompts */
+  personality?: string;
   /** Default context data available to the agent */
   context?: TContext;
   /** Context provider function for always-fresh context (alternative to static context) */
@@ -73,10 +82,6 @@ export interface AgentOptions<TContext = unknown> {
   hooks?: ContextLifecycleHooks<TContext>;
   /** AI provider strategy for generating responses */
   ai: AiProvider;
-  /** Maximum number of processing iterations per request */
-  maxEngineIterations?: number;
-  /** Optional parallelism controls for preparation engine */
-  preparation?: PreparationEngineOptions;
   /** Composition mode for response generation */
   compositionMode?: CompositionMode;
   /** Initial terms for domain glossary */
@@ -86,9 +91,7 @@ export interface AgentOptions<TContext = unknown> {
   /** Initial capabilities */
   capabilities?: Capability[];
   /** Initial routes (will be instantiated as Route objects) */
-  routes?: RouteOptions[];
-  /** Initial observations for disambiguation */
-  observations?: ObservationOptions[];
+  routes?: RouteOptions<unknown>[];
   /** Optional persistence configuration for auto-saving sessions and messages */
   persistence?: PersistenceConfig;
 }

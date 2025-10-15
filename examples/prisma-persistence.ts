@@ -1,8 +1,8 @@
 /**
- * Example: Using Prisma ORM for Persistence
+ * Example: Using Prisma ORM for Persistence with Session State
  *
  * This example shows how to use @falai/agent with Prisma for automatic
- * session and message persistence - as easy as using an AI provider!
+ * session state persistence - with the new data-driven architecture!
  */
 
 import {
@@ -11,6 +11,7 @@ import {
   PrismaAdapter,
   createMessageEvent,
   EventSource,
+  createSession,
 } from "../src/index";
 
 // @ts-ignore
@@ -38,12 +39,22 @@ import { PrismaClient } from "@prisma/client";
 // Example context type
 interface ConversationContext {
   userId: string;
-  sessionId: string;
   userName: string;
-  preferences: {
-    language: string;
-    theme: string;
+  currentBooking?: {
+    destination?: string;
+    departureDate?: string;
+    returnDate?: string;
+    passengers?: number;
   };
+}
+
+// Extracted data type for flight booking
+interface FlightBookingData {
+  destination: string;
+  departureDate: string;
+  returnDate?: string;
+  passengers: number;
+  cabinClass: "economy" | "premium" | "business" | "first";
 }
 
 async function example() {
@@ -53,30 +64,101 @@ async function example() {
   const userId = "user_123";
 
   /**
-   * Create Agent with Persistence - Simple Provider Pattern! ✨
+   * Create Agent with Persistence - New Session-Based Pattern! ✨
    */
   const agent = new Agent<ConversationContext>({
-    name: "Shopping Assistant",
-    description: "A helpful shopping assistant",
+    name: "Travel Assistant",
+    description: "A helpful travel booking assistant",
+    goal: "Help users book flights with ease",
     ai: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
     context: {
       userId,
-      sessionId: "", // Will be set when we create/load a session
       userName: "Alice",
-      preferences: {
-        language: "en",
-        theme: "light",
-      },
     },
     // ✨ Just pass the adapter - that's it!
     persistence: {
       adapter: new PrismaAdapter({ prisma }),
-      autoSave: true,
+      autoSave: true, // Auto-saves session state after each response
       userId,
     },
+  });
+
+  /**
+   * Create a route with data extraction schema
+   */
+  const flightRoute = agent.createRoute<FlightBookingData>({
+    title: "Book a Flight",
+    description: "Help user book a flight ticket",
+    conditions: [
+      "User wants to book a flight",
+      "User mentions travel, flying, or booking tickets",
+    ],
+    gatherSchema: {
+      type: "object",
+      properties: {
+        destination: {
+          type: "string",
+          description: "Destination city or airport",
+        },
+        departureDate: {
+          type: "string",
+          description: "Departure date (YYYY-MM-DD)",
+        },
+        returnDate: {
+          type: "string",
+          description: "Return date (YYYY-MM-DD)",
+        },
+        passengers: {
+          type: "number",
+          minimum: 1,
+          maximum: 9,
+          description: "Number of passengers",
+        },
+        cabinClass: {
+          type: "string",
+          enum: ["economy", "premium", "business", "first"],
+          default: "economy",
+          description: "Cabin class preference",
+        },
+      },
+      required: ["destination", "departureDate", "passengers", "cabinClass"],
+    },
+  });
+
+  // State flow with smart data gathering
+  const askDestination = flightRoute.initialState.transitionTo({
+    chatState: "Ask where they want to fly",
+    gather: ["destination"],
+    skipIf: (extracted) => !!extracted.destination,
+  });
+
+  const askDates = askDestination.transitionTo({
+    chatState: "Ask about travel dates",
+    gather: ["departureDate", "returnDate"],
+    skipIf: (extracted) => !!extracted.departureDate,
+    requiredData: ["destination"],
+  });
+
+  const askPassengers = askDates.transitionTo({
+    chatState: "Ask how many passengers",
+    gather: ["passengers"],
+    skipIf: (extracted) => !!extracted.passengers,
+    requiredData: ["destination", "departureDate"],
+  });
+
+  const askCabinClass = askPassengers.transitionTo({
+    chatState: "Ask about cabin class preference",
+    gather: ["cabinClass"],
+    skipIf: (extracted) => !!extracted.cabinClass,
+    requiredData: ["destination", "departureDate", "passengers"],
+  });
+
+  const confirmBooking = askCabinClass.transitionTo({
+    chatState: "Present options and confirm booking details",
+    requiredData: ["destination", "departureDate", "passengers", "cabinClass"],
   });
 
   /**
@@ -89,83 +171,156 @@ async function example() {
   }
 
   /**
-   * Create or find a session
+   * Create or find a session - New Pattern!
    */
-  let session = await persistence.findActiveSession(userId);
-
-  if (!session) {
-    session = await persistence.createSession({
+  let sessionResult =
+    await persistence.createSessionWithState<FlightBookingData>({
       userId,
-      agentName: "Shopping Assistant",
+      agentName: "Travel Assistant",
       initialData: {
-        language: "en",
-        theme: "light",
+        cabinClass: "economy", // Default value
       },
     });
-    console.log("✨ Created new session:", session.id);
-  } else {
-    console.log("📂 Found active session:", session.id);
-  }
 
-  // Update context with session ID
-  await agent.updateContext({
-    sessionId: session.id,
-  } as Partial<ConversationContext>);
+  let session = sessionResult.sessionState;
+  const dbSessionId = sessionResult.sessionData.id;
+
+  console.log("✨ Created new session:", dbSessionId);
+  console.log("📊 Initial session state:", {
+    currentRoute: session.currentRoute,
+    extracted: session.extracted,
+  });
 
   /**
    * Load conversation history
    */
-  const history = await persistence.loadSessionHistory(session.id);
+  const history = await persistence.loadSessionHistory(dbSessionId);
   console.log(`📜 Loaded ${history.length} messages from history`);
 
   /**
-   * Send a message
+   * Turn 1: User provides multiple fields at once
    */
-  const userMessage = createMessageEvent(
+  console.log("\n--- Turn 1 ---");
+  const userMessage1 = createMessageEvent(
     EventSource.CUSTOMER,
     "Alice",
-    "I'm looking for a winter jacket"
+    "I want to fly to Paris on June 15 with 2 people"
   );
+
+  history.push(userMessage1);
+
+  const response1 = await agent.respond({
+    history,
+    session, // Pass session state
+  });
+
+  console.log("🤖 Agent:", response1.message);
+  console.log("📊 Session state after turn 1:", {
+    currentRoute: response1.session?.currentRoute?.title,
+    currentState: response1.session?.currentState?.id,
+    extracted: response1.session?.extracted,
+  });
 
   // Save user message
   await persistence.saveMessage({
-    sessionId: session.id,
+    sessionId: dbSessionId,
     userId,
     role: "user",
-    content: "I'm looking for a winter jacket",
-    event: userMessage,
+    content: userMessage1.data.message,
+    event: userMessage1,
   });
 
-  history.push(userMessage);
-
-  // Generate agent response
-  const response = await agent.respond({ history });
-  console.log("🤖 Agent:", response.message);
-
-  // Save agent message
+  // Save agent message (session state is auto-saved by Agent!)
   await persistence.saveMessage({
-    sessionId: session.id,
+    sessionId: dbSessionId,
     userId,
     role: "agent",
-    content: response.message,
-    route: response.route?.id,
-    state: response.state?.id,
-    toolCalls: response.toolCalls,
+    content: response1.message,
+    route: response1.session?.currentRoute?.id,
+    state: response1.session?.currentState?.id,
+  });
+
+  // Update session for next turn
+  session = response1.session!;
+
+  /**
+   * Turn 2: User changes their mind
+   */
+  console.log("\n--- Turn 2 ---");
+  const userMessage2 = createMessageEvent(
+    EventSource.CUSTOMER,
+    "Alice",
+    "Actually, make that Tokyo instead, and premium class"
+  );
+
+  history.push(
+    createMessageEvent(
+      EventSource.AI_AGENT,
+      "Travel Assistant",
+      response1.message
+    )
+  );
+  history.push(userMessage2);
+
+  const response2 = await agent.respond({
+    history,
+    session, // Pass updated session
+  });
+
+  console.log("🤖 Agent:", response2.message);
+  console.log("📊 Session state after turn 2:", {
+    currentRoute: response2.session?.currentRoute?.title,
+    currentState: response2.session?.currentState?.id,
+    extracted: response2.session?.extracted,
+  });
+
+  // Save messages
+  await persistence.saveMessage({
+    sessionId: dbSessionId,
+    userId,
+    role: "user",
+    content: userMessage2.data.message,
+    event: userMessage2,
+  });
+
+  await persistence.saveMessage({
+    sessionId: dbSessionId,
+    userId,
+    role: "agent",
+    content: response2.message,
+    route: response2.session?.currentRoute?.id,
+    state: response2.session?.currentState?.id,
+  });
+
+  session = response2.session!;
+
+  /**
+   * Load session state from database (demonstrates persistence)
+   */
+  console.log("\n--- Loading Session from Database ---");
+  const loadedSession = await persistence.loadSessionState<FlightBookingData>(
+    dbSessionId
+  );
+
+  console.log("📥 Loaded session state:", {
+    currentRoute: loadedSession?.currentRoute?.title,
+    currentState: loadedSession?.currentState?.id,
+    extracted: loadedSession?.extracted,
   });
 
   /**
    * Query sessions and messages
    */
   const userSessions = await persistence.getUserSessions(userId);
-  console.log(`👤 User has ${userSessions.length} total sessions`);
+  console.log(`\n👤 User has ${userSessions.length} total sessions`);
 
-  const messages = await persistence.getSessionMessages(session.id);
+  const messages = await persistence.getSessionMessages(dbSessionId);
   console.log(`💬 Session has ${messages.length} messages`);
 
   /**
    * Complete the session
    */
-  await persistence.completeSession(session.id);
+  await persistence.completeSession(dbSessionId);
   console.log("✅ Session completed");
 
   /**
@@ -175,59 +330,67 @@ async function example() {
 }
 
 /**
- * Advanced Example: Using with Lifecycle Hooks
+ * Advanced Example: Session State with Lifecycle Hooks
  */
 async function advancedExample() {
   const prisma = new PrismaClient();
-  const userId = "user_123";
+  const userId = "user_456";
 
-  const agent = new Agent<ConversationContext>({
-    name: "Smart Assistant",
-    description: "An intelligent assistant with persistent state",
+  interface UserContext {
+    userId: string;
+    userName: string;
+    preferences: {
+      currency: string;
+      language: string;
+    };
+  }
+
+  interface OnboardingData {
+    fullName: string;
+    email: string;
+    phoneNumber: string;
+    country: string;
+  }
+
+  const agent = new Agent<UserContext>({
+    name: "Onboarding Assistant",
+    description: "Help new users get started",
     ai: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
     context: {
       userId,
-      sessionId: "",
-      userName: "Alice",
+      userName: "Bob",
       preferences: {
+        currency: "USD",
         language: "en",
-        theme: "light",
       },
     },
-    // Lifecycle hooks for automatic context sync
+    // Lifecycle hooks for session state enrichment
     hooks: {
-      // Load fresh context before each response
-      beforeRespond: async (currentContext) => {
-        const persistence = agent.getPersistenceManager();
-        if (!persistence) return currentContext;
+      // Enrich extracted data before saving
+      onExtractedUpdate: async (extracted, previous) => {
+        console.log("🔄 Extracted data updated:", { extracted, previous });
 
-        const freshSession = await persistence.getSession(
-          currentContext.sessionId
-        );
-        return {
-          ...currentContext,
-          preferences:
-            (
-              freshSession?.collectedData as {
-                preferences?: typeof currentContext.preferences;
-              }
-            )?.preferences || currentContext.preferences,
-        };
+        // Normalize phone numbers
+        if (extracted.phoneNumber) {
+          extracted.phoneNumber = extracted.phoneNumber.replace(/\D/g, "");
+        }
+
+        // Validate email
+        if (extracted.email && !extracted.email.includes("@")) {
+          console.warn("⚠️ Invalid email detected");
+        }
+
+        return extracted;
       },
-      // Automatically persist context updates
-      onContextUpdate: async (newContext) => {
-        const persistence = agent.getPersistenceManager();
-        if (!persistence) return;
 
-        await persistence.updateCollectedData(newContext.sessionId, {
-          preferences: newContext.preferences,
-        });
+      // Update context when session state changes
+      onContextUpdate: async (newContext, oldContext) => {
+        console.log("🔄 Context updated:", { newContext, oldContext });
       },
     },
-    // ✨ Same simple adapter pattern!
     persistence: {
       adapter: new PrismaAdapter({ prisma }),
       autoSave: true,
@@ -235,26 +398,79 @@ async function advancedExample() {
     },
   });
 
-  // Create a session
-  const persistence = agent.getPersistenceManager();
-  const session = await persistence!.createSession({
-    userId,
-    agentName: "Smart Assistant",
+  // Create onboarding route
+  const onboardingRoute = agent.createRoute<OnboardingData>({
+    title: "User Onboarding",
+    description: "Collect user information for account setup",
+    gatherSchema: {
+      type: "object",
+      properties: {
+        fullName: { type: "string" },
+        email: { type: "string" },
+        phoneNumber: { type: "string" },
+        country: { type: "string" },
+      },
+      required: ["fullName", "email", "country"],
+    },
   });
 
-  await agent.updateContext({
-    sessionId: session.id,
-  } as Partial<ConversationContext>);
+  onboardingRoute.initialState
+    .transitionTo({
+      chatState: "Welcome and ask for name",
+      gather: ["fullName"],
+      skipIf: (data) => !!data.fullName,
+    })
+    .transitionTo({
+      chatState: "Ask for email",
+      gather: ["email"],
+      skipIf: (data) => !!data.email,
+    })
+    .transitionTo({
+      chatState: "Ask for phone number (optional)",
+      gather: ["phoneNumber"],
+    })
+    .transitionTo({
+      chatState: "Ask for country",
+      gather: ["country"],
+      skipIf: (data) => !!data.country,
+    })
+    .transitionTo({
+      chatState: "Confirm and complete onboarding",
+    });
 
-  // Now context updates are automatically persisted!
-  await agent.updateContext({
-    preferences: {
-      language: "es",
-      theme: "dark",
-    },
-  } as Partial<ConversationContext>);
+  const persistence = agent.getPersistenceManager()!;
 
-  console.log("🎉 Context updates automatically saved to database!");
+  // Create session with state
+  const { sessionData, sessionState } =
+    await persistence.createSessionWithState<OnboardingData>({
+      userId,
+      agentName: "Onboarding Assistant",
+    });
+
+  console.log("✨ Created onboarding session:", sessionData.id);
+
+  // Simulate conversation
+  const history = [];
+  let session = sessionState;
+
+  const response = await agent.respond({
+    history: [
+      createMessageEvent(EventSource.CUSTOMER, "Bob", "Hi, I'm new here!"),
+    ],
+    session,
+  });
+
+  console.log("🤖 Agent:", response.message);
+  console.log("📊 Extracted so far:", response.session?.extracted);
+
+  await persistence.saveMessage({
+    sessionId: sessionData.id,
+    userId,
+    role: "agent",
+    content: response.message,
+  });
+
+  console.log("✅ Session state automatically saved to database!");
 
   await prisma.$disconnect();
 }
@@ -265,42 +481,72 @@ async function advancedExample() {
 async function quickStart() {
   const prisma = new PrismaClient();
 
-  // That's it! Just create the adapter and pass it
+  interface ContactFormData {
+    name: string;
+    email: string;
+    message: string;
+  }
+
   const agent = new Agent({
-    name: "My Agent",
-    description: "A helpful assistant",
+    name: "Support Agent",
     ai: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.5-flash",
+      model: "models/gemini-2.0-flash-exp",
     }),
     persistence: {
-      adapter: new PrismaAdapter({ prisma }), // ✨ Simple!
-      userId: "user_123",
+      adapter: new PrismaAdapter({ prisma }),
+      userId: "user_789",
+      autoSave: true, // ✨ Automatically saves session state!
     },
   });
 
-  // Get persistence manager
-  const persistence = agent.getPersistenceManager();
-  if (!persistence) return;
-
-  // Create session
-  const session = await persistence.createSession({
-    userId: "user_123",
-    agentName: "My Agent",
+  // Create a simple contact form route
+  const contactRoute = agent.createRoute<ContactFormData>({
+    title: "Contact Form",
+    gatherSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        email: { type: "string" },
+        message: { type: "string" },
+      },
+      required: ["name", "email", "message"],
+    },
   });
 
-  // Load history and respond
-  const history = await persistence.loadSessionHistory(session.id);
-  const response = await agent.respond({ history });
+  contactRoute.initialState
+    .transitionTo({
+      chatState: "Collect all information",
+      gather: ["name", "email", "message"],
+    })
+    .transitionTo({
+      chatState: "Confirm submission",
+    });
 
-  // Save message
-  await persistence.saveMessage({
-    sessionId: session.id,
-    role: "agent",
-    content: response.message,
+  const persistence = agent.getPersistenceManager()!;
+
+  // Create session with state support
+  const { sessionData, sessionState } =
+    await persistence.createSessionWithState<ContactFormData>({
+      userId: "user_789",
+      agentName: "Support Agent",
+    });
+
+  // Chat!
+  const response = await agent.respond({
+    history: [
+      createMessageEvent(
+        EventSource.CUSTOMER,
+        "User",
+        "I need help, my name is John and my email is john@example.com"
+      ),
+    ],
+    session: sessionState,
   });
 
-  console.log("✅ Done! Messages automatically saved to Prisma.");
+  console.log("✅ Response:", response.message);
+  console.log("📊 Extracted:", response.session?.extracted);
+  console.log("💾 Session state auto-saved to Prisma!");
 
   await prisma.$disconnect();
 }

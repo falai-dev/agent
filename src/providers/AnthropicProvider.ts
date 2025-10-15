@@ -258,13 +258,10 @@ export class AnthropicProvider implements AiProvider {
         ...this.config,
       };
 
-      // Handle JSON mode if requested
-      // Note: Anthropic doesn't have a native JSON mode like OpenAI,
-      // but we can add it to the system prompt
-      if (input.parameters?.jsonMode) {
-        // Add system message requesting JSON output
+      // Handle schema: Anthropic doesn't have a native schema mode, so embed constraints
+      if (input.parameters?.jsonSchema) {
         const systemPrompt =
-          "You must respond with valid JSON only. Do not include any text outside the JSON structure.";
+          "You must respond with valid JSON only and it MUST match the provided schema.";
 
         // Merge with existing system if present
         if (typeof this.config?.system === "string") {
@@ -294,9 +291,9 @@ export class AnthropicProvider implements AiProvider {
         throw new Error("No response from Anthropic");
       }
 
-      // Parse JSON response if JSON mode was enabled
+      // Parse JSON response if schema was provided
       let structured: AgentStructuredResponse | undefined;
-      if (input.parameters?.jsonMode) {
+      if (input.parameters?.jsonSchema) {
         try {
           structured = JSON.parse(message) as AgentStructuredResponse;
         } catch (error) {
@@ -418,10 +415,10 @@ export class AnthropicProvider implements AiProvider {
       ...this.config,
     };
 
-    // Handle JSON mode if requested
-    if (input.parameters?.jsonMode) {
+    // Handle schema in streaming: embed constraint
+    if (input.parameters?.jsonSchema) {
       const systemPrompt =
-        "You must respond with valid JSON only. Do not include any text outside the JSON structure.";
+        "You must respond with valid JSON only and it MUST match the provided schema.";
 
       if (typeof this.config?.system === "string") {
         params.system = `${this.config.system}\n\n${systemPrompt}`;
@@ -466,9 +463,9 @@ export class AnthropicProvider implements AiProvider {
       }
     }
 
-    // Parse JSON response if JSON mode was enabled
+    // Parse JSON response if schema was provided
     let structured: AgentStructuredResponse | undefined;
-    if (input.parameters?.jsonMode && accumulated) {
+    if (input.parameters?.jsonSchema && accumulated) {
       try {
         structured = JSON.parse(accumulated) as AgentStructuredResponse;
       } catch (error) {

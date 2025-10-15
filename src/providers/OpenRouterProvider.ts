@@ -273,53 +273,8 @@ export class OpenRouterProvider implements AiProvider {
         params.max_tokens = input.parameters.maxOutputTokens;
       }
 
-      // Use structured output API if JSON mode is enabled
-      if (input.parameters?.jsonMode) {
-        // Define the JSON schema for agent response
-        const agentResponseSchema = {
-          type: "object",
-          properties: {
-            message: {
-              type: "string",
-              description: "The actual message to send to the user",
-            },
-            route: {
-              type: ["string", "null"],
-              description:
-                "The title of the route chosen (or null if no specific route)",
-            },
-            state: {
-              type: ["string", "null"],
-              description:
-                "The current state within the route (or null if not in a route)",
-            },
-            toolCalls: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  toolName: {
-                    type: "string",
-                    description: "Name of the tool to call",
-                  },
-                  arguments: {
-                    type: "object",
-                    description: "Arguments to pass to the tool",
-                  },
-                },
-                required: ["toolName", "arguments"],
-              },
-              description: "Tool calls the agent wants to execute",
-            },
-            reasoning: {
-              type: "string",
-              description: "Optional: Internal reasoning for this response",
-            },
-          },
-          required: ["message"],
-          additionalProperties: false,
-        };
-
+      // Use structured output API if JSON schema is provided
+      if (input.parameters?.jsonSchema) {
         const response = await this.client.responses.parse({
           model,
           instructions: input.prompt,
@@ -330,8 +285,8 @@ export class OpenRouterProvider implements AiProvider {
           text: {
             format: {
               type: "json_schema",
-              name: "agentResponseSchema",
-              schema: agentResponseSchema,
+              name: input.parameters?.schemaName || "structured_output",
+              schema: input.parameters.jsonSchema,
             },
           },
         });
@@ -355,7 +310,7 @@ export class OpenRouterProvider implements AiProvider {
         };
       }
 
-      // Fall back to regular chat completions API if JSON mode not enabled
+      // Fall back to regular chat completions API if no schema provided
       const response = await this.client.chat.completions.create(params);
 
       const message = response.choices[0]?.message?.content;
@@ -469,10 +424,9 @@ export class OpenRouterProvider implements AiProvider {
       params.max_tokens = input.parameters.maxOutputTokens;
     }
 
-    // Use JSON mode if requested
-    // Note: OpenRouter streaming doesn't support the responses.parse API,
-    // so we use response_format with JSON mode instead
-    if (input.parameters?.jsonMode) {
+    // Streaming path does not support responses.parse; if schema present,
+    // request JSON object and parse at the end.
+    if (input.parameters?.jsonSchema) {
       params.response_format = { type: "json_object" };
     }
 
@@ -510,9 +464,9 @@ export class OpenRouterProvider implements AiProvider {
       }
     }
 
-    // Parse JSON response if JSON mode was enabled
+    // Parse JSON response if schema was provided
     let structured: TStructured | undefined;
-    if (input.parameters?.jsonMode && accumulated) {
+    if (input.parameters?.jsonSchema && accumulated) {
       try {
         structured = JSON.parse(accumulated) as TStructured;
       } catch (error) {

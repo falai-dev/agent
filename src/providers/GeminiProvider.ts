@@ -235,10 +235,13 @@ export class GeminiProvider implements AiProvider {
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
     const operation = async (): Promise<GenerateMessageOutput> => {
-      // Enable JSON mode if requested
+      // Schema-required: configure response schema
       const configOverride: Partial<GenerateContentConfig> = { ...this.config };
-      if (input.parameters?.jsonMode) {
+      if (input.parameters?.jsonSchema) {
         configOverride.responseMimeType = "application/json";
+        // Gemini expects responseSchema. We pass through our schema as-is.
+        // A deeper mapping can be added via utils if needed.
+        configOverride.responseSchema = input.parameters.jsonSchema;
       }
 
       const response: GenerateContentResponse =
@@ -253,9 +256,9 @@ export class GeminiProvider implements AiProvider {
         throw new Error("No response from Gemini");
       }
 
-      // Parse JSON response if JSON mode was enabled
+      // Parse JSON response if schema was provided
       let structured: AgentStructuredResponse | undefined;
-      if (input.parameters?.jsonMode) {
+      if (input.parameters?.jsonSchema) {
         try {
           structured = JSON.parse(message) as AgentStructuredResponse;
         } catch (error) {
@@ -353,10 +356,11 @@ export class GeminiProvider implements AiProvider {
     model: string,
     input: GenerateMessageInput<TContext>
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
-    // Enable JSON mode if requested
+    // Streaming: request JSON if schema provided
     const configOverride: Partial<GenerateContentConfig> = { ...this.config };
-    if (input.parameters?.jsonMode) {
+    if (input.parameters?.jsonSchema) {
       configOverride.responseMimeType = "application/json";
+      configOverride.responseSchema = input.parameters.jsonSchema;
     }
 
     const stream = await this.genAI.models.generateContentStream({
@@ -390,9 +394,9 @@ export class GeminiProvider implements AiProvider {
       }
     }
 
-    // Parse JSON response if JSON mode was enabled
+    // Parse JSON response if schema was provided
     let structured: AgentStructuredResponse | undefined;
-    if (input.parameters?.jsonMode && accumulated) {
+    if (input.parameters?.jsonSchema && accumulated) {
       try {
         structured = JSON.parse(accumulated) as AgentStructuredResponse;
       } catch (error) {

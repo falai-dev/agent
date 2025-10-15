@@ -2,384 +2,382 @@
 
 ## Overview
 
-`@falai/agent` is built on a **state machine-driven architecture** inspired by [Parlant/Emcie](https://github.com/emcie-co/parlant), where tools execute automatically based on conversation flow rather than AI decision-making. This creates deterministic, controllable, and predictable agent behavior.
+`@falai/agent` is built on a **schema-first, data-driven architecture** that prioritizes type safety, structured data extraction, and code-based state management over fuzzy LLM conditions. This creates predictable, maintainable, and efficient conversational AI agents.
 
 ## Core Design Principles
 
-### 1. 🎯 State Machine First
+### 1. 🎯 Schema-First Data Extraction
 
-Conversations are modeled as **explicit state machines** using the Route DSL:
-
-```typescript
-const route = agent.createRoute({
-  title: "Onboarding Flow",
-  description: "Collect user information step by step",
-  conditions: ["User wants to sign up"],
-});
-
-// Define states and transitions explicitly
-route.initialState
-  .transitionTo({ chatState: "Ask for name" })
-  .transitionTo({ toolState: saveName }, "User provided name")
-  .transitionTo({ chatState: "Ask for email" })
-  .transitionTo({ toolState: saveEmail }, "User provided email")
-  .transitionTo({ state: END_ROUTE });
-```
-
-**Why?** Explicit state machines make conversation flows:
-
-- **Predictable** - You know exactly what happens when
-- **Testable** - Each state transition can be unit tested
-- **Debuggable** - Clear state progression makes issues obvious
-- **Maintainable** - Easy to modify flow without breaking things
-
-### 2. 🔧 Automatic Tool Execution
-
-Tools **execute automatically** when triggered by the state machine or guideline matching - the AI never decides when to call tools.
+Define what data to collect upfront using JSON Schema, then extract it reliably:
 
 ```typescript
-// ✅ CORRECT: Tool executes automatically when state is reached
-askName.transitionTo({ toolState: saveName }, "User provided their name");
-
-// ✅ CORRECT: Tool executes when guideline matches
-agent.createGuideline({
-  condition: "User asks about pricing",
-  action: "Explain our pricing structure",
-  tools: [fetchCurrentPricing], // Auto-executes when guideline matches
-});
-
-// ❌ WRONG: Don't expect AI to call tools
-agent.createCapability({
-  title: "Save Data",
-  tools: [saveName], // AI sees this but can't call it
-});
-```
-
-**Why?** Automatic execution ensures:
-
-- **Reliability** - Tools always execute when they should
-- **Security** - You control tool execution, not the AI
-- **Determinism** - Same conversation always triggers same tools
-- **Separation of Concerns** - AI generates messages, engine executes tools
-
-### 3. 🧠 AI as Message Generator Only
-
-The AI's **only job** is to generate natural, conversational messages to users. It never:
-
-- Decides which tools to call
-- Controls conversation flow
-- Makes routing decisions
-- Manages state transitions
-
-```typescript
-// The AI only sees:
-// 1. Agent identity & description
-// 2. Conversation history
-// 3. Context variables (updated by tools)
-// 4. Guidelines to follow
-// 5. Available routes
-// 6. Glossary terms
-
-// The AI NEVER sees:
-// ❌ Available tools
-// ❌ Tool signatures
-// ❌ Domain definitions
-// ❌ Tool execution results (sees context updates instead)
-```
-
-**Why?** This creates:
-
-- **Predictable behavior** - AI can't go "off script"
-- **Cost efficiency** - Smaller prompts = lower API costs
-- **Faster responses** - Less for AI to process
-- **Better quality** - AI focuses on one thing: good messages
-
-### 4. 🔄 Preparation Iteration Loop
-
-Before generating a message, the agent runs **preparation iterations** to gather all needed data:
-
-```
-┌─────────────────────────────────────────────────┐
-│ 1. New message arrives                          │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────┐
-│ 2. Match guidelines against context             │
-│    - Which guidelines apply now?                │
-│    - Do they have tools attached?               │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────┐
-│ 3. Execute tools for matched guidelines         │
-│    - Run tools automatically                    │
-│    - Collect results & context updates          │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────┐
-│ 4. Execute state machine transitions            │
-│    - If state has toolState → execute it        │
-│    - Update context with results                │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-        ┌─────────┴─────────┐
-        │ Tools executed?   │
-        └─────────┬─────────┘
-                  │
-        ┌─────────┴─────────┐
-        │ Yes         │ No  │
-        ▼             ▼
-   ┌─────────┐  ┌────────────┐
-   │ Loop    │  │ Generate   │
-   │ again   │  │ message    │
-   └─────────┘  └────────────┘
-```
-
-**Why?** This enables:
-
-- **Multi-step data gathering** - Tools can trigger more tools
-- **Context enrichment** - Each iteration adds more context
-- **Dynamic flows** - Tool results can change which guidelines match
-- **Efficiency** - One message generation with complete context
-
-### 5. 📦 Domain-Based Tool Organization
-
-Tools are organized into **domains** for better structure and access control:
-
-```typescript
-// Register tools by domain
-agent.addDomain("user", {
-  saveProfile: async (data) => {
-    /* ... */
-  },
-  updatePreferences: async (prefs) => {
-    /* ... */
-  },
-});
-
-agent.addDomain("payment", {
-  processPayment: async (amount) => {
-    /* ... */
-  },
-  refund: async (id) => {
-    /* ... */
-  },
-});
-
-// Route-level access control
-const checkoutRoute = agent.createRoute({
-  title: "Checkout",
-  domains: ["payment"], // SECURITY: Only payment tools can execute in this route
-});
-
-const profileRoute = agent.createRoute({
-  title: "Profile Setup",
-  domains: ["user"], // SECURITY: Only user tools can execute
-});
-
-const generalRoute = agent.createRoute({
-  title: "General Chat",
-  // No domains = ALL tools available (default behavior)
-});
-```
-
-**Important**: Domains are for **internal tool filtering**, not AI prompts:
-
-- ✅ Engine uses domains to filter which tools can execute
-- ✅ Prevents accidental/malicious tool calls outside intended routes
-- ❌ AI never sees domains (they're not in prompts)
-- ❌ Domains don't affect what AI says, only what tools can run
-
-**Why?** Domains provide:
-
-- **Security** - Prevent prompt injection attacks from calling sensitive tools
-- **Route Isolation** - Checkout route can't accidentally trigger user profile tools
-- **Organization** - Logical grouping of related tools
-- **Optional** - Routes without domains have access to all tools (simple default)
-- **Scalability** - Add new domains without affecting existing ones
-
-**Example Security Scenario**:
-
-```typescript
-// Without domains: Malicious user in chat could trigger payment processing
-// With domains: Payment tools only available in checkout route
-const chatRoute = agent.createRoute({
-  title: "General Chat",
-  domains: ["chat", "user"], // Can't execute payment tools
-});
-
-const checkoutRoute = agent.createRoute({
-  title: "Checkout",
-  domains: ["payment"], // Can execute payment, but not unrelated tools
-});
-```
-
-### 6. 🎭 Context-Driven Behavior
-
-Agent behavior adapts based on **context** - not hardcoded logic:
-
-```typescript
-interface MyContext {
-  userId: string;
-  plan: "free" | "pro" | "enterprise";
-  remainingCredits: number;
+// Define your data contract
+interface FlightData {
+  destination: string;
+  departureDate: string;
+  passengers: number;
+  cabinClass: "economy" | "business" | "first";
 }
 
-const agent = new Agent<MyContext>({
-  name: "Assistant",
-  ai: provider,
-  context: {
-    userId: "user123",
-    plan: "pro",
-    remainingCredits: 100,
-  },
-  hooks: {
-    // Refresh context before each response
-    beforeRespond: async (ctx) => {
-      const freshData = await db.getUser(ctx.userId);
-      return { ...ctx, remainingCredits: freshData.credits };
+const route = agent.createRoute<FlightData>({
+  title: "Book Flight",
+  description: "Help user book a flight",
+  gatherSchema: {
+    type: "object",
+    properties: {
+      destination: { type: "string" },
+      departureDate: { type: "string" },
+      passengers: { type: "number", minimum: 1, maximum: 9 },
+      cabinClass: {
+        type: "string",
+        enum: ["economy", "business", "first"],
+        default: "economy",
+      },
     },
-
-    // Persist context updates
-    onContextUpdate: async (newCtx, oldCtx) => {
-      await db.updateUser(newCtx.userId, {
-        credits: newCtx.remainingCredits,
-      });
-    },
+    required: ["destination", "departureDate", "passengers"],
   },
 });
+```
 
-// Guidelines can reference context
-agent.createGuideline({
-  condition: "User requests a feature",
-  action:
-    "If context.plan is 'free', explain upgrade benefits. Otherwise provide the feature.",
+**Why?** Schema-first extraction provides:
+
+- **Type Safety** - Full TypeScript types from definition to extraction
+- **Reliability** - Provider-enforced schemas, not prompt-based parsing
+- **Predictability** - Same data structure every time
+- **Efficiency** - Extract multiple fields in one LLM call
+
+### 2. 📊 Session State Management
+
+Track conversation progress and extracted data across turns:
+
+```typescript
+import {
+  createSession,
+  enterRoute,
+  enterState,
+  mergeExtracted,
+} from "@falai/agent";
+
+let session = createSession<FlightData>();
+
+// Turn 1 - Extract data
+const response1 = await agent.respond({ history, session });
+session = response1.session!; // Updated with extracted data
+
+// Turn 2 - User changes mind (always-on routing)
+const response2 = await agent.respond({ history, session: response1.session });
+session = response2.session!; // Route/state updated if user changed direction
+```
+
+**Why?** Session state enables:
+
+- **Always-on Routing** - Users can change their mind mid-conversation
+- **Context Awareness** - Router sees current progress and extracted data
+- **Data Persistence** - Extracted data survives across turns
+- **State Recovery** - Resume conversations from any point
+
+### 3. 🔧 Code-Based State Logic
+
+Use TypeScript functions instead of LLM conditions for deterministic flow:
+
+```typescript
+// State with smart bypassing based on extracted data
+const askDestination = route.initialState.transitionTo({
+  chatState: "Ask where they want to fly",
+  gather: ["destination"],
+  skipIf: (extracted) => !!extracted.destination, // Code-based condition!
 });
 
-// Tools receive and update context
-const useFeature = defineTool<MyContext, [feature: string], boolean>(
-  "use_feature",
-  async (toolContext, feature) => {
+const askDate = askDestination.transitionTo({
+  chatState: "Ask about travel dates",
+  gather: ["departureDate"],
+  skipIf: (extracted) => !!extracted.departureDate,
+  requiredData: ["destination"], // Prerequisites
+});
+```
+
+**Why?** Code-based logic provides:
+
+- **Predictability** - No fuzzy LLM interpretation of conditions
+- **Performance** - No extra LLM calls for condition checking
+- **Debugging** - Clear logic flow you can trace
+- **Type Safety** - Full TypeScript support for data validation
+
+### 4. 🛠️ Tools with Data Access
+
+Tools execute with full context including extracted data:
+
+```typescript
+const searchFlights = defineTool<Context, [], void, FlightData>(
+  "search_flights",
+  async (toolContext) => {
+    const { extracted, context, history } = toolContext;
+
+    // Access extracted data directly
+    if (!extracted.destination || !extracted.departureDate) {
+      return { data: undefined };
+    }
+
+    // Enrich extracted data
     return {
-      data: true,
-      contextUpdate: {
-        remainingCredits: toolContext.context.remainingCredits - 1,
+      data: undefined,
+      extractedUpdate: {
+        destinationCode: await lookupAirportCode(extracted.destination),
+        departureDateParsed: parseDate(extracted.departureDate),
       },
     };
   }
 );
 ```
 
-**Why?** Context-driven design enables:
+**Why?** Tools with data access enable:
 
-- **Personalization** - Behavior adapts to each user
-- **State persistence** - Context survives across conversations
-- **Dynamic guidelines** - Rules that depend on user state
-- **Tool integration** - Tools update context for next iteration
+- **Data Enrichment** - Tools can validate and enhance extracted data
+- **Computed Fields** - Calculate derived values from extracted data
+- **Conditional Execution** - Tools decide what to do based on data state
+- **Action Flags** - Tools can set flags for subsequent operations
 
-### 7. 📝 Declarative Over Imperative
+### 5. 🎭 Always-On Routing
 
-Configuration is **declarative** - you describe what you want, not how to do it:
+Routing happens every turn, allowing users to change direction:
 
 ```typescript
-// ✅ DECLARATIVE: Describe the desired behavior
-const agent = new Agent({
-  name: "Support Agent",
-  description: "Helpful and empathetic customer support",
-  goal: "Resolve customer issues efficiently",
-  ai: provider,
-  terms: [
-    {
-      name: "SLA",
-      description: "Service Level Agreement - 24hr response time",
-    },
+// User starts booking a flight
+const response1 = await agent.respond({
+  history: [
+    createMessageEvent(EventSource.CUSTOMER, "User", "I want to fly to Paris"),
   ],
-  guidelines: [
-    {
-      condition: "Customer is frustrated",
-      action: "Apologize sincerely and escalate to human if needed",
-    },
-  ],
-  routes: [
-    {
-      title: "Refund Request",
-      conditions: ["Customer wants a refund"],
-      rules: ["Always check order date before processing"],
-      prohibitions: ["Never process refunds over $1000 without approval"],
-    },
-  ],
+  session,
 });
 
-// ❌ IMPERATIVE: Manual control flow
-if (userMessage.includes("refund")) {
-  if (orderDate < thirtyDaysAgo) {
-    if (amount <= 1000) {
-      processRefund();
-    } else {
-      requestApproval();
-    }
-  }
-}
+// User changes mind mid-conversation
+const response2 = await agent.respond({
+  history: [
+    ...previousHistory,
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "User",
+      "Actually, make that Tokyo instead"
+    ),
+  ],
+  session: response1.session, // Router sees context and switches appropriately
+});
 ```
 
-**Why?** Declarative configuration:
+**Why?** Always-on routing provides:
 
-- **Reads like documentation** - Easy to understand intent
-- **Less boilerplate** - Framework handles the "how"
-- **Easier to maintain** - Change behavior by changing config
-- **Better for non-coders** - Business logic in plain terms
+- **User Control** - Users can change their mind naturally
+- **Context Awareness** - Router considers current progress
+- **Graceful Transitions** - Smooth handling of intent changes
+- **No Dead Ends** - Always a valid next step
+
+### 6. 🔄 Three-Phase Pipeline
+
+Clean separation of concerns in every response:
+
+```
+1. PREPARATION → 2. ROUTING → 3. RESPONSE
+```
+
+**Phase 1: Preparation**
+
+- Execute tools if current state has `toolState`
+- Update context with tool results
+- Enrich extracted data if tools return `extractedUpdate`
+
+**Phase 2: Routing**
+
+- Build dynamic routing schema (scores for all routes 0-100)
+- Include session context in routing prompt
+- AI selects best route based on current state
+- Update session if route changed
+
+**Phase 3: Response**
+
+- Determine next state using `skipIf` and `requiredData`
+- Build response schema including current state's `gather` fields
+- Generate message with schema-enforced data extraction
+- Update session with newly extracted data
+
+**Why?** This architecture enables:
+
+- **Efficiency** - 1-2 LLM calls per turn vs 3-5 in condition-heavy approaches
+- **Reliability** - Tools execute before AI sees the conversation
+- **Flexibility** - Always-on routing handles any user direction
+- **Type Safety** - Schemas ensure consistent data structures
+
+### 7. 📦 Enhanced Lifecycle Hooks
+
+Hooks for validation, enrichment, and persistence:
+
+```typescript
+const agent = new Agent({
+  // ... other options
+  hooks: {
+    // Refresh context before each response
+    beforeRespond: async (ctx) => {
+      return await loadFreshContext(ctx.userId);
+    },
+
+    // Persist context updates
+    onContextUpdate: async (newCtx, oldCtx) => {
+      await saveContext(newCtx);
+    },
+
+    // Validate and enrich extracted data
+    onExtractedUpdate: async (extracted, previous) => {
+      // Normalize data
+      if (extracted.passengers < 1) extracted.passengers = 1;
+
+      // Auto-trigger actions
+      if (hasAllRequiredData(extracted)) {
+        extracted.shouldSearchFlights = true;
+      }
+
+      return extracted;
+    },
+  },
+});
+```
+
+**Why?** Lifecycle hooks provide:
+
+- **Data Validation** - Ensure extracted data meets business rules
+- **Enrichment** - Add computed fields or normalize values
+- **Persistence** - Save/restore conversation state
+- **Integration** - Connect with external systems
 
 ## Comparison with Other Approaches
 
+### @falai/agent vs Traditional State Machines
+
+| Aspect              | @falai/agent (Data-Driven) | Traditional State Machines            |
+| ------------------- | -------------------------- | ------------------------------------- |
+| **State Logic**     | Code-based (`skipIf`)      | Manual condition checking             |
+| **Data Collection** | Schema-driven extraction   | Manual parsing                        |
+| **Type Safety**     | Full TypeScript            | Often runtime validation              |
+| **LLM Calls/Turn**  | 1-2 (routing + response)   | 3-5 (conditions + routing + response) |
+| **Validation**      | Code + schemas             | Manual implementation                 |
+| **Routing**         | Always-on, context-aware   | Route-only, rigid                     |
+
 ### @falai/agent vs OpenAI Function Calling
 
-| Aspect             | @falai/agent                  | OpenAI Functions                   |
-| ------------------ | ----------------------------- | ---------------------------------- |
-| **Tool Execution** | Automatic (state machine)     | AI-decided                         |
-| **Flow Control**   | Explicit routes & states      | AI inference                       |
-| **Determinism**    | High - same input = same flow | Low - AI may vary                  |
-| **Debugging**      | Clear state progression       | Black box AI decisions             |
-| **Cost**           | Lower - tools not in prompts  | Higher - full tool specs in prompt |
-| **Use Case**       | Structured conversations      | Flexible, open-ended tasks         |
+| Aspect             | @falai/agent             | OpenAI Functions              |
+| ------------------ | ------------------------ | ----------------------------- |
+| **Tool Execution** | Automatic (state-driven) | AI-decided                    |
+| **Flow Control**   | Code-based state logic   | AI inference                  |
+| **Determinism**    | High - code-driven flow  | Low - AI may vary             |
+| **Data Handling**  | Structured schemas       | Unstructured function results |
+| **Type Safety**    | Full TypeScript          | Runtime type checking         |
+| **Use Case**       | Structured conversations | Flexible, open-ended tasks    |
 
-### When to Use @falai/agent
+## When to Use @falai/agent
 
 ✅ **Great for:**
 
-- Customer support workflows
-- Onboarding flows
-- Multi-step processes
-- Compliance-sensitive applications
-- Predictable conversation paths
-- Tool-heavy applications
+- **Data Collection Flows** - Booking, onboarding, forms, surveys
+- **Multi-Step Processes** - Complex workflows with clear progression
+- **Type-Safe Applications** - When data structure matters
+- **Predictable Conversations** - Structured, goal-oriented interactions
+- **Session-Based Apps** - Conversations that span multiple turns
 
 ❌ **Not ideal for:**
 
-- Open-ended creative tasks
-- Scenarios where AI judgment is critical
-- Rapid prototyping without clear flows
-- Simple Q&A without state
+- **Open-Ended Chat** - General conversation without clear goals
+- **Creative Tasks** - Brainstorming, writing, ideation
+- **Simple Q&A** - Stateless question-answering (use stateless routes!)
+- **Rapid Prototyping** - When you need maximum flexibility
+
+## Architecture Patterns
+
+### Stateful Routes (Data Collection)
+
+For structured data gathering with state management:
+
+```typescript
+interface BookingData {
+  destination: string;
+  dates: string;
+  passengers: number;
+}
+
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Flight Booking",
+  gatherSchema: {
+    /* schema for all fields */
+  },
+});
+
+bookingRoute.initialState
+  .transitionTo({
+    chatState: "Ask destination",
+    gather: ["destination"],
+    skipIf: (data) => !!data.destination,
+  })
+  .transitionTo({
+    toolState: enrichDestination, // Validates and enriches
+    requiredData: ["destination"],
+  })
+  .transitionTo({
+    chatState: "Ask dates",
+    gather: ["dates"],
+    skipIf: (data) => !!data.dates,
+  });
+```
+
+### Stateless Routes (Q&A)
+
+For simple question-answering without state:
+
+```typescript
+const qnaRoute = agent.createRoute({
+  title: "Company Q&A",
+  conditions: ["User asks about company"],
+  // NO gatherSchema - stateless!
+});
+
+// Just use initial state
+qnaRoute.initialState.chatState = "Answer from knowledge base";
+```
+
+### Mixed Architecture
+
+Combine both patterns in one agent:
+
+```typescript
+// Q&A routes (stateless)
+const companyInfoRoute = agent.createRoute({
+  /* no schema */
+});
+const productInfoRoute = agent.createRoute({
+  /* no schema */
+});
+
+// Booking routes (stateful)
+const bookingRoute = agent.createRoute<BookingData>({
+  /* with schema */
+});
+const supportRoute = agent.createRoute<SupportData>({
+  /* with schema */
+});
+```
 
 ## Design Influences
 
 This framework draws inspiration from:
 
-1. **[Parlant/Emcie](https://github.com/emcie-co/parlant)** - Preparation iteration loop, guideline-driven execution
+1. **Schema-First APIs** - JSON Schema for data contracts
 2. **State Machines** - Explicit state modeling for predictability
-3. **Railway-Oriented Programming** - Fluent APIs with chaining
-4. **Domain-Driven Design** - Organizing capabilities by domain
-5. **React Hooks** - Lifecycle hooks pattern for extensibility
+3. **TypeScript** - Full type safety throughout
+4. **Functional Programming** - Pure functions for state logic
+5. **React Hooks** - Lifecycle patterns for extensibility
 
 ## Further Reading
 
 - [Getting Started Guide](./GETTING_STARTED.md) - Build your first agent
+- [Session State Guide](./CONTEXT_MANAGEMENT.md) - Session management patterns
 - [API Reference](./API_REFERENCE.md) - Complete API documentation
-- [Route DSL Guide](./STRUCTURE.md) - State machine patterns
-- [Provider Docs](./PROVIDERS.md) - AI provider configuration
-- [Examples](/examples) - Real-world agent implementations
+- [Examples](../examples/) - Real-world implementations
 
 ---
 

@@ -36,10 +36,6 @@ Adds a behavioral guideline. Returns `this` for chaining.
 
 Adds an agent capability. Returns `this` for chaining.
 
-##### `createObservation(description: string): Observation`
-
-Creates an observation for disambiguation.
-
 ##### `addDomain<TName, TDomain>(name: TName, domainObject: TDomain): void`
 
 Registers a domain with tools/methods.
@@ -54,12 +50,12 @@ Gets allowed domains for a specific route by title. Returns filtered domains bas
 
 ##### `respond(input: RespondInput<TContext>): Promise<RespondOutput>`
 
-Generates an AI response based on conversation history with structured output including route, state, and tool call information.
+Generates an AI response with session state management, data extraction, and intelligent routing.
 
 ```typescript
 interface RespondInput<TContext> {
   history: Event[];
-  state?: StateRef;
+  session?: SessionState; // NEW: Session state for conversation tracking
   contextOverride?: Partial<TContext>;
   signal?: AbortSignal;
 }
@@ -67,11 +63,9 @@ interface RespondInput<TContext> {
 interface RespondOutput {
   /** The message to send to the user */
   message: string;
-  /** Route chosen by the agent (if applicable) */
-  route?: { id: string; title: string };
-  /** Current state within the route (if applicable) */
-  state?: { id: string; description?: string };
-  /** Tool calls requested by the agent */
+  /** Updated session state (includes extracted data, current route/state) */
+  session?: SessionState;
+  /** Tool calls executed during response (for debugging) */
   toolCalls?: Array<{
     toolName: string;
     arguments: Record<string, unknown>;
@@ -79,12 +73,19 @@ interface RespondOutput {
 }
 ```
 
-**Enhanced Response Information:**
+**Enhanced Response Pipeline:**
 
-- Uses structured JSON output via `responses.parse()` API (OpenAI/OpenRouter) or JSON mode (Gemini)
-- Automatically detects which route the agent chose based on conversation context
-- Provides current state information for tracking conversation flow
-- Returns tool calls for execution in your application
+1. **Tool Execution** - Execute tools if current state has `toolState`
+2. **Always-On Routing** - Score all routes, respect user intent to change direction
+3. **State Traversal** - Use `skipIf` and `requiredData` to determine next state
+4. **Response Generation** - Build schema with `gather` fields, extract data
+5. **Session Update** - Merge extracted data into session state
+
+**Session State Management:**
+
+- Tracks current route, state, and extracted data across turns
+- Enables "I changed my mind" scenarios with context-aware routing
+- Automatically merges new extracted data with existing session data
 
 **Example:**
 
@@ -239,7 +240,7 @@ Represents a conversation flow with states and transitions.
 ```typescript
 new Route(options: RouteOptions)
 
-interface RouteOptions {
+interface RouteOptions<TExtracted = unknown> {
   id?: string;              // Optional custom ID (deterministic ID generated from title if not provided)
   title: string;            // Route title
   description?: string;     // Route description
@@ -248,6 +249,17 @@ interface RouteOptions {
   domains?: string[];       // Domain names allowed in this route (undefined = all domains)
   rules?: string[];         // Absolute rules the agent MUST follow in this route
   prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do in this route
+
+  // NEW: Schema-first data extraction
+  gatherSchema?: {
+    type: "object";
+    properties: Record<string, any>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+
+  // NEW: Pre-populate extracted data when entering route
+  initialData?: Partial<TExtracted>;
 }
 ```
 
@@ -278,10 +290,6 @@ Returns the prohibitions that must never be done in this route.
 ##### `getRef(): RouteRef`
 
 Returns a reference to this route.
-
-##### `toRef(): RouteRef`
-
-Returns a reference including the route instance (for disambiguation).
 
 ##### `describe(): string`
 
@@ -322,16 +330,28 @@ Represents a state within a conversation route.
 Creates a transition from this state and returns a chainable result.
 
 ```typescript
-interface TransitionSpec {
+interface TransitionSpec<TExtracted = unknown> {
   chatState?: string; // Transition to a chat interaction
   toolState?: ToolRef; // Transition to execute a tool
   state?: StateRef | symbol; // Transition to specific state or END_ROUTE
+
+  // NEW: Data extraction fields for this state
+  gather?: string[];
+
+  // NEW: Code-based condition to skip this state
+  skipIf?: (extracted: Partial<TExtracted>) => boolean;
+
+  // NEW: Prerequisites that must be met to enter this state
+  requiredData?: string[];
 }
 
-interface TransitionResult {
+interface TransitionResult<TExtracted = unknown> {
   id: string; // State identifier
   routeId: string; // Route identifier
-  transitionTo: (spec: TransitionSpec, condition?: string) => TransitionResult;
+  transitionTo: (
+    spec: TransitionSpec<TExtracted>,
+    condition?: string
+  ) => TransitionResult<TExtracted>;
 }
 ```
 
@@ -340,39 +360,66 @@ interface TransitionResult {
 **Example:**
 
 ```typescript
-// Approach 1: Step-by-step (ideal for complex flows with branching)
-const t0 = route.initialState.transitionTo({
-  chatState: "Ask for user name",
+// Define your data extraction type
+interface FlightData {
+  destination: string;
+  departureDate: string;
+  passengers: number;
+}
+
+// Create a data-driven route
+const flightRoute = agent.createRoute<FlightData>({
+  title: "Book Flight",
+  gatherSchema: {
+    type: "object",
+    properties: {
+      destination: { type: "string" },
+      departureDate: { type: "string" },
+      passengers: { type: "number", minimum: 1, maximum: 9 },
+    },
+    required: ["destination", "departureDate", "passengers"],
+  },
 });
 
-const t1 = t0.transitionTo({
-  chatState: "Ask for email",
+// Approach 1: Step-by-step with data extraction
+const askDestination = flightRoute.initialState.transitionTo({
+  chatState: "Ask where they want to fly",
+  gather: ["destination"],
+  skipIf: (extracted) => !!extracted.destination, // Skip if already have destination
 });
 
-const t2 = t1.transitionTo({
-  chatState: "Confirm details",
+const askDates = askDestination.transitionTo({
+  chatState: "Ask about travel dates",
+  gather: ["departureDate"],
+  skipIf: (extracted) => !!extracted.departureDate,
+  requiredData: ["destination"], // Must have destination first
+});
+
+const askPassengers = askDates.transitionTo({
+  chatState: "How many passengers?",
+  gather: ["passengers"],
+  skipIf: (extracted) => !!extracted.passengers,
 });
 
 // Access state properties
-console.log(t1.id); // State ID
-console.log(t1.routeId); // Route ID
+console.log(askDestination.id); // State ID
+console.log(askDestination.routeId); // Route ID
 
-// Use saved references for branching
-t1.transitionTo(
-  { chatState: "Handle invalid email" },
-  "Email validation failed"
-);
-
-// Approach 2: Fluent chaining (elegant for linear flows)
-route.initialState
-  .transitionTo({ chatState: "Ask for user name" })
-  .transitionTo({ chatState: "Ask for email" })
-  .transitionTo({ chatState: "Confirm details" })
+// Approach 2: Fluent chaining for linear flows
+flightRoute.initialState
+  .transitionTo({
+    chatState: "Extract travel details",
+    gather: ["destination", "departureDate", "passengers"],
+  })
+  .transitionTo({
+    chatState: "Present available flights",
+  })
   .transitionTo({ state: END_ROUTE });
 
-// Both approaches are equivalent - choose based on your needs:
-// - Use step-by-step for complex flows with conditional branches
-// - Use chaining for simple linear flows for conciseness
+// Use with session state
+let session = createSession<FlightData>();
+const response = await agent.respond({ history, session });
+console.log(response.session?.extracted); // { destination: "Paris", ... }
 ```
 
 ##### `addGuideline(guideline: Guideline): void`
@@ -392,46 +439,6 @@ ID of the route this state belongs to (readonly).
 ##### `description: string`
 
 State description (readonly).
-
----
-
-### `Observation`
-
-Handles disambiguation between multiple routes.
-
-#### Constructor
-
-```typescript
-new Observation(options: ObservationOptions)
-
-interface ObservationOptions {
-  id?: string;          // Optional custom ID (deterministic ID generated from description if not provided)
-  description: string;  // The observation description
-  routeRefs?: string[]; // Route IDs or titles to disambiguate between
-}
-```
-
-**Note on IDs:** Observation IDs are deterministic by default, generated from the description using a hash function. This ensures consistency across server restarts.
-
-#### Methods
-
-##### `disambiguate(routes: (Route | RouteRef)[]): this`
-
-Sets routes this observation can disambiguate between. Returns `this` for chaining.
-
-##### `getRoutes(): RouteRef[]`
-
-Returns routes associated with this observation.
-
-#### Properties
-
-##### `id: string`
-
-Unique identifier (readonly).
-
-##### `description: string`
-
-Observation description (readonly).
 
 ---
 
@@ -1214,10 +1221,6 @@ Adds guidelines section.
 
 Adds capabilities section.
 
-##### `addObservations(observations): this`
-
-Adds observations for disambiguation.
-
 ##### `addActiveRoutes(routes): this`
 
 Adds active routes to the prompt.
@@ -1479,17 +1482,6 @@ const stateId = generateStateId("route_123", "Ask for name");
 // Returns: "state_ask_for_name_{hash}"
 ```
 
-#### `generateObservationId(description: string): string`
-
-Generates a deterministic observation ID from a description.
-
-```typescript
-import { generateObservationId } from "@falai/agent";
-
-const obsId = generateObservationId("User intent is unclear");
-// Returns: "observation_user_intent_is_unclear_{hash}"
-```
-
 #### `generateToolId(name: string): string`
 
 Generates a deterministic tool ID from a name.
@@ -1552,7 +1544,6 @@ enum BuiltInSection {
   CONTEXT = "context",
   GUIDELINES = "guidelines",
   CAPABILITIES = "capabilities",
-  OBSERVATIONS = "observations",
   ACTIVE_ROUTES = "active_routes",
 }
 ```

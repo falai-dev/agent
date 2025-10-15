@@ -1,6 +1,6 @@
 /**
  * Persistent multi-turn onboarding agent example
- * Demonstrates context lifecycle management for stateful conversations
+ * Updated for v2 architecture with session state management and schema-first data extraction
  */
 
 import {
@@ -10,7 +10,7 @@ import {
   END_ROUTE,
   EventSource,
   createMessageEvent,
-  type ContextLifecycleHooks,
+  createSession,
 } from "../src/index";
 
 // ============================================================================
@@ -63,16 +63,19 @@ const db = {
 // CONTEXT TYPE
 // ============================================================================
 
+// Data extraction types for onboarding
+interface OnboardingData {
+  businessName?: string;
+  businessDescription?: string;
+  industry?: string;
+  contactEmail?: string;
+}
+
 interface OnboardingContext {
   sessionId: string;
   userId: string;
   userName?: string;
-  collectedData: {
-    businessName?: string;
-    businessDescription?: string;
-    industry?: string;
-    contactEmail?: string;
-  };
+  collectedData: OnboardingData;
   completedSteps: string[];
 }
 
@@ -96,31 +99,26 @@ async function createPersistentOnboardingAgent(sessionId: string) {
   }
 
   // Define lifecycle hooks for automatic persistence
-  const hooks: ContextLifecycleHooks<OnboardingContext> = {
-    // Called before respond() - load fresh context from database
-    beforeRespond: async (currentContext) => {
-      console.log("🔄 Loading fresh context from database...");
-      const freshSession = await db.sessions.findById(sessionId);
+  const hooks = {
+    // Called after data extraction - validate and enrich extracted data
+    onExtractedUpdate: async (extracted, previousExtracted) => {
+      console.log("🔄 Processing extracted data...");
 
-      if (!freshSession) {
-        return currentContext; // Fallback to current
-      }
+      // Update completed steps based on what's been extracted
+      const completedSteps: string[] = [];
+      if (extracted.businessName) completedSteps.push("business_info");
+      if (extracted.businessDescription)
+        completedSteps.push("business_description");
+      if (extracted.industry) completedSteps.push("industry");
+      if (extracted.contactEmail) completedSteps.push("contact");
 
-      return {
-        sessionId: freshSession.sessionId,
-        userId: freshSession.userId,
-        collectedData: freshSession.collectedData,
-        completedSteps: freshSession.completedSteps,
-      };
-    },
-
-    // Called after context updates - persist to database
-    onContextUpdate: async (newContext) => {
-      console.log("💾 Persisting context update to database...");
+      // Persist to database
       await db.sessions.update(sessionId, {
-        collectedData: newContext.collectedData,
-        completedSteps: newContext.completedSteps,
+        collectedData: extracted,
+        completedSteps,
       });
+
+      return extracted;
     },
   };
 
@@ -134,11 +132,21 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     description: "A friendly assistant that helps businesses get started",
     goal: "Collect business information efficiently while being conversational",
     ai: provider,
-    context: {
-      sessionId: session.sessionId,
-      userId: session.userId,
-      collectedData: session.collectedData,
-      completedSteps: session.completedSteps,
+    // Context is loaded fresh from database on each respond() call
+    contextProvider: async () => {
+      console.log("🔄 Loading fresh context from database...");
+      const freshSession = await db.sessions.findById(sessionId);
+
+      if (!freshSession) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+
+      return {
+        sessionId: freshSession.sessionId,
+        userId: freshSession.userId,
+        collectedData: freshSession.collectedData,
+        completedSteps: freshSession.completedSteps,
+      };
     },
     hooks, // Enable lifecycle hooks for persistence
   });
@@ -229,44 +237,79 @@ async function createPersistentOnboardingAgent(sessionId: string) {
   );
 
   // ============================================================================
-  // ONBOARDING ROUTE
+  // ONBOARDING ROUTE WITH DATA EXTRACTION
   // ============================================================================
 
-  const onboardingRoute = agent.createRoute({
+  const onboardingRoute = agent.createRoute<OnboardingData>({
     title: "Business Onboarding",
     description: "Guide user through business information collection",
     conditions: ["User is onboarding their business"],
+    gatherSchema: {
+      type: "object",
+      properties: {
+        businessName: {
+          type: "string",
+          description: "Name of the business",
+        },
+        businessDescription: {
+          type: "string",
+          description: "Brief description of what the business does",
+        },
+        industry: {
+          type: "string",
+          description: "Industry the business operates in",
+        },
+        contactEmail: {
+          type: "string",
+          description: "Contact email for the business",
+        },
+      },
+      required: ["businessName", "businessDescription"],
+    },
   });
 
-  // Step 1: Collect business info
-  const askBusinessInfo = onboardingRoute.initialState.transitionTo({
+  // State 1: Gather business name and description
+  const gatherBusinessInfo = onboardingRoute.initialState.transitionTo({
     chatState: "Ask for business name and a brief description",
+    gather: ["businessName", "businessDescription"],
+    skipIf: (extracted) =>
+      !!extracted.businessName && !!extracted.businessDescription,
   });
 
-  const saveBusinessStep = askBusinessInfo.transitionTo({
+  // State 2: Save business info (tool execution)
+  const saveBusiness = gatherBusinessInfo.transitionTo({
     toolState: saveBusinessInfo,
+    requiredData: ["businessName", "businessDescription"],
   });
 
-  // Step 2: Collect industry
-  const askIndustry = saveBusinessStep.transitionTo({
+  // State 3: Gather industry
+  const gatherIndustry = saveBusiness.transitionTo({
     chatState: "Ask what industry the business operates in",
+    gather: ["industry"],
+    skipIf: (extracted) => !!extracted.industry,
   });
 
-  const saveIndustryStep = askIndustry.transitionTo({
+  // State 4: Save industry (tool execution)
+  const saveIndustryStep = gatherIndustry.transitionTo({
     toolState: saveIndustry,
+    requiredData: ["industry"],
   });
 
-  // Step 3: Collect contact
-  const askContact = saveIndustryStep.transitionTo({
+  // State 5: Gather contact email
+  const gatherContact = saveIndustryStep.transitionTo({
     chatState: "Ask for their contact email",
+    gather: ["contactEmail"],
+    skipIf: (extracted) => !!extracted.contactEmail,
   });
 
-  const saveContactStep = askContact.transitionTo({
+  // State 6: Save contact (tool execution)
+  const saveContact = gatherContact.transitionTo({
     toolState: saveContactEmail,
+    requiredData: ["contactEmail"],
   });
 
-  // Step 4: Confirmation
-  const confirm = saveContactStep.transitionTo({
+  // State 7: Confirmation
+  const confirm = saveContact.transitionTo({
     chatState: "Summarize all collected information and ask for confirmation",
   });
 
@@ -366,12 +409,17 @@ async function main() {
     lastUpdated: new Date(),
   });
 
+  // Create agent with fresh context loading
+  const agent = await createPersistentOnboardingAgent(sessionId);
+
   console.log("=== MULTI-TURN CONVERSATION SIMULATION ===\n");
+
+  // Initialize session state for multi-turn conversation
+  let session = createSession<OnboardingData>();
 
   // Turn 1: Start onboarding
   console.log("📱 Turn 1: User starts onboarding");
-  const agent1 = await createPersistentOnboardingAgent(sessionId);
-  const response1 = await agent1.respond({
+  const response1 = await agent.respond({
     history: [
       createMessageEvent(
         EventSource.CUSTOMER,
@@ -379,42 +427,53 @@ async function main() {
         "Hi, I want to onboard my business"
       ),
     ],
+    session,
   });
   console.log("🤖 Bot:", response1.message);
-  console.log("📊 Context after turn 1:", agent1["context"]);
+  console.log("📊 Extracted after turn 1:", response1.session?.extracted);
+  console.log("📊 Route:", response1.session?.currentRoute?.title);
   console.log();
 
+  // Update session with progress
+  session = response1.session!;
+
   // Turn 2: User provides business info
-  // NOTE: We create a NEW agent instance - context is loaded from database
   console.log("📱 Turn 2: User provides business info");
-  const agent2 = await createPersistentOnboardingAgent(sessionId);
-  const response2 = await agent2.respond({
-    history: [
-      createMessageEvent(
-        EventSource.CUSTOMER,
-        "Alice",
-        "My business is called 'TechFlow' and we build AI-powered workflow automation tools"
-      ),
-    ],
-  });
+  const history2 = [
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Alice",
+      "Hi, I want to onboard my business"
+    ),
+    createMessageEvent(EventSource.AI_AGENT, "Agent", response1.message),
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Alice",
+      "My business is called 'TechFlow' and we build AI-powered workflow automation tools"
+    ),
+  ];
+  const response2 = await agent.respond({ history: history2, session });
   console.log("🤖 Bot:", response2.message);
-  console.log("📊 Context after turn 2:", agent2["context"]);
+  console.log("📊 Extracted after turn 2:", response2.session?.extracted);
   console.log();
+
+  // Update session again
+  session = response2.session!;
 
   // Turn 3: User provides industry
   console.log("📱 Turn 3: User provides industry");
-  const agent3 = await createPersistentOnboardingAgent(sessionId);
-  const response3 = await agent3.respond({
-    history: [
-      createMessageEvent(
-        EventSource.CUSTOMER,
-        "Alice",
-        "We're in the SaaS industry"
-      ),
-    ],
-  });
+  const history3 = [
+    ...history2,
+    createMessageEvent(EventSource.AI_AGENT, "Agent", response2.message),
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Alice",
+      "We're in the SaaS industry"
+    ),
+  ];
+  const response3 = await agent.respond({ history: history3, session });
   console.log("🤖 Bot:", response3.message);
-  console.log("📊 Context after turn 3:", agent3["context"]);
+  console.log("📊 Extracted after turn 3:", response3.session?.extracted);
   console.log();
 
   // Verify persistence
@@ -427,34 +486,41 @@ async function main() {
 }
 
 // ============================================================================
-// KEY PATTERNS DEMONSTRATED
+// KEY PATTERNS DEMONSTRATED (V2 Architecture)
 // ============================================================================
 
 /*
- * ✅ PATTERN 1: Lifecycle Hooks (Recommended for most cases)
- *    - beforeRespond: Load fresh context before each response
- *    - onContextUpdate: Persist context after updates
- *    - Works with both static context and updates
+ * ✅ PATTERN 1: Session State Management (Core v2 pattern)
+ *    - createSession<T>(): Initialize typed session state
+ *    - Pass session to respond() calls
+ *    - Session tracks extracted data across turns
+ *    - Always-on routing respects intent changes
  *
- * ✅ PATTERN 2: Context Provider (For always-fresh context)
- *    - contextProvider: Function that returns fresh context
- *    - onContextUpdate: Still needed for persistence
- *    - Best when context is always loaded from external source
+ * ✅ PATTERN 2: Schema-First Data Extraction
+ *    - gatherSchema: Define data contracts upfront
+ *    - Type-safe extraction throughout conversation
+ *    - skipIf functions for deterministic state logic
+ *    - requiredData arrays for prerequisites
  *
- * ✅ PATTERN 3: Tool Context Updates (Two options)
- *    - Option A: Return { data, contextUpdate } in tool result
- *    - Option B: Call toolContext.updateContext() directly
- *    - Both trigger onContextUpdate hook automatically
+ * ✅ PATTERN 3: Context Provider (For external data sources)
+ *    - contextProvider: Load fresh context from database/API
+ *    - Runs before each respond() call
+ *    - Perfect for real-time external data
  *
- * ✅ PATTERN 4: Explicit Updates
- *    - agent.updateContext() for manual updates
- *    - Triggers onContextUpdate hook
- *    - Useful outside of tool execution
+ * ✅ PATTERN 4: Lifecycle Hooks (Data validation & enrichment)
+ *    - onExtractedUpdate: Process extracted data after extraction
+ *    - Validate, enrich, and persist extracted data
+ *    - Return modified extracted data
  *
- * ❌ ANTI-PATTERN: Caching Agents
- *    - DON'T cache agent instances across requests
- *    - DO recreate agents with fresh context
- *    - Context gets stale if agent is cached
+ * ✅ PATTERN 5: Tool Integration (Enhanced context access)
+ *    - Tools access extracted data via context parameter
+ *    - Can return extractedUpdate to modify extracted data
+ *    - Perfect for data validation and enrichment
+ *
+ * ✅ PATTERN 6: State Progression (Code-based logic)
+ *    - skipIf: Deterministic functions instead of fuzzy conditions
+ *    - requiredData: Prerequisites for state transitions
+ *    - No more LLM interpretation of state logic
  */
 
 if (import.meta.url === `file://${process.argv[1]}`) {

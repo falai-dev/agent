@@ -1,15 +1,16 @@
 # Persistence with @falai/agent
 
-The `@falai/agent` framework provides optional, flexible persistence for automatically saving conversation sessions and messages to your database.
+The `@falai/agent` framework provides optional, flexible persistence for automatically saving conversation sessions, extracted data, and messages to your database.
 
 ## Features
 
 - ✅ **Optional** - Persistence is completely optional
 - ✅ **Provider Pattern** - Simple API like AI providers (`new PrismaAdapter({ prisma })`)
-- ✅ **Type-safe** - Full TypeScript support
-- ✅ **Prisma Ready** - Built-in Prisma ORM adapter
+- ✅ **Type-safe** - Full TypeScript support with generics
+- ✅ **Session State Integration** - Automatic saving of extracted data and conversation progress
+- ✅ **Multiple Adapters** - Prisma, Redis, MongoDB, PostgreSQL, SQLite, OpenSearch, Memory
 - ✅ **Extensible** - Create adapters for any database
-- ✅ **Auto-save** - Automatic message persistence
+- ✅ **Auto-save** - Automatic session state and message persistence
 
 ## Quick Start with Prisma
 
@@ -80,13 +81,20 @@ npx prisma generate
 npx prisma migrate dev --name init
 ```
 
-### 4. Use in Your Agent (That's it!)
+### 4. Use in Your Agent with Session State (That's it!)
 
 ```typescript
 import { Agent, PrismaAdapter, GeminiProvider } from "@falai/agent";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+// Define your extracted data type
+interface BookingData {
+  destination: string;
+  date: string;
+  passengers: number;
+}
 
 const agent = new Agent({
   name: "My Agent",
@@ -95,27 +103,55 @@ const agent = new Agent({
   persistence: {
     adapter: new PrismaAdapter({ prisma }),
     userId: "user_123",
+    autoSave: true, // Auto-saves session state!
   },
+});
+
+// Create a route with data extraction
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Flight",
+  gatherSchema: {
+    type: "object",
+    properties: {
+      destination: { type: "string" },
+      date: { type: "string" },
+      passengers: { type: "number" },
+    },
+    required: ["destination", "date", "passengers"],
+  },
+});
+
+// Define states with smart data gathering
+bookingRoute.initialState.transitionTo({
+  chatState: "Collect booking details",
+  gather: ["destination", "date", "passengers"],
 });
 
 // Access persistence methods
 const persistence = agent.getPersistenceManager();
 
-// Create a session
-const session = await persistence.createSession({
-  userId: "user_123",
-  agentName: "My Agent",
-});
+// Create a session with state support
+const { sessionData, sessionState } =
+  await persistence.createSessionWithState<BookingData>({
+    userId: "user_123",
+    agentName: "My Agent",
+  });
 
 // Load history
-const history = await persistence.loadSessionHistory(session.id);
+const history = await persistence.loadSessionHistory(sessionData.id);
 
-// Generate response
-const response = await agent.respond({ history });
+// Generate response with session state
+const response = await agent.respond({
+  history,
+  session: sessionState, // Pass session state
+});
 
-// Save message (auto-saved if configured)
+// Session state is auto-saved! ✨
+console.log("Extracted data:", response.session?.extracted);
+
+// Save message
 await persistence.saveMessage({
-  sessionId: session.id,
+  sessionId: sessionData.id,
   role: "agent",
   content: response.message,
 });
@@ -220,6 +256,96 @@ const agent = new Agent({
 await agent.updateContext({ preferences: { theme: "dark" } });
 ```
 
+## Session State Integration
+
+The new architecture automatically saves and loads `SessionState<TExtracted>` which includes:
+
+- **Current route and state** - Track conversation progress
+- **Extracted data** - All data gathered via `gatherSchema` and `gather` fields
+- **Route history** - History of route transitions
+- **Metadata** - Session timestamps and custom data
+
+### How It Works
+
+1. **Auto-Save**: When `autoSave: true`, session state is automatically persisted after each `respond()` call
+2. **Conversion**: `SessionState` is automatically converted to `SessionData` for storage
+3. **Recovery**: Load session state from database to resume conversations
+
+### Create Session with State
+
+```typescript
+const { sessionData, sessionState } =
+  await persistence.createSessionWithState<YourDataType>({
+    userId: "user_123",
+    agentName: "My Agent",
+    initialData: {
+      /* optional pre-filled data */
+    },
+  });
+
+// sessionData: Database record
+// sessionState: In-memory session state ready to use
+```
+
+### Save Session State
+
+```typescript
+// Manual save (not needed if autoSave: true)
+await persistence.saveSessionState(sessionId, sessionState);
+```
+
+### Load Session State
+
+```typescript
+// Load session state from database
+const sessionState = await persistence.loadSessionState<YourDataType>(
+  sessionId
+);
+
+// Load message history
+const history = await persistence.loadSessionHistory(sessionId);
+
+// Resume conversation
+const response = await agent.respond({
+  history,
+  session: sessionState,
+});
+```
+
+### What Gets Persisted
+
+The session state stores:
+
+```typescript
+{
+  currentRoute: {
+    id: "book_flight",
+    title: "Book a Flight",
+    enteredAt: Date
+  },
+  currentState: {
+    id: "ask_dates",
+    description: "Ask about travel dates",
+    enteredAt: Date
+  },
+  extracted: {
+    destination: "Paris",
+    departureDate: "2025-06-15",
+    passengers: 2
+  },
+  routeHistory: [
+    { routeId: "book_flight", enteredAt: Date, completed: false }
+  ],
+  metadata: {
+    sessionId: "session_123",
+    createdAt: Date,
+    lastUpdatedAt: Date
+  }
+}
+```
+
+This data is stored in `collectedData` field as JSON in the database.
+
 ## PersistenceManager API
 
 Access via `agent.getPersistenceManager()`:
@@ -227,7 +353,25 @@ Access via `agent.getPersistenceManager()`:
 ### Session Methods
 
 ```typescript
-// Create session
+// Create session with state support (NEW!)
+const { sessionData, sessionState } =
+  await persistence.createSessionWithState<YourDataType>({
+    userId: "user_123",
+    agentName: "My Agent",
+    initialData: {
+      /* optional */
+    },
+  });
+
+// Save session state (NEW!)
+await persistence.saveSessionState(sessionId, sessionState);
+
+// Load session state (NEW!)
+const sessionState = await persistence.loadSessionState<YourDataType>(
+  sessionId
+);
+
+// Create session (legacy)
 await persistence.createSession({
   userId: "user_123",
   agentName: "My Agent",
@@ -375,13 +519,16 @@ await persistence.saveMessage({
 
 ## Best Practices
 
-1. ✅ Use lifecycle hooks for automatic context persistence
-2. ✅ Enable `autoSave` to track message counts automatically
-3. ✅ Store minimal data in `collectedData`
-4. ✅ Index frequently queried fields
-5. ✅ Use cascading deletes for cleanup
-6. ✅ Handle errors gracefully
-7. ✅ Complete or abandon sessions when done
+1. ✅ **Use `createSessionWithState()`** - Get both database record and session state in one call
+2. ✅ **Enable `autoSave: true`** - Automatically persist session state after each response
+3. ✅ **Define extraction schemas** - Use `gatherSchema` in routes for structured data collection
+4. ✅ **Pass session state** - Always pass `session` parameter to `agent.respond()`
+5. ✅ **Load session state** - Use `loadSessionState()` to resume conversations
+6. ✅ **Store extracted data** - Leverage `collectedData.extracted` for user input tracking
+7. ✅ **Index frequently queried fields** - Add database indexes on `userId`, `status`, etc.
+8. ✅ **Use cascading deletes** - Clean up messages automatically when deleting sessions
+9. ✅ **Complete sessions** - Mark sessions as completed when conversation ends
+10. ✅ **Handle errors gracefully** - Wrap persistence calls in try-catch blocks
 
 ## Troubleshooting
 

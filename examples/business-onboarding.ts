@@ -1,13 +1,13 @@
 /**
  * Business Onboarding Example
+ * Updated for v2 architecture with session state management and schema-first data extraction
  *
  * Real-world example showing:
- * - Complex multi-step onboarding flow
- * - Tools with contextUpdate for automatic state management
- * - Lifecycle hooks for persistence
- * - Branching logic (physical vs online business)
- * - Both step-by-step and chained transition approaches
- * - Agent caching with lifecycle hooks
+ * - Complex multi-step onboarding flow with schema-based data extraction
+ * - Tools with enhanced context access for automatic state management
+ * - Lifecycle hooks for data validation and persistence
+ * - Branching logic (physical vs online business) with skipIf conditions
+ * - Code-based state progression instead of fuzzy conditions
  */
 
 import {
@@ -17,6 +17,7 @@ import {
   EventSource,
   createMessageEvent,
   OpenAIProvider,
+  createSession,
   type ToolContext,
 } from "../src/index";
 
@@ -690,10 +691,21 @@ async function main() {
 
   // Generate response (requires valid API key)
   try {
-    const response = await agent.respond({ history });
+    // Initialize session state for multi-turn conversation
+    let session = createSession<OnboardingData>();
+
+    const response = await agent.respond({ history, session });
     console.log("Agent:", response.message);
-    console.log("\nRoute:", response.route?.title);
-    console.log("State:", response.state?.description);
+    console.log("\nRoute:", response.session?.currentRoute?.title);
+    console.log("Extracted:", response.session?.extracted);
+
+    // Update session with progress
+    session = response.session!;
+
+    console.log("\n✅ Session state benefits:");
+    console.log("   - Data extraction tracked across turns");
+    console.log("   - State progression managed automatically");
+    console.log("   - Always-on routing respects intent changes");
   } catch (error: any) {
     console.log("\n(Skipping AI response - requires valid API key)");
     console.log("Error:", error.message);

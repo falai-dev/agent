@@ -1,5 +1,6 @@
 /**
  * Domain Scoping Example
+ * Updated for v2 architecture with session state management
  *
  * This example demonstrates how to use domain scoping to restrict which tools
  * can EXECUTE in different conversation routes for security and isolation.
@@ -11,7 +12,12 @@
  * execute automatically when triggered by the state machine or guidelines.
  */
 
-import { Agent, createMessageEvent, EventSource } from "../src/index";
+import {
+  Agent,
+  createMessageEvent,
+  EventSource,
+  createSession,
+} from "../src/index";
 import { OpenRouterProvider } from "../src/providers";
 
 // Initialize AI provider
@@ -138,10 +144,16 @@ async function demonstrateScoping() {
     ),
   ];
 
-  const response1 = await agent.respond({ history: history1 });
-  console.log(`Route chosen: ${response1.route?.title}`);
+  // Initialize session state for multi-turn conversation
+  let session = createSession();
+
+  const response1 = await agent.respond({ history: history1, session });
+  console.log(`Route chosen: ${response1.session?.currentRoute?.title}`);
   console.log(`Available tools in this route: scraping only`);
   console.log(`Response: ${response1.message}\n`);
+
+  // Update session with progress
+  session = response1.session!;
 
   // Example 2: Schedule Meeting route - only calendar tools available
   console.log("2️⃣  Example: User wants to schedule a meeting");
@@ -153,10 +165,13 @@ async function demonstrateScoping() {
     ),
   ];
 
-  const response2 = await agent.respond({ history: history2 });
-  console.log(`Route chosen: ${response2.route?.title}`);
+  const response2 = await agent.respond({ history: history2, session });
+  console.log(`Route chosen: ${response2.session?.currentRoute?.title}`);
   console.log(`Available tools in this route: calendar only`);
   console.log(`Response: ${response2.message}\n`);
+
+  // Update session again
+  session = response2.session!;
 
   // Example 3: Customer Support route - NO tools available
   console.log("3️⃣  Example: User has a general question");
@@ -168,10 +183,13 @@ async function demonstrateScoping() {
     ),
   ];
 
-  const response3 = await agent.respond({ history: history3 });
-  console.log(`Route chosen: ${response3.route?.title}`);
+  const response3 = await agent.respond({ history: history3, session });
+  console.log(`Route chosen: ${response3.session?.currentRoute?.title}`);
   console.log(`Available tools in this route: none (conversation only)`);
   console.log(`Response: ${response3.message}\n`);
+
+  // Update session again
+  session = response3.session!;
 
   // Example 4: Admin Support route - ALL tools available (for demo purposes)
   console.log("4️⃣  Example: Admin needs full access");
@@ -183,30 +201,33 @@ async function demonstrateScoping() {
     ),
   ];
 
-  const response4 = await agent.respond({ history: history4 });
-  console.log(`Route chosen: ${response4.route?.title}`);
+  const response4 = await agent.respond({ history: history4, session });
+  console.log(`Route chosen: ${response4.session?.currentRoute?.title}`);
   console.log(`Available tools in this route: all domains`);
   console.log(`Response: ${response4.message}\n`);
 }
 
 // Benefits demonstration
 console.log(`
-🔒 Security Benefits:
+🔒 Security Benefits (V2 Architecture):
 - Customer Support route cannot execute payment.processPayment()
 - Data Collection route cannot execute calendar.scheduleEvent()
 - Each route has minimum necessary tool permissions
 - Prevents prompt injection attacks from calling sensitive tools
+- Session state ensures domain scoping persists across turns
 
 🎯 Isolation Benefits:
 - Route execution is isolated - tools can't cross boundaries
 - Checkout can't accidentally trigger admin operations
 - Clear separation of concerns by capability
+- Always-on routing maintains domain restrictions
 
 📋 Clarity Benefits:
 - Routes clearly document their capabilities
 - Easy to audit what each route can execute
 - Better debugging when tools are called
 - Self-documenting security model
+- Session state tracks domain-scoped conversations
 `);
 
 // Inspect route configurations

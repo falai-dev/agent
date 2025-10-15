@@ -1,8 +1,6 @@
 /**
  * Example: OpenAI Agent with multiple providers
- *
- * This example demonstrates how to use the OpenAI provider
- * and how to switch between different AI providers
+ * Updated for v2 architecture with session state management and schema-first data extraction
  */
 
 import {
@@ -11,6 +9,8 @@ import {
   defineTool,
   createMessageEvent,
   EventSource,
+  createSession,
+  END_ROUTE,
 } from "../src/index";
 
 // Custom context type
@@ -20,18 +20,29 @@ interface CustomerContext {
   preferences: string[];
 }
 
-// Define a simple tool
+// Data extraction type for weather queries
+interface WeatherData {
+  location?: string;
+  temperature?: number;
+  condition?: string;
+}
+
+// Define a tool that can access extracted data
 const getWeather = defineTool<
   CustomerContext,
   [{ location: string }],
   { location: string; temperature: number; condition: string }
 >(
   "get_weather",
-  async (_context, args) => {
+  async ({ context, extracted }, args) => {
+    // Use extracted location if available, otherwise use args
+    const location =
+      (extracted as Partial<WeatherData>)?.location || args.location;
+
     // Simulate API call
     return {
       data: {
-        location: args.location,
+        location,
         temperature: 72,
         condition: "Sunny",
       },
@@ -96,32 +107,57 @@ async function main() {
       enabled: true,
     });
 
-  // Create a simple route
-  const weatherRoute = agent.createRoute({
+  // Create weather route with data extraction schema
+  const weatherRoute = agent.createRoute<WeatherData>({
     title: "Check Weather",
     description: "Help user check weather for a location",
     conditions: ["User wants to know the weather"],
+    gatherSchema: {
+      type: "object",
+      properties: {
+        location: {
+          type: "string",
+          description: "City or location for weather check",
+        },
+        temperature: {
+          type: "number",
+          description: "Temperature in Fahrenheit",
+        },
+        condition: {
+          type: "string",
+          description: "Weather condition (sunny, cloudy, rainy, etc.)",
+        },
+      },
+      required: ["location"],
+    },
   });
 
-  // Add states and transitions
+  // State 1: Gather location
   const askLocation = weatherRoute.initialState.transitionTo({
     chatState: "Ask which city they want weather for",
+    gather: ["location"],
+    skipIf: (extracted) => !!extracted.location,
   });
 
-  const fetchWeather = askLocation.transitionTo(
-    {
-      toolState: getWeather,
-    },
-    "User provides a city name"
-  );
+  // State 2: Get weather data
+  const fetchWeather = askLocation.transitionTo({
+    toolState: getWeather,
+    requiredData: ["location"],
+  });
 
+  // State 3: Present weather information
   const showWeather = fetchWeather.transitionTo({
     chatState:
       "Present the weather information in a friendly way with temperature and condition",
   });
 
-  // Simulate a conversation
+  showWeather.transitionTo({ state: END_ROUTE });
+
+  // Example conversation with session state management
   console.log("🤖 Starting OpenAI Agent Example\n");
+
+  // Initialize session state for multi-turn conversation
+  let session = createSession<WeatherData>();
 
   // Build history
   const history = [
@@ -133,11 +169,10 @@ async function main() {
   ];
 
   try {
-    // Generate response (this would call OpenAI)
-    console.log("📤 Sending request to OpenAI...");
+    // Turn 1: Process weather query with session state
+    console.log("📤 Processing with session state...");
+    const response = await agent.respond({ history, session });
 
-    // In a real scenario, you would call agent.generateMessage() or similar
-    // For now, let's just show the structure:
     console.log("\n✅ Agent Configuration:");
     console.log(`   AI Provider: ${openaiProvider.name}`);
 
@@ -147,12 +182,19 @@ async function main() {
       `   States: Initial → Ask Location → Fetch Weather → Show Weather`
     );
 
-    console.log("\n💬 Conversation History:");
-    history.forEach((event, i) => {
-      console.log(`   ${i + 1}. ${event.source}: ${event.data.message}`);
-    });
+    console.log("\n💬 Conversation:");
+    console.log(`   Customer: ${history[0].data.message}`);
+    console.log(`   Agent: ${response.message}`);
+    console.log(`   Route: ${response.session?.currentRoute?.title}`);
+    console.log(`   Extracted:`, response.session?.extracted);
 
-    console.log("\n✨ Ready to process with OpenAI provider!");
+    // Update session with progress
+    session = response.session!;
+
+    console.log("\n✨ Session state benefits:");
+    console.log("   ✅ Data extraction tracked across turns");
+    console.log("   ✅ State progression managed automatically");
+    console.log("   ✅ Always-on routing respects intent changes");
     console.log(
       "   (Set OPENAI_API_KEY environment variable to make actual API calls)"
     );

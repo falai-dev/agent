@@ -2,22 +2,41 @@
  * Core Agent implementation
  */
 
-import type {
-  AgentOptions,
-  Term,
-  Guideline,
-  GuidelineMatch,
-  Capability,
-} from "../types/agent";
-import type { Event, StateRef } from "../types/index";
+import type { AgentOptions, Term, Guideline, Capability } from "../types/agent";
+import type { Event, StateRef, MessageEventData } from "../types/index";
 import type { RouteOptions } from "../types/route";
+import type { RoutingDecisionOutput } from "./RoutingEngine";
+import type { SessionState } from "../types/session";
+import type { AgentStructuredResponse } from "../types/ai";
+import {
+  createSession,
+  enterRoute,
+  enterState,
+  mergeExtracted,
+} from "../types/session";
+import { EventKind } from "../types/history";
+import { PromptComposer } from "./PromptComposer";
 
 import { Route } from "./Route";
+import { State } from "./State";
 import { DomainRegistry } from "./DomainRegistry";
-import { PromptBuilder } from "./PromptBuilder";
-import { Observation } from "./Observation";
 import { PersistenceManager } from "./PersistenceManager";
-import { PreparationEngine } from "./PreparationEngine";
+import { RoutingEngine } from "./RoutingEngine";
+import { ResponseEngine } from "./ResponseEngine";
+import { ToolExecutor } from "./ToolExecutor";
+
+/**
+ * Helper to extract last message from history
+ */
+function getLastMessageFromHistory(history: Event[]): string {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const event = history[i];
+    if (event.kind === EventKind.MESSAGE) {
+      return (event.data as MessageEventData).message;
+    }
+  }
+  return "";
+}
 
 /**
  * Main Agent class with generic context support
@@ -26,12 +45,13 @@ export class Agent<TContext = unknown> {
   private terms: Term[] = [];
   private guidelines: Guideline[] = [];
   private capabilities: Capability[] = [];
-  private routes: Route<TContext>[] = [];
-  private observations: Observation[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private routes: Route<TContext, any>[] = [];
   private domainRegistry = new DomainRegistry();
   private context: TContext | undefined;
   private persistenceManager: PersistenceManager | undefined;
-  private preparationEngine: PreparationEngine<TContext>;
+  private routingEngine: RoutingEngine<TContext>;
+  private responseEngine: ResponseEngine<TContext>;
 
   /**
    * Dynamic domain property - populated via addDomain
@@ -39,11 +59,6 @@ export class Agent<TContext = unknown> {
   public readonly domain: Record<string, Record<string, unknown>> = {};
 
   constructor(private readonly options: AgentOptions<TContext>) {
-    // Initialize with default values
-    if (!this.options.maxEngineIterations) {
-      this.options.maxEngineIterations = 1;
-    }
-
     // Validate context configuration
     if (options.context !== undefined && options.contextProvider) {
       throw new Error(
@@ -54,11 +69,13 @@ export class Agent<TContext = unknown> {
     // Initialize context if provided
     this.context = options.context;
 
-    // Initialize preparation engine with AI provider and optional parallelism controls
-    this.preparationEngine = new PreparationEngine<TContext>(options.ai, {
-      maxParallelLlmCalls: options.preparation?.maxParallelLlmCalls,
-      maxParallelTools: options.preparation?.maxParallelTools,
+    // Initialize routing and response engines
+    this.routingEngine = new RoutingEngine<TContext>({
+      maxCandidates: 5,
+      allowRouteSwitch: true,
+      switchThreshold: 70,
     });
+    this.responseEngine = new ResponseEngine<TContext>();
 
     // Initialize persistence if configured
     if (options.persistence) {
@@ -94,27 +111,7 @@ export class Agent<TContext = unknown> {
 
     if (options.routes) {
       options.routes.forEach((routeOptions) => {
-        this.createRoute(routeOptions);
-      });
-    }
-
-    if (options.observations) {
-      options.observations.forEach((obsOptions) => {
-        const obs = this.createObservation(obsOptions.description);
-
-        // If route refs were provided, resolve and disambiguate
-        if (obsOptions.routeRefs && obsOptions.routeRefs.length > 0) {
-          const resolvedRoutes = obsOptions.routeRefs
-            .map((ref) => {
-              // Try to find route by ID or title
-              return this.routes.find((r) => r.id === ref || r.title === ref);
-            })
-            .filter((r): r is Route<TContext> => r !== undefined);
-
-          if (resolvedRoutes.length > 0) {
-            obs.disambiguate(resolvedRoutes);
-          }
-        }
+        this.createRoute<unknown>(routeOptions);
       });
     }
   }
@@ -142,9 +139,12 @@ export class Agent<TContext = unknown> {
 
   /**
    * Create a new route (journey)
+   * @template TExtracted - Type of data extracted throughout the route
    */
-  createRoute(options: RouteOptions): Route<TContext> {
-    const route = new Route<TContext>(options);
+  createRoute<TExtracted = unknown>(
+    options: RouteOptions<TExtracted>
+  ): Route<TContext, TExtracted> {
+    const route = new Route<TContext, TExtracted>(options);
     this.routes.push(route);
     return route;
   }
@@ -183,24 +183,33 @@ export class Agent<TContext = unknown> {
   }
 
   /**
-   * Create an observation for disambiguation
-   */
-  createObservation(description: string): Observation {
-    const observation = new Observation({ description });
-    this.observations.push(observation);
-    return observation;
-  }
-
-  /**
    * Add a domain with its tools/methods
+   * Automatically tags all ToolRef objects with their domain name for security enforcement
    */
   addDomain<TName extends string, TDomain extends Record<string, unknown>>(
     name: TName,
     domainObject: TDomain
   ): void {
-    this.domainRegistry.register(name, domainObject);
+    // Tag all tools in this domain with the domain name for security enforcement
+    const taggedDomain = { ...domainObject };
+    for (const key in taggedDomain) {
+      const value = taggedDomain[key];
+      // Check if value is a ToolRef (has handler, id, name properties)
+      if (
+        value &&
+        typeof value === "object" &&
+        "handler" in value &&
+        "id" in value &&
+        "name" in value
+      ) {
+        // Tag the tool with its domain name
+        (value as Record<string, unknown>).domainName = name;
+      }
+    }
+
+    this.domainRegistry.register(name, taggedDomain);
     // Attach to the domain property for easy access
-    this.domain[name] = domainObject;
+    this.domain[name] = taggedDomain;
   }
 
   /**
@@ -223,6 +232,36 @@ export class Agent<TContext = unknown> {
   }
 
   /**
+   * Update extracted data in session with lifecycle hook support
+   * Triggers the onExtractedUpdate lifecycle hook if configured
+   * @internal
+   */
+  private async updateExtracted<TExtracted = unknown>(
+    session: SessionState<TExtracted>,
+    extractedUpdate: Partial<TExtracted>
+  ): Promise<SessionState<TExtracted>> {
+    const previousExtracted = { ...session.extracted };
+
+    // Merge new extracted data
+    let newExtracted = {
+      ...session.extracted,
+      ...extractedUpdate,
+    };
+
+    // Trigger lifecycle hook if configured
+    if (this.options.hooks?.onExtractedUpdate) {
+      const updatedExtracted = (await this.options.hooks.onExtractedUpdate(
+        newExtracted,
+        previousExtracted
+      )) as Partial<TExtracted>;
+      newExtracted = updatedExtracted;
+    }
+
+    // Return updated session
+    return mergeExtracted(session, newExtracted);
+  }
+
+  /**
    * Get current context (fetches from provider if configured)
    * @internal
    */
@@ -237,19 +276,70 @@ export class Agent<TContext = unknown> {
   }
 
   /**
+   * Determine the next state in a route based on extracted data
+   * @internal
+   */
+  private getNextState<TExtracted = unknown>(
+    route: Route<TContext, TExtracted>,
+    currentState: State<TContext, TExtracted> | undefined,
+    extracted: Partial<TExtracted>
+  ): State<TContext, TExtracted> {
+    // If no current state, start from initial state
+    if (!currentState) {
+      // Check if initial state should be skipped
+      if (route.initialState.shouldSkip(extracted)) {
+        return this.getNextState(route, route.initialState, extracted);
+      }
+      return route.initialState;
+    }
+
+    // Get transitions from current state
+    const transitions = currentState.getTransitions();
+
+    // If no transitions, stay in current state
+    if (transitions.length === 0) {
+      return currentState;
+    }
+
+    // Try to find the next state to transition to
+    for (const transition of transitions) {
+      const target = transition.getTarget();
+      if (!target) continue;
+
+      // Check if target state should be skipped
+      if (target.shouldSkip(extracted)) {
+        // Recursively find next non-skipped state
+        return this.getNextState(route, target, extracted);
+      }
+
+      // Check if target state has required data
+      if (!target.hasRequiredData(extracted)) {
+        // Cannot enter this state yet, stay in current state
+        continue;
+      }
+
+      // Found valid next state
+      return target;
+    }
+
+    // No valid transition found, stay in current state
+    return currentState;
+  }
+
+  /**
    * Generate a response based on history and context as a stream
    */
   async *respondStream(params: {
     history: Event[];
     state?: StateRef;
+    session?: SessionState;
     contextOverride?: Partial<TContext>;
     signal?: AbortSignal;
   }): AsyncGenerator<{
     delta: string;
     accumulated: string;
     done: boolean;
-    route?: { id: string; title: string } | null;
-    state?: { id: string; description?: string } | null;
+    session?: SessionState;
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   }> {
     const { history, contextOverride, signal } = params;
@@ -265,184 +355,307 @@ export class Agent<TContext = unknown> {
     }
 
     // Merge context with override
-    let effectiveContext = {
+    const effectiveContext = {
       ...(currentContext as Record<string, unknown>),
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
 
-    // RUN PREPARATION ITERATIONS
-    // This is where tools execute automatically based on:
-    // 1. Matched guidelines with associated tools
-    // 2. State machine transitions with toolState
-    //
-    // The AI will NEVER see these tools - they execute before message generation
-    const preparationResult = await this.preparationEngine.prepare({
-      history,
-      currentState: params.state,
-      context: effectiveContext,
-      routes: this.routes,
-      guidelines: this.guidelines,
-      maxIterations: this.options.maxEngineIterations || 1,
-    });
+    // Initialize or get session
+    let session = params.session || createSession();
 
-    // Update context with results from tool executions
-    effectiveContext = preparationResult.finalContext;
-
-    // Persist updated context and trigger lifecycle hook
-    const previousStoredContext = this.context;
-    this.context = effectiveContext;
-    if (
-      this.options.hooks?.onContextUpdate &&
-      previousStoredContext !== undefined
-    ) {
-      await this.options.hooks.onContextUpdate(
-        this.context,
-        previousStoredContext
+    // PHASE 1: TOOL EXECUTION - Execute tools if current state has toolState
+    if (session.currentRoute && session.currentState) {
+      const currentRoute = this.routes.find(
+        (r) => r.id === session.currentRoute?.id
       );
-    }
+      if (currentRoute) {
+        const currentState = currentRoute.getState(session.currentState.id);
+        if (currentState) {
+          const transitions = currentState.getTransitions();
+          const toolTransition = transitions.find((t) => t.spec.toolState);
 
-    // Log tool executions for debugging
-    if (preparationResult.toolExecutions.length > 0) {
-      console.log(
-        `[Agent] Preparation complete: ${preparationResult.toolExecutions.length} tools executed in ${preparationResult.iterations.length} iterations`
-      );
-    }
+          if (toolTransition?.spec.toolState) {
+            const toolExecutor = new ToolExecutor<TContext, unknown>();
+            // Get allowed domains from current route for security enforcement
+            const allowedDomains = currentRoute.getDomains();
+            const result = await toolExecutor.executeTool(
+              toolTransition.spec.toolState,
+              effectiveContext,
+              this.updateContext.bind(this),
+              history,
+              session.extracted,
+              allowedDomains
+            );
 
-    // Build prompt (same as respond method)
-    const promptBuilder = new PromptBuilder();
+            // Update context with tool results
+            if (result.contextUpdate) {
+              await this.updateContext(
+                result.contextUpdate as Partial<TContext>
+              );
+            }
 
-    // Add agent identity
-    if (this.options.description) {
-      promptBuilder.addAgentIdentity({
-        name: this.options.name,
-        description: this.options.description,
-      });
-    }
+            // Update extracted data with tool results
+            if (result.extractedUpdate) {
+              session = await this.updateExtracted(
+                session,
+                result.extractedUpdate
+              );
+              console.log(
+                `[Agent] Tool updated extracted data:`,
+                result.extractedUpdate
+              );
+            }
 
-    // Add interaction history
-    promptBuilder.addInteractionHistoryForMessageGeneration(history);
-
-    // Add glossary
-    if (this.terms.length > 0) {
-      promptBuilder.addGlossary(this.terms);
-    }
-
-    // Add guidelines (convert to GuidelineMatch format, filter enabled only)
-    const enabledGuidelines = this.guidelines.filter(
-      (g) => g.enabled !== false
-    );
-    if (enabledGuidelines.length > 0) {
-      const guidelineMatches: GuidelineMatch[] = enabledGuidelines.map((g) => ({
-        guideline: g,
-      }));
-      promptBuilder.addGuidelinesForMessageGeneration(guidelineMatches);
-    }
-
-    // Add capabilities
-    if (this.capabilities.length > 0) {
-      promptBuilder.addCapabilitiesForMessageGeneration(this.capabilities);
-    }
-
-    // Add observations
-    if (this.observations.length > 0) {
-      const observationsWithRoutes = this.observations
-        .map((obs) => ({
-          description: obs.description,
-          routes: obs.getRoutes().map((routeRef) => {
-            const route = this.routes.find((r) => r.id === routeRef.id);
-            return { title: route?.title || routeRef.id };
-          }),
-        }))
-        .filter((obs) => obs.routes.length > 0);
-
-      if (observationsWithRoutes.length > 0) {
-        promptBuilder.addObservations(observationsWithRoutes);
+            console.log(
+              `[Agent] Executed tool: ${result.toolName} (success: ${result.success})`
+            );
+          }
+        }
       }
     }
 
-    // Add active routes with their rules and prohibitions
+    // PHASE 2: ROUTING - Determine which route to use
+    let selectedRoute: Route<TContext> | undefined;
+    let responseDirectives: string[] | undefined;
+
     if (this.routes.length > 0) {
-      promptBuilder.addActiveRoutes(
-        this.routes.map((r) => ({
-          title: r.title,
-          description: r.description,
-          conditions: r.conditions,
-          domains: r.getDomains(),
-          rules: r.getRules(),
-          prohibitions: r.getProhibitions(),
-        }))
+      // Get last user message
+      const lastUserMessage = getLastMessageFromHistory(history);
+
+      // Build routing schema
+      const routingSchema = this.routingEngine.buildDynamicRoutingSchema(
+        this.routes
       );
+
+      // Build routing prompt with session context
+      const routingPrompt = this.routingEngine.buildRoutingPrompt(
+        history,
+        this.routes,
+        lastUserMessage,
+        {
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+          personality: this.options.personality,
+        },
+        session // Pass session for context-aware routing
+      );
+
+      // Call AI to score routes (non-streaming for routing decision)
+      const routingResult = await this.options.ai.generateMessage<
+        TContext,
+        RoutingDecisionOutput
+      >({
+        prompt: routingPrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: routingSchema,
+          schemaName: "routing_output",
+        },
+      });
+
+      // Select best route from scores
+      if (routingResult.structured?.routes) {
+        const decision = this.routingEngine.decideRouteFromScores({
+          context: routingResult.structured.context,
+          routes: routingResult.structured.routes,
+          responseDirectives: routingResult.structured.responseDirectives,
+        });
+        selectedRoute = this.routes.find((r) => r.id === decision.routeId);
+        responseDirectives = routingResult.structured.responseDirectives;
+
+        if (selectedRoute) {
+          console.log(
+            `[Agent] Selected route: ${selectedRoute.title} (score: ${decision.maxScore})`
+          );
+
+          // Update session with selected route (if changed)
+          if (
+            !session.currentRoute ||
+            session.currentRoute.id !== selectedRoute.id
+          ) {
+            session = enterRoute(
+              session,
+              selectedRoute.id,
+              selectedRoute.title
+            );
+
+            // Merge initial data if provided by the route
+            if (selectedRoute.initialData) {
+              session = mergeExtracted(session, selectedRoute.initialData);
+              console.log(
+                `[Agent] Merged initial data:`,
+                selectedRoute.initialData
+              );
+            }
+
+            console.log(`[Agent] Entered route: ${selectedRoute.title}`);
+          }
+        }
+      }
     }
 
-    // NOTE: Domains/tools are NOT added to the prompt.
-    // Tools execute automatically based on state transitions and guideline matching,
-    // NOT based on AI decisions. The AI should never see available tools.
+    // PHASE 3: RESPONSE - Stream message using selected route
+    if (selectedRoute) {
+      // Determine next state based on current extracted data
+      const currentStateRef = session.currentState;
+      const currentState = currentStateRef
+        ? selectedRoute.getState(currentStateRef.id)
+        : undefined;
+      const nextState = this.getNextState(
+        selectedRoute,
+        currentState,
+        session.extracted
+      );
 
-    // Add JSON response schema instructions
-    promptBuilder.addJsonResponseSchema();
+      // Update session with next state
+      session = enterState(session, nextState.id, nextState.description);
+      console.log(`[Agent] Entered state: ${nextState.id}`);
 
-    // Build final prompt
-    const prompt = promptBuilder.build();
+      // Get last user message
+      const lastUserMessage = getLastMessageFromHistory(history);
 
-    // Generate message stream using AI provider with JSON mode enabled
-    const stream = this.options.ai.generateMessageStream({
-      prompt,
-      history,
-      context: effectiveContext,
-      signal,
-      parameters: {
-        jsonMode: true,
-      },
-    });
+      // Build response schema for this route (with gather fields from state)
+      const responseSchema = this.responseEngine.responseSchemaForRoute(
+        selectedRoute,
+        nextState
+      );
 
-    // Stream chunks to caller
-    for await (const chunk of stream) {
-      // Extract route and state from structured response on final chunk
-      let route: { id: string; title: string } | null = null;
-      let state: { id: string; description?: string } | null = null;
-      let toolCalls:
-        | Array<{ toolName: string; arguments: Record<string, unknown> }>
-        | undefined;
+      // Build response prompt
+      const responsePrompt = this.responseEngine.buildResponsePrompt(
+        selectedRoute,
+        selectedRoute.getRules(),
+        selectedRoute.getProhibitions(),
+        responseDirectives,
+        history,
+        lastUserMessage,
+        {
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+          personality: this.options.personality,
+        }
+      );
 
-      if (chunk.done && chunk.structured) {
-        // Find route by title
-        if (chunk.structured.route) {
-          const foundRoute = this.routes.find(
-            (r) => r.title === chunk.structured?.route
-          );
-          if (foundRoute) {
-            route = {
-              id: foundRoute.id,
-              title: foundRoute.title,
-            };
+      // Generate message stream using AI provider
+      const stream = this.options.ai.generateMessageStream({
+        prompt: responsePrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: responseSchema,
+          schemaName: "response_stream_output",
+        },
+      });
+
+      // Stream chunks to caller
+      for await (const chunk of stream) {
+        const toolCalls:
+          | Array<{ toolName: string; arguments: Record<string, unknown> }>
+          | undefined = undefined;
+
+        // Extract gathered data on final chunk
+        if (chunk.done && chunk.structured && nextState.gatherFields) {
+          const gatheredData: Record<string, unknown> = {};
+          // The structured response includes both base fields and gathered extraction fields
+          const structuredData = chunk.structured as AgentStructuredResponse &
+            Record<string, unknown>;
+
+          for (const field of nextState.gatherFields) {
+            if (field in structuredData) {
+              gatheredData[field] = structuredData[field];
+            }
+          }
+
+          // Merge gathered data into session
+          if (Object.keys(gatheredData).length > 0) {
+            session = await this.updateExtracted(session, gatheredData);
+            console.log(`[Agent] Extracted data:`, gatheredData);
           }
         }
 
-        // Create state reference if provided
-        if (chunk.structured.state) {
-          state = {
-            id: "dynamic_state",
-            description: chunk.structured.state,
-          };
-        }
-
-        // Extract tool calls
+        // Extract any additional data from structured response on final chunk
         if (
-          chunk.structured.toolCalls &&
-          chunk.structured.toolCalls.length > 0
+          chunk.done &&
+          chunk.structured &&
+          typeof chunk.structured === "object" &&
+          "contextUpdate" in chunk.structured
         ) {
-          toolCalls = chunk.structured.toolCalls;
+          await this.updateContext(
+            (chunk.structured as { contextUpdate?: Partial<TContext> })
+              .contextUpdate as Partial<TContext>
+          );
         }
-      }
 
-      yield {
-        delta: chunk.delta,
-        accumulated: chunk.accumulated,
-        done: chunk.done,
-        route: route || undefined,
-        state: state || undefined,
-        toolCalls,
-      };
+        // Auto-save session state on final chunk
+        if (
+          chunk.done &&
+          this.persistenceManager &&
+          session.metadata?.sessionId &&
+          this.options.persistence?.autoSave !== false
+        ) {
+          await this.persistenceManager.saveSessionState(
+            session.metadata.sessionId,
+            session
+          );
+          console.log(
+            `[Agent] Auto-saved session state to persistence: ${session.metadata.sessionId}`
+          );
+        }
+
+        yield {
+          delta: chunk.delta,
+          accumulated: chunk.accumulated,
+          done: chunk.done,
+          session, // Return updated session
+          toolCalls,
+        };
+      }
+    } else {
+      // Fallback: No routes defined, stream a simple response
+      const fallbackPrompt = new PromptComposer<TContext>()
+        .addAgentMeta({
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+        })
+        .addPersonality(this.options.personality)
+        .addInteractionHistory(history)
+        .addGlossary(this.terms)
+        .addGuidelines(this.guidelines)
+        .addCapabilities(this.capabilities)
+        .build();
+
+      const stream = this.options.ai.generateMessageStream({
+        prompt: fallbackPrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+            additionalProperties: false,
+          },
+          schemaName: "fallback_stream_response",
+        },
+      });
+
+      for await (const chunk of stream) {
+        yield {
+          delta: chunk.delta,
+          accumulated: chunk.accumulated,
+          done: chunk.done,
+          session, // Return updated session
+          toolCalls: undefined,
+        };
+      }
     }
   }
 
@@ -452,12 +665,12 @@ export class Agent<TContext = unknown> {
   async respond(params: {
     history: Event[];
     state?: StateRef;
+    session?: SessionState;
     contextOverride?: Partial<TContext>;
     signal?: AbortSignal;
   }): Promise<{
     message: string;
-    route?: { id: string; title: string } | null;
-    state?: { id: string; description?: string } | null;
+    session?: SessionState;
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   }> {
     const { history, contextOverride, signal } = params;
@@ -473,182 +686,294 @@ export class Agent<TContext = unknown> {
     }
 
     // Merge context with override
-    let effectiveContext = {
+    const effectiveContext = {
       ...(currentContext as Record<string, unknown>),
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
 
-    // RUN PREPARATION ITERATIONS
-    // This is where tools execute automatically based on:
-    // 1. Matched guidelines with associated tools
-    // 2. State machine transitions with toolState
-    //
-    // The AI will NEVER see these tools - they execute before message generation
-    const preparationResult = await this.preparationEngine.prepare({
-      history,
-      currentState: params.state,
-      context: effectiveContext,
-      routes: this.routes,
-      guidelines: this.guidelines,
-      maxIterations: this.options.maxEngineIterations || 1,
-    });
+    // Initialize or get session
+    let session = params.session || createSession();
 
-    // Update context with results from tool executions
-    effectiveContext = preparationResult.finalContext;
-
-    // Persist updated context and trigger lifecycle hook
-    const previousStoredContext = this.context;
-    this.context = effectiveContext;
-    if (
-      this.options.hooks?.onContextUpdate &&
-      previousStoredContext !== undefined
-    ) {
-      await this.options.hooks.onContextUpdate(
-        this.context,
-        previousStoredContext
+    // PHASE 1: TOOL EXECUTION - Execute tools if current state has toolState
+    if (session.currentRoute && session.currentState) {
+      const currentRoute = this.routes.find(
+        (r) => r.id === session.currentRoute?.id
       );
-    }
+      if (currentRoute) {
+        const currentState = currentRoute.getState(session.currentState.id);
+        if (currentState) {
+          const transitions = currentState.getTransitions();
+          const toolTransition = transitions.find((t) => t.spec.toolState);
 
-    // Log tool executions for debugging
-    if (preparationResult.toolExecutions.length > 0) {
-      console.log(
-        `[Agent] Preparation complete: ${preparationResult.toolExecutions.length} tools executed in ${preparationResult.iterations.length} iterations`
-      );
-    }
+          if (toolTransition?.spec.toolState) {
+            const toolExecutor = new ToolExecutor<TContext, unknown>();
+            // Get allowed domains from current route for security enforcement
+            const allowedDomains = currentRoute.getDomains();
+            const result = await toolExecutor.executeTool(
+              toolTransition.spec.toolState,
+              effectiveContext,
+              this.updateContext.bind(this),
+              history,
+              session.extracted,
+              allowedDomains
+            );
 
-    // Build prompt
-    const promptBuilder = new PromptBuilder();
+            // Update context with tool results
+            if (result.contextUpdate) {
+              await this.updateContext(
+                result.contextUpdate as Partial<TContext>
+              );
+            }
 
-    // Add agent identity
-    if (this.options.description) {
-      promptBuilder.addAgentIdentity({
-        name: this.options.name,
-        description: this.options.description,
-      });
-    }
+            // Update extracted data with tool results
+            if (result.extractedUpdate) {
+              session = await this.updateExtracted(
+                session,
+                result.extractedUpdate
+              );
+              console.log(
+                `[Agent] Tool updated extracted data:`,
+                result.extractedUpdate
+              );
+            }
 
-    // Add interaction history
-    promptBuilder.addInteractionHistoryForMessageGeneration(history);
-
-    // Add glossary
-    if (this.terms.length > 0) {
-      promptBuilder.addGlossary(this.terms);
-    }
-
-    // Add guidelines (convert to GuidelineMatch format, filter enabled only)
-    const enabledGuidelines = this.guidelines.filter(
-      (g) => g.enabled !== false
-    );
-    if (enabledGuidelines.length > 0) {
-      const guidelineMatches: GuidelineMatch[] = enabledGuidelines.map((g) => ({
-        guideline: g,
-      }));
-      promptBuilder.addGuidelinesForMessageGeneration(guidelineMatches);
-    }
-
-    // Add capabilities
-    if (this.capabilities.length > 0) {
-      promptBuilder.addCapabilitiesForMessageGeneration(this.capabilities);
-    }
-
-    // Add observations
-    if (this.observations.length > 0) {
-      const observationsWithRoutes = this.observations
-        .map((obs) => ({
-          description: obs.description,
-          routes: obs.getRoutes().map((routeRef) => {
-            const route = this.routes.find((r) => r.id === routeRef.id);
-            return { title: route?.title || routeRef.id };
-          }),
-        }))
-        .filter((obs) => obs.routes.length > 0);
-
-      if (observationsWithRoutes.length > 0) {
-        promptBuilder.addObservations(observationsWithRoutes);
+            console.log(
+              `[Agent] Executed tool: ${result.toolName} (success: ${result.success})`
+            );
+          }
+        }
       }
     }
 
-    // Add active routes with their rules and prohibitions
+    // PHASE 2: ROUTING - Determine which route to use
+    let selectedRoute: Route<TContext> | undefined;
+    let responseDirectives: string[] | undefined;
+
     if (this.routes.length > 0) {
-      promptBuilder.addActiveRoutes(
-        this.routes.map((r) => ({
-          title: r.title,
-          description: r.description,
-          conditions: r.conditions,
-          domains: r.getDomains(),
-          rules: r.getRules(),
-          prohibitions: r.getProhibitions(),
-        }))
+      // Get last user message
+      const lastUserMessage = getLastMessageFromHistory(history);
+
+      // Build routing schema
+      const routingSchema = this.routingEngine.buildDynamicRoutingSchema(
+        this.routes
       );
+
+      // Build routing prompt with session context
+      const routingPrompt = this.routingEngine.buildRoutingPrompt(
+        history,
+        this.routes,
+        lastUserMessage,
+        {
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+          personality: this.options.personality,
+        },
+        session // Pass session for context-aware routing
+      );
+
+      // Call AI to score routes
+      const routingResult = await this.options.ai.generateMessage<
+        TContext,
+        RoutingDecisionOutput
+      >({
+        prompt: routingPrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: routingSchema,
+          schemaName: "routing_output",
+        },
+      });
+
+      // Select best route from scores
+      if (routingResult.structured?.routes) {
+        const decision = this.routingEngine.decideRouteFromScores({
+          context: routingResult.structured.context,
+          routes: routingResult.structured.routes,
+          responseDirectives: routingResult.structured.responseDirectives,
+        });
+        selectedRoute = this.routes.find((r) => r.id === decision.routeId);
+        responseDirectives = routingResult.structured.responseDirectives;
+
+        if (selectedRoute) {
+          console.log(
+            `[Agent] Selected route: ${selectedRoute.title} (score: ${decision.maxScore})`
+          );
+
+          // Update session with selected route (if changed)
+          if (
+            !session.currentRoute ||
+            session.currentRoute.id !== selectedRoute.id
+          ) {
+            session = enterRoute(
+              session,
+              selectedRoute.id,
+              selectedRoute.title
+            );
+
+            // Merge initial data if provided by the route
+            if (selectedRoute.initialData) {
+              session = mergeExtracted(session, selectedRoute.initialData);
+              console.log(
+                `[Agent] Merged initial data:`,
+                selectedRoute.initialData
+              );
+            }
+
+            console.log(`[Agent] Entered route: ${selectedRoute.title}`);
+          }
+        }
+      }
     }
 
-    // NOTE: Domains/tools are NOT added to the prompt.
-    // Tools execute automatically based on state transitions and guideline matching,
-    // NOT based on AI decisions. The AI should never see available tools.
-
-    // Add JSON response schema instructions
-    promptBuilder.addJsonResponseSchema();
-
-    // Build final prompt
-    const prompt = promptBuilder.build();
-
-    // Generate message using AI provider with JSON mode enabled
-    const result = await this.options.ai.generateMessage({
-      prompt,
-      history,
-      context: effectiveContext,
-      signal,
-      parameters: {
-        jsonMode: true,
-      },
-    });
-
-    // Parse structured response
-    let message = result.message;
-    let route: { id: string; title: string } | null = null;
-    let state: { id: string; description?: string } | null = null;
-    let toolCalls:
+    // PHASE 3: RESPONSE - Generate message using selected route
+    let message: string;
+    const toolCalls:
       | Array<{ toolName: string; arguments: Record<string, unknown> }>
-      | undefined;
+      | undefined = undefined;
 
-    if (result.structured) {
-      // Extract data from structured response
-      message = result.structured.message || message;
+    if (selectedRoute) {
+      // Determine next state based on current extracted data
+      const currentStateRef = session.currentState;
+      const currentState = currentStateRef
+        ? selectedRoute.getState(currentStateRef.id)
+        : undefined;
+      const nextState = this.getNextState(
+        selectedRoute,
+        currentState,
+        session.extracted
+      );
 
-      // Find route by title
-      if (result.structured.route) {
-        const foundRoute = this.routes.find(
-          (r) => r.title === result.structured?.route
-        );
-        if (foundRoute) {
-          route = {
-            id: foundRoute.id,
-            title: foundRoute.title,
-          };
+      // Update session with next state
+      session = enterState(session, nextState.id, nextState.description);
+      console.log(`[Agent] Entered state: ${nextState.id}`);
+
+      // Get last user message
+      const lastUserMessage = getLastMessageFromHistory(history);
+
+      // Build response schema for this route (with gather fields from state)
+      const responseSchema = this.responseEngine.responseSchemaForRoute(
+        selectedRoute,
+        nextState
+      );
+
+      // Build response prompt
+      const responsePrompt = this.responseEngine.buildResponsePrompt(
+        selectedRoute,
+        selectedRoute.getRules(),
+        selectedRoute.getProhibitions(),
+        responseDirectives,
+        history,
+        lastUserMessage,
+        {
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+          personality: this.options.personality,
+        }
+      );
+
+      // Generate message using AI provider
+      const result = await this.options.ai.generateMessage({
+        prompt: responsePrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: responseSchema,
+          schemaName: "response_output",
+        },
+      });
+
+      message = result.structured?.message || result.message;
+
+      // Extract gathered data from response
+      if (result.structured && nextState.gatherFields) {
+        const gatheredData: Record<string, unknown> = {};
+        // The structured response includes both base fields and gathered extraction fields
+        const structuredData = result.structured as AgentStructuredResponse &
+          Record<string, unknown>;
+
+        for (const field of nextState.gatherFields) {
+          if (field in structuredData) {
+            gatheredData[field] = structuredData[field];
+          }
+        }
+
+        // Merge gathered data into session
+        if (Object.keys(gatheredData).length > 0) {
+          session = mergeExtracted(session, gatheredData);
+          console.log(`[Agent] Extracted data:`, gatheredData);
         }
       }
 
-      // Create state reference if provided
-      if (result.structured.state) {
-        state = {
-          id: "dynamic_state",
-          description: result.structured.state,
-        };
-      }
-
-      // Extract tool calls
+      // Extract any additional data from structured response
       if (
-        result.structured.toolCalls &&
-        result.structured.toolCalls.length > 0
+        result.structured &&
+        typeof result.structured === "object" &&
+        "contextUpdate" in result.structured
       ) {
-        toolCalls = result.structured.toolCalls;
+        await this.updateContext(
+          (result.structured as { contextUpdate?: Partial<TContext> })
+            .contextUpdate as Partial<TContext>
+        );
       }
+    } else {
+      // Fallback: No routes defined, generate a simple response
+      const fallbackPrompt = new PromptComposer<TContext>()
+        .addAgentMeta({
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+        })
+        .addPersonality(this.options.personality)
+        .addInteractionHistory(history)
+        .addGlossary(this.terms)
+        .addGuidelines(this.guidelines)
+        .addCapabilities(this.capabilities)
+        .build();
+
+      const result = await this.options.ai.generateMessage({
+        prompt: fallbackPrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+            additionalProperties: false,
+          },
+          schemaName: "fallback_response",
+        },
+      });
+
+      message = result.structured?.message || result.message;
+    }
+
+    // Auto-save session state to persistence if configured
+    if (
+      this.persistenceManager &&
+      session.metadata?.sessionId &&
+      this.options.persistence?.autoSave !== false
+    ) {
+      await this.persistenceManager.saveSessionState(
+        session.metadata.sessionId,
+        session
+      );
+      console.log(
+        `[Agent] Auto-saved session state to persistence: ${session.metadata.sessionId}`
+      );
     }
 
     return {
       message,
-      route: route || undefined,
-      state: state || undefined,
+      session, // Return updated session with route/state info
       toolCalls,
     };
   }
@@ -656,7 +981,7 @@ export class Agent<TContext = unknown> {
   /**
    * Get all routes
    */
-  getRoutes(): Route<TContext>[] {
+  getRoutes(): Route<TContext, unknown>[] {
     return [...this.routes];
   }
 
@@ -679,13 +1004,6 @@ export class Agent<TContext = unknown> {
    */
   getCapabilities(): Capability[] {
     return [...this.capabilities];
-  }
-
-  /**
-   * Get all observations
-   */
-  getObservations(): Observation[] {
-    return [...this.observations];
   }
 
   /**

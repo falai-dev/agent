@@ -3,6 +3,7 @@
  */
 
 import type { ToolRef } from "./tool";
+import type { StructuredSchema } from "./schema";
 
 /**
  * Reference to a route
@@ -29,8 +30,9 @@ import type { Guideline } from "./agent";
 
 /**
  * Options for creating a route
+ * @template TExtracted - Type of data extracted throughout the route (inferred from gatherSchema)
  */
-export interface RouteOptions {
+export interface RouteOptions<TExtracted = unknown> {
   /** Custom ID for the route (optional - will generate deterministic ID from title if not provided) */
   id?: string;
   /** Title of the route */
@@ -47,12 +49,27 @@ export interface RouteOptions {
   rules?: string[];
   /** Absolute prohibitions the agent must never do in this route */
   prohibitions?: string[];
+  /** Optional: extractions the router may return (added to routing schema) */
+  routingExtrasSchema?: StructuredSchema;
+  /** Optional: structured response data for this route's message generation */
+  responseOutputSchema?: StructuredSchema;
+  /**
+   * NEW: Schema defining data to extract throughout this route
+   * This creates a type-safe contract for what data the route collects
+   */
+  gatherSchema?: StructuredSchema;
+  /**
+   * NEW: Initial data to pre-populate when entering this route
+   * Useful for restoring sessions or pre-filling known information
+   * States with skipIf conditions will be automatically bypassed if data is present
+   */
+  initialData?: Partial<TExtracted>;
 }
 
 /**
  * Specification for a state transition
  */
-export interface TransitionSpec<TContext = unknown> {
+export interface TransitionSpec<TContext = unknown, TExtracted = unknown> {
   /** Transition to a chat state with this description */
   chatState?: string;
   /** Transition to execute a tool */
@@ -60,16 +77,35 @@ export interface TransitionSpec<TContext = unknown> {
   toolState?: ToolRef<TContext, any[], any>;
   /** Transition to a specific state or end marker */
   state?: StateRef | symbol;
+  /**
+   * NEW: Fields to gather from the conversation in this state
+   * These should match keys in the route's gatherSchema
+   */
+  gather?: string[];
+  /**
+   * NEW: Function to determine if this state should be skipped
+   * If returns true, the state will be bypassed
+   * @param extracted - Currently extracted data
+   * @returns true if state should be skipped, false otherwise
+   */
+  skipIf?: (extracted: Partial<TExtracted>) => boolean;
+  /**
+   * NEW: Required data fields that must be present before entering this state
+   * If any required field is missing, state cannot be entered
+   * Uses string[] for developer-friendly usage (same as gather)
+   */
+  requiredData?: string[];
 }
 
 /**
  * Result of a transition operation
  * Combines state reference with the ability to chain transitions
  */
-export interface TransitionResult<TContext = unknown> extends StateRef {
+export interface TransitionResult<TContext = unknown, TExtracted = unknown>
+  extends StateRef {
   /** Allow chaining transitions */
   transitionTo: (
-    spec: TransitionSpec<TContext>,
+    spec: TransitionSpec<TContext, TExtracted>,
     condition?: string
-  ) => TransitionResult<TContext>;
+  ) => TransitionResult<TContext, TExtracted>;
 }

@@ -14,6 +14,12 @@ import type {
   MessageRepository,
 } from "../types/persistence";
 import type { Event } from "../types/history";
+import type { SessionState } from "../types/session";
+import {
+  createSession,
+  sessionStateToData,
+  sessionDataToState,
+} from "../types/session";
 
 /**
  * Manager for handling persistence operations
@@ -218,5 +224,82 @@ export class PersistenceManager {
     return messages
       .map((m) => this.messageToEvent(m))
       .filter((e): e is Event => e !== undefined);
+  }
+
+  /**
+   * Save SessionState to database
+   * Converts SessionState to SessionData and persists it
+   */
+  async saveSessionState<TExtracted = Record<string, unknown>>(
+    sessionId: string,
+    sessionState: SessionState<TExtracted>
+  ): Promise<SessionData | null> {
+    const persistenceData = sessionStateToData(sessionState);
+
+    return await this.sessionRepository.update(sessionId, {
+      currentRoute: persistenceData.currentRoute,
+      currentState: persistenceData.currentState,
+      collectedData: persistenceData.collectedData,
+      lastMessageAt: new Date(),
+    });
+  }
+
+  /**
+   * Load SessionState from database
+   * Converts SessionData to SessionState
+   */
+  async loadSessionState<TExtracted = Record<string, unknown>>(
+    sessionId: string
+  ): Promise<SessionState<TExtracted> | null> {
+    const sessionData = await this.sessionRepository.findById(sessionId);
+
+    if (!sessionData) {
+      return null;
+    }
+
+    const stateData = sessionDataToState<TExtracted>({
+      currentRoute: sessionData.currentRoute,
+      currentState: sessionData.currentState,
+      collectedData: sessionData.collectedData,
+    });
+
+    // Create a full session state with the loaded data
+    const session = createSession<TExtracted>({
+      sessionId,
+      createdAt: sessionData.createdAt,
+      lastUpdatedAt: sessionData.updatedAt,
+    });
+
+    return {
+      ...session,
+      ...stateData,
+    };
+  }
+
+  /**
+   * Create session with SessionState support
+   * Returns both SessionData and initialized SessionState
+   */
+  async createSessionWithState<TExtracted = Record<string, unknown>>(
+    options: CreateSessionOptions
+  ): Promise<{
+    sessionData: SessionData;
+    sessionState: SessionState<TExtracted>;
+  }> {
+    const sessionData = await this.createSession(options);
+
+    // Create SessionState with database session ID
+    const sessionState = createSession<TExtracted>({
+      sessionId: sessionData.id,
+      createdAt: sessionData.createdAt,
+      lastUpdatedAt: sessionData.updatedAt,
+    });
+
+    // If initial data was provided, merge it as extracted data
+    if (options.initialData) {
+      sessionState.extracted = options.initialData as Partial<TExtracted>;
+    }
+
+    return { sessionData, sessionState };
   }
 }

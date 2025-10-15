@@ -3,6 +3,7 @@
  */
 
 import type { RouteOptions, RouteRef } from "../types/route";
+import type { StructuredSchema } from "../types/schema";
 import type { Guideline } from "../types/agent";
 
 import { State } from "./State";
@@ -11,7 +12,7 @@ import { generateRouteId } from "../utils/id";
 /**
  * Represents a conversational route/journey
  */
-export class Route<TContext = unknown> {
+export class Route<TContext = unknown, TExtracted = unknown> {
   public readonly id: string;
   public readonly title: string;
   public readonly description?: string;
@@ -19,10 +20,14 @@ export class Route<TContext = unknown> {
   public readonly domains?: string[];
   public readonly rules: string[];
   public readonly prohibitions: string[];
-  public readonly initialState: State<TContext>;
+  public readonly initialState: State<TContext, TExtracted>;
+  public readonly responseOutputSchema?: StructuredSchema;
+  public readonly gatherSchema?: StructuredSchema;
+  public readonly initialData?: Partial<TExtracted>;
+  private routingExtrasSchema?: StructuredSchema;
   private guidelines: Guideline[] = [];
 
-  constructor(options: RouteOptions) {
+  constructor(options: RouteOptions<TExtracted>) {
     // Use provided ID or generate a deterministic one from the title
     this.id = options.id || generateRouteId(options.title);
     this.title = options.title;
@@ -31,7 +36,14 @@ export class Route<TContext = unknown> {
     this.domains = options.domains;
     this.rules = options.rules || ([] as string[]);
     this.prohibitions = options.prohibitions || ([] as string[]);
-    this.initialState = new State<TContext>(this.id, "Initial state");
+    this.initialState = new State<TContext, TExtracted>(
+      this.id,
+      "Initial state"
+    );
+    this.routingExtrasSchema = options.routingExtrasSchema;
+    this.responseOutputSchema = options.responseOutputSchema;
+    this.gatherSchema = options.gatherSchema;
+    this.initialData = options.initialData;
 
     // Initialize guidelines from options
     if (options.guidelines) {
@@ -83,6 +95,20 @@ export class Route<TContext = unknown> {
   }
 
   /**
+   * Get optional extras schema requested during routing
+   */
+  getRoutingExtrasSchema(): StructuredSchema | undefined {
+    return this.routingExtrasSchema;
+  }
+
+  /**
+   * Get optional structured response schema for this route's message
+   */
+  getResponseOutputSchema(): StructuredSchema | undefined {
+    return this.responseOutputSchema;
+  }
+
+  /**
    * Get route reference
    */
   getRef(): RouteRef {
@@ -92,23 +118,12 @@ export class Route<TContext = unknown> {
   }
 
   /**
-   * Create a route reference that includes this route instance
-   * Useful for disambiguation
-   */
-  toRef(): RouteRef & { route: Route<TContext> } {
-    return {
-      id: this.id,
-      route: this,
-    };
-  }
-
-  /**
    * Get all states in this route (via traversal from initial state)
    */
-  getAllStates(): State<TContext>[] {
+  getAllStates(): State<TContext, TExtracted>[] {
     const visited = new Set<string>();
-    const states: State<TContext>[] = [];
-    const queue: State<TContext>[] = [this.initialState];
+    const states: State<TContext, TExtracted>[] = [];
+    const queue: State<TContext, TExtracted>[] = [this.initialState];
 
     while (queue.length > 0) {
       const current = queue.shift()!;
@@ -137,7 +152,7 @@ export class Route<TContext = unknown> {
    * @param stateId - The state ID to find
    * @returns The state if found, undefined otherwise
    */
-  getState(stateId: string): State<TContext> | undefined {
+  getState(stateId: string): State<TContext, TExtracted> | undefined {
     const states = this.getAllStates();
     return states.find((state) => state.id === stateId);
   }

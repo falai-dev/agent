@@ -45,8 +45,12 @@ export interface GenerateMessageInput<TContext = unknown> {
     maxOutputTokens?: number;
     /** Reasoning/thinking configuration */
     reasoning?: ReasoningConfig;
-    /** Enable structured JSON output mode */
-    jsonMode?: boolean;
+    /**
+     * Required: Structured JSON schema the provider must enforce for output
+     */
+    jsonSchema: { [key: string]: unknown };
+    /** Optional schema name (used by providers that require one) */
+    schemaName?: string;
   };
   /** Abort signal for cancellation */
   signal?: AbortSignal;

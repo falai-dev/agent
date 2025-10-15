@@ -10,10 +10,9 @@ Welcome to the `@falai/agent` documentation!
 
 ### Core Concepts
 
-- **[Architecture](./ARCHITECTURE.md)** - Design principles & philosophy ⭐ **NEW**
-- **[Constructor Options](./CONSTRUCTOR_OPTIONS.md)** - Comprehensive guide to declarative vs fluent configuration
-- **[Context Management](./CONTEXT_MANAGEMENT.md)** - Dynamic context variables & lifecycle hooks
-- **[Package Structure](./STRUCTURE.md)** - Package organization and module design
+- **[Architecture](./ARCHITECTURE.md)** - Design principles & philosophy (Data-driven sessions) ⭐ **UPDATED**
+- **[Constructor Options](./CONSTRUCTOR_OPTIONS.md)** - Comprehensive guide to declarative vs fluent configuration ⭐ **UPDATED**
+- **[Context Management](./CONTEXT_MANAGEMENT.md)** - Session state & data extraction patterns ⭐ **UPDATED**
 
 ### Reference
 
@@ -47,19 +46,15 @@ Welcome to the `@falai/agent` documentation!
 **Need specific API details?**
 → Browse the [API Reference](./API_REFERENCE.md)
 
-**Understanding the codebase?**
-→ Read [Package Structure](./STRUCTURE.md)
-
 **Need persistence?**
 → See [Persistence Guide](./PERSISTENCE.md)
 
 ### By Topic
 
-- **Architecture & Design**: [Architecture Guide](./ARCHITECTURE.md) | [Package Structure](./STRUCTURE.md)
+- **Architecture & Design**: [Architecture Guide](./ARCHITECTURE.md)
 - **Agent Configuration**: [Constructor Options](./CONSTRUCTOR_OPTIONS.md) | [Context Management](./CONTEXT_MANAGEMENT.md)
 - **Conversation Flows**: [API Reference - Routes](./API_REFERENCE.md#route)
 - **Tools & Domains**: [Domain Organization](./DOMAINS.md) | [API Reference - Tools](./API_REFERENCE.md#definetool)
-- **Disambiguation**: [API Reference - Observations](./API_REFERENCE.md#observation)
 - **AI Providers**: [Providers Guide](./PROVIDERS.md) | [API Reference](./API_REFERENCE.md#geminiprovider)
 - **Database Persistence**: [Persistence Guide](./PERSISTENCE.md) | [Adapters](./ADAPTERS.md)
 - **Contributing**: [Contributing Guide](./CONTRIBUTING.md) | [Publishing Guide](./PUBLISHING.md)
@@ -72,8 +67,9 @@ Check out the [`examples/`](../examples/) directory for complete, runnable examp
 
 - **[Declarative Agent](../examples/declarative-agent.ts)** - Full constructor-based configuration
 - **[Travel Agent](../examples/travel-agent.ts)** - Complex multi-route travel booking system
-- **[Healthcare Agent](../examples/healthcare-agent.ts)** - Disambiguation with observations
+- **[Healthcare Agent](../examples/healthcare-agent.ts)** - Full example
 - **[Streaming Agent](../examples/streaming-agent.ts)** - Real-time streaming responses
+- **[Company Q&A Agent](../examples/company-qna-agent.ts)** - Stateless question-answering with knowledge base
 
 ### Persistence Examples
 
@@ -90,6 +86,7 @@ Check out the [`examples/`](../examples/) directory for complete, runnable examp
 
 - **[Domain Scoping](../examples/domain-scoping.ts)** - Control tool access per route
 - **[Rules & Prohibitions](../examples/rules-prohibitions.ts)** - Fine-grained behavior control
+- **[Extracted Data Modification](../examples/extracted-data-modification.ts)** - Tools that validate and enrich extracted data
 
 ## 🤝 Contributing
 

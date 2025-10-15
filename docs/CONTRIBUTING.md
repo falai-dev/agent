@@ -244,7 +244,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```bash
 git add .
-git commit -m "feat: add disambiguation support for routes"
+git commit -m "feat: add support for routes"
 ```
 
 **Commit types:**

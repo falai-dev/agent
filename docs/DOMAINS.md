@@ -662,6 +662,67 @@ route.initialState.transitionTo({
 });
 ```
 
+## How Enforcement Works (Under the Hood)
+
+For developers who want to understand the implementation:
+
+### Automatic Tool Tagging
+
+When you register tools via `agent.addDomain()`, each tool is automatically tagged with its domain name:
+
+```typescript
+// When you do this:
+agent.addDomain("payment", {
+  processPayment: defineTool(/* ... */),
+});
+
+// The framework automatically adds:
+// processPayment.domainName = "payment"
+```
+
+### Runtime Enforcement
+
+When a tool tries to execute, `ToolExecutor` checks:
+
+1. **Get allowed domains** from the current route
+2. **Check tool's domain** against the allowed list
+3. **Block execution** if domain not allowed
+4. **Throw security error** with clear message
+
+```typescript
+// ToolExecutor enforcement code:
+if (allowedDomains !== undefined && tool.domainName) {
+  if (!allowedDomains.includes(tool.domainName)) {
+    throw new Error(
+      `Domain security violation: Tool "${tool.name}" belongs to domain "${tool.domainName}" ` +
+        `which is not allowed in this route. Allowed domains: [${allowedDomains.join(
+          ", "
+        )}]`
+    );
+  }
+}
+```
+
+### What Gets Enforced
+
+✅ **Tools in state machine transitions** (`toolState`)  
+✅ **Multiple domain access** (route can allow several domains)  
+✅ **Empty array enforcement** (`domains: []` blocks all tools)  
+✅ **Undefined = all allowed** (backward compatible)
+
+### Type Safety
+
+The domain system is fully type-safe:
+
+```typescript
+interface ToolRef {
+  id: string;
+  name: string;
+  handler: Function;
+  domainName?: string; // Added by addDomain()
+}
+```
+
 ## See Also
 
 - [Architecture Guide](./ARCHITECTURE.md) - Core design principles

@@ -1,14 +1,13 @@
 /**
- * Example: Declarative Agent Configuration
+ * Example: Declarative Agent Configuration with Session State
  *
  * This example demonstrates how to configure an entire agent
  * using declarative syntax in the constructor, including:
  * - Terms (glossary)
  * - Guidelines (behavior rules)
  * - Capabilities
- * - Routes with nested guidelines and custom IDs
- * - Observations with route references and custom IDs
- * - Custom timestamps for events
+ * - Routes with data extraction schemas and custom IDs
+ * - Session state management for multi-turn conversations
  */
 
 import {
@@ -17,17 +16,32 @@ import {
   createMessageEvent,
   EventSource,
   GeminiProvider,
+  createSession,
   type Term,
   type Guideline,
   type Capability,
   type RouteOptions,
-  type ObservationOptions,
 } from "../src/index";
 
 // Context type
 interface HealthcareContext {
   patientId: string;
   patientName: string;
+}
+
+// Data extraction types
+interface AppointmentData {
+  appointmentType: "checkup" | "consultation" | "followup";
+  preferredDate: string;
+  preferredTime: string;
+  symptoms?: string;
+  urgency: "low" | "medium" | "high";
+}
+
+interface LabData {
+  testType: string;
+  testDate: string;
+  resultsNeeded: boolean;
 }
 
 // Define tools with custom IDs (optional - IDs are deterministic by default)
@@ -69,7 +83,18 @@ const getLabResults = defineTool<
   { report: string; status: string }
 >(
   "get_lab_results",
-  async ({ context }) => {
+  async ({ context, extracted }) => {
+    // Tools can now access extracted data
+    const labData = extracted as Partial<LabData>;
+    if (labData?.testType) {
+      return {
+        data: {
+          report: `${labData.testType} results for ${context.patientName}`,
+          status: "All values within normal range",
+        },
+      };
+    }
+
     return {
       data: {
         report: `Lab results for ${context.patientName}`,
@@ -80,6 +105,31 @@ const getLabResults = defineTool<
   {
     id: "healthcare_lab_results", // Custom ID
     description: "Retrieves patient lab results",
+  }
+);
+
+const scheduleAppointment = defineTool<
+  HealthcareContext,
+  [],
+  { confirmation: string }
+>(
+  "schedule_appointment",
+  async ({ context, extracted }) => {
+    // Tools can access extracted appointment data
+    const appointment = extracted as Partial<AppointmentData>;
+    if (!appointment?.preferredDate || !appointment?.preferredTime) {
+      return { data: { confirmation: "Please provide appointment details" } };
+    }
+
+    return {
+      data: {
+        confirmation: `Appointment scheduled for ${appointment.preferredDate} at ${appointment.preferredTime}`,
+      },
+    };
+  },
+  {
+    id: "healthcare_schedule_appointment",
+    description: "Schedules patient appointments",
   }
 );
 
@@ -140,6 +190,34 @@ const routes: RouteOptions[] = [
     title: "Schedule Appointment",
     description: "Helps the patient schedule an appointment",
     conditions: ["The patient wants to schedule an appointment"],
+    gatherSchema: {
+      type: "object",
+      properties: {
+        appointmentType: {
+          type: "string",
+          enum: ["checkup", "consultation", "followup"],
+          description: "Type of appointment needed",
+        },
+        preferredDate: {
+          type: "string",
+          description: "Preferred appointment date",
+        },
+        preferredTime: {
+          type: "string",
+          description: "Preferred appointment time",
+        },
+        symptoms: {
+          type: "string",
+          description: "Description of symptoms (if applicable)",
+        },
+        urgency: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+          default: "medium",
+        },
+      },
+      required: ["appointmentType", "preferredDate", "preferredTime"],
+    },
     guidelines: [
       {
         condition: "The patient says their visit is urgent",
@@ -154,6 +232,25 @@ const routes: RouteOptions[] = [
     title: "Check Lab Results",
     description: "Retrieves and explains patient lab results",
     conditions: ["The patient wants to see their lab results"],
+    gatherSchema: {
+      type: "object",
+      properties: {
+        testType: {
+          type: "string",
+          description: "Type of lab test",
+        },
+        testDate: {
+          type: "string",
+          description: "Date of the lab test",
+        },
+        resultsNeeded: {
+          type: "boolean",
+          default: true,
+          description: "Whether detailed results are needed",
+        },
+      },
+      required: ["testType"],
+    },
     guidelines: [
       {
         condition: "The patient presses for more conclusions about results",
@@ -163,14 +260,11 @@ const routes: RouteOptions[] = [
       },
     ],
   },
-];
-
-const observations: ObservationOptions[] = [
   {
-    id: "obs_visit_followup", // Custom ID for tracking
-    description:
-      "The patient asks to follow up on their visit, but it's not clear in which way",
-    routeRefs: ["Schedule Appointment", "Check Lab Results"], // Reference by title
+    title: "General Healthcare Questions",
+    description: "Answer general healthcare questions",
+    conditions: ["Patient asks general healthcare questions"],
+    // No gatherSchema - stateless Q&A
   },
 ];
 
@@ -192,7 +286,6 @@ const agent = new Agent<HealthcareContext>({
   guidelines,
   capabilities,
   routes,
-  observations,
 });
 
 // You can still add more dynamically after construction
@@ -208,31 +301,55 @@ agent
     synonyms: ["virtual visit", "video appointment"],
   });
 
-// Example usage
+// Example usage with session state
 async function main() {
+  // Initialize session state
+  let session = createSession<AppointmentData | LabData>();
+
   // Create events with custom timestamps (useful for historical data)
   const history = [
     createMessageEvent(
       EventSource.CUSTOMER,
       "Alice",
-      "Hi, I need to follow up on my recent visit",
-      "2025-10-13T14:30:00Z" // Optional custom timestamp
+      "Hi, I need to follow up on my recent visit"
     ),
   ];
 
-  const response = await agent.respond({ history });
+  // Turn 1 - Agent responds and extracts intent
+  const response = await agent.respond({ history, session });
   console.log("Agent:", response.message);
-  console.log("Route chosen:", response.route?.title);
-  console.log("Route ID:", response.route?.id); // Custom ID is preserved
+  console.log("Route chosen:", response.session?.currentRoute?.title);
+  console.log("Extracted data:", response.session?.extracted);
 
-  // The agent will use the observation to disambiguate
-  // and ask which type of follow-up the patient needs
+  // Session state is updated with progress
+  session = response.session!;
+
+  // Turn 2 - Continue conversation with session state
+  if (response.session?.currentRoute?.title === "Schedule Appointment") {
+    const history2 = [
+      ...history,
+      createMessageEvent(EventSource.AI_AGENT, "Bot", response.message),
+      createMessageEvent(
+        EventSource.CUSTOMER,
+        "Alice",
+        "I need a checkup next week"
+      ),
+    ];
+
+    const response2 = await agent.respond({ history: history2, session });
+    console.log("Agent:", response2.message);
+    console.log("Updated extracted:", response2.session?.extracted);
+
+    // Session tracks the appointment booking progress
+    console.log("Current state:", response2.session?.currentState?.id);
+  }
 
   // Note: Custom IDs ensure consistency across server restarts
-  // This is crucial for:
-  // - Storing conversation state in databases
-  // - Tracking metrics and analytics
-  // - Referencing routes in external systems
+  // Session state enables:
+  // - Tracking conversation progress across turns
+  // - Extracting structured data throughout conversation
+  // - Always-on routing that respects user intent changes
+  // - State recovery for resuming conversations
 }
 
 // Uncomment to run:

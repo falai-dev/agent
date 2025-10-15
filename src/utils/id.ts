@@ -54,16 +54,6 @@ export function generateStateId(
 }
 
 /**
- * Generate a deterministic observation ID
- * Format: observation_{sanitized_description}_{hash}
- */
-export function generateObservationId(description: string): string {
-  const sanitized = sanitize(description.substring(0, 50)); // Limit length
-  const hash = simpleHash(description);
-  return `observation_${sanitized}_${hash}`;
-}
-
-/**
  * Generate a deterministic tool ID
  * Format: tool_{sanitized_name}_{hash}
  */

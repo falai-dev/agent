@@ -71,7 +71,16 @@ export function createMessageEvent(
   source: EventSource,
   participantName: string,
   message: string,
-  timestamp?: string
+  options?: {
+    timestamp?: string;
+    session?: {
+      routeId?: string;
+      routeTitle?: string;
+      stateId?: string;
+      stateDescription?: string;
+      extracted?: Record<string, unknown>;
+    };
+  }
 ): Event<MessageEventData> {
   return {
     kind: EventKind.MESSAGE,
@@ -79,8 +88,9 @@ export function createMessageEvent(
     data: {
       participant: { display_name: participantName },
       message,
+      session: options?.session,
     },
-    timestamp: timestamp || new Date().toISOString(),
+    timestamp: options?.timestamp || new Date().toISOString(),
   };
 }
 

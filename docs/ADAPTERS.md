@@ -2,6 +2,8 @@
 
 All adapters follow the **provider pattern** - no dependencies required in the package, users install only what they need.
 
+**NEW**: All adapters now support the new **Session State** pattern with automatic persistence of extracted data, current route/state, and conversation progress!
+
 ## ✅ Implemented Adapters
 
 ### 1. **PrismaAdapter**
@@ -73,10 +75,16 @@ All adapters follow the **provider pattern** - no dependencies required in the p
 
 ## 🎯 Usage Pattern
 
-All adapters follow the same simple pattern:
+All adapters follow the same simple pattern with full session state support:
 
 ```typescript
 import { Agent, [Adapter]Adapter } from "@falai/agent";
+
+// Define your data extraction type
+interface YourDataType {
+  field1: string;
+  field2: number;
+}
 
 const adapter = new [Adapter]Adapter({
   client: yourClientInstance,
@@ -87,9 +95,45 @@ const agent = new Agent({
   persistence: {
     adapter,
     userId: "user_123",
-    autoSave: true,
+    autoSave: true, // ✨ Auto-saves session state!
   },
 });
+
+// Create a route with data extraction
+const route = agent.createRoute<YourDataType>({
+  title: "My Route",
+  gatherSchema: {
+    type: "object",
+    properties: {
+      field1: { type: "string" },
+      field2: { type: "number" },
+    },
+    required: ["field1", "field2"],
+  },
+});
+
+// Define states
+route.initialState.transitionTo({
+  chatState: "Collect data",
+  gather: ["field1", "field2"],
+});
+
+// Use with session state
+const persistence = agent.getPersistenceManager();
+const { sessionData, sessionState } =
+  await persistence.createSessionWithState<YourDataType>({
+    userId: "user_123",
+    agentName: "My Agent",
+  });
+
+// Chat with automatic session state persistence
+const response = await agent.respond({
+  history: [...],
+  session: sessionState, // Pass session state
+});
+
+// Session state auto-saved! Includes extracted data
+console.log("Extracted:", response.session?.extracted);
 ```
 
 ## 🔌 Optional Dependencies
@@ -150,9 +194,45 @@ export class MyCustomAdapter implements PersistenceAdapter {
 
 All adapters are fully typed with **zero `any` types** (except for Prisma's dynamic model access):
 
-- Generic client interfaces
+- Generic client interfaces with `SessionState<TExtracted>` support
 - Typed repository methods
 - Full IDE autocomplete
+- Type-safe data extraction throughout
+
+## 💾 What Gets Stored
+
+All adapters store session state in the `collectedData` JSON field:
+
+```json
+{
+  "extracted": {
+    "destination": "Paris",
+    "departureDate": "2025-06-15",
+    "passengers": 2
+  },
+  "routeHistory": [
+    {
+      "routeId": "book_flight",
+      "enteredAt": "2025-10-15T10:00:00Z",
+      "completed": false
+    }
+  ],
+  "currentRouteTitle": "Book a Flight",
+  "currentStateDescription": "Ask about travel dates",
+  "metadata": {
+    "sessionId": "session_123",
+    "createdAt": "2025-10-15T10:00:00Z",
+    "lastUpdatedAt": "2025-10-15T10:05:00Z"
+  }
+}
+```
+
+This allows:
+
+- ✅ Full session state recovery
+- ✅ Analytics on extracted data
+- ✅ Conversation progress tracking
+- ✅ Multi-turn conversation support
 
 ## 🚀 Coming Soon
 

@@ -44,17 +44,6 @@ export type {
   GenerateMessageOutput,
 } from "./ai";
 
-// Prompt types
-export type {
-  PromptSection,
-  ContextVariable,
-  ContextVariableValue,
-} from "./prompt";
-export { SectionStatus } from "./prompt";
-
-// Observation types
-export type { Observation, ObservationOptions } from "./observation";
-
 // Persistence types
 export type {
   SessionData,
