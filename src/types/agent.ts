@@ -25,6 +25,7 @@ export enum CompositionMode {
  * Forward declare observation types
  */
 import type { ObservationOptions } from "./observation";
+import { PreparationEngineOptions } from "@core/PreparationEngine";
 
 /**
  * Context lifecycle hooks for managing state persistence
@@ -74,6 +75,8 @@ export interface AgentOptions<TContext = unknown> {
   ai: AiProvider;
   /** Maximum number of processing iterations per request */
   maxEngineIterations?: number;
+  /** Optional parallelism controls for preparation engine */
+  preparation?: PreparationEngineOptions;
   /** Composition mode for response generation */
   compositionMode?: CompositionMode;
   /** Initial terms for domain glossary */

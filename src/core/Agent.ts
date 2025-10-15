@@ -54,8 +54,11 @@ export class Agent<TContext = unknown> {
     // Initialize context if provided
     this.context = options.context;
 
-    // Initialize preparation engine with AI provider
-    this.preparationEngine = new PreparationEngine<TContext>(options.ai);
+    // Initialize preparation engine with AI provider and optional parallelism controls
+    this.preparationEngine = new PreparationEngine<TContext>(options.ai, {
+      maxParallelLlmCalls: options.preparation?.maxParallelLlmCalls,
+      maxParallelTools: options.preparation?.maxParallelTools,
+    });
 
     // Initialize persistence if configured
     if (options.persistence) {
@@ -285,6 +288,19 @@ export class Agent<TContext = unknown> {
     // Update context with results from tool executions
     effectiveContext = preparationResult.finalContext;
 
+    // Persist updated context and trigger lifecycle hook
+    const previousStoredContext = this.context;
+    this.context = effectiveContext;
+    if (
+      this.options.hooks?.onContextUpdate &&
+      previousStoredContext !== undefined
+    ) {
+      await this.options.hooks.onContextUpdate(
+        this.context,
+        previousStoredContext
+      );
+    }
+
     // Log tool executions for debugging
     if (preparationResult.toolExecutions.length > 0) {
       console.log(
@@ -479,6 +495,19 @@ export class Agent<TContext = unknown> {
 
     // Update context with results from tool executions
     effectiveContext = preparationResult.finalContext;
+
+    // Persist updated context and trigger lifecycle hook
+    const previousStoredContext = this.context;
+    this.context = effectiveContext;
+    if (
+      this.options.hooks?.onContextUpdate &&
+      previousStoredContext !== undefined
+    ) {
+      await this.options.hooks.onContextUpdate(
+        this.context,
+        previousStoredContext
+      );
+    }
 
     // Log tool executions for debugging
     if (preparationResult.toolExecutions.length > 0) {

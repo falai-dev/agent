@@ -70,13 +70,54 @@ export interface PreparationResult<TContext = unknown> {
 /**
  * PreparationEngine - Executes the preparation iteration loop
  */
+export interface PreparationEngineOptions {
+  maxParallelLlmCalls?: number;
+  maxParallelTools?: number;
+}
+
 export class PreparationEngine<TContext = unknown> {
   private readonly conditionEvaluator?: ConditionEvaluator<TContext>;
+  private readonly maxParallelLlmCalls: number;
+  private readonly maxParallelTools: number;
 
-  constructor(ai?: AiProvider) {
+  /**
+   * Run a list of async jobs with a concurrency limit, preserving order of results.
+   */
+  private async processWithConcurrency<T>(
+    tasks: Array<() => Promise<T>>,
+    runner: (task: () => Promise<T>) => Promise<T>,
+    concurrency: number
+  ): Promise<T[]> {
+    const results: T[] = new Array<T>(tasks.length);
+    let nextIndex = 0;
+    const workers: Promise<void>[] = [];
+
+    const runNext = async (): Promise<void> => {
+      const current = nextIndex++;
+      if (current >= tasks.length) {
+        return;
+      }
+      try {
+        results[current] = await runner(tasks[current]);
+      } finally {
+        await runNext();
+      }
+    };
+
+    const workerCount = Math.min(concurrency, tasks.length);
+    for (let i = 0; i < workerCount; i++) {
+      workers.push(runNext());
+    }
+    await Promise.all(workers);
+    return results;
+  }
+
+  constructor(ai?: AiProvider, options?: PreparationEngineOptions) {
     if (ai) {
       this.conditionEvaluator = new ConditionEvaluator<TContext>(ai);
     }
+    this.maxParallelLlmCalls = options?.maxParallelLlmCalls ?? 4;
+    this.maxParallelTools = options?.maxParallelTools ?? 8;
   }
 
   /**
@@ -166,23 +207,31 @@ export class PreparationEngine<TContext = unknown> {
 
     // Step 2: Execute tools from matched guidelines
     // Guidelines with associated tools should execute those tools
+    const guidelineToolCalls: Array<() => Promise<ToolExecutionResult | null>> =
+      [];
     for (const match of matchedGuidelines) {
       if (match.guideline.tools && match.guideline.tools.length > 0) {
         for (const tool of match.guideline.tools) {
-          const toolResult = await this.executeTool(
-            tool as ToolRef<TContext, unknown[], unknown>,
-            params.context,
-            params.history
+          const t = tool as ToolRef<TContext, unknown[], unknown>;
+          guidelineToolCalls.push(() =>
+            this.executeTool(t, params.context, params.history)
           );
-          if (toolResult) {
-            executedTools.push(toolResult);
-
-            // Update context from tool result if tool provided context updates
-            if (toolResult.result && typeof toolResult.result === "object") {
-              const result = toolResult.result as Record<string, unknown>;
-              if (result.contextUpdate) {
-                Object.assign(contextUpdates, result.contextUpdate);
-              }
+        }
+      }
+    }
+    if (guidelineToolCalls.length > 0) {
+      const results = await this.processWithConcurrency(
+        guidelineToolCalls,
+        (fn) => fn(),
+        this.maxParallelTools
+      );
+      for (const toolResult of results) {
+        if (toolResult) {
+          executedTools.push(toolResult);
+          if (toolResult.result && typeof toolResult.result === "object") {
+            const result = toolResult.result as Record<string, unknown>;
+            if (result.contextUpdate) {
+              Object.assign(contextUpdates, result.contextUpdate);
             }
           }
         }
@@ -237,45 +286,54 @@ export class PreparationEngine<TContext = unknown> {
     context: TContext,
     history: Event[]
   ): Promise<GuidelineMatch[]> {
-    const matches: GuidelineMatch[] = [];
+    const alwaysMatches = guidelines.filter(
+      (g) => g.enabled !== false && !g.condition
+    );
+    const conditional = guidelines.filter(
+      (g) => g.enabled !== false && g.condition
+    );
 
-    for (const guideline of guidelines) {
-      // Skip disabled guidelines
-      if (guideline.enabled === false) {
-        continue;
-      }
+    const matches: GuidelineMatch[] = alwaysMatches.map((guideline) => ({
+      guideline,
+      rationale: "Guideline has no condition - always active",
+    }));
 
-      // If guideline has no condition, it's always matched
-      if (!guideline.condition) {
-        matches.push({
-          guideline,
-          rationale: "Guideline has no condition - always active",
-        });
-        continue;
-      }
-
-      // Evaluate condition using AI if evaluator is available
-      if (!this.conditionEvaluator) {
-        // No AI available, match all enabled guidelines with conditions
+    if (!this.conditionEvaluator) {
+      // No AI available, match all enabled guidelines with conditions
+      for (const guideline of conditional) {
         matches.push({
           guideline,
           rationale: "AI not available - defaulting to match",
         });
-        continue;
       }
+      return matches;
+    }
 
+    // Evaluate conditional guidelines with limited parallelism
+    const workers = conditional.map((guideline) => async () => {
       const evaluation =
-        await this.conditionEvaluator.evaluateGuidelineCondition(
+        await this.conditionEvaluator!.evaluateGuidelineCondition(
           guideline,
           context,
           history
         );
-
       if (evaluation.matches) {
-        matches.push({
+        return {
           guideline,
           rationale: evaluation.rationale || "Condition evaluated as true",
-        });
+        } as GuidelineMatch;
+      }
+      return null;
+    });
+
+    const evaluated = await this.processWithConcurrency(
+      workers,
+      (w) => w(),
+      this.maxParallelLlmCalls
+    );
+    for (const r of evaluated) {
+      if (r) {
+        matches.push(r);
       }
     }
 
@@ -498,3 +556,6 @@ export class PreparationEngine<TContext = unknown> {
     }
   }
 }
+
+// Helper methods (outside class scope are not necessary; keep inside class)
+export type _Internal = unknown;
