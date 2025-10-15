@@ -40,3 +40,5 @@ coverage/
 # Temporary
 .tmp/
 .cache/
+
+parlant/
