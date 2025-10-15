@@ -121,11 +121,18 @@ const bookingRoute = agent.createRoute<BookingData>({
   },
 });
 
-// Define states with smart data gathering
-bookingRoute.initialState.transitionTo({
-  chatState: "Collect booking details",
-  gather: ["destination", "date", "passengers"],
-});
+// Define states with smart data gathering and custom IDs
+bookingRoute.initialState
+  .transitionTo({
+    id: "collect_details", // ✅ Custom state ID for easier tracking
+    chatState: "Collect booking details",
+    gather: ["destination", "date", "passengers"],
+  })
+  .transitionTo({
+    id: "confirm_booking", // ✅ Custom state ID
+    chatState: "Confirm all details",
+    requiredData: ["destination", "date", "passengers"],
+  });
 
 // Access persistence methods
 const persistence = agent.getPersistenceManager();
@@ -137,17 +144,22 @@ const { sessionData, sessionState } =
     agentName: "My Agent",
   });
 
+// Session ID is automatically set in metadata
+console.log("Session ID:", sessionState.metadata?.sessionId);
+// Outputs: sessionData.id (e.g., "cuid_abc123")
+
 // Load history
 const history = await persistence.loadSessionHistory(sessionData.id);
 
 // Generate response with session state
 const response = await agent.respond({
   history,
-  session: sessionState, // Pass session state
+  session: sessionState, // Pass session state with ID
 });
 
 // Session state is auto-saved! ✨
 console.log("Extracted data:", response.session?.extracted);
+console.log("Current state ID:", response.session?.currentState?.id); // Custom or auto-generated ID
 
 // Save message
 await persistence.saveMessage({

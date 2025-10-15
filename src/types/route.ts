@@ -70,6 +70,8 @@ export interface RouteOptions<TExtracted = unknown> {
  * Specification for a state transition
  */
 export interface TransitionSpec<TContext = unknown, TExtracted = unknown> {
+  /** Custom ID for this state (optional - will generate deterministic ID if not provided) */
+  id?: string;
   /** Transition to a chat state with this description */
   chatState?: string;
   /** Transition to execute a tool */

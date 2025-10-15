@@ -128,14 +128,16 @@ async function example() {
     },
   });
 
-  // State flow with smart data gathering
+  // State flow with smart data gathering and custom IDs
   const askDestination = flightRoute.initialState.transitionTo({
+    id: "ask_destination", // Custom state ID for easier tracking
     chatState: "Ask where they want to fly",
     gather: ["destination"],
     skipIf: (extracted) => !!extracted.destination,
   });
 
   const askDates = askDestination.transitionTo({
+    id: "ask_dates", // Custom state ID
     chatState: "Ask about travel dates",
     gather: ["departureDate", "returnDate"],
     skipIf: (extracted) => !!extracted.departureDate,
@@ -143,6 +145,7 @@ async function example() {
   });
 
   const askPassengers = askDates.transitionTo({
+    id: "ask_passengers", // Custom state ID
     chatState: "Ask how many passengers",
     gather: ["passengers"],
     skipIf: (extracted) => !!extracted.passengers,
@@ -150,6 +153,7 @@ async function example() {
   });
 
   const askCabinClass = askPassengers.transitionTo({
+    id: "ask_cabin_class", // Custom state ID
     chatState: "Ask about cabin class preference",
     gather: ["cabinClass"],
     skipIf: (extracted) => !!extracted.cabinClass,
@@ -157,6 +161,7 @@ async function example() {
   });
 
   const confirmBooking = askCabinClass.transitionTo({
+    id: "confirm_booking", // Custom state ID
     chatState: "Present options and confirm booking details",
     requiredData: ["destination", "departureDate", "passengers", "cabinClass"],
   });
@@ -186,6 +191,10 @@ async function example() {
   const dbSessionId = sessionResult.sessionData.id;
 
   console.log("✨ Created new session:", dbSessionId);
+  console.log("📊 Session metadata:", {
+    sessionId: session.metadata?.sessionId, // Same as dbSessionId
+    createdAt: session.metadata?.createdAt,
+  });
   console.log("📊 Initial session state:", {
     currentRoute: session.currentRoute,
     extracted: session.extracted,
@@ -216,8 +225,10 @@ async function example() {
 
   console.log("🤖 Agent:", response1.message);
   console.log("📊 Session state after turn 1:", {
+    sessionId: response1.session?.metadata?.sessionId,
     currentRoute: response1.session?.currentRoute?.title,
-    currentState: response1.session?.currentState?.id,
+    currentStateId: response1.session?.currentState?.id, // Custom ID like "ask_destination"
+    currentStateDescription: response1.session?.currentState?.description,
     extracted: response1.session?.extracted,
   });
 

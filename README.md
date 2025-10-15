@@ -70,6 +70,7 @@
 - **Session State Integration** - Automatic saving of extracted data & conversation progress
 - **Provider Pattern** - Simple API like AI providers
 - **Multiple Adapters** - Prisma, Redis, MongoDB, PostgreSQL, SQLite, OpenSearch, Memory
+- **Custom Database Support** - Manual session state management for existing schemas
 - **Auto-save** - Automatic session state & message persistence
 - **Type-Safe** - Full TypeScript support with generics
 - **Extensible** - Create adapters for any database
@@ -971,6 +972,16 @@ Full-text search and analytics-powered persistence:
 - 📊 Powerful aggregations and analytics
 - 🌐 Compatible with Elasticsearch 7.x
 - ☁️ AWS OpenSearch Service ready
+
+### 🗄️ [Custom Database Integration](./examples/custom-database-persistence.ts)
+
+Manual session state management for existing database schemas:
+
+- 🔧 Full control over database operations
+- 📦 Works with any database (no adapter needed)
+- 🔄 Manual session state save/restore
+- 🎯 Perfect for integrating with existing schemas
+- ✅ Complete example with validation hooks
 
 ---
 

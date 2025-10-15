@@ -58,7 +58,11 @@ import {
   mergeExtracted,
 } from "@falai/agent";
 
-let session = createSession<FlightData>();
+// Create session with optional metadata including session ID
+let session = createSession<FlightData>(sessionId, {
+  userId: "user_456",
+  createdAt: new Date(),
+});
 
 // Turn 1 - Extract data
 const response1 = await agent.respond({ history, session });
@@ -67,6 +71,31 @@ session = response1.session!; // Updated with extracted data
 // Turn 2 - User changes mind (always-on routing)
 const response2 = await agent.respond({ history, session: response1.session });
 session = response2.session!; // Route/state updated if user changed direction
+
+// Access session metadata
+console.log(session.metadata?.sessionId); // "unique-session-123"
+```
+
+**Session with Persistence:**
+
+When using persistence adapters, set the session ID from the database:
+
+```typescript
+// Create database session and in-memory session state
+const { sessionData, sessionState } =
+  await persistence.createSessionWithState<FlightData>({
+    userId: "user_123",
+    agentName: "Travel Agent",
+  });
+
+// sessionState.metadata.sessionId is automatically set to sessionData.id
+console.log(sessionState.metadata?.sessionId); // "cuid_from_database"
+
+// Use it in conversation
+const response = await agent.respond({
+  history,
+  session: sessionState, // Auto-saves to database!
+});
 ```
 
 **Why?** Session state enables:
@@ -75,6 +104,7 @@ session = response2.session!; // Route/state updated if user changed direction
 - **Context Awareness** - Router sees current progress and extracted data
 - **Data Persistence** - Extracted data survives across turns
 - **State Recovery** - Resume conversations from any point
+- **Session Tracking** - Track conversations via session ID in database
 
 ### 3. 🔧 Code-Based State Logic
 
@@ -83,12 +113,14 @@ Use TypeScript functions instead of LLM conditions for deterministic flow:
 ```typescript
 // State with smart bypassing based on extracted data
 const askDestination = route.initialState.transitionTo({
+  id: "ask_destination", // Optional: custom state ID
   chatState: "Ask where they want to fly",
   gather: ["destination"],
   skipIf: (extracted) => !!extracted.destination, // Code-based condition!
 });
 
 const askDate = askDestination.transitionTo({
+  id: "ask_date", // Optional: custom state ID for easier tracking
   chatState: "Ask about travel dates",
   gather: ["departureDate"],
   skipIf: (extracted) => !!extracted.departureDate,
@@ -96,12 +128,27 @@ const askDate = askDestination.transitionTo({
 });
 ```
 
+**Custom State IDs:**
+
+You can optionally provide custom IDs for states to make them easier to track and reference:
+
+```typescript
+const confirmBooking = askDate.transitionTo({
+  id: "confirm_booking", // ✅ Custom ID instead of auto-generated
+  chatState: "Confirm all booking details",
+  requiredData: ["destination", "departureDate", "passengers"],
+});
+```
+
+If you don't provide an ID, one is automatically generated from the route ID and state description.
+
 **Why?** Code-based logic provides:
 
 - **Predictability** - No fuzzy LLM interpretation of conditions
 - **Performance** - No extra LLM calls for condition checking
 - **Debugging** - Clear logic flow you can trace
 - **Type Safety** - Full TypeScript support for data validation
+- **Custom IDs** - Easier tracking and debugging with meaningful state identifiers
 
 ### 4. 🛠️ Tools with Data Access
 

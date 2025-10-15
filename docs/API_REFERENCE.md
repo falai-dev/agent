@@ -87,28 +87,98 @@ interface RespondOutput {
 - Enables "I changed my mind" scenarios with context-aware routing
 - Automatically merges new extracted data with existing session data
 
-**Example:**
+**Example with Persistence Adapters:**
 
 ```typescript
+import { createSession } from "@falai/agent";
+
+// Using built-in persistence adapters
+const { sessionData, sessionState } =
+  await persistence.createSessionWithState<FlightData>({
+    userId: "user_123",
+    agentName: "Travel Agent",
+  });
+
 const response = await agent.respond({
-  history: conversationHistory,
+  history,
+  session: sessionState, // Auto-saves if autoSave: true
+});
+```
+
+**Example with Custom Database (Manual):**
+
+```typescript
+import { createSession, SessionState } from "@falai/agent";
+
+// Load from your custom database
+const dbSession = await yourDb.sessions.findOne({ id: sessionId });
+
+// Restore or create session state
+let agentSession: SessionState<YourDataType>;
+
+if (dbSession && dbSession.currentRoute && dbSession.collectedData) {
+  // Restore existing session from database
+  agentSession = {
+    currentRoute: {
+      id: dbSession.currentRoute,
+      title:
+        dbSession.collectedData?.currentRouteTitle || dbSession.currentRoute,
+      enteredAt: new Date(),
+    },
+    currentState: dbSession.currentState
+      ? {
+          id: dbSession.currentState,
+          description: dbSession.collectedData?.currentStateDescription,
+          enteredAt: new Date(),
+        }
+      : undefined,
+    extracted: dbSession.collectedData?.extracted || {},
+    routeHistory: dbSession.collectedData?.routeHistory || [],
+    metadata: {
+      sessionId: dbSession.id,
+      createdAt: dbSession.createdAt,
+      lastUpdatedAt: new Date(),
+    },
+  };
+} else {
+  // Create new session
+  agentSession = createSession<YourDataType>({
+    sessionId: dbSession?.id || "new-session-id",
+  });
+}
+
+// Use session in conversation
+const response = await agent.respond({
+  history,
+  session: agentSession,
 });
 
-// Save to database
-await db.agentMessages.create({
-  sessionId: session.id,
+// Manually save to your database
+await yourDb.sessions.update({
+  id: dbSession.id,
+  currentRoute: response.session?.currentRoute?.id,
+  currentState: response.session?.currentState?.id,
+  collectedData: {
+    extracted: response.session?.extracted,
+    routeHistory: response.session?.routeHistory,
+    currentRouteTitle: response.session?.currentRoute?.title,
+    currentStateDescription: response.session?.currentState?.description,
+    metadata: response.session?.metadata,
+  },
+  lastMessageAt: new Date(),
+});
+
+// Save message
+await yourDb.messages.create({
+  sessionId: dbSession.id,
   role: "agent",
   content: response.message,
-  route: response.route?.title,
-  state: response.state?.description,
-  toolCalls: response.toolCalls || [],
+  route: response.session?.currentRoute?.id,
+  state: response.session?.currentState?.id,
 });
-
-// Check if conversation is complete
-if (response.route?.title === END_ROUTE) {
-  await markSessionComplete(session.id);
-}
 ```
+
+See also: [Custom Database Integration Example](../examples/custom-database-persistence.ts)
 
 ##### `respondStream(input: RespondInput<TContext>): AsyncGenerator<StreamChunk>`
 

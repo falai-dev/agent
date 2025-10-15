@@ -83,7 +83,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
     const targetState = new State<TContext, TExtracted>(
       this.routeId,
       spec.chatState,
-      undefined,
+      spec.id, // Use custom ID if provided
       spec.gather,
       spec.skipIf,
       spec.requiredData
