@@ -43,12 +43,10 @@ export class State<TContext = unknown, TExtracted = unknown> {
    * Create a transition from this state to another
    *
    * @param spec - Transition specification (chatState, toolState, or direct state)
-   * @param condition - Optional condition for this transition
    * @returns TransitionResult that supports chaining
    */
   transitionTo(
-    spec: TransitionSpec<TContext, TExtracted>,
-    condition?: string
+    spec: TransitionSpec<TContext, TExtracted>
   ): TransitionResult<TContext, TExtracted> {
     // Handle END_ROUTE
     if (
@@ -58,8 +56,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
     ) {
       const endTransition = new Transition<TContext, TExtracted>(
         this.getRef(),
-        { state: END_ROUTE },
-        condition
+        { state: END_ROUTE, condition: spec.condition }
       );
       this.transitions.push(endTransition);
 
@@ -71,8 +68,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
     if (spec.state && typeof spec.state !== "symbol") {
       const transition = new Transition<TContext, TExtracted>(
         this.getRef(),
-        spec,
-        condition
+        spec
       );
       this.transitions.push(transition);
 
@@ -90,8 +86,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
     );
     const transition = new Transition<TContext, TExtracted>(
       this.getRef(),
-      spec,
-      condition
+      spec
     );
     transition.setTarget(targetState);
 
@@ -160,10 +155,8 @@ export class State<TContext = unknown, TExtracted = unknown> {
 
     return {
       ...ref,
-      transitionTo: (
-        spec: TransitionSpec<TContext, TExtracted>,
-        condition?: string
-      ) => stateInstance.transitionTo(spec, condition),
+      transitionTo: (spec: TransitionSpec<TContext, TExtracted>) =>
+        stateInstance.transitionTo(spec),
     };
   }
 

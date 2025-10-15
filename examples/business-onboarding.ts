@@ -446,10 +446,10 @@ async function createBusinessOnboardingAgent(
   });
 
   // Step 1: Business basics - Save
-  const saveBusiness = askBusiness.transitionTo(
-    { toolState: saveBusinessInfo },
-    "User provided company name, sector, and description"
-  );
+  const saveBusiness = askBusiness.transitionTo({
+    toolState: saveBusinessInfo,
+    condition: "User provided company name, sector, and description",
+  });
 
   // Step 2: Products/Services - Ask
   const askProducts = saveBusiness.transitionTo({
@@ -458,10 +458,10 @@ async function createBusinessOnboardingAgent(
   });
 
   // Step 2: Products/Services - Save
-  const saveProducts = askProducts.transitionTo(
-    { toolState: saveProductsServices },
-    "User listed products/services and target audience"
-  );
+  const saveProducts = askProducts.transitionTo({
+    toolState: saveProductsServices,
+    condition: "User listed products/services and target audience",
+  });
 
   // Step 3: Location - Branch point
   const askLocation = saveProducts.transitionTo({
@@ -470,32 +470,28 @@ async function createBusinessOnboardingAgent(
   });
 
   // Step 3a: Physical store path
-  const askPhysicalLocation = askLocation.transitionTo(
-    {
-      chatState:
-        "I see! Since you have a physical presence, I need the complete address (street, number, city, and state) and business hours. This is important for your assistant to inform customers. (e.g., 'José Silva Street, 123, São Paulo - SP - Mon to Fri: 9am to 6pm')",
-    },
-    "User has a physical store"
-  );
+  const askPhysicalLocation = askLocation.transitionTo({
+    chatState:
+      "I see! Since you have a physical presence, I need the complete address (street, number, city, and state) and business hours. This is important for your assistant to inform customers. (e.g., 'José Silva Street, 123, São Paulo - SP - Mon to Fri: 9am to 6pm')",
+    condition: "User has a physical store",
+  });
 
-  const savePhysicalLocation = askPhysicalLocation.transitionTo(
-    { toolState: saveLocationInfo },
-    "User provided physical address"
-  );
+  const savePhysicalLocation = askPhysicalLocation.transitionTo({
+    toolState: saveLocationInfo,
+    condition: "User provided physical address",
+  });
 
   // Step 3b: Online-only path
-  const askOnlineLocation = askLocation.transitionTo(
-    {
-      chatState:
-        "Perfect! Since it's online only, please share your main website or social media where customers can find you? And what are your support hours? (e.g., 'www.example.com - 24/7 support' or 'Instagram @mycompany - Mon to Fri: 9am-6pm')",
-    },
-    "User does not have a physical store"
-  );
+  const askOnlineLocation = askLocation.transitionTo({
+    chatState:
+      "Perfect! Since it's online only, please share your main website or social media where customers can find you? And what are your support hours? (e.g., 'www.example.com - 24/7 support' or 'Instagram @mycompany - Mon to Fri: 9am-6pm')",
+    condition: "User does not have a physical store",
+  });
 
-  const saveOnlineLocation = askOnlineLocation.transitionTo(
-    { toolState: saveContactInfo },
-    "User provided website/social media and support hours"
-  );
+  const saveOnlineLocation = askOnlineLocation.transitionTo({
+    toolState: saveContactInfo,
+    condition: "User provided website/social media and support hours",
+  });
 
   // Step 4: Contact info (convergence point for physical stores)
   const askContact = savePhysicalLocation.transitionTo({
@@ -503,10 +499,10 @@ async function createBusinessOnboardingAgent(
       "Do you also have a website or social media? If yes, which one? (if not, you can skip by saying 'I don't have one')",
   });
 
-  const saveContact = askContact.transitionTo(
-    { toolState: saveContactInfo },
-    "User provided website/social media"
-  );
+  const saveContact = askContact.transitionTo({
+    toolState: saveContactInfo,
+    condition: "User provided website/social media",
+  });
 
   // Step 5: Payment info (convergence point from both paths)
   const askPayment = saveContact.transitionTo({
@@ -517,10 +513,10 @@ async function createBusinessOnboardingAgent(
   // Also connect online path to payment
   saveOnlineLocation.transitionTo({ state: askPayment });
 
-  const savePayment = askPayment.transitionTo(
-    { toolState: savePaymentInfo },
-    "User provided payment methods or said not applicable"
-  );
+  const savePayment = askPayment.transitionTo({
+    toolState: savePaymentInfo,
+    condition: "User provided payment methods or said not applicable",
+  });
 
   // Step 6: Suggest automatic routes
   const suggestRoutes = savePayment.transitionTo({
@@ -528,16 +524,16 @@ async function createBusinessOnboardingAgent(
       "Perfect! Now I'll create the essential routes. Based on what you told me, I'll automatically create:\n\n1. **Products and Services** - for when they ask what you offer\n2. **Pricing and Quotes** - for questions about prices\n3. **Payment Information** - payment methods and installments\n4. **Location and Contact** - address, website, and hours\n\nThese are the most important routes for any business. I'll create them automatically with the information you provided. Sound good?",
   });
 
-  const createRoutes = suggestRoutes.transitionTo(
-    { toolState: addConversationRoute },
-    "User approved automatic route creation"
-  );
+  const createRoutes = suggestRoutes.transitionTo({
+    toolState: addConversationRoute,
+    condition: "User approved automatic route creation",
+  });
 
   // Step 7: Review collected data
-  const reviewData = createRoutes.transitionTo(
-    { toolState: getCollectedData },
-    "Routes created successfully"
-  );
+  const reviewData = createRoutes.transitionTo({
+    toolState: getCollectedData,
+    condition: "Routes created successfully",
+  });
 
   // Step 8: Summary and options
   const summary = reviewData.transitionTo({
@@ -546,45 +542,65 @@ async function createBusinessOnboardingAgent(
   });
 
   // Step 9a: Add more routes
-  const askCustomRoute = summary.transitionTo(
-    {
-      chatState:
-        "Got it! Tell me about this additional route: what's the title, what kind of questions should it answer, and what keywords do customers use? (e.g., 'Warranty and Exchange - answers about warranty, exchange, and returns - keywords: warranty, exchange, return')",
-    },
-    "User wants to add more routes"
-  );
+  const askCustomRoute = summary.transitionTo({
+    chatState:
+      "Got it! Tell me about this additional route: what's the title, what kind of questions should it answer, and what keywords do customers use? (e.g., 'Warranty and Exchange - answers about warranty, exchange, and returns - keywords: warranty, exchange, return')",
+    condition: "User wants to add more routes",
+  });
 
-  const saveCustomRoute = askCustomRoute.transitionTo(
-    { toolState: addConversationRoute },
-    "User provided custom route information"
-  );
+  const saveCustomRoute = askCustomRoute.transitionTo({
+    toolState: addConversationRoute,
+    condition: "User provided custom route information",
+  });
 
   // Loop back to summary after adding custom route
   saveCustomRoute.transitionTo({ state: summary });
 
   // Step 9b: Final confirmation
-  const completion = summary.transitionTo(
-    {
-      chatState:
-        "🎉 Perfect! Setup complete! Your WhatsApp assistant is ready and will use all this information to automatically serve your customers. If you have any questions or need adjustments, just let me know!",
-    },
-    "User confirmed everything is okay"
-  );
+  const completion = summary.transitionTo({
+    chatState:
+      "🎉 Perfect! Setup complete! Your WhatsApp assistant is ready and will use all this information to automatically serve your customers. If you have any questions or need adjustments, just let me know!",
+    condition: "User confirmed everything is okay",
+  });
 
   completion.transitionTo({ state: END_ROUTE });
 
-  // ==================== Alternative: Chained Approach ====================
-  // For simpler linear flows, you can use chaining for conciseness:
+  // ==================== Alternative: Sequential Steps ====================
+  // For simpler linear flows, you can use the new sequential steps approach:
 
-  // Example of a simple feedback collection route
-  const feedbackRoute = agent.createRoute({
+  // Example 1: Using steps array (NEW!)
+  agent.createRoute({
     title: "Collect Feedback",
     description: "Quick feedback collection from completed onboarding",
     conditions: ["User wants to provide feedback"],
+    steps: [
+      {
+        id: "ask_rating",
+        chatState: "How would you rate your onboarding experience? (1-5 stars)",
+      },
+      {
+        id: "ask_liked_most",
+        chatState: "What did you like most about the process?",
+      },
+      {
+        id: "ask_improve",
+        chatState: "Is there anything we could improve?",
+      },
+      {
+        id: "thank_you",
+        chatState: "Thank you for your feedback! It helps us improve. 🙏",
+      },
+    ],
   });
 
-  // Beautiful fluent chaining for linear flows
-  feedbackRoute.initialState
+  // Example 2: Traditional chaining approach (still supported)
+  const manualFeedbackRoute = agent.createRoute({
+    title: "Manual Feedback Route",
+    description: "Same flow using traditional chaining",
+    conditions: ["User wants manual feedback flow"],
+  });
+
+  manualFeedbackRoute.initialState
     .transitionTo({
       id: "ask_rating",
       chatState: "How would you rate your onboarding experience? (1-5 stars)",

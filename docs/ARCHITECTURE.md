@@ -112,26 +112,22 @@ Use TypeScript functions for deterministic flow control AND text conditions for 
 
 ```typescript
 // State with smart bypassing based on extracted data
-const askDestination = route.initialState.transitionTo(
-  {
-    id: "ask_destination", // Optional: custom state ID
-    chatState: "Ask where they want to fly",
-    gather: ["destination"],
-    skipIf: (extracted) => !!extracted.destination, // Code-based condition!
-  },
-  "Customer hasn't specified destination yet" // Text condition for AI
-);
+const askDestination = route.initialState.transitionTo({
+  id: "ask_destination", // Optional: custom state ID
+  chatState: "Ask where they want to fly",
+  gather: ["destination"],
+  skipIf: (extracted) => !!extracted.destination, // Code-based condition!
+  condition: "Customer hasn't specified destination yet", // Text condition for AI
+});
 
-const askDate = askDestination.transitionTo(
-  {
-    id: "ask_date", // Optional: custom state ID for easier tracking
-    chatState: "Ask about travel dates",
-    gather: ["departureDate"],
-    skipIf: (extracted) => !!extracted.departureDate,
-    requiredData: ["destination"], // Prerequisites
-  },
-  "Destination confirmed, need travel dates now"
-);
+const askDate = askDestination.transitionTo({
+  id: "ask_date", // Optional: custom state ID for easier tracking
+  chatState: "Ask about travel dates",
+  gather: ["departureDate"],
+  skipIf: (extracted) => !!extracted.departureDate,
+  requiredData: ["destination"], // Prerequisites
+  condition: "Destination confirmed, need travel dates now",
+});
 });
 ```
 

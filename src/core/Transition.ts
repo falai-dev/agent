@@ -10,12 +10,15 @@ import type { State } from "./State";
  */
 export class Transition<TContext = unknown, TExtracted = unknown> {
   private target?: State<TContext, TExtracted>;
+  public readonly condition?: string;
 
   constructor(
     public readonly source: StateRef,
-    public readonly spec: TransitionSpec<TContext, TExtracted>,
-    public readonly condition?: string
-  ) {}
+    public readonly spec: TransitionSpec<TContext, TExtracted>
+  ) {
+    // Extract condition from spec for convenience
+    this.condition = spec.condition;
+  }
 
   /**
    * Set the target state for this transition

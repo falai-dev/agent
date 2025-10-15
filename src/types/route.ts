@@ -64,6 +64,12 @@ export interface RouteOptions<TExtracted = unknown> {
    * States with skipIf conditions will be automatically bypassed if data is present
    */
   initialData?: Partial<TExtracted>;
+  /**
+   * NEW: Sequential steps for simple linear flows
+   * If provided, automatically chains the steps from initialState to END_ROUTE
+   * For complex flows with branching, build the state machine manually instead
+   */
+  steps?: TransitionSpec<unknown, TExtracted>[];
 }
 
 /**
@@ -97,6 +103,11 @@ export interface TransitionSpec<TContext = unknown, TExtracted = unknown> {
    * Uses string[] for developer-friendly usage (same as gather)
    */
   requiredData?: string[];
+  /**
+   * Optional condition for this transition
+   * Description of when this transition should be taken
+   */
+  condition?: string;
 }
 
 /**
@@ -107,7 +118,6 @@ export interface TransitionResult<TContext = unknown, TExtracted = unknown>
   extends StateRef {
   /** Allow chaining transitions */
   transitionTo: (
-    spec: TransitionSpec<TContext, TExtracted>,
-    condition?: string
+    spec: TransitionSpec<TContext, TExtracted>
   ) => TransitionResult<TContext, TExtracted>;
 }

@@ -270,85 +270,67 @@ async function createTravelAgent() {
   });
 
   // Build the route flow with data extraction and smart state progression
-  const askDestination = flightBookingRoute.initialState.transitionTo(
-    {
-      chatState: "Ask about the destination",
-      gather: ["destination"],
-      skipIf: (extracted) => !!extracted.destination,
-    },
-    "Customer needs to specify their travel destination"
-  );
+  const askDestination = flightBookingRoute.initialState.transitionTo({
+    chatState: "Ask about the destination",
+    gather: ["destination"],
+    skipIf: (extracted) => !!extracted.destination,
+    condition: "Customer needs to specify their travel destination",
+  });
 
-  const enrichDestination = askDestination.transitionTo(
-    {
-      toolState: lookupDestinationCode,
-      requiredData: ["destination"],
-    },
-    "Destination provided, lookup airport code"
-  );
+  const enrichDestination = askDestination.transitionTo({
+    toolState: lookupDestinationCode,
+    requiredData: ["destination"],
+    condition: "Destination provided, lookup airport code",
+  });
 
-  const askDates = enrichDestination.transitionTo(
-    {
-      chatState: "Ask about preferred travel dates",
-      gather: ["departureDate"],
-      skipIf: (extracted) => !!extracted.departureDate,
-      requiredData: ["destination"],
-    },
-    "Destination confirmed, need travel dates"
-  );
+  const askDates = enrichDestination.transitionTo({
+    chatState: "Ask about preferred travel dates",
+    gather: ["departureDate"],
+    skipIf: (extracted) => !!extracted.departureDate,
+    requiredData: ["destination"],
+    condition: "Destination confirmed, need travel dates",
+  });
 
-  const askPassengers = askDates.transitionTo(
-    {
-      chatState: "Ask for number of passengers",
-      gather: ["passengers"],
-      skipIf: (extracted) => !!extracted.passengers,
-      requiredData: ["destination", "departureDate"],
-    },
-    "Dates confirmed, need passenger count"
-  );
+  const askPassengers = askDates.transitionTo({
+    chatState: "Ask for number of passengers",
+    gather: ["passengers"],
+    skipIf: (extracted) => !!extracted.passengers,
+    requiredData: ["destination", "departureDate"],
+    condition: "Dates confirmed, need passenger count",
+  });
 
-  const searchFlightsState = askPassengers.transitionTo(
-    {
-      toolState: searchFlights,
-      // Triggered when shouldSearchFlights flag is set by hook
-    },
-    "All basic info gathered, search for available flights"
-  );
+  const searchFlightsState = askPassengers.transitionTo({
+    toolState: searchFlights,
+    // Triggered when shouldSearchFlights flag is set by hook
+    condition: "All basic info gathered, search for available flights",
+  });
 
-  const presentFlights = searchFlightsState.transitionTo(
-    {
-      chatState: "Present available flights and ask which one works for them",
-    },
-    "Flight search complete, present options to customer"
-  );
+  const presentFlights = searchFlightsState.transitionTo({
+    chatState: "Present available flights and ask which one works for them",
+    condition: "Flight search complete, present options to customer",
+  });
 
   // Happy path: customer selects a flight
-  const confirmBooking = presentFlights.transitionTo(
-    {
-      chatState: "Confirm booking details before proceeding",
-      gather: ["cabinClass", "urgency"], // Additional optional data
-    },
-    "Customer interested in a flight, confirm booking details"
-  );
+  const confirmBooking = presentFlights.transitionTo({
+    chatState: "Confirm booking details before proceeding",
+    gather: ["cabinClass", "urgency"], // Additional optional data
+    condition: "Customer interested in a flight, confirm booking details",
+  });
 
-  const bookFlightState = confirmBooking.transitionTo(
-    {
-      toolState: bookFlight,
-    },
-    "Customer confirmed, proceed with booking"
-  );
+  const bookFlightState = confirmBooking.transitionTo({
+    toolState: bookFlight,
+    condition: "Customer confirmed, proceed with booking",
+  });
 
-  const provideConfirmation = bookFlightState.transitionTo(
-    {
-      chatState: "Provide confirmation number and booking summary",
-    },
-    "Booking completed successfully"
-  );
+  const provideConfirmation = bookFlightState.transitionTo({
+    chatState: "Provide confirmation number and booking summary",
+    condition: "Booking completed successfully",
+  });
 
-  provideConfirmation.transitionTo(
-    { state: END_ROUTE },
-    "Customer has confirmation, booking flow complete"
-  );
+  provideConfirmation.transitionTo({
+    state: END_ROUTE,
+    condition: "Customer has confirmation, booking flow complete",
+  });
 
   // Add route-specific guidelines
   flightBookingRoute.createGuideline({
@@ -386,34 +368,29 @@ async function createTravelAgent() {
     },
   });
 
-  const askConfirmation = bookingStatusRoute.initialState.transitionTo(
-    {
-      chatState: "Ask for the confirmation number or booking reference",
-      gather: ["confirmationNumber"],
-      skipIf: (extracted) => !!extracted.confirmationNumber,
-    },
-    "Customer wants to check booking status but hasn't provided confirmation number"
-  );
+  const askConfirmation = bookingStatusRoute.initialState.transitionTo({
+    chatState: "Ask for the confirmation number or booking reference",
+    gather: ["confirmationNumber"],
+    skipIf: (extracted) => !!extracted.confirmationNumber,
+    condition:
+      "Customer wants to check booking status but hasn't provided confirmation number",
+  });
 
-  const checkStatus = askConfirmation.transitionTo(
-    {
-      toolState: getBookingStatus,
-      requiredData: ["confirmationNumber"],
-    },
-    "Confirmation number provided, look up booking details"
-  );
+  const checkStatus = askConfirmation.transitionTo({
+    toolState: getBookingStatus,
+    requiredData: ["confirmationNumber"],
+    condition: "Confirmation number provided, look up booking details",
+  });
 
-  const provideStatus = checkStatus.transitionTo(
-    {
-      chatState: "Provide booking status and relevant information",
-    },
-    "Booking status retrieved successfully"
-  );
+  const provideStatus = checkStatus.transitionTo({
+    chatState: "Provide booking status and relevant information",
+    condition: "Booking status retrieved successfully",
+  });
 
-  provideStatus.transitionTo(
-    { state: END_ROUTE },
-    "Booking information provided to customer"
-  );
+  provideStatus.transitionTo({
+    state: END_ROUTE,
+    condition: "Booking information provided to customer",
+  });
 
   // Global guidelines
   agent.createGuideline({

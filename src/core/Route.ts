@@ -2,7 +2,12 @@
  * Route (Journey) DSL implementation
  */
 
-import type { RouteOptions, RouteRef } from "../types/route";
+import type {
+  RouteOptions,
+  RouteRef,
+  TransitionSpec,
+  TransitionResult,
+} from "../types/route";
 import type { StructuredSchema } from "../types/schema";
 import type { Guideline } from "../types/agent";
 
@@ -51,6 +56,32 @@ export class Route<TContext = unknown, TExtracted = unknown> {
         this.createGuideline(guideline);
       });
     }
+
+    // Build sequential steps if provided
+    if (options.steps && options.steps.length > 0) {
+      this.buildSequentialSteps(options.steps);
+    }
+  }
+
+  /**
+   * Build a sequential state machine from an array of steps
+   * @private
+   */
+  private buildSequentialSteps(
+    steps: Array<TransitionSpec<TContext, TExtracted>>
+  ): void {
+    // Import END_ROUTE dynamically to avoid circular dependency
+    const END_ROUTE = Symbol.for("END_ROUTE");
+
+    let currentState: TransitionResult<TContext, TExtracted> =
+      this.initialState;
+
+    for (const step of steps) {
+      currentState = currentState.transitionTo(step);
+    }
+
+    // End the route
+    currentState.transitionTo({ state: END_ROUTE });
   }
 
   /**
