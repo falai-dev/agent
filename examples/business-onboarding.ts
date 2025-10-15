@@ -586,15 +586,19 @@ async function createBusinessOnboardingAgent(
   // Beautiful fluent chaining for linear flows
   feedbackRoute.initialState
     .transitionTo({
+      id: "ask_rating",
       chatState: "How would you rate your onboarding experience? (1-5 stars)",
     })
     .transitionTo({
+      id: "ask_liked_most",
       chatState: "What did you like most about the process?",
     })
     .transitionTo({
+      id: "ask_improve",
       chatState: "Is there anything we could improve?",
     })
     .transitionTo({
+      id: "thank_you",
       chatState: "Thank you for your feedback! It helps us improve. 🙏",
     })
     .transitionTo({ state: END_ROUTE });
@@ -603,38 +607,45 @@ async function createBusinessOnboardingAgent(
 
   agent
     .createGuideline({
+      id: "guideline_confused",
       condition: "User seems confused or doesn't understand something",
       action:
         "Be patient and provide practical examples of what you need. E.g., 'José Silva Street, 123, São Paulo - SP' for address",
     })
     .createGuideline({
+      id: "guideline_incomplete",
       condition: "User provides incomplete or very vague information",
       action:
         "Politely ask for the missing specific details. E.g., 'You mentioned the address, but what's the city and state?'",
     })
     .createGuideline({
+      id: "guideline_skip",
       condition:
         "User wants to skip information saying they don't have it or it doesn't apply",
       action:
         "Be smart: if the information is critical for their business type (e.g., address for physical store, website for e-commerce), explain the importance. If not critical, accept it and move forward saying 'no problem, that's fine'",
     })
     .createGuideline({
+      id: "guideline_physical_online",
       condition: "User has physical store but said online-only or vice versa",
       action:
         "Adjust the flow dynamically: if they have a physical store, prioritize address and hours. If online-only, prioritize website/social media and digital support hours. Don't ask for irrelevant information",
     })
     .createGuideline({
+      id: "guideline_why",
       condition: "User asks why they need to provide certain information",
       action:
         "Explain practically: 'This information will help your assistant automatically answer customers when they ask about this. E.g., when they ask about payment methods, the assistant will inform automatically'",
     })
     .createGuideline({
+      id: "guideline_edit",
       condition:
         "User wants to edit or correct something they already provided",
       action:
         "Accept promptly and update the information: 'Of course! I'll update to...'. Use the appropriate tool to save the correction",
     })
     .createGuideline({
+      id: "guideline_unrelated",
       condition: "User asks a question unrelated to onboarding",
       action:
         "Answer briefly and redirect: 'I understand, but let's finish the setup first? We're almost there!'",

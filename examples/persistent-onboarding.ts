@@ -269,18 +269,24 @@ async function createPersistentOnboardingAgent(sessionId: string) {
   });
 
   // State 1: Gather business name and description
-  const gatherBusinessInfo = onboardingRoute.initialState.transitionTo({
-    chatState: "Ask for business name and a brief description",
-    gather: ["businessName", "businessDescription"],
-    skipIf: (extracted) =>
-      !!extracted.businessName && !!extracted.businessDescription,
-  });
+  const gatherBusinessInfo = onboardingRoute.initialState.transitionTo(
+    {
+      chatState: "Ask for business name and a brief description",
+      gather: ["businessName", "businessDescription"],
+      skipIf: (extracted) =>
+        !!extracted.businessName && !!extracted.businessDescription,
+    },
+    "Need to collect basic business information first"
+  );
 
   // State 2: Save business info (tool execution)
-  const saveBusiness = gatherBusinessInfo.transitionTo({
-    toolState: saveBusinessInfo,
-    requiredData: ["businessName", "businessDescription"],
-  });
+  const saveBusiness = gatherBusinessInfo.transitionTo(
+    {
+      toolState: saveBusinessInfo,
+      requiredData: ["businessName", "businessDescription"],
+    },
+    "Business name and description provided, save to database"
+  );
 
   // State 3: Gather industry
   const gatherIndustry = saveBusiness.transitionTo({

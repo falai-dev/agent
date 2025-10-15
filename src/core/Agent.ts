@@ -3,18 +3,12 @@
  */
 
 import type { AgentOptions, Term, Guideline, Capability } from "../types/agent";
-import type { Event, StateRef, MessageEventData } from "../types/index";
+import type { Event, StateRef } from "../types/index";
 import type { RouteOptions } from "../types/route";
-import type { RoutingDecisionOutput } from "./RoutingEngine";
+
 import type { SessionState } from "../types/session";
 import type { AgentStructuredResponse } from "../types/ai";
-import {
-  createSession,
-  enterRoute,
-  enterState,
-  mergeExtracted,
-} from "../types/session";
-import { EventKind } from "../types/history";
+import { createSession, enterState, mergeExtracted } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
 
 import { Route } from "./Route";
@@ -24,19 +18,7 @@ import { PersistenceManager } from "./PersistenceManager";
 import { RoutingEngine } from "./RoutingEngine";
 import { ResponseEngine } from "./ResponseEngine";
 import { ToolExecutor } from "./ToolExecutor";
-
-/**
- * Helper to extract last message from history
- */
-function getLastMessageFromHistory(history: Event[]): string {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const event = history[i];
-    if (event.kind === EventKind.MESSAGE) {
-      return (event.data as MessageEventData).message;
-    }
-  }
-  return "";
-}
+import { getLastMessageFromHistory } from "../utils/event";
 
 /**
  * Main Agent class with generic context support
@@ -276,57 +258,6 @@ export class Agent<TContext = unknown> {
   }
 
   /**
-   * Determine the next state in a route based on extracted data
-   * @internal
-   */
-  private getNextState<TExtracted = unknown>(
-    route: Route<TContext, TExtracted>,
-    currentState: State<TContext, TExtracted> | undefined,
-    extracted: Partial<TExtracted>
-  ): State<TContext, TExtracted> {
-    // If no current state, start from initial state
-    if (!currentState) {
-      // Check if initial state should be skipped
-      if (route.initialState.shouldSkip(extracted)) {
-        return this.getNextState(route, route.initialState, extracted);
-      }
-      return route.initialState;
-    }
-
-    // Get transitions from current state
-    const transitions = currentState.getTransitions();
-
-    // If no transitions, stay in current state
-    if (transitions.length === 0) {
-      return currentState;
-    }
-
-    // Try to find the next state to transition to
-    for (const transition of transitions) {
-      const target = transition.getTarget();
-      if (!target) continue;
-
-      // Check if target state should be skipped
-      if (target.shouldSkip(extracted)) {
-        // Recursively find next non-skipped state
-        return this.getNextState(route, target, extracted);
-      }
-
-      // Check if target state has required data
-      if (!target.hasRequiredData(extracted)) {
-        // Cannot enter this state yet, stay in current state
-        continue;
-      }
-
-      // Found valid next state
-      return target;
-    }
-
-    // No valid transition found, stay in current state
-    return currentState;
-  }
-
-  /**
    * Generate a response based on history and context as a stream
    */
   async *respondStream(params: {
@@ -414,106 +345,66 @@ export class Agent<TContext = unknown> {
       }
     }
 
-    // PHASE 2: ROUTING - Determine which route to use
+    // PHASE 2: ROUTING + STATE SELECTION - Determine which route and state to use (combined)
     let selectedRoute: Route<TContext> | undefined;
     let responseDirectives: string[] | undefined;
+    let selectedState: State<TContext> | undefined;
 
     if (this.routes.length > 0) {
-      // Get last user message
-      const lastUserMessage = getLastMessageFromHistory(history);
-
-      // Build routing schema
-      const routingSchema = this.routingEngine.buildDynamicRoutingSchema(
-        this.routes
-      );
-
-      // Build routing prompt with session context
-      const routingPrompt = this.routingEngine.buildRoutingPrompt(
+      const orchestration = await this.routingEngine.decideRouteAndState({
+        routes: this.routes,
+        session,
         history,
-        this.routes,
-        lastUserMessage,
-        {
+        agentMeta: {
           name: this.options.name,
           goal: this.options.goal,
           description: this.options.description,
           personality: this.options.personality,
         },
-        session // Pass session for context-aware routing
-      );
-
-      // Call AI to score routes (non-streaming for routing decision)
-      const routingResult = await this.options.ai.generateMessage<
-        TContext,
-        RoutingDecisionOutput
-      >({
-        prompt: routingPrompt,
-        history,
+        ai: this.options.ai,
         context: effectiveContext,
         signal,
-        parameters: {
-          jsonSchema: routingSchema,
-          schemaName: "routing_output",
-        },
       });
 
-      // Select best route from scores
-      if (routingResult.structured?.routes) {
-        const decision = this.routingEngine.decideRouteFromScores({
-          context: routingResult.structured.context,
-          routes: routingResult.structured.routes,
-          responseDirectives: routingResult.structured.responseDirectives,
-        });
-        selectedRoute = this.routes.find((r) => r.id === decision.routeId);
-        responseDirectives = routingResult.structured.responseDirectives;
-
-        if (selectedRoute) {
-          console.log(
-            `[Agent] Selected route: ${selectedRoute.title} (score: ${decision.maxScore})`
-          );
-
-          // Update session with selected route (if changed)
-          if (
-            !session.currentRoute ||
-            session.currentRoute.id !== selectedRoute.id
-          ) {
-            session = enterRoute(
-              session,
-              selectedRoute.id,
-              selectedRoute.title
-            );
-
-            // Merge initial data if provided by the route
-            if (selectedRoute.initialData) {
-              session = mergeExtracted(session, selectedRoute.initialData);
-              console.log(
-                `[Agent] Merged initial data:`,
-                selectedRoute.initialData
-              );
-            }
-
-            console.log(`[Agent] Entered route: ${selectedRoute.title}`);
-          }
-        }
-      }
+      selectedRoute = orchestration.selectedRoute;
+      selectedState = orchestration.selectedState;
+      responseDirectives = orchestration.responseDirectives;
+      session = orchestration.session;
     }
 
-    // PHASE 3: RESPONSE - Stream message using selected route
+    // PHASE 3: DETERMINE NEXT STATE - Use state from combined decision or get initial state
     if (selectedRoute) {
-      // Determine next state based on current extracted data
-      const currentStateRef = session.currentState;
-      const currentState = currentStateRef
-        ? selectedRoute.getState(currentStateRef.id)
-        : undefined;
-      const nextState = this.getNextState(
-        selectedRoute,
-        currentState,
-        session.extracted
-      );
+      let nextState: State<TContext>;
+
+      // If we have a selected state from the combined routing decision, use it
+      if (selectedState) {
+        nextState = selectedState;
+      } else {
+        // New route or no state selected - get initial state or first valid state
+        const candidates = this.routingEngine.getCandidateStates(
+          selectedRoute,
+          undefined,
+          session.extracted
+        );
+        if (candidates.length > 0) {
+          nextState = candidates[0].state;
+          console.log(
+            `[Agent] Using first valid state: ${nextState.id} for new route`
+          );
+        } else {
+          // Fallback to initial state even if it should be skipped
+          nextState = selectedRoute.initialState;
+          console.warn(
+            `[Agent] No valid states found, using initial state: ${nextState.id}`
+          );
+        }
+      }
 
       // Update session with next state
       session = enterState(session, nextState.id, nextState.description);
       console.log(`[Agent] Entered state: ${nextState.id}`);
 
+      // PHASE 4: RESPONSE GENERATION - Stream message using selected route and state
       // Get last user message
       const lastUserMessage = getLastMessageFromHistory(history);
 
@@ -742,111 +633,71 @@ export class Agent<TContext = unknown> {
       }
     }
 
-    // PHASE 2: ROUTING - Determine which route to use
+    // PHASE 2: ROUTING + STATE SELECTION - Determine which route and state to use (combined)
     let selectedRoute: Route<TContext> | undefined;
     let responseDirectives: string[] | undefined;
+    let selectedState: State<TContext> | undefined;
 
     if (this.routes.length > 0) {
-      // Get last user message
-      const lastUserMessage = getLastMessageFromHistory(history);
-
-      // Build routing schema
-      const routingSchema = this.routingEngine.buildDynamicRoutingSchema(
-        this.routes
-      );
-
-      // Build routing prompt with session context
-      const routingPrompt = this.routingEngine.buildRoutingPrompt(
+      const orchestration = await this.routingEngine.decideRouteAndState({
+        routes: this.routes,
+        session,
         history,
-        this.routes,
-        lastUserMessage,
-        {
+        agentMeta: {
           name: this.options.name,
           goal: this.options.goal,
           description: this.options.description,
           personality: this.options.personality,
         },
-        session // Pass session for context-aware routing
-      );
-
-      // Call AI to score routes
-      const routingResult = await this.options.ai.generateMessage<
-        TContext,
-        RoutingDecisionOutput
-      >({
-        prompt: routingPrompt,
-        history,
+        ai: this.options.ai,
         context: effectiveContext,
         signal,
-        parameters: {
-          jsonSchema: routingSchema,
-          schemaName: "routing_output",
-        },
       });
 
-      // Select best route from scores
-      if (routingResult.structured?.routes) {
-        const decision = this.routingEngine.decideRouteFromScores({
-          context: routingResult.structured.context,
-          routes: routingResult.structured.routes,
-          responseDirectives: routingResult.structured.responseDirectives,
-        });
-        selectedRoute = this.routes.find((r) => r.id === decision.routeId);
-        responseDirectives = routingResult.structured.responseDirectives;
-
-        if (selectedRoute) {
-          console.log(
-            `[Agent] Selected route: ${selectedRoute.title} (score: ${decision.maxScore})`
-          );
-
-          // Update session with selected route (if changed)
-          if (
-            !session.currentRoute ||
-            session.currentRoute.id !== selectedRoute.id
-          ) {
-            session = enterRoute(
-              session,
-              selectedRoute.id,
-              selectedRoute.title
-            );
-
-            // Merge initial data if provided by the route
-            if (selectedRoute.initialData) {
-              session = mergeExtracted(session, selectedRoute.initialData);
-              console.log(
-                `[Agent] Merged initial data:`,
-                selectedRoute.initialData
-              );
-            }
-
-            console.log(`[Agent] Entered route: ${selectedRoute.title}`);
-          }
-        }
-      }
+      selectedRoute = orchestration.selectedRoute;
+      selectedState = orchestration.selectedState;
+      responseDirectives = orchestration.responseDirectives;
+      session = orchestration.session;
     }
 
-    // PHASE 3: RESPONSE - Generate message using selected route
+    // PHASE 3: DETERMINE NEXT STATE - Use state from combined decision or get initial state
     let message: string;
     const toolCalls:
       | Array<{ toolName: string; arguments: Record<string, unknown> }>
       | undefined = undefined;
 
     if (selectedRoute) {
-      // Determine next state based on current extracted data
-      const currentStateRef = session.currentState;
-      const currentState = currentStateRef
-        ? selectedRoute.getState(currentStateRef.id)
-        : undefined;
-      const nextState = this.getNextState(
-        selectedRoute,
-        currentState,
-        session.extracted
-      );
+      let nextState: State<TContext>;
+
+      // If we have a selected state from the combined routing decision, use it
+      if (selectedState) {
+        nextState = selectedState;
+      } else {
+        // New route or no state selected - get initial state or first valid state
+        const candidates = this.routingEngine.getCandidateStates(
+          selectedRoute,
+          undefined,
+          session.extracted
+        );
+        if (candidates.length > 0) {
+          nextState = candidates[0].state;
+          console.log(
+            `[Agent] Using first valid state: ${nextState.id} for new route`
+          );
+        } else {
+          // Fallback to initial state even if it should be skipped
+          nextState = selectedRoute.initialState;
+          console.warn(
+            `[Agent] No valid states found, using initial state: ${nextState.id}`
+          );
+        }
+      }
 
       // Update session with next state
       session = enterState(session, nextState.id, nextState.description);
       console.log(`[Agent] Entered state: ${nextState.id}`);
 
+      // PHASE 4: RESPONSE GENERATION - Generate message using selected route and state
       // Get last user message
       const lastUserMessage = getLastMessageFromHistory(history);
 

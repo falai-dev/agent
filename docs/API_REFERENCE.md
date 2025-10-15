@@ -420,10 +420,15 @@ interface TransitionResult<TExtracted = unknown> {
   routeId: string; // Route identifier
   transitionTo: (
     spec: TransitionSpec<TExtracted>,
-    condition?: string
+    condition?: string // Optional: AI-evaluated text condition for this transition
   ) => TransitionResult<TExtracted>;
 }
 ```
+
+**Parameters:**
+
+- `spec`: The transition specification (see `TransitionSpec` above)
+- `condition` (optional): Human-readable condition text that the AI evaluates when selecting states. Use this to guide the AI's state selection based on conversation context. Examples: "Customer confirmed payment", "All required data collected", "User wants to modify order"
 
 **Returns:** A `TransitionResult` that includes the target state's reference (`id`, `routeId`) and a `transitionTo` method for chaining additional transitions.
 
@@ -451,19 +456,25 @@ const flightRoute = agent.createRoute<FlightData>({
   },
 });
 
-// Approach 1: Step-by-step with data extraction
-const askDestination = flightRoute.initialState.transitionTo({
-  chatState: "Ask where they want to fly",
-  gather: ["destination"],
-  skipIf: (extracted) => !!extracted.destination, // Skip if already have destination
-});
+// Approach 1: Step-by-step with data extraction and text conditions
+const askDestination = flightRoute.initialState.transitionTo(
+  {
+    chatState: "Ask where they want to fly",
+    gather: ["destination"],
+    skipIf: (extracted) => !!extracted.destination, // Skip if already have destination
+  },
+  "Customer hasn't specified destination yet" // AI-evaluated condition
+);
 
-const askDates = askDestination.transitionTo({
-  chatState: "Ask about travel dates",
-  gather: ["departureDate"],
-  skipIf: (extracted) => !!extracted.departureDate,
-  requiredData: ["destination"], // Must have destination first
-});
+const askDates = askDestination.transitionTo(
+  {
+    chatState: "Ask about travel dates",
+    gather: ["departureDate"],
+    skipIf: (extracted) => !!extracted.departureDate,
+    requiredData: ["destination"], // Must have destination first
+  },
+  "Destination confirmed, need travel dates"
+);
 
 const askPassengers = askDates.transitionTo({
   chatState: "How many passengers?",

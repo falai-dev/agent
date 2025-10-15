@@ -47,7 +47,9 @@
 
 - **Schema-First Extraction** - Define data contracts with JSON Schema
 - **Session State Management** - Track conversation progress across turns
-- **Code-Based Logic** - Deterministic state progression with `skipIf`
+- **AI-Driven State Transitions** - Smart state selection based on conversation context
+- **Text-Based Conditions** - Human-readable transition conditions for the AI to evaluate
+- **Code-Based Logic** - Deterministic state progression with `skipIf` and `requiredData`
 - **Always-On Routing** - Context-aware routing respects user intent changes
 
 </td>
@@ -455,9 +457,12 @@ const askName = onboardingRoute.initialState.transitionTo({
   chatState: "Ask for user's full name",
 });
 
-const askEmail = askName.transitionTo({
-  chatState: "Request email address",
-});
+const askEmail = askName.transitionTo(
+  {
+    chatState: "Request email address",
+  },
+  "Customer has only provided name but not email yet"
+);
 
 const confirmDetails = askEmail.transitionTo({
   chatState: "Confirm all details before proceeding",

@@ -161,19 +161,25 @@ async function createHealthcareAgent() {
   });
 
   // State 1: Gather appointment reason
-  const gatherReason = schedulingRoute.initialState.transitionTo({
-    chatState: "Ask what the patient needs an appointment for",
-    gather: ["appointmentReason"],
-    skipIf: (extracted) => !!extracted.appointmentReason,
-  });
+  const gatherReason = schedulingRoute.initialState.transitionTo(
+    {
+      chatState: "Ask what the patient needs an appointment for",
+      gather: ["appointmentReason"],
+      skipIf: (extracted) => !!extracted.appointmentReason,
+    },
+    "Patient hasn't specified reason for appointment yet"
+  );
 
   // State 2: Check urgency and show available slots
-  const checkUrgency = gatherReason.transitionTo({
-    chatState: "Check if this is urgent and show available slots",
-    gather: ["urgency"],
-    skipIf: (extracted) => !!extracted.urgency,
-    requiredData: ["appointmentReason"],
-  });
+  const checkUrgency = gatherReason.transitionTo(
+    {
+      chatState: "Check if this is urgent and show available slots",
+      gather: ["urgency"],
+      skipIf: (extracted) => !!extracted.urgency,
+      requiredData: ["appointmentReason"],
+    },
+    "Reason provided, now assess urgency level"
+  );
 
   const showSlots = checkUrgency.transitionTo({
     toolState: getUpcomingSlots,
@@ -200,16 +206,22 @@ async function createHealthcareAgent() {
     requiredData: ["appointmentReason", "preferredTime", "preferredDate"],
   });
 
-  const schedule = confirmDetails.transitionTo({
-    toolState: scheduleAppointment,
-    requiredData: ["appointmentReason", "preferredTime", "preferredDate"],
-  });
+  const schedule = confirmDetails.transitionTo(
+    {
+      toolState: scheduleAppointment,
+      requiredData: ["appointmentReason", "preferredTime", "preferredDate"],
+    },
+    "All details confirmed, book the appointment"
+  );
 
   const confirmation = schedule.transitionTo({
     chatState: "Confirm the appointment has been scheduled",
   });
 
-  confirmation.transitionTo({ state: END_ROUTE });
+  confirmation.transitionTo(
+    { state: END_ROUTE },
+    "Appointment booked successfully"
+  );
 
   // Alternative path: no times work - show later slots
   const laterSlots = presentTimes.transitionTo({

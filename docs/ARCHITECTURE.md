@@ -106,25 +106,32 @@ const response = await agent.respond({
 - **State Recovery** - Resume conversations from any point
 - **Session Tracking** - Track conversations via session ID in database
 
-### 3. 🔧 Code-Based State Logic
+### 3. 🔧 Code-Based State Logic + AI-Driven Transitions
 
-Use TypeScript functions instead of LLM conditions for deterministic flow:
+Use TypeScript functions for deterministic flow control AND text conditions for AI-driven state selection:
 
 ```typescript
 // State with smart bypassing based on extracted data
-const askDestination = route.initialState.transitionTo({
-  id: "ask_destination", // Optional: custom state ID
-  chatState: "Ask where they want to fly",
-  gather: ["destination"],
-  skipIf: (extracted) => !!extracted.destination, // Code-based condition!
-});
+const askDestination = route.initialState.transitionTo(
+  {
+    id: "ask_destination", // Optional: custom state ID
+    chatState: "Ask where they want to fly",
+    gather: ["destination"],
+    skipIf: (extracted) => !!extracted.destination, // Code-based condition!
+  },
+  "Customer hasn't specified destination yet" // Text condition for AI
+);
 
-const askDate = askDestination.transitionTo({
-  id: "ask_date", // Optional: custom state ID for easier tracking
-  chatState: "Ask about travel dates",
-  gather: ["departureDate"],
-  skipIf: (extracted) => !!extracted.departureDate,
-  requiredData: ["destination"], // Prerequisites
+const askDate = askDestination.transitionTo(
+  {
+    id: "ask_date", // Optional: custom state ID for easier tracking
+    chatState: "Ask about travel dates",
+    gather: ["departureDate"],
+    skipIf: (extracted) => !!extracted.departureDate,
+    requiredData: ["destination"], // Prerequisites
+  },
+  "Destination confirmed, need travel dates now"
+);
 });
 ```
 
@@ -149,6 +156,23 @@ If you don't provide an ID, one is automatically generated from the route ID and
 - **Debugging** - Clear logic flow you can trace
 - **Type Safety** - Full TypeScript support for data validation
 - **Custom IDs** - Easier tracking and debugging with meaningful state identifiers
+
+**How State Transitions Work:**
+
+1. **Code filters first**: `skipIf` and `requiredData` filter out invalid states deterministically
+2. **AI selects best state**: From valid candidates, AI evaluates text conditions to choose optimal state
+3. **Combined decision**: Single AI call handles both route selection AND state selection (no extra calls!)
+4. **Completion detection**: When all states are skipped and `END_ROUTE` is reached, route is marked complete
+
+```typescript
+// The AI sees:
+// "Available states: askDate, confirmBooking
+//  - askDate: Destination confirmed, need travel dates now
+//  - confirmBooking: All required info collected, ready to book
+//  Current extracted: {destination: 'Paris', departureDate: '2025-01-15'}
+//
+//  → AI selects 'confirmBooking' based on context"
+```
 
 ### 4. 🛠️ Tools with Data Access
 
