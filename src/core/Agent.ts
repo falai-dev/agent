@@ -594,15 +594,12 @@ export class Agent<TContext = unknown> {
         if (
           chunk.done &&
           this.persistenceManager &&
-          session.metadata?.sessionId &&
+          session.id &&
           this.options.persistence?.autoSave !== false
         ) {
-          await this.persistenceManager.saveSessionState(
-            session.metadata.sessionId,
-            session
-          );
+          await this.persistenceManager.saveSessionState(session.id, session);
           console.log(
-            `[Agent] Auto-saved session state to persistence: ${session.metadata.sessionId}`
+            `[Agent] Auto-saved session state to persistence: ${session.id}`
           );
         }
 
@@ -959,15 +956,12 @@ export class Agent<TContext = unknown> {
     // Auto-save session state to persistence if configured
     if (
       this.persistenceManager &&
-      session.metadata?.sessionId &&
+      session.id &&
       this.options.persistence?.autoSave !== false
     ) {
-      await this.persistenceManager.saveSessionState(
-        session.metadata.sessionId,
-        session
-      );
+      await this.persistenceManager.saveSessionState(session.id, session);
       console.log(
-        `[Agent] Auto-saved session state to persistence: ${session.metadata.sessionId}`
+        `[Agent] Auto-saved session state to persistence: ${session.id}`
       );
     }
 

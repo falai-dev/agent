@@ -257,15 +257,14 @@ export class PersistenceManager {
       return null;
     }
 
-    const stateData = sessionDataToState<TExtracted>({
+    const stateData = sessionDataToState<TExtracted>(sessionId, {
       currentRoute: sessionData.currentRoute,
       currentState: sessionData.currentState,
       collectedData: sessionData.collectedData,
     });
 
     // Create a full session state with the loaded data
-    const session = createSession<TExtracted>({
-      sessionId,
+    const session = createSession<TExtracted>(sessionId, {
       createdAt: sessionData.createdAt,
       lastUpdatedAt: sessionData.updatedAt,
     });
@@ -289,8 +288,7 @@ export class PersistenceManager {
     const sessionData = await this.createSession(options);
 
     // Create SessionState with database session ID
-    const sessionState = createSession<TExtracted>({
-      sessionId: sessionData.id,
+    const sessionState = createSession<TExtracted>(sessionData.id, {
       createdAt: sessionData.createdAt,
       lastUpdatedAt: sessionData.updatedAt,
     });

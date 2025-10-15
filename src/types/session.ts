@@ -7,6 +7,9 @@
  * and data extracted during the route progression
  */
 export interface SessionState<TExtracted = Record<string, unknown>> {
+  /** Unique session identifier (useful for persistence) */
+  id?: string;
+
   /** Current route the conversation is in */
   currentRoute?: {
     id: string;
@@ -34,7 +37,6 @@ export interface SessionState<TExtracted = Record<string, unknown>> {
 
   /** Session metadata */
   metadata?: {
-    sessionId?: string;
     createdAt?: Date;
     lastUpdatedAt?: Date;
     [key: string]: unknown;
@@ -43,11 +45,15 @@ export interface SessionState<TExtracted = Record<string, unknown>> {
 
 /**
  * Helper to create a new session
+ * @param sessionId - Optional session ID (e.g., from database)
+ * @param metadata - Optional metadata to attach
  */
 export function createSession<TExtracted = Record<string, unknown>>(
+  sessionId?: string,
   metadata?: SessionState<TExtracted>["metadata"]
 ): SessionState<TExtracted> {
   return {
+    id: sessionId,
     extracted: {},
     routeHistory: [],
     metadata: {
@@ -172,15 +178,21 @@ export function sessionStateToData<TExtracted = Record<string, unknown>>(
 /**
  * Helper to convert database SessionData back to SessionState
  * Used when loading from database
+ * @param sessionId - The database session ID
+ * @param data - The database session data
  */
-export function sessionDataToState<TExtracted = Record<string, unknown>>(data: {
-  currentRoute?: string;
-  currentState?: string;
-  collectedData?: Record<string, unknown>;
-}): Partial<SessionState<TExtracted>> {
+export function sessionDataToState<TExtracted = Record<string, unknown>>(
+  sessionId: string,
+  data: {
+    currentRoute?: string;
+    currentState?: string;
+    collectedData?: Record<string, unknown>;
+  }
+): SessionState<TExtracted> {
   const collectedData = data.collectedData || {};
 
   return {
+    id: sessionId,
     currentRoute: data.currentRoute
       ? {
           id: data.currentRoute,
