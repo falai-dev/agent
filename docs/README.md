@@ -10,15 +10,21 @@ Welcome to the `@falai/agent` documentation!
 
 ### Core Concepts
 
+- **[Architecture](./ARCHITECTURE.md)** - Design principles & philosophy ⭐ **NEW**
 - **[Constructor Options](./CONSTRUCTOR_OPTIONS.md)** - Comprehensive guide to declarative vs fluent configuration
-- **[Package Structure](./STRUCTURE.md)** - Architecture and design principles
+- **[Context Management](./CONTEXT_MANAGEMENT.md)** - Dynamic context variables & lifecycle hooks
+- **[Package Structure](./STRUCTURE.md)** - Package organization and module design
 
 ### Reference
 
 - **[API Reference](./API_REFERENCE.md)** - Complete API documentation for all classes, methods, and types
 - **[AI Providers Guide](./PROVIDERS.md)** - Gemini, OpenAI, Anthropic, and custom providers
+- **[Domain Organization](./DOMAINS.md)** - Optional tool security & organization **NEW**
 - **[Persistence Guide](./PERSISTENCE.md)** - Auto-save sessions and messages to any database
 - **[Database Adapters](./ADAPTERS.md)** - Adapter comparison and configuration examples
+
+### Contributing
+
 - **[Contributing Guide](./CONTRIBUTING.md)** - How to contribute to the project
 - **[Publishing Guide](./PUBLISHING.md)** - How to publish updates to npm
 
@@ -29,8 +35,14 @@ Welcome to the `@falai/agent` documentation!
 **First time here?**
 → Start with [Getting Started](./GETTING_STARTED.md)
 
+**Understanding the design?**
+→ Read [Architecture Guide](./ARCHITECTURE.md)
+
 **Building a complex agent?**
 → Check [Constructor Options](./CONSTRUCTOR_OPTIONS.md)
+
+**Need tool security?**
+→ See [Domain Organization](./DOMAINS.md)
 
 **Need specific API details?**
 → Browse the [API Reference](./API_REFERENCE.md)
@@ -43,12 +55,14 @@ Welcome to the `@falai/agent` documentation!
 
 ### By Topic
 
-- **Agent Configuration**: [Constructor Options](./CONSTRUCTOR_OPTIONS.md)
+- **Architecture & Design**: [Architecture Guide](./ARCHITECTURE.md) | [Package Structure](./STRUCTURE.md)
+- **Agent Configuration**: [Constructor Options](./CONSTRUCTOR_OPTIONS.md) | [Context Management](./CONTEXT_MANAGEMENT.md)
 - **Conversation Flows**: [API Reference - Routes](./API_REFERENCE.md#route)
-- **Tools & Functions**: [API Reference - Tools](./API_REFERENCE.md#definetool)
+- **Tools & Domains**: [Domain Organization](./DOMAINS.md) | [API Reference - Tools](./API_REFERENCE.md#definetool)
 - **Disambiguation**: [API Reference - Observations](./API_REFERENCE.md#observation)
 - **AI Providers**: [Providers Guide](./PROVIDERS.md) | [API Reference](./API_REFERENCE.md#geminiprovider)
 - **Database Persistence**: [Persistence Guide](./PERSISTENCE.md) | [Adapters](./ADAPTERS.md)
+- **Contributing**: [Contributing Guide](./CONTRIBUTING.md) | [Publishing Guide](./PUBLISHING.md)
 
 ## 💡 Examples
 

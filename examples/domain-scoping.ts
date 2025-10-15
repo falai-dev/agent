@@ -2,7 +2,13 @@
  * Domain Scoping Example
  *
  * This example demonstrates how to use domain scoping to restrict which tools
- * are available in different conversation routes for security and clarity.
+ * can EXECUTE in different conversation routes for security and isolation.
+ *
+ * Important: Domains are OPTIONAL. If you never use domains, all tools are
+ * available everywhere. Use domains when you need security and organization.
+ *
+ * Key Concept: The AI never sees tools. Domains control which tools can
+ * execute automatically when triggered by the state machine or guidelines.
  */
 
 import { Agent, createMessageEvent, EventSource } from "../src/index";
@@ -186,19 +192,21 @@ async function demonstrateScoping() {
 // Benefits demonstration
 console.log(`
 🔒 Security Benefits:
-- Customer Support route cannot accidentally call payment.processPayment()
-- Data Collection route cannot access calendar.scheduleEvent()
-- Each route has minimum necessary permissions
+- Customer Support route cannot execute payment.processPayment()
+- Data Collection route cannot execute calendar.scheduleEvent()
+- Each route has minimum necessary tool permissions
+- Prevents prompt injection attacks from calling sensitive tools
 
-⚡ Performance Benefits:
-- AI only sees relevant tools for each route
-- Faster decision making with reduced context
-- Clearer intent and fewer errors
+🎯 Isolation Benefits:
+- Route execution is isolated - tools can't cross boundaries
+- Checkout can't accidentally trigger admin operations
+- Clear separation of concerns by capability
 
-🎯 Clarity Benefits:
+📋 Clarity Benefits:
 - Routes clearly document their capabilities
-- Easy to audit what each route can do
+- Easy to audit what each route can execute
 - Better debugging when tools are called
+- Self-documenting security model
 `);
 
 // Inspect route configurations

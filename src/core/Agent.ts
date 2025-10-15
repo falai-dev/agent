@@ -328,11 +328,9 @@ export class Agent<TContext = unknown> {
       );
     }
 
-    // Add domains (tools) information if any domains are registered
-    const allDomains = this.domainRegistry.all();
-    if (Object.keys(allDomains).length > 0) {
-      promptBuilder.addDomains(allDomains);
-    }
+    // NOTE: Domains/tools are NOT added to the prompt.
+    // Tools execute automatically based on state transitions and guideline matching,
+    // NOT based on AI decisions. The AI should never see available tools.
 
     // Add JSON response schema instructions
     promptBuilder.addJsonResponseSchema();
@@ -500,11 +498,9 @@ export class Agent<TContext = unknown> {
       );
     }
 
-    // Add domains (tools) information if any domains are registered
-    const allDomains = this.domainRegistry.all();
-    if (Object.keys(allDomains).length > 0) {
-      promptBuilder.addDomains(allDomains);
-    }
+    // NOTE: Domains/tools are NOT added to the prompt.
+    // Tools execute automatically based on state transitions and guideline matching,
+    // NOT based on AI decisions. The AI should never see available tools.
 
     // Add JSON response schema instructions
     promptBuilder.addJsonResponseSchema();

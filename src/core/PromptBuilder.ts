@@ -449,7 +449,7 @@ When you detect any of these situations, consider which route would be most appr
               ? `\n  Triggered when: ${route.conditions.join(" OR ")}`
               : "";
           const desc = route.description ? `\n  ${route.description}` : "";
-          
+
           let domainInfo = "";
           if (route.domains !== undefined) {
             if (route.domains.length === 0) {
@@ -461,17 +461,23 @@ When you detect any of these situations, consider which route would be most appr
 
           let rulesInfo = "";
           if (route.rules && route.rules.length > 0) {
-            const rulesList = route.rules.map((r, idx) => `${idx + 1}. ${r}`).join("; ");
+            const rulesList = route.rules
+              .map((r, idx) => `${idx + 1}. ${r}`)
+              .join("; ");
             rulesInfo = `\n  RULES: ${rulesList}`;
           }
 
           let prohibitionsInfo = "";
           if (route.prohibitions && route.prohibitions.length > 0) {
-            const prohibitionsList = route.prohibitions.map((p, idx) => `${idx + 1}. ${p}`).join("; ");
+            const prohibitionsList = route.prohibitions
+              .map((p, idx) => `${idx + 1}. ${p}`)
+              .join("; ");
             prohibitionsInfo = `\n  PROHIBITIONS: ${prohibitionsList}`;
           }
 
-          return `${i + 1}) ${route.title}${desc}${conditions}${domainInfo}${rulesInfo}${prohibitionsInfo}`;
+          return `${i + 1}) ${
+            route.title
+          }${desc}${conditions}${domainInfo}${rulesInfo}${prohibitionsInfo}`;
         })
         .join("\n\n");
 
@@ -497,9 +503,7 @@ IMPORTANT:
   /**
    * Add domains (tools) information
    */
-  addDomains(
-    domains: Record<string, Record<string, unknown>>
-  ): this {
+  addDomains(domains: Record<string, Record<string, unknown>>): this {
     const domainNames = Object.keys(domains);
     if (domainNames.length > 0) {
       const domainsString = domainNames
@@ -526,21 +530,18 @@ When calling tools, use the format: domain.toolName (e.g., "payment.processPayme
     return this;
   }
 
-
   /**
    * Add JSON response schema instructions
+   *
+   * NOTE: toolCalls are NOT included. Tools execute automatically based on
+   * state transitions and guideline matching, NOT based on AI decisions.
    */
   addJsonResponseSchema(): this {
     const schema = {
       message: "The actual message to send to the user",
       route: "The title of the route you chose (or null if no specific route)",
-      state: "The current state within the route (or null if not in a route)",
-      toolCalls: [
-        {
-          toolName: "Name of the tool to call",
-          arguments: "Object with tool arguments",
-        },
-      ],
+      state:
+        "The current state within the chosen route (or null if not in a route)",
       reasoning: "Optional: Your internal reasoning for this response",
     };
 
@@ -556,7 +557,6 @@ Instructions:
 - "message": The actual message to send to the user (required)
 - "route": If you chose a specific conversation route, provide its exact title. If not in a route, use null.
 - "state": The current state within the chosen route. If not in a route or at initial state, use null.
-- "toolCalls": If you need to call any tools, provide an array of tool calls. If no tools needed, use an empty array or omit.
 - "reasoning": Optional field for your internal thinking process.
 
 Your entire response must be valid JSON. Do not include any text before or after the JSON object.`,

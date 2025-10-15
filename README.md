@@ -52,11 +52,12 @@
 </td>
 <td width="50%">
 
-### 🔧 **Tools & Capabilities**
+### 🔧 **Tools & Domains**
 
 - **Type-Safe Tools** - Define tools with full type inference
-- **Domain Registry** - Organize capabilities by domain
+- **Domain Registry** - Optional security & organization by domain
 - **Context Awareness** - Tools receive typed context automatically
+- **Automatic Execution** - Tools run based on state machine, not AI
 
 </td>
 </tr>
@@ -82,6 +83,34 @@
 </td>
 </tr>
 </table>
+
+---
+
+## 🏗️ Architecture
+
+`@falai/agent` uses a **state machine-driven architecture** where:
+
+- 🎯 **Conversations are explicit state machines** - Predictable, testable flows using the Route DSL
+- 🔧 **Tools execute automatically** - Based on state transitions and guideline matching, not AI decisions
+- 🧠 **AI only generates messages** - The AI never sees or calls tools; it just creates natural responses
+- 🔄 **Preparation iterations gather data** - Tools run in loops before message generation to enrich context
+- 📦 **Domain-based organization** - Tools grouped logically with route-level access control
+
+**Example:**
+
+```typescript
+route.initialState
+  .transitionTo({ chatState: "What's your name?" })
+  .transitionTo(
+    { toolState: saveName }, // ← Tool executes automatically
+    "User provided their name"
+  )
+  .transitionTo({ chatState: "Thanks! What's your email?" });
+```
+
+The AI generates conversational messages while the engine handles tool execution and flow control. This creates **deterministic, controllable agents** perfect for structured conversations like customer support, onboarding, and multi-step processes.
+
+📖 **[Read the full architecture guide →](./docs/ARCHITECTURE.md)**
 
 ---
 
@@ -240,16 +269,81 @@ See [streaming-agent.ts](./examples/streaming-agent.ts) for complete examples.
 
 ---
 
+## 🔒 Domain-Based Security (Optional)
+
+Domains let you **optionally** organize and restrict tools for security. **If you never use domains, your agent works perfectly** - all tools are available everywhere.
+
+### Without Domains (Simple & Default)
+
+```typescript
+const agent = new Agent({ name: "My Agent", ai: provider });
+
+// Define tools normally
+const saveName = defineTool(/* ... */);
+const processPayment = defineTool(/* ... */);
+
+// All tools work everywhere
+const route = agent.createRoute({ title: "Onboarding" });
+route.initialState
+  .transitionTo({ toolState: saveName }) // ✅ Works
+  .transitionTo({ toolState: processPayment }); // ✅ Works
+```
+
+### With Domains (Security & Organization)
+
+```typescript
+// Organize tools into security domains
+agent.addDomain("user", {
+  saveName: async (name) => {
+    /* ... */
+  },
+});
+
+agent.addDomain("payment", {
+  processPayment: async (amount) => {
+    /* ... */
+  },
+});
+
+// Restrict which tools each route can use
+const onboardingRoute = agent.createRoute({
+  title: "Onboarding",
+  domains: ["user"], // ONLY user tools can execute
+});
+
+const checkoutRoute = agent.createRoute({
+  title: "Checkout",
+  domains: ["payment"], // ONLY payment tools can execute
+});
+
+// Security: payment tools can't execute in onboarding route
+onboardingRoute.initialState
+  .transitionTo({ toolState: agent.domain.user.saveName }) // ✅ Allowed
+  .transitionTo({ toolState: agent.domain.payment.processPayment }); // ❌ Blocked!
+```
+
+**When to use domains:**
+
+- ✅ Production systems with sensitive operations
+- ✅ Preventing prompt injection attacks
+- ✅ Route isolation (checkout can't trigger account deletion)
+- ❌ Skip for prototypes and simple agents
+
+📖 **[Full Domain Guide →](./docs/DOMAINS.md)** | [Example →](./examples/domain-scoping.ts)
+
+---
+
 ## 📚 Documentation
 
 ### 📖 Guides
 
+- **[Architecture](./docs/ARCHITECTURE.md)** - Design principles & philosophy ⭐
 - **[Getting Started](./docs/GETTING_STARTED.md)** - Your first agent in 5 minutes
 - **[Constructor Options](./docs/CONSTRUCTOR_OPTIONS.md)** - Declarative vs Fluent API patterns
 - **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Persistent conversations & state management
 - **[Persistence](./docs/PERSISTENCE.md)** - Optional database persistence with Prisma **(NEW!)**
 - **[API Reference](./docs/API_REFERENCE.md)** - Complete API documentation
-- **[Architecture](./docs/STRUCTURE.md)** - Package structure and design principles
+- **[Package Structure](./docs/STRUCTURE.md)** - Package structure and design principles
 
 ### 💡 Key Concepts
 
