@@ -612,10 +612,12 @@ async function createBusinessOnboardingAgent(
     .transitionTo({
       id: "ask_improve",
       chatState: "Is there anything we could improve?",
+      condition: "User wants to provide feedback",
     })
     .transitionTo({
       id: "thank_you",
       chatState: "Thank you for your feedback! It helps us improve. 🙏",
+      condition: "User provided feedback",
     })
     .transitionTo({ state: END_ROUTE });
 
