@@ -112,7 +112,7 @@ async function main() {
     title: "Check Weather",
     description: "Help user check weather for a location",
     conditions: ["User wants to know the weather"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         location: {

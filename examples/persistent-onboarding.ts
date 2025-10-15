@@ -244,7 +244,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     title: "Business Onboarding",
     description: "Guide user through business information collection",
     conditions: ["User is onboarding their business"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         businessName: {
@@ -503,7 +503,7 @@ async function main() {
  *    - Always-on routing respects intent changes
  *
  * ✅ PATTERN 2: Schema-First Data Extraction
- *    - gatherSchema: Define data contracts upfront
+ *    - extractionSchema: Define data contracts upfront
  *    - Type-safe extraction throughout conversation
  *    - skipIf functions for deterministic state logic
  *    - requiredData arrays for prerequisites

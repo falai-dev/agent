@@ -251,7 +251,7 @@ const bookingRoute = agent.createRoute<FlightData>({
     "User wants to book a flight",
     "User mentions flying, traveling, or booking",
   ],
-  gatherSchema: {
+  extractionSchema: {
     type: "object",
     properties: {
       destination: {

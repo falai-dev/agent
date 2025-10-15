@@ -103,7 +103,7 @@ const agent = new Agent<FlightBookingContext>({
       title: 'Book Flight',
       description: 'Help user book a flight',
       conditions: ['User wants to book a flight'],
-      gatherSchema: {
+      extractionSchema: {
         type: 'object',
         properties: {
           destination: { type: 'string' },
@@ -175,7 +175,7 @@ interface RouteOptions<TExtracted = unknown> {
   prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do
 
   // NEW: Schema-first data extraction
-  gatherSchema?: {
+  extractionSchema?: {
     type: "object";
     properties: Record<string, any>;
     required?: string[];

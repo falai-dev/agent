@@ -321,7 +321,7 @@ interface RouteOptions<TExtracted = unknown> {
   prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do in this route
 
   // NEW: Schema-first data extraction
-  gatherSchema?: {
+  extractionSchema?: {
     type: "object";
     properties: Record<string, any>;
     required?: string[];
@@ -445,7 +445,7 @@ interface FlightData {
 // Create a data-driven route
 const flightRoute = agent.createRoute<FlightData>({
   title: "Book Flight",
-  gatherSchema: {
+  extractionSchema: {
     type: "object",
     properties: {
       destination: { type: "string" },
@@ -1557,7 +1557,7 @@ interface SessionState<TExtracted = Record<string, unknown>> {
 **Key Features:**
 
 - **`id`** - Optional session identifier that persists across database operations
-- **`extracted`** - Type-safe data collected via `gatherSchema`
+- **`extracted`** - Type-safe data collected via `extractionSchema`
 - **`currentRoute`** / **`currentState`** - Track conversation position
 - **`routeHistory`** - Full audit trail of route transitions
 - **`metadata`** - Custom data (timestamps, user info, etc.)

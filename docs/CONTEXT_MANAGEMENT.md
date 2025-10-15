@@ -182,7 +182,7 @@ interface FlightData {
 
 const route = agent.createRoute<FlightData>({
   title: "Book Flight",
-  gatherSchema: {
+  extractionSchema: {
     type: "object",
     properties: {
       destination: { type: "string" },

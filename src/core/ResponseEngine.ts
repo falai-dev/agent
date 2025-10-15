@@ -30,9 +30,9 @@ export class ResponseEngine<TContext = unknown> {
     }
 
     // Add gather fields from current state
-    if (currentState?.gatherFields && route.gatherSchema?.properties) {
+    if (currentState?.gatherFields && route.extractionSchema?.properties) {
       for (const field of currentState.gatherFields) {
-        const fieldSchema = route.gatherSchema.properties[field];
+        const fieldSchema = route.extractionSchema.properties[field];
         if (fieldSchema) {
           base.properties![field] = fieldSchema;
         }

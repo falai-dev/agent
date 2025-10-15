@@ -130,7 +130,7 @@ async function createHealthcareAgent() {
     title: "Schedule an Appointment",
     description: "Helps the patient find a time for their appointment.",
     conditions: ["The patient wants to schedule an appointment"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         appointmentReason: {
@@ -250,7 +250,7 @@ async function createHealthcareAgent() {
     title: "Lab Results",
     description: "Retrieves the patient's lab results and explains them.",
     conditions: ["The patient wants to see their lab results"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         testType: {

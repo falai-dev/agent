@@ -2,7 +2,7 @@
  * Example: Company Q&A Agent (Stateless, Knowledge-Based)
  *
  * This demonstrates:
- * 1. Schema-first architecture for stateless Q&A routes (no gatherSchema)
+ * 1. Schema-first architecture for stateless Q&A routes (no extractionSchema)
  * 2. Tools for context enrichment (not data extraction)
  * 3. Session state management even for stateless conversations
  * 4. Always-on routing with context awareness
@@ -234,7 +234,7 @@ const companyInfoRoute = agent.createRoute({
     "How many employees",
     "Where is the headquarters",
   ],
-  // NO gatherSchema - stateless Q&A route
+  // NO extractionSchema - stateless Q&A route
   // Just use initial state with chatState for response generation
 });
 
@@ -250,7 +250,7 @@ const productInfoRoute = agent.createRoute({
     "What products do you offer",
     "Tell me about your widgets",
   ],
-  // NO gatherSchema - just answering questions
+  // NO extractionSchema - just answering questions
 });
 
 // Initial state is enough - no transitions needed for simple Q&A
@@ -265,7 +265,7 @@ const policyRoute = agent.createRoute({
     "Shipping information",
     "Warranty questions",
   ],
-  // NO gatherSchema
+  // NO extractionSchema
 });
 
 // Initial state is enough - no extra setup needed

@@ -102,7 +102,7 @@ const agent = new Agent({
 // Create a route with data extraction
 const route = agent.createRoute<YourDataType>({
   title: "My Route",
-  gatherSchema: {
+  extractionSchema: {
     type: "object",
     properties: {
       field1: { type: "string" },

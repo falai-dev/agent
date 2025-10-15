@@ -88,7 +88,7 @@ async function example() {
       "User wants to report a problem",
       "User mentions support, help, or issue",
     ],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         issue: {
@@ -286,7 +286,7 @@ async function highThroughputExample() {
   // Simple chat route that extracts topic and sentiment
   const chatRoute = agent.createRoute<QuickChatData>({
     title: "General Chat",
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         topic: {
@@ -364,7 +364,7 @@ async function sessionRecoveryExample() {
 
   const orderRoute = agent.createRoute<OrderData>({
     title: "Place Order",
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         productId: { type: "string" },

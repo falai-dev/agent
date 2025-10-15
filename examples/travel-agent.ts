@@ -223,7 +223,7 @@ async function createTravelAgent() {
     description:
       "Helps the customer find and book a flight to their desired destination.",
     conditions: ["The customer wants to book a flight"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         destination: {
@@ -370,7 +370,7 @@ async function createTravelAgent() {
     description:
       "Retrieves the customer's booking status and provides relevant information.",
     conditions: ["The customer wants to check their booking status"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         confirmationNumber: {

@@ -22,7 +22,7 @@ interface FlightData {
 const route = agent.createRoute<FlightData>({
   title: "Book Flight",
   description: "Help user book a flight",
-  gatherSchema: {
+  extractionSchema: {
     type: "object",
     properties: {
       destination: { type: "string" },
@@ -374,7 +374,7 @@ interface BookingData {
 
 const bookingRoute = agent.createRoute<BookingData>({
   title: "Flight Booking",
-  gatherSchema: {
+  extractionSchema: {
     /* schema for all fields */
   },
 });
@@ -404,7 +404,7 @@ For simple question-answering without state:
 const qnaRoute = agent.createRoute({
   title: "Company Q&A",
   conditions: ["User asks about company"],
-  // NO gatherSchema - stateless!
+  // NO extractionSchema - stateless!
 });
 
 // Just use initial state

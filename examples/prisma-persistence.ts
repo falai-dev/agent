@@ -96,7 +96,7 @@ async function example() {
       "User wants to book a flight",
       "User mentions travel, flying, or booking tickets",
     ],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         destination: {
@@ -413,7 +413,7 @@ async function advancedExample() {
   const onboardingRoute = agent.createRoute<OnboardingData>({
     title: "User Onboarding",
     description: "Collect user information for account setup",
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         fullName: { type: "string" },
@@ -514,7 +514,7 @@ async function quickStart() {
   // Create a simple contact form route
   const contactRoute = agent.createRoute<ContactFormData>({
     title: "Contact Form",
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         name: { type: "string" },

@@ -105,7 +105,7 @@ async function example() {
       "User reports an issue or problem",
       "User is dissatisfied",
     ],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         category: {
@@ -337,7 +337,7 @@ async function analyticsExample() {
 
   const ticketRoute = agent.createRoute<TicketData>({
     title: "Analyze Support Ticket",
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         ticketType: { type: "string" },

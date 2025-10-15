@@ -146,7 +146,7 @@ async function example() {
       "User is a new customer",
       "User needs to set up their account",
     ],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         fullName: { type: "string" },
@@ -464,7 +464,7 @@ async function advancedExample() {
 
   const route = agent.createRoute<OnboardingData>({
     title: "Onboarding",
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         fullName: { type: "string" },

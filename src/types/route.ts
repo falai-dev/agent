@@ -30,7 +30,7 @@ import type { Guideline } from "./agent";
 
 /**
  * Options for creating a route
- * @template TExtracted - Type of data extracted throughout the route (inferred from gatherSchema)
+ * @template TExtracted - Type of data extracted throughout the route (inferred from extractionSchema)
  */
 export interface RouteOptions<TExtracted = unknown> {
   /** Custom ID for the route (optional - will generate deterministic ID from title if not provided) */
@@ -57,7 +57,7 @@ export interface RouteOptions<TExtracted = unknown> {
    * NEW: Schema defining data to extract throughout this route
    * This creates a type-safe contract for what data the route collects
    */
-  gatherSchema?: StructuredSchema;
+  extractionSchema?: StructuredSchema;
   /**
    * NEW: Initial data to pre-populate when entering this route
    * Useful for restoring sessions or pre-filling known information
@@ -81,7 +81,7 @@ export interface TransitionSpec<TContext = unknown, TExtracted = unknown> {
   state?: StateRef | symbol;
   /**
    * NEW: Fields to gather from the conversation in this state
-   * These should match keys in the route's gatherSchema
+   * These should match keys in the route's extractionSchema
    */
   gather?: string[];
   /**

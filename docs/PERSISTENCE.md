@@ -110,7 +110,7 @@ const agent = new Agent({
 // Create a route with data extraction
 const bookingRoute = agent.createRoute<BookingData>({
   title: "Book Flight",
-  gatherSchema: {
+  extractionSchema: {
     type: "object",
     properties: {
       destination: { type: "string" },
@@ -273,7 +273,7 @@ await agent.updateContext({ preferences: { theme: "dark" } });
 The new architecture automatically saves and loads `SessionState<TExtracted>` which includes:
 
 - **Current route and state** - Track conversation progress
-- **Extracted data** - All data gathered via `gatherSchema` and `gather` fields
+- **Extracted data** - All data gathered via `extractionSchema` and `gather` fields
 - **Route history** - History of route transitions
 - **Metadata** - Session timestamps and custom data
 
@@ -533,7 +533,7 @@ await persistence.saveMessage({
 
 1. ✅ **Use `createSessionWithState()`** - Get both database record and session state in one call
 2. ✅ **Enable `autoSave: true`** - Automatically persist session state after each response
-3. ✅ **Define extraction schemas** - Use `gatherSchema` in routes for structured data collection
+3. ✅ **Define extraction schemas** - Use `extractionSchema` in routes for structured data collection
 4. ✅ **Pass session state** - Always pass `session` parameter to `agent.respond()`
 5. ✅ **Load session state** - Use `loadSessionState()` to resume conversations
 6. ✅ **Store extracted data** - Leverage `collectedData.extracted` for user input tracking

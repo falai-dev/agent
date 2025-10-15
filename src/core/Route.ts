@@ -22,7 +22,7 @@ export class Route<TContext = unknown, TExtracted = unknown> {
   public readonly prohibitions: string[];
   public readonly initialState: State<TContext, TExtracted>;
   public readonly responseOutputSchema?: StructuredSchema;
-  public readonly gatherSchema?: StructuredSchema;
+  public readonly extractionSchema?: StructuredSchema;
   public readonly initialData?: Partial<TExtracted>;
   private routingExtrasSchema?: StructuredSchema;
   private guidelines: Guideline[] = [];
@@ -42,7 +42,7 @@ export class Route<TContext = unknown, TExtracted = unknown> {
     );
     this.routingExtrasSchema = options.routingExtrasSchema;
     this.responseOutputSchema = options.responseOutputSchema;
-    this.gatherSchema = options.gatherSchema;
+    this.extractionSchema = options.extractionSchema;
     this.initialData = options.initialData;
 
     // Initialize guidelines from options

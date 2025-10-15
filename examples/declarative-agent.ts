@@ -190,7 +190,7 @@ const routes: RouteOptions[] = [
     title: "Schedule Appointment",
     description: "Helps the patient schedule an appointment",
     conditions: ["The patient wants to schedule an appointment"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         appointmentType: {
@@ -232,7 +232,7 @@ const routes: RouteOptions[] = [
     title: "Check Lab Results",
     description: "Retrieves and explains patient lab results",
     conditions: ["The patient wants to see their lab results"],
-    gatherSchema: {
+    extractionSchema: {
       type: "object",
       properties: {
         testType: {
@@ -264,7 +264,7 @@ const routes: RouteOptions[] = [
     title: "General Healthcare Questions",
     description: "Answer general healthcare questions",
     conditions: ["Patient asks general healthcare questions"],
-    // No gatherSchema - stateless Q&A
+    // No extractionSchema - stateless Q&A
   },
 ];
 
