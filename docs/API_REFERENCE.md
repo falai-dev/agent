@@ -1430,6 +1430,240 @@ interface ToolResult<TReturn> {
 
 ## Types
 
+### `SessionState<TExtracted>`
+
+Tracks the current position in the conversation flow and data extracted during route progression.
+
+```typescript
+interface SessionState<TExtracted = Record<string, unknown>> {
+  /** Unique session identifier (useful for persistence) */
+  id?: string;
+
+  /** Current route the conversation is in */
+  currentRoute?: {
+    id: string;
+    title: string;
+    enteredAt: Date;
+  };
+
+  /** Current state within the route */
+  currentState?: {
+    id: string;
+    description?: string;
+    enteredAt: Date;
+  };
+
+  /** Data extracted during the current route */
+  extracted: Partial<TExtracted>;
+
+  /** History of routes visited in this session */
+  routeHistory: Array<{
+    routeId: string;
+    enteredAt: Date;
+    exitedAt?: Date;
+    completed: boolean;
+  }>;
+
+  /** Session metadata */
+  metadata?: {
+    createdAt?: Date;
+    lastUpdatedAt?: Date;
+    [key: string]: unknown;
+  };
+}
+```
+
+**Key Features:**
+
+- **`id`** - Optional session identifier that persists across database operations
+- **`extracted`** - Type-safe data collected via `gatherSchema`
+- **`currentRoute`** / **`currentState`** - Track conversation position
+- **`routeHistory`** - Full audit trail of route transitions
+- **`metadata`** - Custom data (timestamps, user info, etc.)
+
+**Usage:**
+
+```typescript
+interface FlightData {
+  destination: string;
+  departureDate: string;
+}
+
+// Create session with database ID
+const session = createSession<FlightData>("session_abc123");
+
+// Use in conversation
+const response = await agent.respond({ history, session });
+
+// Access extracted data
+console.log(response.session?.extracted.destination); // Type-safe!
+```
+
+---
+
+### Session Helper Functions
+
+#### `createSession<TExtracted>(sessionId?, metadata?): SessionState<TExtracted>`
+
+Creates a new session state object.
+
+**Parameters:**
+
+- `sessionId` (optional): Unique session identifier from database
+- `metadata` (optional): Additional metadata to attach
+
+**Example:**
+
+```typescript
+// Simple usage
+const session = createSession<OnboardingData>();
+
+// With database ID (when loading from persistence)
+const session = createSession<OnboardingData>("session_123");
+
+// With metadata
+const session = createSession<OnboardingData>("session_123", {
+  userId: "user_456",
+  channel: "whatsapp",
+});
+```
+
+#### `enterRoute<TExtracted>(session, routeId, routeTitle): SessionState<TExtracted>`
+
+Updates session when entering a new route. Automatically:
+
+- Exits previous route (if exists)
+- Resets extracted data
+- Adds route to history
+- Updates timestamps
+
+**Example:**
+
+```typescript
+let session = createSession<FlightData>();
+
+// Enter booking route
+session = enterRoute(session, "book_flight", "Book a Flight");
+
+console.log(session.currentRoute?.title); // "Book a Flight"
+console.log(session.extracted); // {} (reset for new route)
+```
+
+#### `enterState<TExtracted>(session, stateId, description?): SessionState<TExtracted>`
+
+Updates session when entering a new state within a route.
+
+**Example:**
+
+```typescript
+session = enterState(session, "ask_destination", "Ask where to fly");
+
+console.log(session.currentState?.id); // "ask_destination"
+console.log(session.currentState?.description); // "Ask where to fly"
+```
+
+#### `mergeExtracted<TExtracted>(session, data): SessionState<TExtracted>`
+
+Merges new extracted data into session. Updates timestamps automatically.
+
+**Example:**
+
+```typescript
+session = mergeExtracted(session, {
+  destination: "Paris",
+  departureDate: "2025-06-15",
+});
+
+console.log(session.extracted); // { destination: "Paris", departureDate: "2025-06-15" }
+```
+
+#### `sessionStateToData<TExtracted>(session): object`
+
+Converts SessionState to persistence-friendly format for database storage.
+
+**Returns:**
+
+```typescript
+{
+  currentRoute?: string;          // Route ID
+  currentState?: string;          // State ID
+  collectedData: {                // All session data
+    extracted: Partial<TExtracted>;
+    routeHistory: Array<...>;
+    currentRouteTitle?: string;
+    currentStateDescription?: string;
+    metadata?: object;
+  };
+}
+```
+
+**Example:**
+
+```typescript
+const session = createSession<FlightData>("session_123");
+// ... conversation happens ...
+
+// Save to database
+const dbData = sessionStateToData(session);
+await db.sessions.update(session.id!, {
+  currentRoute: dbData.currentRoute,
+  currentState: dbData.currentState,
+  collectedData: dbData.collectedData,
+});
+```
+
+#### `sessionDataToState<TExtracted>(sessionId, data): SessionState<TExtracted>`
+
+Converts database data back to SessionState for resuming conversations.
+
+**Parameters:**
+
+- `sessionId`: The database session ID
+- `data`: Database session data (currentRoute, currentState, collectedData)
+
+**Example:**
+
+```typescript
+// Load from database
+const dbSession = await db.sessions.findById("session_123");
+
+// Restore session state
+const session = sessionDataToState<FlightData>(dbSession.id, {
+  currentRoute: dbSession.currentRoute,
+  currentState: dbSession.currentState,
+  collectedData: dbSession.collectedData,
+});
+
+// Resume conversation
+const response = await agent.respond({ history, session });
+```
+
+**Complete Persistence Example:**
+
+```typescript
+// CREATE: New session
+let session = createSession<FlightData>(dbSession.id);
+
+// CONVERSATION: Extract data
+const response1 = await agent.respond({ history: history1, session });
+session = response1.session!; // { extracted: { destination: "Paris" } }
+
+// SAVE: To database
+const saveData = sessionStateToData(session);
+await db.sessions.update(session.id!, saveData);
+
+// ---  Later (new request) ---
+
+// LOAD: From database
+const loaded = await db.sessions.findById("session_123");
+const restored = sessionDataToState<FlightData>(loaded.id, loaded);
+
+// CONTINUE: Conversation
+const response2 = await agent.respond({ history: history2, session: restored });
+```
+
+---
+
 ### `AgentStructuredResponse`
 
 The structured response format returned by AI providers when JSON mode is enabled.
