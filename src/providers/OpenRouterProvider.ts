@@ -13,6 +13,7 @@ import type {
   GenerateMessageOutput,
   GenerateMessageStreamChunk,
 } from "../types/ai";
+import type { StructuredSchema } from "../types/schema";
 import { withTimeoutAndRetry } from "../utils/retry";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -169,6 +170,20 @@ export class OpenRouterProvider implements AiProvider {
     };
   }
 
+  /**
+   * Adapt common schema format to OpenRouter's format.
+   * OpenRouter is OpenAI-compatible and uses standard JSON Schema.
+   *
+   * @private
+   */
+  private adaptSchemaForOpenRouter(
+    schema: StructuredSchema
+  ): Record<string, unknown> {
+    // OpenRouter is OpenAI-compatible and uses standard JSON Schema
+    // Our StructuredSchema is already JSON Schema compatible
+    return schema as Record<string, unknown>;
+  }
+
   async generateMessage<
     TContext = unknown,
     TStructured = AgentStructuredResponse
@@ -286,7 +301,10 @@ export class OpenRouterProvider implements AiProvider {
             format: {
               type: "json_schema",
               name: input.parameters?.schemaName || "structured_output",
-              schema: input.parameters.jsonSchema,
+              // Adapt common schema format to OpenRouter's format
+              schema: this.adaptSchemaForOpenRouter(
+                input.parameters.jsonSchema
+              ),
             },
           },
         });

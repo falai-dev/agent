@@ -19,12 +19,15 @@ export class ResponseEngine<TContext = unknown> {
       type: "object",
       properties: {
         message: { type: "string", description: "Final user-facing message" },
-        data: route.responseOutputSchema || { type: "object" },
-        contextUpdate: { type: "object" },
       },
       required: ["message"],
       additionalProperties: false,
     };
+
+    // Add data field only if route has responseOutputSchema
+    if (route.responseOutputSchema) {
+      base.properties!.data = route.responseOutputSchema;
+    }
 
     // Add gather fields from current state
     if (currentState?.gatherFields && route.gatherSchema?.properties) {
@@ -75,7 +78,7 @@ export class ResponseEngine<TContext = unknown> {
     pc.addInteractionHistory(history);
     pc.addLastMessage(lastMessage);
     pc.addInstruction(
-      "Return ONLY JSON matching the schema (message + optional data/contextUpdate)."
+      "Return ONLY JSON matching the schema. The 'message' field is required."
     );
     return pc.build();
   }

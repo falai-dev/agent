@@ -12,6 +12,7 @@ import type {
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types/ai";
+import type { StructuredSchema } from "../types/schema";
 import { withTimeoutAndRetry } from "../utils/retry";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -159,6 +160,20 @@ export class OpenAIProvider implements AiProvider {
     };
   }
 
+  /**
+   * Adapt common schema format to OpenAI's format.
+   * OpenAI uses standard JSON Schema, so this is mostly a passthrough.
+   *
+   * @private
+   */
+  private adaptSchemaForOpenAI(
+    schema: StructuredSchema
+  ): Record<string, unknown> {
+    // OpenAI's responses.parse API uses standard JSON Schema
+    // Our StructuredSchema is already JSON Schema compatible
+    return schema as Record<string, unknown>;
+  }
+
   async generateMessage<
     TContext = unknown,
     TStructured = AgentStructuredResponse
@@ -279,7 +294,8 @@ export class OpenAIProvider implements AiProvider {
             format: {
               type: "json_schema",
               name: input.parameters?.schemaName || "structured_output",
-              schema: input.parameters.jsonSchema,
+              // Adapt common schema format to OpenAI's format
+              schema: this.adaptSchemaForOpenAI(input.parameters.jsonSchema),
             },
           },
         });

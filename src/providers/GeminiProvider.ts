@@ -6,8 +6,9 @@ import type {
   GoogleGenAI as GoogleGenAIType,
   GenerateContentConfig,
   GenerateContentResponse,
+  Schema,
 } from "@google/genai";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 import type {
   AiProvider,
@@ -16,6 +17,7 @@ import type {
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types/ai";
+import type { StructuredSchema } from "../types/schema";
 import { withTimeoutAndRetry } from "../utils/retry";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -147,6 +149,109 @@ export class GeminiProvider implements AiProvider {
     };
   }
 
+  /**
+   * Adapt common schema format to Gemini's specific requirements.
+   * Gemini has strict validation:
+   * - OBJECT types MUST have non-empty properties
+   * - Empty objects cause 400 Bad Request errors
+   * - Uses Gemini's Schema type with Type enums
+   *
+   * @private
+   */
+  private adaptSchemaForGemini(schema: StructuredSchema): Schema {
+    const geminiSchema: Schema = {};
+
+    // Convert type
+    if (schema.type) {
+      if (Array.isArray(schema.type)) {
+        // For now, take the first type (Gemini doesn't support union types the same way)
+        geminiSchema.type = this.mapToGeminiType(schema.type[0]);
+      } else {
+        geminiSchema.type = this.mapToGeminiType(schema.type);
+      }
+    }
+
+    // Handle description
+    if (schema.description) {
+      geminiSchema.description = schema.description;
+    }
+
+    // Handle nullable
+    if (schema.nullable !== undefined) {
+      geminiSchema.nullable = schema.nullable;
+    }
+
+    // Handle enum
+    if (schema.enum) {
+      geminiSchema.enum = schema.enum as string[];
+    }
+
+    // Handle object properties - Gemini requires non-empty properties for OBJECT type
+    if (
+      geminiSchema.type === Type.OBJECT ||
+      schema.type === "object" ||
+      (Array.isArray(schema.type) && schema.type.includes("object"))
+    ) {
+      if (!schema.properties || Object.keys(schema.properties).length === 0) {
+        console.warn(
+          "[GeminiProvider] Gemini requires OBJECT types to have non-empty properties. Converting empty object to STRING."
+        );
+        geminiSchema.type = Type.STRING;
+        return geminiSchema;
+      }
+
+      // Recursively convert nested properties
+      geminiSchema.properties = {};
+      for (const [key, value] of Object.entries(schema.properties)) {
+        geminiSchema.properties[key] = this.adaptSchemaForGemini(value);
+      }
+
+      // Handle required fields
+      if (schema.required && schema.required.length > 0) {
+        geminiSchema.required = schema.required;
+      }
+    }
+
+    // Handle array items
+    if (
+      geminiSchema.type === Type.ARRAY ||
+      schema.type === "array" ||
+      (Array.isArray(schema.type) && schema.type.includes("array"))
+    ) {
+      if (schema.items) {
+        geminiSchema.items = this.adaptSchemaForGemini(schema.items);
+      }
+    }
+
+    return geminiSchema;
+  }
+
+  /**
+   * Map common JSON Schema type strings to Gemini's Type enum
+   * @private
+   */
+  private mapToGeminiType(type: string): Type {
+    switch (type.toLowerCase()) {
+      case "string":
+        return Type.STRING;
+      case "number":
+        return Type.NUMBER;
+      case "integer":
+        return Type.INTEGER;
+      case "boolean":
+        return Type.BOOLEAN;
+      case "array":
+        return Type.ARRAY;
+      case "object":
+        return Type.OBJECT;
+      default:
+        console.warn(
+          `[GeminiProvider] Unknown type "${type}", defaulting to STRING`
+        );
+        return Type.STRING;
+    }
+  }
+
   async generateMessage<
     TContext = unknown,
     TStructured = AgentStructuredResponse
@@ -239,9 +344,10 @@ export class GeminiProvider implements AiProvider {
       const configOverride: Partial<GenerateContentConfig> = { ...this.config };
       if (input.parameters?.jsonSchema) {
         configOverride.responseMimeType = "application/json";
-        // Gemini expects responseSchema. We pass through our schema as-is.
-        // A deeper mapping can be added via utils if needed.
-        configOverride.responseSchema = input.parameters.jsonSchema;
+        // Adapt common schema format to Gemini's specific requirements
+        configOverride.responseSchema = this.adaptSchemaForGemini(
+          input.parameters.jsonSchema
+        );
       }
 
       const response: GenerateContentResponse =
@@ -360,7 +466,10 @@ export class GeminiProvider implements AiProvider {
     const configOverride: Partial<GenerateContentConfig> = { ...this.config };
     if (input.parameters?.jsonSchema) {
       configOverride.responseMimeType = "application/json";
-      configOverride.responseSchema = input.parameters.jsonSchema;
+      // Adapt common schema format to Gemini's specific requirements
+      configOverride.responseSchema = this.adaptSchemaForGemini(
+        input.parameters.jsonSchema
+      );
     }
 
     const stream = await this.genAI.models.generateContentStream({
