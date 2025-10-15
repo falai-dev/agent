@@ -4,6 +4,18 @@ All adapters follow the **provider pattern** - no dependencies required in the p
 
 **NEW**: All adapters now support the new **Session State** pattern with automatic persistence of extracted data, current route/state, and conversation progress!
 
+### 🎯 Available Adapters
+
+| Adapter               | Use Case                           | Install                                      |
+| --------------------- | ---------------------------------- | -------------------------------------------- |
+| **PrismaAdapter**     | Type-safe ORM with migrations      | `npm install @prisma/client`                 |
+| **RedisAdapter**      | Fast in-memory for real-time apps  | `npm install ioredis`                        |
+| **MongoAdapter**      | Flexible document storage          | `npm install mongodb`                        |
+| **PostgreSQLAdapter** | Raw SQL with auto table creation   | `npm install pg`                             |
+| **SQLiteAdapter**     | Lightweight local database         | `npm install better-sqlite3`                 |
+| **OpenSearchAdapter** | Full-text search & analytics       | `npm install @opensearch-project/opensearch` |
+| **MemoryAdapter**     | Testing & development (no install) | Built-in (no dependencies) ✨                |
+
 ## ✅ Implemented Adapters
 
 ### 1. **PrismaAdapter**
