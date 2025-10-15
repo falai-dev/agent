@@ -48,39 +48,67 @@ export interface GeminiProviderOptions {
  */
 interface ErrorWithStatus {
   status?: number;
-  code?: number;
+  code?: string;
   message?: string;
+  type?: string;
+}
+
+/**
+ * Type guard to check if error is ErrorWithStatus
+ */
+function isErrorWithStatus(error: unknown): error is ErrorWithStatus {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    ("status" in error || "code" in error || "message" in error)
+  );
+}
+
+/**
+ * Safely extract error message
+ */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (isErrorWithStatus(error) && error.message) {
+    return error.message;
+  }
+  return String(error);
 }
 
 /**
  * Determines if an error should trigger backup model usage
  */
 const shouldUseBackupModel = (error: unknown): boolean => {
-  const err = error as ErrorWithStatus;
+  if (!isErrorWithStatus(error)) {
+    return false;
+  }
 
-  if (err?.status === 500 || err?.code === 500) {
+  // Server errors
+  if (error.status === 500 || error.status === 503) {
     return true;
   }
 
-  const message = err?.message ?? String(error);
+  // Rate limiting
+  if (error.status === 429) {
+    return true;
+  }
+
+  // Model overloaded or unavailable
+  if (error.code === "overloaded") {
+    return true;
+  }
+
+  const message = getErrorMessage(error);
   if (
+    message.includes("overloaded") ||
+    message.includes("unavailable") ||
+    message.includes("not available") ||
     message.includes("internal error") ||
     message.includes("Internal error") ||
     message.includes("INTERNAL")
   ) {
-    return true;
-  }
-
-  if (
-    err?.status === 429 ||
-    err?.code === 429 ||
-    err?.status === 503 ||
-    err?.code === 503
-  ) {
-    return true;
-  }
-
-  if (message.includes("unavailable") || message.includes("not available")) {
     return true;
   }
 
@@ -119,26 +147,35 @@ export class GeminiProvider implements AiProvider {
     };
   }
 
-  async generateMessage<TContext = unknown>(
+  async generateMessage<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
-    return this.generateWithBackup(input);
+  ): Promise<GenerateMessageOutput<TStructured>> {
+    return this.generateWithBackup<TContext, TStructured>(input);
   }
 
-  async *generateMessageStream<TContext = unknown>(
+  async *generateMessageStream<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
-    yield* this.generateStreamWithBackup(input);
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
+    yield* this.generateStreamWithBackup<TContext, TStructured>(input);
   }
 
-  private async generateWithBackup<TContext = unknown>(
+  private async generateWithBackup<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
+  ): Promise<GenerateMessageOutput<TStructured>> {
     // Try primary model first
     try {
       return await this.generateWithModel(this.primaryModel, input);
     } catch (primaryError: unknown) {
-      const primaryErrMsg = String(primaryError);
+      const primaryErrMsg = getErrorMessage(primaryError);
       console.warn(
         `[GEMINI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
@@ -162,9 +199,9 @@ export class GeminiProvider implements AiProvider {
         try {
           const result = await this.generateWithModel(backupModel, input);
           console.log(`[GEMINI] Backup model ${backupModel} succeeded`);
-          return result;
+          return result as GenerateMessageOutput<TStructured>;
         } catch (backupError: unknown) {
-          const backupErrMsg = String(backupError);
+          const backupErrMsg = getErrorMessage(backupError);
           console.warn(
             `[GEMINI] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
@@ -182,7 +219,7 @@ export class GeminiProvider implements AiProvider {
         }
       }
 
-      const lastBackupErrMsg = String(lastBackupError);
+      const lastBackupErrMsg = getErrorMessage(lastBackupError);
       console.error(
         `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
@@ -190,10 +227,13 @@ export class GeminiProvider implements AiProvider {
     }
   }
 
-  private async generateWithModel<TContext = unknown>(
+  private async generateWithModel<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     model: string,
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
+  ): Promise<GenerateMessageOutput<TStructured>> {
     const operation = async (): Promise<GenerateMessageOutput> => {
       // Enable JSON mode if requested
       const configOverride: Partial<GenerateContentConfig> = { ...this.config };
@@ -214,7 +254,7 @@ export class GeminiProvider implements AiProvider {
       }
 
       // Parse JSON response if JSON mode was enabled
-      let structured;
+      let structured: AgentStructuredResponse | undefined;
       if (input.parameters?.jsonMode) {
         try {
           structured = JSON.parse(message) as AgentStructuredResponse;
@@ -241,17 +281,20 @@ export class GeminiProvider implements AiProvider {
       this.retryConfig.timeout,
       this.retryConfig.retries,
       `Gemini ${model}`
-    );
+    ) as Promise<GenerateMessageOutput<TStructured>>;
   }
 
-  private async *generateStreamWithBackup<TContext = unknown>(
+  private async *generateStreamWithBackup<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Try primary model first
     try {
       yield* this.generateStreamWithModel(this.primaryModel, input);
     } catch (primaryError: unknown) {
-      const primaryErrMsg = String(primaryError);
+      const primaryErrMsg = getErrorMessage(primaryError);
       console.warn(
         `[GEMINI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
@@ -277,7 +320,7 @@ export class GeminiProvider implements AiProvider {
           console.log(`[GEMINI] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
-          const backupErrMsg = String(backupError);
+          const backupErrMsg = getErrorMessage(backupError);
           console.warn(
             `[GEMINI] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
@@ -295,7 +338,7 @@ export class GeminiProvider implements AiProvider {
         }
       }
 
-      const lastBackupErrMsg = String(lastBackupError);
+      const lastBackupErrMsg = getErrorMessage(lastBackupError);
       console.error(
         `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
@@ -303,10 +346,13 @@ export class GeminiProvider implements AiProvider {
     }
   }
 
-  private async *generateStreamWithModel<TContext = unknown>(
+  private async *generateStreamWithModel<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     model: string,
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Enable JSON mode if requested
     const configOverride: Partial<GenerateContentConfig> = { ...this.config };
     if (input.parameters?.jsonMode) {
@@ -368,7 +414,7 @@ export class GeminiProvider implements AiProvider {
         promptTokens: promptTokenCount,
         completionTokens: candidatesTokenCount,
       },
-      structured,
+      structured: structured as TStructured | undefined,
     };
   }
 }

@@ -149,24 +149,36 @@ export class AnthropicProvider implements AiProvider {
     };
   }
 
-  async generateMessage<TContext = unknown>(
+  async generateMessage<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
-    return this.generateWithBackup(input);
+  ): Promise<GenerateMessageOutput<TStructured>> {
+    return this.generateWithBackup<TContext, TStructured>(input);
   }
 
-  async *generateMessageStream<TContext = unknown>(
+  async *generateMessageStream<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
-    yield* this.generateStreamWithBackup(input);
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
+    yield* this.generateStreamWithBackup<TContext, TStructured>(input);
   }
 
-  private async generateWithBackup<TContext = unknown>(
+  private async generateWithBackup<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
+  ): Promise<GenerateMessageOutput<TStructured>> {
     // Try primary model first
     try {
-      return await this.generateWithModel(this.primaryModel, input);
+      return await this.generateWithModel<TContext, TStructured>(
+        this.primaryModel,
+        input
+      );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
       console.warn(
@@ -190,7 +202,10 @@ export class AnthropicProvider implements AiProvider {
         );
 
         try {
-          const result = await this.generateWithModel(backupModel, input);
+          const result = await this.generateWithModel<TContext, TStructured>(
+            backupModel,
+            input
+          );
           console.log(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
           return result;
         } catch (backupError: unknown) {
@@ -220,10 +235,13 @@ export class AnthropicProvider implements AiProvider {
     }
   }
 
-  private async generateWithModel<TContext = unknown>(
+  private async generateWithModel<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     model: string,
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
+  ): Promise<GenerateMessageOutput<TStructured>> {
     const operation = async (): Promise<GenerateMessageOutput> => {
       // Anthropic requires max_tokens to be specified
       const maxTokens = input.parameters?.maxOutputTokens || 4096;
@@ -306,15 +324,21 @@ export class AnthropicProvider implements AiProvider {
       this.retryConfig.timeout,
       this.retryConfig.retries,
       `Anthropic ${model}`
-    );
+    ) as Promise<GenerateMessageOutput<TStructured>>;
   }
 
-  private async *generateStreamWithBackup<TContext = unknown>(
+  private async *generateStreamWithBackup<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Try primary model first
     try {
-      yield* this.generateStreamWithModel(this.primaryModel, input);
+      yield* this.generateStreamWithModel<TContext, TStructured>(
+        this.primaryModel,
+        input
+      );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
       console.warn(
@@ -338,7 +362,10 @@ export class AnthropicProvider implements AiProvider {
         );
 
         try {
-          yield* this.generateStreamWithModel(backupModel, input);
+          yield* this.generateStreamWithModel<TContext, TStructured>(
+            backupModel,
+            input
+          );
           console.log(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
@@ -368,10 +395,13 @@ export class AnthropicProvider implements AiProvider {
     }
   }
 
-  private async *generateStreamWithModel<TContext = unknown>(
+  private async *generateStreamWithModel<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     model: string,
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Anthropic requires max_tokens to be specified
     const maxTokens = input.parameters?.maxOutputTokens || 4096;
 
@@ -428,7 +458,7 @@ export class AnthropicProvider implements AiProvider {
             delta,
             accumulated,
             done: false,
-          };
+          } as GenerateMessageStreamChunk<TStructured>;
         }
       } else if (chunk.type === "message_delta") {
         stopReason = chunk.delta.stop_reason || undefined;
@@ -462,6 +492,6 @@ export class AnthropicProvider implements AiProvider {
         completionTokens: outputTokens,
       },
       structured,
-    };
+    } as GenerateMessageStreamChunk<TStructured>;
   }
 }

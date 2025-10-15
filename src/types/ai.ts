@@ -76,7 +76,7 @@ export interface AgentStructuredResponse {
 /**
  * Output from AI message generation
  */
-export interface GenerateMessageOutput {
+export interface GenerateMessageOutput<TStructured = AgentStructuredResponse> {
   /** The generated message */
   message: string;
   /** Optional metadata about generation */
@@ -91,13 +91,15 @@ export interface GenerateMessageOutput {
     [key: string]: unknown;
   };
   /** Structured response data (when JSON mode is enabled) */
-  structured?: AgentStructuredResponse;
+  structured?: TStructured;
 }
 
 /**
  * Stream chunk from AI message generation
  */
-export interface GenerateMessageStreamChunk {
+export interface GenerateMessageStreamChunk<
+  TStructured = AgentStructuredResponse
+> {
   /** The delta/chunk of the message */
   delta: string;
   /** Accumulated message so far */
@@ -116,7 +118,7 @@ export interface GenerateMessageStreamChunk {
     [key: string]: unknown;
   };
   /** Structured response data (only available when done=true and JSON mode is enabled) */
-  structured?: AgentStructuredResponse;
+  structured?: TStructured;
 }
 
 /**
@@ -129,14 +131,17 @@ export interface AiProvider {
   /**
    * Generate a message based on prompt and context
    */
-  generateMessage<TContext = unknown>(
+  generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>(
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput>;
+  ): Promise<GenerateMessageOutput<TStructured>>;
 
   /**
    * Generate a message as a stream based on prompt and context
    */
-  generateMessageStream<TContext = unknown>(
+  generateMessageStream<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk>;
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>>;
 }

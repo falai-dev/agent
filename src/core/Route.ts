@@ -133,6 +133,16 @@ export class Route<TContext = unknown> {
   }
 
   /**
+   * Get a specific state by ID
+   * @param stateId - The state ID to find
+   * @returns The state if found, undefined otherwise
+   */
+  getState(stateId: string): State<TContext> | undefined {
+    const states = this.getAllStates();
+    return states.find((state) => state.id === stateId);
+  }
+
+  /**
    * Get a description of the route structure for debugging
    */
   describe(): string {

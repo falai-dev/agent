@@ -159,24 +159,36 @@ export class OpenAIProvider implements AiProvider {
     };
   }
 
-  async generateMessage<TContext = unknown>(
+  async generateMessage<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
-    return this.generateWithBackup(input);
+  ): Promise<GenerateMessageOutput<TStructured>> {
+    return this.generateWithBackup<TContext, TStructured>(input);
   }
 
-  async *generateMessageStream<TContext = unknown>(
+  async *generateMessageStream<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
-    yield* this.generateStreamWithBackup(input);
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
+    yield* this.generateStreamWithBackup<TContext, TStructured>(input);
   }
 
-  private async generateWithBackup<TContext = unknown>(
+  private async generateWithBackup<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
+  ): Promise<GenerateMessageOutput<TStructured>> {
     // Try primary model first
     try {
-      return await this.generateWithModel(this.primaryModel, input);
+      return await this.generateWithModel<TContext, TStructured>(
+        this.primaryModel,
+        input
+      );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
       console.warn(
@@ -202,7 +214,7 @@ export class OpenAIProvider implements AiProvider {
         try {
           const result = await this.generateWithModel(backupModel, input);
           console.log(`[OPENAI] Backup model ${backupModel} succeeded`);
-          return result;
+          return result as GenerateMessageOutput<TStructured>;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
           console.warn(
@@ -230,10 +242,13 @@ export class OpenAIProvider implements AiProvider {
     }
   }
 
-  private async generateWithModel<TContext = unknown>(
+  private async generateWithModel<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     model: string,
     input: GenerateMessageInput<TContext>
-  ): Promise<GenerateMessageOutput> {
+  ): Promise<GenerateMessageOutput<TStructured>> {
     const operation = async (): Promise<GenerateMessageOutput> => {
       const params: ChatCompletionCreateParamsNonStreaming = {
         model,
@@ -358,15 +373,21 @@ export class OpenAIProvider implements AiProvider {
       this.retryConfig.timeout,
       this.retryConfig.retries,
       `OpenAI ${model}`
-    );
+    ) as Promise<GenerateMessageOutput<TStructured>>;
   }
 
-  private async *generateStreamWithBackup<TContext = unknown>(
+  private async *generateStreamWithBackup<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Try primary model first
     try {
-      yield* this.generateStreamWithModel(this.primaryModel, input);
+      yield* this.generateStreamWithModel<TContext, TStructured>(
+        this.primaryModel,
+        input
+      );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
       console.warn(
@@ -390,7 +411,10 @@ export class OpenAIProvider implements AiProvider {
         );
 
         try {
-          yield* this.generateStreamWithModel(backupModel, input);
+          yield* this.generateStreamWithModel<TContext, TStructured>(
+            backupModel,
+            input
+          );
           console.log(`[OPENAI] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
@@ -420,10 +444,13 @@ export class OpenAIProvider implements AiProvider {
     }
   }
 
-  private async *generateStreamWithModel<TContext = unknown>(
+  private async *generateStreamWithModel<
+    TContext = unknown,
+    TStructured = AgentStructuredResponse
+  >(
     model: string,
     input: GenerateMessageInput<TContext>
-  ): AsyncGenerator<GenerateMessageStreamChunk> {
+  ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     const params = {
       ...this.config,
       model,
@@ -483,10 +510,10 @@ export class OpenAIProvider implements AiProvider {
     }
 
     // Parse JSON response if JSON mode was enabled
-    let structured: AgentStructuredResponse | undefined;
+    let structured: TStructured | undefined;
     if (input.parameters?.jsonMode && accumulated) {
       try {
-        structured = JSON.parse(accumulated) as AgentStructuredResponse;
+        structured = JSON.parse(accumulated) as TStructured;
       } catch (error) {
         console.warn(
           "[OPENAI] Failed to parse JSON response in stream:",

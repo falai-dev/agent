@@ -17,6 +17,7 @@ import { DomainRegistry } from "./DomainRegistry";
 import { PromptBuilder } from "./PromptBuilder";
 import { Observation } from "./Observation";
 import { PersistenceManager } from "./PersistenceManager";
+import { PreparationEngine } from "./PreparationEngine";
 
 /**
  * Main Agent class with generic context support
@@ -30,6 +31,7 @@ export class Agent<TContext = unknown> {
   private domainRegistry = new DomainRegistry();
   private context: TContext | undefined;
   private persistenceManager: PersistenceManager | undefined;
+  private preparationEngine: PreparationEngine<TContext>;
 
   /**
    * Dynamic domain property - populated via addDomain
@@ -51,6 +53,9 @@ export class Agent<TContext = unknown> {
 
     // Initialize context if provided
     this.context = options.context;
+
+    // Initialize preparation engine with AI provider
+    this.preparationEngine = new PreparationEngine<TContext>(options.ai);
 
     // Initialize persistence if configured
     if (options.persistence) {
@@ -257,10 +262,35 @@ export class Agent<TContext = unknown> {
     }
 
     // Merge context with override
-    const effectiveContext = {
+    let effectiveContext = {
       ...(currentContext as Record<string, unknown>),
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
+
+    // RUN PREPARATION ITERATIONS
+    // This is where tools execute automatically based on:
+    // 1. Matched guidelines with associated tools
+    // 2. State machine transitions with toolState
+    //
+    // The AI will NEVER see these tools - they execute before message generation
+    const preparationResult = await this.preparationEngine.prepare({
+      history,
+      currentState: params.state,
+      context: effectiveContext,
+      routes: this.routes,
+      guidelines: this.guidelines,
+      maxIterations: this.options.maxEngineIterations || 1,
+    });
+
+    // Update context with results from tool executions
+    effectiveContext = preparationResult.finalContext;
+
+    // Log tool executions for debugging
+    if (preparationResult.toolExecutions.length > 0) {
+      console.log(
+        `[Agent] Preparation complete: ${preparationResult.toolExecutions.length} tools executed in ${preparationResult.iterations.length} iterations`
+      );
+    }
 
     // Build prompt (same as respond method)
     const promptBuilder = new PromptBuilder();
@@ -427,10 +457,35 @@ export class Agent<TContext = unknown> {
     }
 
     // Merge context with override
-    const effectiveContext = {
+    let effectiveContext = {
       ...(currentContext as Record<string, unknown>),
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
+
+    // RUN PREPARATION ITERATIONS
+    // This is where tools execute automatically based on:
+    // 1. Matched guidelines with associated tools
+    // 2. State machine transitions with toolState
+    //
+    // The AI will NEVER see these tools - they execute before message generation
+    const preparationResult = await this.preparationEngine.prepare({
+      history,
+      currentState: params.state,
+      context: effectiveContext,
+      routes: this.routes,
+      guidelines: this.guidelines,
+      maxIterations: this.options.maxEngineIterations || 1,
+    });
+
+    // Update context with results from tool executions
+    effectiveContext = preparationResult.finalContext;
+
+    // Log tool executions for debugging
+    if (preparationResult.toolExecutions.length > 0) {
+      console.log(
+        `[Agent] Preparation complete: ${preparationResult.toolExecutions.length} tools executed in ${preparationResult.iterations.length} iterations`
+      );
+    }
 
     // Build prompt
     const promptBuilder = new PromptBuilder();
