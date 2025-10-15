@@ -2,6 +2,8 @@
 
 Welcome to the `@falai/agent` documentation!
 
+📋 **[Complete Documentation Index →](DOCS.md)** - Full searchable index of all docs
+
 ## 📖 Documentation Structure
 
 ### Getting Started

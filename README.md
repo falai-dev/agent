@@ -235,6 +235,8 @@ const agent = new Agent({
 
 ## 📚 Documentation
 
+📋 **[Complete Documentation Index →](docs/DOCS.md)** - Searchable index of all docs
+
 **Core Guides:**
 - 📘 **[Getting Started](./docs/GETTING_STARTED.md)** - Build your first agent in 5 minutes
 - 🏗️ **[Architecture](./docs/ARCHITECTURE.md)** - Design principles & philosophy
