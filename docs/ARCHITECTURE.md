@@ -158,7 +158,7 @@ If you don't provide an ID, one is automatically generated from the route ID and
 1. **Code filters first**: `skipIf` and `requiredData` filter out invalid states deterministically
 2. **AI selects best state**: From valid candidates, AI evaluates text conditions to choose optimal state
 3. **Combined decision**: Single AI call handles both route selection AND state selection (no extra calls!)
-4. **Completion detection**: When all states are skipped and `END_ROUTE` is reached, route is marked complete
+4. **Completion detection**: When all states are skipped and `END_STATE` is reached, route is marked complete
 
 ```typescript
 // The AI sees:

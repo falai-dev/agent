@@ -66,10 +66,19 @@ export interface RouteOptions<TExtracted = unknown> {
   initialData?: Partial<TExtracted>;
   /**
    * NEW: Sequential steps for simple linear flows
-   * If provided, automatically chains the steps from initialState to END_ROUTE
+   * If provided, automatically chains the steps from initialState to END_STATE
    * For complex flows with branching, build the state machine manually instead
    */
   steps?: TransitionSpec<unknown, TExtracted>[];
+  /**
+   * Configure the initial state (optional)
+   * Accepts full TransitionSpec configuration (id, chatState, gather, skipIf, etc.)
+   * Note: toolState and state properties are ignored for initial state
+   */
+  initialState?: Omit<
+    TransitionSpec<unknown, TExtracted>,
+    "toolState" | "state" | "condition"
+  >;
 }
 
 /**

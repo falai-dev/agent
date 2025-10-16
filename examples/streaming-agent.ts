@@ -14,6 +14,7 @@ import {
   OpenAIProvider,
   GeminiProvider,
   createSession,
+  END_STATE,
 } from "../src/index";
 
 // Custom context type
@@ -257,6 +258,37 @@ async function streamingWithRoutes() {
     chatState: "Understand the user's product question",
   });
 
+  // Create a feedback route
+  const feedbackRoute = agent.createRoute<{
+    rating: number;
+    comments: string;
+  }>({
+    title: "Collect Feedback",
+    description: "Collect user feedback on their support experience",
+    conditions: ["User wants to provide feedback"],
+    extractionSchema: {
+      type: "object",
+      properties: {
+        rating: { type: "number", minimum: 1, maximum: 5 },
+        comments: { type: "string" },
+      },
+      required: ["rating"],
+    },
+    steps: [
+      {
+        chatState: "How would you rate your support experience from 1 to 5?",
+        gather: ["rating"],
+      },
+      {
+        chatState: "Thanks for the rating! Any other comments?",
+        gather: ["comments"],
+      },
+      {
+        chatState: "We appreciate your feedback!",
+      },
+    ],
+  });
+
   const history = [
     createMessageEvent(
       EventSource.CUSTOMER,
@@ -284,6 +316,19 @@ async function streamingWithRoutes() {
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
         console.log(`   - Extracted:`, chunk.session?.extracted || "None");
+
+        // Check for route completion
+        if (chunk.isRouteComplete) {
+          console.log("\n✅ Route complete!");
+          if (chunk.session?.currentRoute?.title === "Collect Feedback") {
+            await logFeedback(
+              agent.getExtractedData(chunk.session?.id) as {
+                rating: number;
+                comments: string;
+              }
+            );
+          }
+        }
 
         // Update session with progress
         session = chunk.session!;
@@ -370,6 +415,21 @@ async function streamingWithAbortSignal() {
     }
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Mock function to log feedback.
+ * @param data - The feedback data.
+ */
+async function logFeedback(data: { rating: number; comments: string }) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📝 Logging Feedback...");
+  console.log("=".repeat(60));
+  console.log("Feedback Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Rating: ${data.rating}`);
+  console.log(`   - Comments: ${data.comments}`);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Feedback logged successfully!");
 }
 
 async function main() {

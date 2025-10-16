@@ -55,7 +55,7 @@ export class Transition<TContext = unknown, TExtracted = unknown> {
     }
     if (this.spec.state) {
       if (typeof this.spec.state === "symbol") {
-        parts.push("state: END_ROUTE");
+        parts.push("state: END_STATE");
       } else {
         parts.push(`state: ${this.spec.state.id}`);
       }

@@ -16,7 +16,7 @@ Main agent class for managing conversational AI.
 new Agent<TContext>(options: AgentOptions<TContext>)
 ```
 
-See [Constructor Options](./CONSTRUCTOR_OPTIONS.md) for full details.
+See [Agent](./AGENT.md) for full details.
 
 #### Methods
 
@@ -48,6 +48,70 @@ Gets allowed domains for a specific route by ID. Returns filtered domains based 
 
 Gets allowed domains for a specific route by title. Returns filtered domains based on route's `domains` property, or all domains if route has no restrictions.
 
+##### `getExtractedData<TExtracted>(routeId?): Partial<TExtracted>`
+
+Gets the extracted data from current session, optionally for a specific route.
+
+```typescript
+// Option 1: Using current session (set with setCurrentSession)
+agent.setCurrentSession(session);
+const extracted = agent.getExtractedData(); // Uses current session
+
+// Option 2: Get data for specific route
+const routeData = agent.getExtractedData("onboarding"); // Route-specific data
+
+// Option 3: From response (with current session set)
+const response = await agent.respond({ history });
+const extracted = agent.getExtractedData(); // Uses current session
+```
+
+**Parameters:**
+
+- `routeId` (optional): Route ID to get data for. If not provided, returns current route data.
+
+**Returns:** The extracted data from the current session
+
+**Note:** Returns empty object if no current session is set.
+
+##### `setCurrentSession(session): void`
+
+Sets the current session for convenience methods. Once set, methods like `getExtractedData()` don't need the session parameter.
+
+```typescript
+// Set current session
+agent.setCurrentSession(session);
+
+// Now methods use the current session automatically
+const extracted = agent.getExtractedData();
+// Get extracted data for route
+const routeData = agent.getExtractedData("onboarding");
+```
+
+**Parameters:**
+
+- `session`: Session state to use as current session
+
+##### `getCurrentSession(): SessionState | undefined`
+
+Gets the currently set session.
+
+```typescript
+const current = agent.getCurrentSession();
+if (current) {
+  console.log("Current session:", current.id);
+}
+```
+
+**Returns:** Current session or undefined if none set
+
+##### `clearCurrentSession(): void`
+
+Clears the current session.
+
+```typescript
+agent.clearCurrentSession();
+```
+
 ##### `respond(input: RespondInput<TContext>): Promise<RespondOutput>`
 
 Generates an AI response with session state management, data extraction, and intelligent routing.
@@ -70,6 +134,13 @@ interface RespondOutput {
     toolName: string;
     arguments: Record<string, unknown>;
   }>;
+  /**
+   * NEW: Indicates if the current route has reached END_STATE
+   * When true, all required data has been collected and the route is complete.
+   * Your application should handle this appropriately (e.g., process collected data,
+   * show completion UI, start a new route, etc.)
+   */
+  isRouteComplete?: boolean;
 }
 ```
 
@@ -86,6 +157,7 @@ interface RespondOutput {
 - Tracks current route, state, and extracted data across turns
 - Enables "I changed my mind" scenarios with context-aware routing
 - Automatically merges new extracted data with existing session data
+- **Per-route data preservation** - Extracted data is organized by route ID, allowing users to switch routes without losing progress
 
 **Example with Persistence Adapters:**
 
@@ -99,9 +171,21 @@ const { sessionData, sessionState } =
     agentName: "Travel Agent",
   });
 
+// Option 1: Set current session for convenience
+agent.setCurrentSession(sessionState);
+
 const response = await agent.respond({
   history,
-  session: sessionState, // Auto-saves if autoSave: true
+  // session: sessionState, // No longer required!
+});
+
+// Use convenience methods without passing session
+const extracted = agent.getExtractedData();
+
+// Option 2: Still pass session explicitly if preferred
+const response2 = await agent.respond({
+  history,
+  session: sessionState,
 });
 ```
 
@@ -178,6 +262,101 @@ await yourDb.messages.create({
 });
 ```
 
+**Handling Route Completion:**
+
+When a route reaches its END_STATE transition (all required data collected), the response includes `isRouteComplete: true`:
+
+```typescript
+const response = await agent.respond({
+  history,
+  session,
+});
+
+if (response.isRouteComplete) {
+  // Route is complete! All data has been collected
+  console.log("✅ Route completed!");
+
+  // Get all the collected data
+  const collectedData = agent.getExtractedData(response.session!);
+  console.log("Collected data:", collectedData);
+
+  // Handle completion in your application:
+  // - Save the collected data to your database
+  // - Trigger business logic (e.g., create booking, send email)
+  // - Show completion UI to user
+  // - Start a new route or conversation
+
+  await processCompletedData(collectedData);
+
+  // Optional: Show a custom completion message
+  return "Thank you! Your information has been saved.";
+} else {
+  // Normal flow - route still in progress
+  return response.message;
+}
+```
+
+**Example: Onboarding Flow**
+
+```typescript
+// Onboarding route with skipIf logic for pre-filled data
+const onboardingRoute = agent.createRoute<OnboardingData>({
+  id: "onboarding",
+  title: "User Onboarding",
+  extractionSchema: ONBOARDING_SCHEMA,
+  initialData: existingUserData, // Pre-fill with existing data
+});
+
+// Build states with skipIf conditions
+const welcome = onboardingRoute.initialState.transitionTo({
+  id: "ask_name",
+  chatState: "What's your name?",
+  gather: ["name"],
+  skipIf: (data) => !!data.name, // Skip if name already collected
+});
+
+const askEmail = welcome.transitionTo({
+  id: "ask_email",
+  chatState: "What's your email?",
+  gather: ["email"],
+  skipIf: (data) => !!data.email, // Skip if email already collected
+});
+
+const complete = askEmail.transitionTo({
+  id: "complete",
+  chatState: "All done! Thank you.",
+});
+
+complete.transitionTo({ state: END_STATE });
+
+// Option 1: Set current session for convenience
+agent.setCurrentSession(session);
+
+const response = await agent.respond({ history });
+
+if (response.isRouteComplete) {
+  // If all data was pre-filled, the route completes immediately!
+  // The routing engine recursively skips all states and reaches END_STATE
+  const data = agent.getExtractedData(); // No need to pass session!
+  await saveUserProfile(data);
+  return "Profile updated successfully!";
+}
+
+// Get route-specific data if needed
+const onboardingData = agent.getExtractedDataForRoute("onboarding");
+const bookingData = agent.getExtractedDataForRoute("booking");
+
+return response.message;
+```
+
+**Important Notes:**
+
+- `isRouteComplete` is `true` when the route reaches an `END_STATE` transition
+- The `message` will be empty (`""`) when `isRouteComplete` is `true`
+- You should check `isRouteComplete` and handle completion appropriately
+- If all states are skipped (due to `skipIf` conditions), the route can complete immediately on entry
+- Use `agent.getExtractedData(session)` to retrieve all collected data
+
 See also: [Custom Database Integration Example](../examples/custom-database-persistence.ts)
 
 ##### `respondStream(input: RespondInput<TContext>): AsyncGenerator<StreamChunk>`
@@ -192,15 +371,18 @@ interface StreamChunk {
   accumulated: string;
   /** Whether this is the final chunk */
   done: boolean;
-  /** Route chosen by the agent (only in final chunk) */
-  route?: { id: string; title: string };
-  /** Current state within the route (only in final chunk) */
-  state?: { id: string; description?: string };
+  /** Updated session state (includes extracted data, current route/state) */
+  session?: SessionState;
   /** Tool calls requested by the agent (only in final chunk) */
   toolCalls?: Array<{
     toolName: string;
     arguments: Record<string, unknown>;
   }>;
+  /**
+   * Indicates if the current route has reached END_STATE (only in final chunk)
+   * When true, all required data has been collected and the route is complete.
+   */
+  isRouteComplete?: boolean;
 }
 ```
 
@@ -215,7 +397,7 @@ interface StreamChunk {
 
 ```typescript
 // Basic streaming
-for await (const chunk of agent.respondStream({ history })) {
+for await (const chunk of agent.respondStream({ history, session })) {
   if (chunk.delta) {
     // Display incremental text to user
     process.stdout.write(chunk.delta);
@@ -223,9 +405,17 @@ for await (const chunk of agent.respondStream({ history })) {
 
   if (chunk.done) {
     console.log("\n✅ Complete!");
-    // Access final metadata
-    if (chunk.route) {
-      console.log("Route:", chunk.route.title);
+
+    // Check if route is complete
+    if (chunk.isRouteComplete) {
+      console.log("🎉 Route completed!");
+      const data = agent.getExtractedData(chunk.session!);
+      await handleCompletion(data);
+    }
+
+    // Access session state
+    if (chunk.session?.currentRoute) {
+      console.log("Route:", chunk.session.currentRoute.title);
     }
     if (chunk.toolCalls) {
       console.log("Tool calls:", chunk.toolCalls.length);
@@ -330,10 +520,27 @@ interface RouteOptions<TExtracted = unknown> {
 
   // NEW: Pre-populate extracted data when entering route
   initialData?: Partial<TExtracted>;
+
+  // NEW: Configure the initial state
+  initialState?: {
+    id?: string;              // Custom ID for the initial state
+    chatState?: string;       // Description for the initial state
+    gather?: string[];        // Fields to gather in the initial state
+    skipIf?: (extracted: Partial<TExtracted>) => boolean;  // Skip condition
+    requiredData?: string[];  // Required data prerequisites
+  };
+
+  // NEW: Sequential steps for simple linear flows
+  steps?: TransitionSpec<unknown, TExtracted>[];
 }
 ```
 
 **Note on IDs:** Route IDs are deterministic by default, generated from the title using a hash function. This ensures consistency across server restarts. You can provide a custom ID if you need specific control over the identifier.
+
+**Initial State Configuration:** You can configure the initial state in two ways:
+
+1. Using `initialState` option when creating the route
+2. Using `route.initialState.configure()` method after route creation
 
 #### Methods
 
@@ -360,6 +567,8 @@ Returns the prohibitions that must never be done in this route.
 ##### `getRef(): RouteRef`
 
 Returns a reference to this route.
+
+**Note:** Routes no longer have a `getExtractedData()` method. Use `agent.getExtractedData()` or `agent.getExtractedDataForRoute(routeId)` instead.
 
 ##### `describe(): string`
 
@@ -403,7 +612,7 @@ Creates a transition from this state and returns a chainable result.
 interface TransitionSpec<TExtracted = unknown> {
   chatState?: string; // Transition to a chat interaction
   toolState?: ToolRef; // Transition to execute a tool
-  state?: StateRef | symbol; // Transition to specific state or END_ROUTE
+  state?: StateRef | symbol; // Transition to specific state or END_STATE
 
   // NEW: Data extraction fields for this state
   gather?: string[];
@@ -492,7 +701,7 @@ flightRoute.initialState
   .transitionTo({
     chatState: "Present available flights",
   })
-  .transitionTo({ state: END_ROUTE });
+  .transitionTo({ state: END_STATE });
 
 // Use with session state
 let session = createSession<FlightData>();
@@ -503,6 +712,36 @@ console.log(response.session?.extracted); // { destination: "Paris", ... }
 ##### `addGuideline(guideline: Guideline): void`
 
 Adds a guideline specific to this state.
+
+##### `configure(config): this`
+
+Configure the state properties after creation. Useful for overriding initial state configuration. Returns `this` for chaining.
+
+```typescript
+// Configure initial state after route creation
+route.initialState.configure({
+  description: "Welcome! Let's get started",
+  gatherFields: ["name", "email"],
+  skipIf: (extracted) => !!extracted.name && !!extracted.email,
+  requiredData: [],
+});
+
+// Or configure any state
+const askName = route.initialState.transitionTo({ chatState: "Ask for name" });
+askName.configure({
+  gatherFields: ["firstName", "lastName"],
+});
+```
+
+**Parameters:**
+
+- `config`: Configuration object with optional properties:
+  - `description?: string` - State description
+  - `gatherFields?: string[]` - Fields to gather in this state
+  - `skipIf?: (extracted: Partial<TExtracted>) => boolean` - Skip condition function
+  - `requiredData?: string[]` - Required data prerequisites
+
+**Returns:** `this` for method chaining
 
 #### Properties
 
@@ -1531,8 +1770,18 @@ interface SessionState<TExtracted = Record<string, unknown>> {
     enteredAt: Date;
   };
 
-  /** Data extracted during the current route */
+  /**
+   * Data extracted during the current route
+   * Convenience reference to extractedByRoute[currentRoute.id]
+   */
   extracted: Partial<TExtracted>;
+
+  /**
+   * Extracted data organized by route ID
+   * Preserves data when switching between routes
+   * Format: { "routeId": { ...extractedData } }
+   */
+  extractedByRoute: Record<string, Partial<unknown>>;
 
   /** History of routes visited in this session */
   routeHistory: Array<{
@@ -1554,10 +1803,25 @@ interface SessionState<TExtracted = Record<string, unknown>> {
 **Key Features:**
 
 - **`id`** - Optional session identifier that persists across database operations
-- **`extracted`** - Type-safe data collected via `extractionSchema`
+- **`extracted`** - Type-safe data collected via `extractionSchema` for the **current route**
+- **`extractedByRoute`** - **NEW:** Per-route data map that preserves extracted data when switching routes
 - **`currentRoute`** / **`currentState`** - Track conversation position
 - **`routeHistory`** - Full audit trail of route transitions
 - **`metadata`** - Custom data (timestamps, user info, etc.)
+
+**Per-Route Data Preservation:**
+
+When users switch routes (e.g., "Actually, I want to book a hotel instead"), the framework automatically:
+
+- Saves current route's `extracted` data to `extractedByRoute[routeId]`
+- Loads the new route's data from `extractedByRoute[newRouteId]` (if resuming)
+- Keeps `extracted` as a convenient reference to the current route's data
+
+This allows users to:
+
+- Switch routes without losing progress
+- Resume incomplete routes where they left off
+- Access historical data from previous routes via `session.extractedByRoute["route_id"]`
 
 **Usage:**
 
@@ -1818,15 +2082,42 @@ All IDs are generated deterministically using a hash function of their content (
 
 ## Constants
 
-### `END_ROUTE`
+### `END_STATE`
 
-Symbol marking the end of a conversation route.
+Symbol marking the end of a conversation route. Use this when building routes to mark where they should end.
 
 ```typescript
-import { END_ROUTE } from "@falai/agent";
+import { END_STATE } from "@falai/agent";
 
-state.transitionTo({ state: END_ROUTE });
+const thankYou = askEmail.transitionTo({
+  chatState: "Thank you for your information!",
+});
+
+// Mark the end of the route
+thankYou.transitionTo({ state: END_STATE });
 ```
+
+### `END_STATE_ID`
+
+String constant representing END_STATE for runtime comparisons. When a route completes, `currentState.id` is set to this value.
+
+```typescript
+import { END_STATE_ID } from "@falai/agent";
+
+const response = await agent.respond({ history, session });
+
+// Method 1: Using isRouteComplete (recommended)
+if (response.isRouteComplete) {
+  console.log("Route completed!");
+}
+
+// Method 2: Using END_STATE_ID constant
+if (response.session?.currentState?.id === END_STATE_ID) {
+  console.log("Route completed!");
+}
+```
+
+**Note:** Both methods are equivalent. Use `isRouteComplete` for simplicity, or `END_STATE_ID` for consistency with how you build routes.
 
 ---
 

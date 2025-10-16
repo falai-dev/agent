@@ -15,6 +15,8 @@ import {
   EventSource,
   createMessageEvent,
   EventKind,
+  END_STATE,
+  OpenAIProvider,
 } from "../src";
 import type { Event } from "../src/types";
 import type { ToolRef } from "../src/types/tool";
@@ -52,6 +54,12 @@ interface CompanyContext {
     date: string;
     summary: string;
   }>;
+}
+
+interface FeedbackData {
+  rating?: number;
+  comments?: string;
+  contactPermission?: boolean;
 }
 
 // ==============================================================================
@@ -138,7 +146,10 @@ const agent = new Agent<CompanyContext>({
     "I'm here to help you learn about Acme Corp, our products, and policies",
   personality:
     "Friendly, helpful, and knowledgeable. Always professional but approachable.",
-  ai: null as any, // Replace with actual AI provider
+  ai: new OpenAIProvider({
+    apiKey: process.env.OPENAI_API_KEY || "test-key",
+    model: "gpt-5o-mini",
+  }),
 
   // Initialize with company knowledge
   context: {
@@ -325,6 +336,57 @@ const fallbackRoute = agent.createRoute({
 
 // Initial state is enough for fallback conversations
 
+// Route 7: Collect Feedback (Stateful Example)
+const feedbackRoute = agent.createRoute<FeedbackData>({
+  title: "Collect Feedback",
+  description: "Collect user feedback about their experience",
+  conditions: ["User wants to leave feedback", "User seems satisfied or upset"],
+  extractionSchema: {
+    type: "object",
+    properties: {
+      rating: {
+        type: "number",
+        description: "A rating from 1 to 5",
+        minimum: 1,
+        maximum: 5,
+      },
+      comments: { type: "string", description: "Open-ended feedback" },
+      contactPermission: {
+        type: "boolean",
+        description: "Permission to contact the user for more details",
+      },
+    },
+    required: ["rating", "comments"],
+  },
+});
+
+feedbackRoute.initialState
+  .transitionTo({
+    id: "ask_rating",
+    chatState:
+      "I'd love to hear your feedback. On a scale of 1 to 5, how would you rate your experience with me today?",
+    gather: ["rating"],
+  })
+  .transitionTo({
+    id: "ask_comments",
+    chatState:
+      "Thanks for the rating! Do you have any specific comments or suggestions?",
+    gather: ["comments"],
+    requiredData: ["rating"],
+  })
+  .transitionTo({
+    id: "ask_permission",
+    chatState:
+      "Thank you for the detailed feedback. Would it be okay if our team contacted you for more details?",
+    gather: ["contactPermission"],
+    requiredData: ["comments"],
+  })
+  .transitionTo({
+    id: "thank_you",
+    chatState: "Thank you for your valuable feedback!",
+  })
+  .transitionTo({ state: END_STATE });
+
 // ==============================================================================
 // USAGE EXAMPLES: Three-Phase Pipeline Demonstration
 // ==============================================================================
@@ -439,6 +501,50 @@ async function exampleConversations() {
   console.log("User: How much does it cost?");
   console.log("AI:", resp2.message);
   // AI understands "it" refers to Acme Widget from context
+
+  // =========================================================================
+  // Example 6: Stateful feedback collection
+  // =========================================================================
+  console.log("\n=== EXAMPLE 6: Stateful Feedback Collection ===");
+  const feedbackHistory: Event[] = [
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "User",
+      "This was very helpful, I want to leave some feedback."
+    ),
+  ];
+
+  const feedbackResponse = await agent.respond({
+    history: feedbackHistory,
+    session,
+  });
+  console.log("AI:", feedbackResponse.message);
+  console.log("Route:", feedbackResponse.session?.currentRoute?.title);
+
+  if (feedbackResponse.isRouteComplete) {
+    console.log("\n✅ Feedback collection complete!");
+    await processFeedback(agent.getExtractedData(feedbackResponse.session?.id));
+  } else {
+    console.log("\n⏳ Feedback collection in progress...");
+  }
+}
+
+/**
+ * Mock function to process collected feedback.
+ * @param data The feedback data collected from the user.
+ */
+async function processFeedback(data: Partial<FeedbackData>) {
+  console.log("\n" + "=".repeat(60));
+  console.log("Processing user feedback...");
+  console.log("=".repeat(60));
+  console.log("Rating:", data.rating);
+  console.log("Comments:", data.comments);
+  console.log("Permission to contact:", data.contactPermission);
+
+  // Here you would typically save this to a database or send it to a support system.
+  await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate async operation
+  console.log("Feedback logged successfully!");
+  console.log("=".repeat(60));
 }
 
 // ==============================================================================

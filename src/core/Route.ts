@@ -43,7 +43,11 @@ export class Route<TContext = unknown, TExtracted = unknown> {
     this.prohibitions = options.prohibitions || ([] as string[]);
     this.initialState = new State<TContext, TExtracted>(
       this.id,
-      "Initial state"
+      options.initialState?.chatState || "Initial state",
+      options.initialState?.id,
+      options.initialState?.gather,
+      options.initialState?.skipIf,
+      options.initialState?.requiredData
     );
     this.routingExtrasSchema = options.routingExtrasSchema;
     this.responseOutputSchema = options.responseOutputSchema;
@@ -70,8 +74,8 @@ export class Route<TContext = unknown, TExtracted = unknown> {
   private buildSequentialSteps(
     steps: Array<TransitionSpec<TContext, TExtracted>>
   ): void {
-    // Import END_ROUTE dynamically to avoid circular dependency
-    const END_ROUTE = Symbol.for("END_ROUTE");
+    // Import END_STATE dynamically to avoid circular dependency
+    const END_STATE = Symbol.for("END_STATE");
 
     let currentState: TransitionResult<TContext, TExtracted> =
       this.initialState;
@@ -81,7 +85,7 @@ export class Route<TContext = unknown, TExtracted = unknown> {
     }
 
     // End the route
-    currentState.transitionTo({ state: END_ROUTE });
+    currentState.transitionTo({ state: END_STATE });
   }
 
   /**

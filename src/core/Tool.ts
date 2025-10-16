@@ -28,7 +28,11 @@ import { generateToolId } from "../utils/id";
  * );
  * ```
  */
-export function defineTool<TContext, TArgs extends unknown[], TResult>(
+export function defineTool<
+  TContext = unknown,
+  TArgs extends unknown[] = unknown[],
+  TResult = unknown
+>(
   name: string,
   handler: ToolHandler<TContext, TArgs, TResult>,
   options?: {
@@ -36,17 +40,70 @@ export function defineTool<TContext, TArgs extends unknown[], TResult>(
     description?: string;
     parameters?: unknown;
   }
+): ToolRef<TContext, TArgs, TResult>;
+export function defineTool<
+  TContext = unknown,
+  TArgs extends unknown[] = unknown[],
+  TResult = unknown
+>(options: {
+  name: string;
+  handler: ToolHandler<TContext, TArgs, TResult>;
+  id?: string;
+  description?: string;
+  parameters?: unknown;
+}): ToolRef<TContext, TArgs, TResult>;
+export function defineTool<
+  TContext = unknown,
+  TArgs extends unknown[] = unknown[],
+  TResult = unknown
+>(
+  nameOrOptions:
+    | string
+    | {
+        name: string;
+        handler: ToolHandler<TContext, TArgs, TResult>;
+        id?: string;
+        description?: string;
+        parameters?: unknown;
+      },
+  handler?: ToolHandler<TContext, TArgs, TResult>,
+  options?: {
+    id?: string;
+    description?: string;
+    parameters?: unknown;
+  }
 ): ToolRef<TContext, TArgs, TResult> {
-  // Use provided ID or generate a deterministic one from the name
-  const id = options?.id || generateToolId(name);
+  if (typeof nameOrOptions === "string") {
+    // Original signature: defineTool(name, handler, options)
+    const name = nameOrOptions;
+    const id = options?.id || generateToolId(name);
 
-  return {
-    id,
-    name,
-    handler,
-    description: options?.description,
-    parameters: options?.parameters,
-  };
+    return {
+      id,
+      name,
+      handler: handler!,
+      description: options?.description,
+      parameters: options?.parameters,
+    };
+  } else {
+    // New signature: defineTool(options)
+    const {
+      name,
+      handler: newHandler,
+      id,
+      description,
+      parameters,
+    } = nameOrOptions;
+    const toolId = id || generateToolId(name);
+
+    return {
+      id: toolId,
+      name,
+      handler: newHandler,
+      description,
+      parameters,
+    };
+  }
 }
 
 /**

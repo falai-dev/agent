@@ -9,7 +9,7 @@ import type {
 } from "../types/route";
 import type { Guideline } from "../types/agent";
 
-import { END_ROUTE } from "../constants";
+import { END_STATE } from "../constants";
 import { Transition } from "./Transition";
 import { generateStateId } from "../utils/id";
 
@@ -20,13 +20,13 @@ export class State<TContext = unknown, TExtracted = unknown> {
   public readonly id: string;
   private transitions: Transition<TContext, TExtracted>[] = [];
   private guidelines: Guideline[] = [];
-  public readonly gatherFields?: string[];
-  public readonly skipIf?: (extracted: Partial<TExtracted>) => boolean;
-  public readonly requiredData?: string[];
+  public gatherFields?: string[];
+  public skipIf?: (extracted: Partial<TExtracted>) => boolean;
+  public requiredData?: string[];
 
   constructor(
     public readonly routeId: string,
-    public readonly description?: string,
+    public description?: string,
     customId?: string,
     gatherFields?: string[],
     skipIf?: (extracted: Partial<TExtracted>) => boolean,
@@ -40,6 +40,31 @@ export class State<TContext = unknown, TExtracted = unknown> {
   }
 
   /**
+   * Configure the state properties after creation
+   * Useful for overriding initial state configuration
+   */
+  configure(config: {
+    description?: string;
+    gatherFields?: string[];
+    skipIf?: (extracted: Partial<TExtracted>) => boolean;
+    requiredData?: string[];
+  }): this {
+    if (config.description !== undefined) {
+      this.description = config.description;
+    }
+    if (config.gatherFields !== undefined) {
+      this.gatherFields = config.gatherFields;
+    }
+    if (config.skipIf !== undefined) {
+      this.skipIf = config.skipIf;
+    }
+    if (config.requiredData !== undefined) {
+      this.requiredData = config.requiredData;
+    }
+    return this;
+  }
+
+  /**
    * Create a transition from this state to another
    *
    * @param spec - Transition specification (chatState, toolState, or direct state)
@@ -48,15 +73,15 @@ export class State<TContext = unknown, TExtracted = unknown> {
   transitionTo(
     spec: TransitionSpec<TContext, TExtracted>
   ): TransitionResult<TContext, TExtracted> {
-    // Handle END_ROUTE
+    // Handle END_STATE
     if (
       spec.state &&
       typeof spec.state === "symbol" &&
-      spec.state === END_ROUTE
+      spec.state === END_STATE
     ) {
       const endTransition = new Transition<TContext, TExtracted>(
         this.getRef(),
-        { state: END_ROUTE, condition: spec.condition }
+        { state: END_STATE, condition: spec.condition }
       );
       this.transitions.push(endTransition);
 
@@ -161,7 +186,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
   }
 
   /**
-   * Create a terminal state reference (for END_ROUTE)
+   * Create a terminal state reference (for END_STATE)
    */
   private createTerminalRef(): TransitionResult<TContext, TExtracted> {
     const terminalRef: StateRef = {
@@ -172,7 +197,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
     return {
       ...terminalRef,
       transitionTo: () => {
-        throw new Error("Cannot transition from END_ROUTE state");
+        throw new Error("Cannot transition from END_STATE state");
       },
     };
   }

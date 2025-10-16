@@ -93,7 +93,6 @@
 
 ---
 
-
 ## 📦 Installation
 
 ```bash
@@ -113,7 +112,7 @@ yarn add @falai/agent
 
 ## 🚀 Quick Start
 
-Build a conversational AI agent in 2 minutes:
+Build a data-driven conversational AI agent in minutes. This example shows how to intelligently gather structured data over multiple turns.
 
 ```typescript
 import {
@@ -122,65 +121,117 @@ import {
   defineTool,
   createMessageEvent,
   EventSource,
+  END_STATE,
+  type ToolContext,
 } from "@falai/agent";
 
-// 1️⃣ Create your agent
+// 1️⃣ Define the data you want to collect
+interface HotelBookingData {
+  hotelName: string;
+  date: string;
+  guests: number;
+}
+
+// 2️⃣ Create your agent
 const agent = new Agent({
   name: "BookingBot",
-  description: "Hotel booking assistant",
+  description: "A hotel booking assistant that gathers information.",
   ai: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
-    model: "models/gemini-2.5-flash",
+    model: "models/gemini-2.5-flash", // or your preferred model
   }),
-  context: { userId: "user_123" },
 });
 
-// 2️⃣ Define a simple tool
-const checkAvailability = defineTool(
-  "check_availability",
-  async (ctx, hotelName: string, date: string) => {
-    return { data: `${hotelName} has rooms available on ${date}` };
+// 3️⃣ Define a tool that uses the collected data
+const bookHotel = defineTool(
+  "book_hotel",
+  async ({ extracted }: ToolContext<{}, HotelBookingData>) => {
+    // Logic to book the hotel...
+    return {
+      data: `Booking confirmed for ${extracted?.guests} at ${extracted?.hotelName} on ${extracted?.date}!`,
+    };
   },
-  { description: "Check hotel availability" }
+  { description: "Books a hotel once all information is collected." }
 );
 
-// 3️⃣ Create a route with 2 states
-const bookingRoute = agent.createRoute({
+// 4️⃣ Create a data-driven route
+const bookingRoute = agent.createRoute<HotelBookingData>({
   title: "Book Hotel",
+  description: "Guides the user through the hotel booking process.",
   conditions: ["User wants to book a hotel"],
+  extractionSchema: {
+    type: "object",
+    properties: {
+      hotelName: { type: "string", description: "The name of the hotel." },
+      date: { type: "string", description: "The desired booking date." },
+      guests: { type: "number", description: "The number of guests." },
+    },
+    required: ["hotelName", "date", "guests"],
+  },
 });
 
-bookingRoute.initialState
-  .transitionTo({
-    toolState: checkAvailability,
-    condition: "User provided hotel name and date",
-  })
-  .transitionTo({ chatState: "Confirm booking and provide summary" });
+// 5️⃣ Build the flow to gather data step-by-step
+const askHotel = bookingRoute.initialState.transitionTo({
+  chatState: "Ask which hotel they want to book",
+  gather: ["hotelName"],
+  skipIf: (extracted) => !!extracted.hotelName, // Skip if we already have it
+});
 
-// 4️⃣ Start conversing
+const askDate = askHotel.transitionTo({
+  chatState: "Ask for the booking date",
+  gather: ["date"],
+  skipIf: (extracted) => !!extracted.date,
+});
+
+const askGuests = askDate.transitionTo({
+  chatState: "Ask for the number of guests",
+  gather: ["guests"],
+  skipIf: (extracted) => !!extracted.guests,
+});
+
+const confirmBooking = askGuests.transitionTo({
+  toolState: bookHotel,
+  condition:
+    "All required information (hotel, date, guests) has been collected.",
+});
+
+confirmBooking.transitionTo({
+  state: END_STATE, // End the conversation flow
+});
+
+// 6️⃣ Start conversing
 const response = await agent.respond({
   history: [
     createMessageEvent(
       EventSource.CUSTOMER,
       "Alice",
-      "Book me a room at Grand Hotel for tomorrow"
+      "I want to book a room at the Grand Hotel for 2 people."
     ),
   ],
 });
 
-console.log(response.message); // 🎉 AI handles the rest!
+// The agent sees that `hotelName` and `guests` are provided,
+// skips the first and third steps, and only asks for the date.
+console.log(response.message);
+// Expected: "Sure, for what date would you like to book at the Grand Hotel?"
 ```
 
-**That's it!** The agent will:
-- ✅ Route to the correct conversation flow
-- ✅ Execute tools automatically when conditions match
-- ✅ Generate natural responses based on state
+**That's it!** The data-driven agent will:
+
+- ✅ **Understand the Goal** - Route to the `Book Hotel` flow based on user intent.
+- ✅ **Extract Known Data** - Automatically pull `hotelName` and `guests` from the first message.
+- ✅ **Skip Unneeded Steps** - Use `skipIf` to bypass questions for data it already has.
+- ✅ **Gather Missing Data** - Intelligently ask only for the missing `date`.
+- ✅ **Execute Deterministically** - Call the `bookHotel` tool only when all required data is present.
+
+This creates a flexible and natural conversation, guided by a clear data structure.
 
 📖 **[See more examples →](./docs/EXAMPLES.md)** | **[Full tutorial →](./docs/GETTING_STARTED.md)**
 
 ### ⚡ Advanced Features
 
 **Streaming responses** for real-time UX:
+
 ```typescript
 for await (const chunk of agent.respondStream({ history })) {
   process.stdout.write(chunk.delta);
@@ -188,6 +239,7 @@ for await (const chunk of agent.respondStream({ history })) {
 ```
 
 **Session state** for multi-turn conversations:
+
 ```typescript
 let session = createSession<MyData>();
 const response = await agent.respond({ history, session });
@@ -195,10 +247,11 @@ session = response.session!; // Tracks progress across turns
 ```
 
 **Database persistence** with any adapter:
+
 ```typescript
 import { PrismaAdapter } from "@falai/agent";
 const agent = new Agent({
-  persistence: { adapter: new PrismaAdapter({ prisma }) }
+  persistence: { adapter: new PrismaAdapter({ prisma }) },
 });
 ```
 
@@ -211,15 +264,19 @@ const agent = new Agent({
 📋 **[Complete Documentation Index →](docs/DOCS.md)** - Searchable index of all docs
 
 **Core Guides:**
+
 - 📘 **[Getting Started](./docs/GETTING_STARTED.md)** - Build your first agent in 5 minutes
 - 🏗️ **[Architecture](./docs/ARCHITECTURE.md)** - Design principles & philosophy
 - 🔧 **[API Reference](./docs/API_REFERENCE.md)** - Complete API documentation
 - 📝 **[Examples](./docs/EXAMPLES.md)** - Production-ready code examples
 
 **Feature Guides:**
+
+- 🛤️ **[Routes](./docs/ROUTES.md)** - Creating conversational routes & flows
+- 🔄 **[States](./docs/STATES.md)** - Managing states & transitions
 - 💾 **[Persistence](./docs/PERSISTENCE.md)** - Database integration with adapters
 - 🔒 **[Domains](./docs/DOMAINS.md)** - Optional tool security & organization
-- 🎛️ **[Constructor Options](./docs/CONSTRUCTOR_OPTIONS.md)** - Configuration patterns
+- 🎛️ **[Agent](./docs/AGENT.md)** - Configuration patterns
 - 📊 **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Session state & lifecycle hooks
 - 🤖 **[AI Providers](./docs/PROVIDERS.md)** - Anthropic, OpenAI, Gemini, OpenRouter
 
@@ -228,6 +285,7 @@ const agent = new Agent({
 ## 🎯 Examples
 
 **Core Examples:**
+
 - 🏢 **[Business Onboarding](./examples/business-onboarding.ts)** - Complex multi-step flow with branching
 - ✈️ **[Travel Agent](./examples/travel-agent.ts)** - Multi-route booking system with session state
 - 🏥 **[Healthcare Assistant](./examples/healthcare-agent.ts)** - Appointment scheduling & lab results
@@ -235,6 +293,7 @@ const agent = new Agent({
 - ⚡ **[Streaming Responses](./examples/streaming-agent.ts)** - Real-time response streaming
 
 **Persistence & Advanced:**
+
 - 💾 **[Prisma Persistence](./examples/prisma-persistence.ts)** - Auto-save with Prisma ORM
 - ⚡ **[Redis Persistence](./examples/redis-persistence.ts)** - Fast in-memory sessions
 - 🔐 **[Domain Scoping](./examples/domain-scoping.ts)** - Tool security per route
@@ -255,6 +314,7 @@ const agent = new Agent({
 5. **Message Generation** - AI generates natural responses based on current state
 
 **Behind the scenes:**
+
 - The AI only generates messages and extracts data - it never decides which tools to call
 - Tools execute deterministically based on state transitions and code-based conditions
 - Session state tracks progress and extracted data across conversation turns

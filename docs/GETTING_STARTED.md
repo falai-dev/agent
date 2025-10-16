@@ -417,7 +417,7 @@ new GeminiProvider({
 
 ## What's Next?
 
-- 📚 Read the [Constructor Options Guide](./CONSTRUCTOR_OPTIONS.md)
+- 📚 Read the [Agent Guide](./AGENT.md)
 - 🔍 Check the [API Reference](./API_REFERENCE.md)
 - 🏗️ Understand the [Architecture](./ARCHITECTURE.md)
 - 🎯 Explore [Examples](../examples/)

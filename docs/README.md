@@ -13,14 +13,19 @@ Welcome to the `@falai/agent` documentation!
 ### Core Concepts
 
 - **[Architecture](./ARCHITECTURE.md)** - Design principles & philosophy (Data-driven sessions) ⭐ **UPDATED**
-- **[Constructor Options](./CONSTRUCTOR_OPTIONS.md)** - Comprehensive guide to declarative vs fluent configuration ⭐ **UPDATED**
+- **[Agent](./AGENT.md)** - Comprehensive guide to declarative vs fluent configuration ⭐ **UPDATED**
 - **[Context Management](./CONTEXT_MANAGEMENT.md)** - Session state & data extraction patterns ⭐ **UPDATED**
+
+### Conversational Flows
+
+- **[Routes Guide](./ROUTES.md)** - Complete guide to creating and managing conversational routes ⭐ **NEW**
+- **[States Guide](./STATES.md)** - Complete guide to creating and managing states ⭐ **NEW**
 
 ### Reference
 
 - **[API Reference](./API_REFERENCE.md)** - Complete API documentation for all classes, methods, and types
 - **[AI Providers Guide](./PROVIDERS.md)** - Gemini, OpenAI, Anthropic, and custom providers
-- **[Domain Organization](./DOMAINS.md)** - Optional tool security & organization **NEW**
+- **[Domain Organization](./DOMAINS.md)** - Optional tool security & organization
 - **[Persistence Guide](./PERSISTENCE.md)** - Auto-save sessions and messages to any database
 - **[Database Adapters](./ADAPTERS.md)** - Adapter comparison and configuration examples
 
@@ -40,7 +45,10 @@ Welcome to the `@falai/agent` documentation!
 → Read [Architecture Guide](./ARCHITECTURE.md)
 
 **Building a complex agent?**
-→ Check [Constructor Options](./CONSTRUCTOR_OPTIONS.md)
+→ Check [Agent](./AGENT.md)
+
+**Creating conversational flows?**
+→ See [Routes Guide](./ROUTES.md) and [States Guide](./STATES.md)
 
 **Need tool security?**
 → See [Domain Organization](./DOMAINS.md)
@@ -54,8 +62,8 @@ Welcome to the `@falai/agent` documentation!
 ### By Topic
 
 - **Architecture & Design**: [Architecture Guide](./ARCHITECTURE.md)
-- **Agent Configuration**: [Constructor Options](./CONSTRUCTOR_OPTIONS.md) | [Context Management](./CONTEXT_MANAGEMENT.md)
-- **Conversation Flows**: [API Reference - Routes](./API_REFERENCE.md#route)
+- **Agent Configuration**: [Agent](./AGENT.md) | [Context Management](./CONTEXT_MANAGEMENT.md)
+- **Conversation Flows**: [Routes Guide](./ROUTES.md) | [States Guide](./STATES.md) | [API Reference - Routes](./API_REFERENCE.md#route)
 - **Tools & Domains**: [Domain Organization](./DOMAINS.md) | [API Reference - Tools](./API_REFERENCE.md#definetool)
 - **AI Providers**: [Providers Guide](./PROVIDERS.md) | [API Reference](./API_REFERENCE.md#geminiprovider)
 - **Database Persistence**: [Persistence Guide](./PERSISTENCE.md) | [Adapters](./ADAPTERS.md)

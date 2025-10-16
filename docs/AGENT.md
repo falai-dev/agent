@@ -1,4 +1,4 @@
-# Constructor Configuration Guide
+# Agent Configuration Guide
 
 ## Overview
 
@@ -7,11 +7,11 @@ The `@falai/agent` framework supports **two complementary patterns** for configu
 1. **Declarative** - Pass arrays/objects in constructors (great for static configs)
 2. **Fluent/Programmatic** - Chain methods to build dynamically (great for runtime logic)
 
-You can **mix both patterns** - initialize with constructor options, then add more dynamically!
+You can **mix both patterns** - initialize with agent, then add more dynamically!
 
 ---
 
-## 📦 Agent Constructor Options
+## 📦 Agent Agent
 
 ```typescript
 interface AgentOptions<TContext = unknown> {
@@ -23,6 +23,9 @@ interface AgentOptions<TContext = unknown> {
   description?: string;
   goal?: string;
   context?: TContext;
+
+  // Optional current session for convenience methods
+  session?: SessionState;
 
   // Context provider for always-fresh context
   contextProvider?: () => Promise<TContext> | TContext;
@@ -73,6 +76,11 @@ const agent = new Agent<FlightBookingContext>({
     userId: '123',
     availableFlights: [],
   },
+
+  // Optional: Set initial session for convenience methods
+  session: createSession<FlightData>({
+    extracted: { destination: 'Paris' }, // Pre-populate with known data
+  }),
 
   // Enhanced lifecycle hooks
   hooks: {
@@ -141,24 +149,87 @@ const agent = new Agent<FlightBookingContext>({
       enabled: true,
     },
   ],
-  ],
 
   capabilities: [
     { title: 'Ticket Management', description: 'Create and track tickets' },
   ],
 });
 
-// Use with session state
+// Option 1: Use session passed to respond (traditional)
 let session = createSession<FlightData>();
 const response = await agent.respond({ history, session });
 console.log(response.session?.extracted); // Extracted flight data
+
+// Option 2: Use session set in constructor (convenience methods)
+// Since we set session in constructor, no need to pass it!
+const response2 = await agent.respond({ history });
+console.log(agent.getExtractedData()); // Uses constructor session
+
+// Option 3: Override session for specific calls
+const customSession = createSession<FlightData>({ extracted: { destination: 'Tokyo' } });
+const response3 = await agent.respond({ history, session: customSession });
+console.log(response3.session?.extracted); // Uses custom session
 ```
 
 ````
 
 ---
 
-## 🛤️ Route Constructor Options
+## 💾 Session Management
+
+The agent supports flexible session management for conversation state tracking:
+
+### Constructor Session (Optional)
+
+Set an initial session in the constructor for convenience:
+
+```typescript
+const agent = new Agent({
+  name: 'Bot',
+  ai: provider,
+  session: createSession<MyData>({
+    extracted: { name: 'John' }, // Pre-populate data
+  }),
+});
+
+// Use convenience methods without passing session
+const response = await agent.respond({ history });
+const data = agent.getExtractedData(); // Uses constructor session
+```
+
+### Runtime Session Management
+
+```typescript
+// Set session for convenience methods
+agent.setCurrentSession(session);
+
+// Use without passing session parameter
+const extracted = agent.getExtractedData();
+const routeData = agent.getExtractedData('onboarding');
+
+// Override for specific calls
+const response = await agent.respond({ history, session: customSession });
+
+// Clear when done
+agent.clearCurrentSession();
+```
+
+### Session Preservation
+
+When switching routes, extracted data is preserved in `extractedByRoute`:
+
+```typescript
+// User switches from onboarding to booking
+const response = await agent.respond({ history }); // Switches routes
+
+// Access data from previous routes
+const onboardingData = agent.getExtractedData('onboarding');
+const bookingData = agent.getExtractedData('booking');
+```
+
+---
+
+## 🛤️ Route Agent
 
 ```typescript
 interface RouteOptions<TExtracted = unknown> {
@@ -375,7 +446,7 @@ const agent = new Agent({
 
 ## 🔄 Fluent API (Still Available!)
 
-All constructor options also have fluent methods that **return `this`** for chaining:
+All agents also have fluent methods that **return `this`** for chaining:
 
 ```typescript
 agent
@@ -449,6 +520,7 @@ const agent = new Agent<MyContext>({
   goal?: string,
   ai: AiProvider,
   context?: MyContext,
+  session?: SessionState,        // Optional current session
   maxEngineIterations?: number,
   compositionMode?: CompositionMode,
   terms?: Term[],

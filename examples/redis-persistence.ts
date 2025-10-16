@@ -16,6 +16,7 @@ import {
   EventSource,
   MessageEventData,
   Event,
+  END_STATE,
 } from "../src/index";
 // @ts-ignore
 import Redis from "ioredis";
@@ -44,6 +45,17 @@ interface SupportTicketData {
   category: "technical" | "billing" | "account" | "other";
   priority: "low" | "medium" | "high";
   description: string;
+}
+
+interface QuickChatData {
+  topic: string;
+  sentiment: "positive" | "neutral" | "negative";
+}
+
+interface OrderData {
+  productId: string;
+  quantity: number;
+  shippingAddress: string;
 }
 
 async function example() {
@@ -137,7 +149,8 @@ async function example() {
     .transitionTo({
       chatState: "Confirm and create ticket",
       requiredData: ["issue", "category", "description"],
-    });
+    })
+    .transitionTo({ state: END_STATE });
 
   const persistence = agent.getPersistenceManager();
   if (!persistence) return;
@@ -231,6 +244,13 @@ async function example() {
     content: response2.message,
   });
 
+  if (response2.isRouteComplete) {
+    console.log("\n✅ Support ticket route complete!");
+    await fileSupportTicket(
+      agent.getExtractedData(session.id) as SupportTicketData
+    );
+  }
+
   // Load session state from Redis (demonstrates persistence)
   console.log("\n--- Loading Session from Redis ---");
   const loadedSession = await persistence.loadSessionState<SupportTicketData>(
@@ -259,11 +279,6 @@ async function example() {
  */
 async function highThroughputExample() {
   const redis = new Redis();
-
-  interface QuickChatData {
-    topic: string;
-    sentiment: "positive" | "neutral" | "negative";
-  }
 
   const agent = new Agent({
     name: "Chat Bot",
@@ -303,10 +318,12 @@ async function highThroughputExample() {
     },
   });
 
-  chatRoute.initialState.transitionTo({
-    chatState: "Chat and extract topic/sentiment",
-    gather: ["topic", "sentiment"],
-  });
+  chatRoute.initialState
+    .transitionTo({
+      chatState: "Chat and extract topic/sentiment",
+      gather: ["topic", "sentiment"],
+    })
+    .transitionTo({ state: END_STATE });
 
   const persistence = agent.getPersistenceManager()!;
 
@@ -331,6 +348,14 @@ async function highThroughputExample() {
 
   console.log("🤖 Response:", response.message);
   console.log("📊 Extracted:", response.session?.extracted);
+
+  if (response.isRouteComplete) {
+    console.log("\n✅ Chat analytics route complete!");
+    await logChatAnalytics(
+      agent.getExtractedData(sessionData.id) as QuickChatData
+    );
+  }
+
   console.log("💾 Session state cached in Redis!");
 
   await redis.quit();
@@ -342,12 +367,6 @@ async function highThroughputExample() {
  */
 async function sessionRecoveryExample() {
   const redis = new Redis();
-
-  interface OrderData {
-    productId: string;
-    quantity: number;
-    shippingAddress: string;
-  }
 
   const agent = new Agent({
     name: "Order Assistant",
@@ -383,7 +402,8 @@ async function sessionRecoveryExample() {
     .transitionTo({
       chatState: "Ask for shipping address",
       gather: ["shippingAddress"],
-    });
+    })
+    .transitionTo({ state: END_STATE });
 
   const persistence = agent.getPersistenceManager()!;
 
@@ -446,9 +466,61 @@ async function sessionRecoveryExample() {
 
   console.log("🤖 Response:", response2.message);
   console.log("📊 Final extracted data:", response2.session?.extracted);
+
+  if (response2.isRouteComplete) {
+    console.log("\n✅ Order placement complete!");
+    await processOrder(
+      agent.getExtractedData(sessionId) as unknown as OrderData
+    );
+  }
+
   console.log("✅ Order complete with recovered session!");
 
   await redis.quit();
+}
+
+/**
+ * Mock function to file a support ticket.
+ * @param data - The support ticket data.
+ */
+async function fileSupportTicket(data: SupportTicketData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🎫 Filing Support Ticket...");
+  console.log("=".repeat(60));
+  console.log("Ticket Details:", JSON.stringify(data, null, 2));
+  console.log(
+    `   - Filing ticket for issue: ${data.issue} with priority: ${data.priority}`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Ticket filed successfully!");
+}
+
+/**
+ * Mock function to log chat analytics.
+ * @param data - The chat data.
+ */
+async function logChatAnalytics(data: QuickChatData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📊 Logging Chat Analytics...");
+  console.log("=".repeat(60));
+  console.log("Chat Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Logging chat with topic: ${data.topic}`);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  console.log("✨ Analytics logged!");
+}
+
+/**
+ * Mock function to process an order.
+ * @param data - The order data.
+ */
+async function processOrder(data: OrderData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📦 Processing Order...");
+  console.log("=".repeat(60));
+  console.log("Order Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Processing order for product: ${data.productId}`);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Order processed successfully!");
 }
 
 // Run the example

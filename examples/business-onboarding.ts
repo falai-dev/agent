@@ -13,7 +13,7 @@
 import {
   Agent,
   defineTool,
-  END_ROUTE,
+  END_STATE,
   EventSource,
   createMessageEvent,
   OpenAIProvider,
@@ -563,7 +563,7 @@ async function createBusinessOnboardingAgent(
     condition: "User confirmed everything is okay",
   });
 
-  completion.transitionTo({ state: END_ROUTE });
+  completion.transitionTo({ state: END_STATE });
 
   // ==================== Alternative: Sequential Steps ====================
   // For simpler linear flows, you can use the new sequential steps approach:
@@ -619,7 +619,7 @@ async function createBusinessOnboardingAgent(
       chatState: "Thank you for your feedback! It helps us improve. 🙏",
       condition: "User provided feedback",
     })
-    .transitionTo({ state: END_ROUTE });
+    .transitionTo({ state: END_STATE });
 
   // ==================== Global Guidelines ====================
 
@@ -722,14 +722,30 @@ async function main() {
   try {
     // Initialize session state for multi-turn conversation
     let session = createSession<OnboardingData>();
+    agent.setCurrentSession(session);
 
-    const response = await agent.respond({ history, session });
+    const response = await agent.respond({ history });
     console.log("Agent:", response.message);
     console.log("\nRoute:", response.session?.currentRoute?.title);
-    console.log("Extracted:", response.session?.extracted);
+
+    // After the conversation, you can get the extracted data
+    const extractedData = agent.getExtractedData<OnboardingData>();
+    console.log("Extracted:", extractedData);
 
     // Update session with progress
     session = response.session!;
+
+    // You can also pass the session to the agent constructor
+    // const agentWithSession = await createBusinessOnboardingAgent("user_123", "Alice", "session_456", {}, session);
+    // const response2 = await agentWithSession.respond({ history });
+
+    if (response.isRouteComplete) {
+      console.log("\n✅ Onboarding route complete!");
+      // Here you would typically save the complete data to your database
+      await processOnboardingData(agent.getExtractedData());
+    } else {
+      console.log("\n⏳ Onboarding route in progress...");
+    }
 
     console.log("\n✅ Session state benefits:");
     console.log("   - Data extraction tracked across turns");
@@ -739,6 +755,31 @@ async function main() {
     console.log("\n(Skipping AI response - requires valid API key)");
     console.log("Error:", error.message);
   }
+}
+
+/**
+ * Mock function to process completed onboarding data
+ * @param data - The complete onboarding data
+ */
+async function processOnboardingData(data: Partial<OnboardingData>) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Processing Completed Onboarding Data...");
+  console.log("=".repeat(60));
+  console.log("Received data:", JSON.stringify(data, null, 2));
+
+  // Example: Save to a database
+  console.log("\n💾 Saving to database...");
+  await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate async operation
+  console.log("   - Business Info:", data.business?.businessName);
+  console.log("   - Contact Info:", data.contact?.website);
+  console.log("   - Location Info:", data.location?.address);
+
+  // Example: Triggering a welcome email
+  console.log("\n📧 Sending welcome email...");
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log(`   - Email sent to user associated with the account.`);
+
+  console.log("\n✨ Onboarding processing complete!");
 }
 
 // Run if executed directly

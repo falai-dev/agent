@@ -7,7 +7,7 @@ import {
   Agent,
   defineTool,
   AnthropicProvider,
-  END_ROUTE,
+  END_STATE,
   EventSource,
   createMessageEvent,
   createSession,
@@ -213,7 +213,7 @@ async function createHealthcareAgent() {
   });
 
   confirmation.transitionTo({
-    state: END_ROUTE,
+    state: END_STATE,
     condition: "Appointment booked successfully",
   });
 
@@ -232,7 +232,7 @@ async function createHealthcareAgent() {
       chatState:
         "Ask the patient to call the office to schedule an appointment",
     })
-    .transitionTo({ state: END_ROUTE });
+    .transitionTo({ state: END_STATE });
 
   schedulingRoute.createGuideline({
     condition: "The patient says their visit is urgent",
@@ -291,7 +291,7 @@ async function createHealthcareAgent() {
     chatState: "Present the lab results and explain what they mean",
   });
 
-  presentResults.transitionTo({ state: END_ROUTE });
+  presentResults.transitionTo({ state: END_STATE });
 
   labResultsRoute.createGuideline({
     condition:
@@ -383,7 +383,64 @@ async function main() {
 
     // Update session again
     session = response2.session!;
+
+    // Turn 3: Patient provides final details
+    const history3 = [
+      ...history2,
+      createMessageEvent(EventSource.AI_AGENT, "Agent", response2.message),
+      createMessageEvent(
+        EventSource.CUSTOMER,
+        "Patient",
+        "Tuesday at 2 PM works for me."
+      ),
+    ];
+
+    const response3 = await agent.respond({ history: history3, session });
+    console.log("\nPatient: Tuesday at 2 PM works for me.");
+    console.log("Agent:", response3.message);
+    console.log("Updated extracted:", response3.session?.extracted);
+    console.log("Current state:", response3.session?.currentState?.id);
+
+    // Check for route completion
+    if (response3.isRouteComplete) {
+      console.log("\n✅ Appointment scheduling complete!");
+      await sendAppointmentReminder(
+        agent.getExtractedData(
+          response3.session?.id
+        ) as unknown as AppointmentData
+      );
+    }
   }
+}
+
+/**
+ * Mock function to send an appointment reminder.
+ * @param data - The appointment data.
+ */
+async function sendAppointmentReminder(data: AppointmentData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Sending Appointment Reminder...");
+  console.log("=".repeat(60));
+  console.log("Appointment Details:", JSON.stringify(data, null, 2));
+  console.log(
+    `   - Sending reminder for ${data.appointmentReason} on ${data.preferredDate} at ${data.preferredTime}.`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Reminder sent!");
+}
+
+/**
+ * Mock function to log a patient inquiry about lab results.
+ * @param data - The lab results data.
+ */
+async function logPatientInquiry(data: LabResultsData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📝 Logging Patient Inquiry...");
+  console.log("=".repeat(60));
+  console.log("Inquiry Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Logging inquiry for ${data.testType} results.`);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Inquiry logged!");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

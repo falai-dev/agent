@@ -7,7 +7,8 @@ import {
   Agent,
   defineTool,
   GeminiProvider,
-  END_ROUTE,
+  END_STATE,
+  END_STATE_ID,
   EventSource,
   createMessageEvent,
   createSession,
@@ -269,24 +270,20 @@ async function createPersistentOnboardingAgent(sessionId: string) {
   });
 
   // State 1: Gather business name and description
-  const gatherBusinessInfo = onboardingRoute.initialState.transitionTo(
-    {
-      chatState: "Ask for business name and a brief description",
-      gather: ["businessName", "businessDescription"],
-      skipIf: (extracted) =>
-        !!extracted.businessName && !!extracted.businessDescription,
-    },
-    "Need to collect basic business information first"
-  );
+  const gatherBusinessInfo = onboardingRoute.initialState.transitionTo({
+    chatState: "Ask for business name and a brief description",
+    gather: ["businessName", "businessDescription"],
+    skipIf: (extracted) =>
+      !!extracted.businessName && !!extracted.businessDescription,
+    condition: "Need to collect basic business information first",
+  });
 
   // State 2: Save business info (tool execution)
-  const saveBusiness = gatherBusinessInfo.transitionTo(
-    {
-      toolState: saveBusinessInfo,
-      requiredData: ["businessName", "businessDescription"],
-    },
-    "Business name and description provided, save to database"
-  );
+  const saveBusiness = gatherBusinessInfo.transitionTo({
+    toolState: saveBusinessInfo,
+    requiredData: ["businessName", "businessDescription"],
+    condition: "Business name and description provided, save to database",
+  });
 
   // State 3: Gather industry
   const gatherIndustry = saveBusiness.transitionTo({
@@ -319,7 +316,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     chatState: "Summarize all collected information and ask for confirmation",
   });
 
-  confirm.transitionTo({ state: END_ROUTE });
+  confirm.transitionTo({ state: END_STATE });
 
   // Guidelines
   onboardingRoute.createGuideline({
@@ -438,6 +435,15 @@ async function main() {
   console.log("🤖 Bot:", response1.message);
   console.log("📊 Extracted after turn 1:", response1.session?.extracted);
   console.log("📊 Route:", response1.session?.currentRoute?.title);
+
+  // Check route completion after turn 1
+  console.log("🔍 Route Completion Check (Turn 1):");
+  if (response1.isRouteComplete) {
+    console.log("   ✅ Route completed after turn 1!");
+  } else {
+    console.log("   ⏳ Route still in progress after turn 1");
+  }
+
   console.log();
 
   // Update session with progress
@@ -461,6 +467,15 @@ async function main() {
   const response2 = await agent.respond({ history: history2, session });
   console.log("🤖 Bot:", response2.message);
   console.log("📊 Extracted after turn 2:", response2.session?.extracted);
+
+  // Check route completion after turn 2
+  console.log("🔍 Route Completion Check (Turn 2):");
+  if (response2.isRouteComplete) {
+    console.log("   ✅ Route completed after turn 2!");
+  } else {
+    console.log("   ⏳ Route still in progress after turn 2");
+  }
+
   console.log();
 
   // Update session again
@@ -480,7 +495,42 @@ async function main() {
   const response3 = await agent.respond({ history: history3, session });
   console.log("🤖 Bot:", response3.message);
   console.log("📊 Extracted after turn 3:", response3.session?.extracted);
+
+  // Check route completion after turn 3
+  console.log("🔍 Route Completion Check (Turn 3):");
+  if (response3.isRouteComplete) {
+    console.log("   ✅ Route completed after turn 3!");
+  } else {
+    console.log("   ⏳ Route still in progress after turn 3");
+  }
+
   console.log();
+
+  // Update session again
+  session = response3.session!;
+
+  // Turn 4: User provides contact email, completing the flow
+  console.log("📱 Turn 4: User provides contact email");
+  const history4 = [
+    ...history3,
+    createMessageEvent(EventSource.AI_AGENT, "Agent", response3.message),
+    createMessageEvent(
+      EventSource.CUSTOMER,
+      "Alice",
+      "Our contact email is contact@techflow.ai"
+    ),
+  ];
+  const response4 = await agent.respond({ history: history4, session });
+  console.log("🤖 Bot:", response4.message);
+  console.log("📊 Extracted after turn 4:", response4.session?.extracted);
+
+  // Check for route completion
+  if (response4.isRouteComplete) {
+    console.log("\n✅ Onboarding complete!");
+    await finalizeOnboarding(
+      agent.getExtractedData(response4.session?.id) as unknown as OnboardingData
+    );
+  }
 
   // Verify persistence
   console.log("=== PERSISTENCE VERIFICATION ===");
@@ -528,6 +578,22 @@ async function main() {
  *    - requiredData: Prerequisites for state transitions
  *    - No more LLM interpretation of state logic
  */
+
+/**
+ * Mock function to finalize the onboarding process.
+ * @param data - The complete onboarding data.
+ */
+async function finalizeOnboarding(data: OnboardingData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Finalizing Onboarding...");
+  console.log("=".repeat(60));
+  console.log("Onboarding Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Sending welcome email to ${data.contactEmail}...`);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("   - Scheduling follow-up call...");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  console.log("✨ Onboarding finalized!");
+}
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(console.error);

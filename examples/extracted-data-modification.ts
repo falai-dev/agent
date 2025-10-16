@@ -9,7 +9,14 @@
  * 5. Three-phase pipeline: PREPARATION → ROUTING → RESPONSE
  */
 
-import { Agent, createSession, EventSource, createMessageEvent } from "../src";
+import {
+  Agent,
+  createSession,
+  EventSource,
+  createMessageEvent,
+  END_STATE,
+  OpenAIProvider,
+} from "../src";
 import type { Event } from "../src/types";
 import type { ToolRef } from "../src/types/tool";
 
@@ -179,6 +186,20 @@ const searchFlightsTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
   },
 };
 
+// Tool 4: Book the flight
+const bookFlightTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
+  id: "book_flight",
+  name: "Book Flight",
+  description: "Finalize the flight booking",
+  handler: async (context) => {
+    const { extracted } = context;
+    const flightData = extracted as Partial<FlightData>;
+    console.log("[Tool] Booking flight with data:", flightData);
+    // Simulate booking API call
+    return { data: undefined };
+  },
+};
+
 // ==============================================================================
 // LIFECYCLE HOOKS: Data Validation & Business Logic (RESPONSE Phase)
 // ==============================================================================
@@ -236,7 +257,10 @@ const agent = new Agent<FlightBookingContext>({
   name: "Flight Booking Agent",
   goal: "Help users book flights efficiently",
   description: "I help you find and book flights",
-  ai: null as any, // Replace with actual AI provider
+  ai: new OpenAIProvider({
+    apiKey: process.env.OPENAI_API_KEY || "your-api-key-here",
+    model: "gpt-5o-mini",
+  }),
   context: {},
   hooks: {
     onExtractedUpdate, // Validation & enrichment hook
@@ -334,6 +358,21 @@ const presentResults = searchFlights.transitionTo({
   chatState: "Present available flights to the user",
 });
 
+// State 8: Confirm booking
+const confirmBooking = presentResults.transitionTo({
+  chatState: "Ask user to confirm the booking",
+  requiredData: ["destinationCode", "departureDateParsed", "passengers"],
+});
+
+// State 9: Finalize booking
+const finalizeBooking = confirmBooking.transitionTo({
+  toolState: bookFlightTool,
+  condition: "User confirms the booking",
+});
+
+// State 10: End of conversation
+finalizeBooking.transitionTo({ state: END_STATE });
+
 // ==============================================================================
 // USAGE EXAMPLE: Three-Phase Pipeline Demonstration
 // ==============================================================================
@@ -357,6 +396,11 @@ async function main() {
   console.log("Extracted:", response.session?.extracted);
   console.log("Context:", agent["context"]);
 
+  if (response.isRouteComplete) {
+    console.log("\n✅ Flight booking complete!");
+    await sendBookingConfirmation(response.session?.extracted);
+  }
+
   /*
    * Expected flow:
    * 1. AI extracts: { destination: "Paris", departureDate: "tomorrow", passengers: 2 }
@@ -372,6 +416,24 @@ async function main() {
    *    - Enters presentResults state
    * 5. AI generates response with flight options
    */
+}
+
+/**
+ * Mock function to send a booking confirmation.
+ * @param data - The flight booking data.
+ */
+async function sendBookingConfirmation(data: Partial<FlightData> | undefined) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Sending Booking Confirmation...");
+  console.log("=".repeat(60));
+  console.log("Booking Details:", JSON.stringify(data, null, 2));
+  console.log(
+    `   - Sending confirmation for flight to ${data?.destinationCode} on ${
+      data?.departureDateParsed ?? ""
+    }.`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Confirmation sent!");
 }
 
 // ==============================================================================

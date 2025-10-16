@@ -16,6 +16,7 @@ import {
   EventSource,
   MessageEventData,
   Event,
+  END_STATE,
 } from "../src/index";
 // @ts-ignore
 import { Client } from "@opensearch-project/opensearch";
@@ -157,7 +158,8 @@ async function example() {
     .transitionTo({
       chatState: "Propose solution and close complaint",
       requiredData: ["category", "description"],
-    });
+    })
+    .transitionTo({ state: END_STATE });
 
   const persistence = agent.getPersistenceManager();
   if (!persistence) return;
@@ -238,6 +240,13 @@ async function example() {
     role: "agent",
     content: response2.message,
   });
+
+  if (response2.isRouteComplete) {
+    console.log("\n✅ Complaint route complete!");
+    await createSupportTicket(
+      agent.getExtractedData(session.id) as ComplaintData
+    );
+  }
 
   // Load session from OpenSearch
   console.log("\n--- Loading Session from OpenSearch ---");
@@ -469,6 +478,22 @@ async function timeSeriesExample() {
   if (adapter.disconnect) {
     await adapter.disconnect();
   }
+}
+
+/**
+ * Mock function to create a support ticket.
+ * @param data - The complaint data from the completed route.
+ */
+async function createSupportTicket(data: ComplaintData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🎫 Creating Support Ticket...");
+  console.log("=".repeat(60));
+  console.log("Ticket Details:", JSON.stringify(data, null, 2));
+  console.log(
+    `   - Creating ticket for category: ${data.category} with severity: ${data.severity}`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Ticket created successfully!");
 }
 
 // Run the example

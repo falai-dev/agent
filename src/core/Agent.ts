@@ -10,6 +10,7 @@ import type { SessionState } from "../types/session";
 import type { AgentStructuredResponse } from "../types/ai";
 import { createSession, enterState, mergeExtracted } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
+import { logger, LoggerLevel } from "../utils/logger";
 
 import { Route } from "./Route";
 import { State } from "./State";
@@ -19,6 +20,7 @@ import { RoutingEngine } from "./RoutingEngine";
 import { ResponseEngine } from "./ResponseEngine";
 import { ToolExecutor } from "./ToolExecutor";
 import { getLastMessageFromHistory } from "../utils/event";
+import { END_STATE_ID } from "../constants";
 
 /**
  * Main Agent class with generic context support
@@ -34,6 +36,7 @@ export class Agent<TContext = unknown> {
   private persistenceManager: PersistenceManager | undefined;
   private routingEngine: RoutingEngine<TContext>;
   private responseEngine: ResponseEngine<TContext>;
+  private currentSession?: SessionState;
 
   /**
    * Dynamic domain property - populated via addDomain
@@ -41,6 +44,11 @@ export class Agent<TContext = unknown> {
   public readonly domain: Record<string, Record<string, unknown>> = {};
 
   constructor(private readonly options: AgentOptions<TContext>) {
+    // Set log level based on debug option
+    if (options.debug) {
+      logger.setLevel(LoggerLevel.DEBUG);
+    }
+
     // Validate context configuration
     if (options.context !== undefined && options.contextProvider) {
       throw new Error(
@@ -50,6 +58,9 @@ export class Agent<TContext = unknown> {
 
     // Initialize context if provided
     this.context = options.context;
+
+    // Initialize current session if provided
+    this.currentSession = options.session;
 
     // Initialize routing and response engines
     this.routingEngine = new RoutingEngine<TContext>({
@@ -66,7 +77,7 @@ export class Agent<TContext = unknown> {
       // Initialize the adapter if it has an initialize method
       if (options.persistence.adapter.initialize) {
         options.persistence.adapter.initialize().catch((error) => {
-          console.error(
+          logger.error(
             "[Agent] Persistence adapter initialization failed:",
             error
           );
@@ -272,6 +283,7 @@ export class Agent<TContext = unknown> {
     done: boolean;
     session?: SessionState;
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+    isRouteComplete?: boolean;
   }> {
     const { history, contextOverride, signal } = params;
 
@@ -291,8 +303,8 @@ export class Agent<TContext = unknown> {
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
 
-    // Initialize or get session
-    let session = params.session || createSession();
+    // Initialize or get session (use current session if available)
+    let session = params.session || this.currentSession || createSession();
 
     // PHASE 1: TOOL EXECUTION - Execute tools if current state has toolState
     if (session.currentRoute && session.currentState) {
@@ -331,13 +343,13 @@ export class Agent<TContext = unknown> {
                 session,
                 result.extractedUpdate
               );
-              console.log(
+              logger.debug(
                 `[Agent] Tool updated extracted data:`,
                 result.extractedUpdate
               );
             }
 
-            console.log(
+            logger.debug(
               `[Agent] Executed tool: ${result.toolName} (success: ${result.success})`
             );
           }
@@ -349,6 +361,7 @@ export class Agent<TContext = unknown> {
     let selectedRoute: Route<TContext> | undefined;
     let responseDirectives: string[] | undefined;
     let selectedState: State<TContext> | undefined;
+    let isRouteComplete = false;
 
     if (this.routes.length > 0) {
       const orchestration = await this.routingEngine.decideRouteAndState({
@@ -370,10 +383,18 @@ export class Agent<TContext = unknown> {
       selectedState = orchestration.selectedState;
       responseDirectives = orchestration.responseDirectives;
       session = orchestration.session;
+      isRouteComplete = orchestration.isRouteComplete || false;
+
+      // Log if route is complete
+      if (isRouteComplete) {
+        logger.debug(
+          `[Agent] Route complete: all required data collected, END_STATE reached`
+        );
+      }
     }
 
     // PHASE 3: DETERMINE NEXT STATE - Use state from combined decision or get initial state
-    if (selectedRoute) {
+    if (selectedRoute && !isRouteComplete) {
       let nextState: State<TContext>;
 
       // If we have a selected state from the combined routing decision, use it
@@ -388,13 +409,13 @@ export class Agent<TContext = unknown> {
         );
         if (candidates.length > 0) {
           nextState = candidates[0].state;
-          console.log(
+          logger.debug(
             `[Agent] Using first valid state: ${nextState.id} for new route`
           );
         } else {
           // Fallback to initial state even if it should be skipped
           nextState = selectedRoute.initialState;
-          console.warn(
+          logger.warn(
             `[Agent] No valid states found, using initial state: ${nextState.id}`
           );
         }
@@ -402,7 +423,7 @@ export class Agent<TContext = unknown> {
 
       // Update session with next state
       session = enterState(session, nextState.id, nextState.description);
-      console.log(`[Agent] Entered state: ${nextState.id}`);
+      logger.debug(`[Agent] Entered state: ${nextState.id}`);
 
       // PHASE 4: RESPONSE GENERATION - Stream message using selected route and state
       // Get last user message
@@ -464,7 +485,7 @@ export class Agent<TContext = unknown> {
           // Merge gathered data into session
           if (Object.keys(gatheredData).length > 0) {
             session = await this.updateExtracted(session, gatheredData);
-            console.log(`[Agent] Extracted data:`, gatheredData);
+            logger.debug(`[Agent] Extracted data:`, gatheredData);
           }
         }
 
@@ -489,9 +510,14 @@ export class Agent<TContext = unknown> {
           this.options.persistence?.autoSave !== false
         ) {
           await this.persistenceManager.saveSessionState(session.id, session);
-          console.log(
+          logger.debug(
             `[Agent] Auto-saved session state to persistence: ${session.id}`
           );
+        }
+
+        // Update current session if we have one
+        if (chunk.done && this.currentSession) {
+          this.currentSession = session;
         }
 
         yield {
@@ -500,8 +526,23 @@ export class Agent<TContext = unknown> {
           done: chunk.done,
           session, // Return updated session
           toolCalls,
+          isRouteComplete,
         };
       }
+    } else if (isRouteComplete && selectedRoute) {
+      // Route is complete - set state to END_STATE marker and yield completion signal
+      session = enterState(session, END_STATE_ID, "Route completed");
+      logger.debug(
+        `[Agent] Route ${selectedRoute.title} completed. Entered END_STATE state.`
+      );
+      yield {
+        delta: "",
+        accumulated: "",
+        done: true,
+        session,
+        toolCalls: undefined,
+        isRouteComplete: true,
+      };
     } else {
       // Fallback: No routes defined, stream a simple response
       const fallbackPrompt = new PromptComposer<TContext>()
@@ -536,12 +577,18 @@ export class Agent<TContext = unknown> {
       });
 
       for await (const chunk of stream) {
+        // Update current session if we have one
+        if (chunk.done && this.currentSession) {
+          this.currentSession = session;
+        }
+
         yield {
           delta: chunk.delta,
           accumulated: chunk.accumulated,
           done: chunk.done,
           session, // Return updated session
           toolCalls: undefined,
+          isRouteComplete: false,
         };
       }
     }
@@ -560,6 +607,7 @@ export class Agent<TContext = unknown> {
     message: string;
     session?: SessionState;
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+    isRouteComplete?: boolean;
   }> {
     const { history, contextOverride, signal } = params;
 
@@ -579,8 +627,9 @@ export class Agent<TContext = unknown> {
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
 
-    // Initialize or get session
-    let session = params.session || createSession();
+    // Initialize or get session (use current session if available)
+    let session =
+      params.session || this.currentSession || createSession<TContext>();
 
     // PHASE 1: TOOL EXECUTION - Execute tools if current state has toolState
     if (session.currentRoute && session.currentState) {
@@ -619,13 +668,13 @@ export class Agent<TContext = unknown> {
                 session,
                 result.extractedUpdate
               );
-              console.log(
+              logger.debug(
                 `[Agent] Tool updated extracted data:`,
                 result.extractedUpdate
               );
             }
 
-            console.log(
+            logger.debug(
               `[Agent] Executed tool: ${result.toolName} (success: ${result.success})`
             );
           }
@@ -637,6 +686,7 @@ export class Agent<TContext = unknown> {
     let selectedRoute: Route<TContext> | undefined;
     let responseDirectives: string[] | undefined;
     let selectedState: State<TContext> | undefined;
+    let isRouteComplete = false;
 
     if (this.routes.length > 0) {
       const orchestration = await this.routingEngine.decideRouteAndState({
@@ -658,6 +708,14 @@ export class Agent<TContext = unknown> {
       selectedState = orchestration.selectedState;
       responseDirectives = orchestration.responseDirectives;
       session = orchestration.session;
+      isRouteComplete = orchestration.isRouteComplete || false;
+
+      // Log if route is complete
+      if (isRouteComplete) {
+        logger.debug(
+          `[Agent] Route complete: all required data collected, END_STATE reached`
+        );
+      }
     }
 
     // PHASE 3: DETERMINE NEXT STATE - Use state from combined decision or get initial state
@@ -666,7 +724,7 @@ export class Agent<TContext = unknown> {
       | Array<{ toolName: string; arguments: Record<string, unknown> }>
       | undefined = undefined;
 
-    if (selectedRoute) {
+    if (selectedRoute && !isRouteComplete) {
       let nextState: State<TContext>;
 
       // If we have a selected state from the combined routing decision, use it
@@ -681,13 +739,13 @@ export class Agent<TContext = unknown> {
         );
         if (candidates.length > 0) {
           nextState = candidates[0].state;
-          console.log(
+          logger.debug(
             `[Agent] Using first valid state: ${nextState.id} for new route`
           );
         } else {
           // Fallback to initial state even if it should be skipped
           nextState = selectedRoute.initialState;
-          console.warn(
+          logger.warn(
             `[Agent] No valid states found, using initial state: ${nextState.id}`
           );
         }
@@ -695,7 +753,7 @@ export class Agent<TContext = unknown> {
 
       // Update session with next state
       session = enterState(session, nextState.id, nextState.description);
-      console.log(`[Agent] Entered state: ${nextState.id}`);
+      logger.debug(`[Agent] Entered state: ${nextState.id}`);
 
       // PHASE 4: RESPONSE GENERATION - Generate message using selected route and state
       // Get last user message
@@ -753,7 +811,7 @@ export class Agent<TContext = unknown> {
         // Merge gathered data into session
         if (Object.keys(gatheredData).length > 0) {
           session = mergeExtracted(session, gatheredData);
-          console.log(`[Agent] Extracted data:`, gatheredData);
+          logger.debug(`[Agent] Extracted data:`, gatheredData);
         }
       }
 
@@ -768,6 +826,13 @@ export class Agent<TContext = unknown> {
             .contextUpdate as Partial<TContext>
         );
       }
+    } else if (isRouteComplete && selectedRoute) {
+      // Route is complete - set state to END_STATE marker and return completion signal
+      session = enterState(session, END_STATE_ID, "Route completed");
+      message = "";
+      logger.debug(
+        `[Agent] Route ${selectedRoute.title} completed. Entered END_STATE state.`
+      );
     } else {
       // Fallback: No routes defined, generate a simple response
       const fallbackPrompt = new PromptComposer<TContext>()
@@ -811,15 +876,21 @@ export class Agent<TContext = unknown> {
       this.options.persistence?.autoSave !== false
     ) {
       await this.persistenceManager.saveSessionState(session.id, session);
-      console.log(
+      logger.debug(
         `[Agent] Auto-saved session state to persistence: ${session.id}`
       );
+    }
+
+    // Update current session if we have one
+    if (this.currentSession) {
+      this.currentSession = session;
     }
 
     return {
       message,
       session, // Return updated session with route/state info
       toolCalls,
+      isRouteComplete: !isRouteComplete, // Indicates if the route has reached END_STATE with all data collected
     };
   }
 
@@ -906,5 +977,48 @@ export class Agent<TContext = unknown> {
 
     const allowedDomains = route.getDomains();
     return this.domainRegistry.getFiltered(allowedDomains);
+  }
+
+  /**
+   * Set the current session for convenience methods
+   * @param session - Session state to use for subsequent calls
+   */
+  setCurrentSession(session: SessionState): void {
+    this.currentSession = session;
+  }
+
+  /**
+   * Get the current session (if set)
+   */
+  getCurrentSession(): SessionState | undefined {
+    return this.currentSession;
+  }
+
+  /**
+   * Clear the current session
+   */
+  clearCurrentSession(): void {
+    this.currentSession = undefined;
+  }
+
+  /**
+   * Get extracted data from current session
+   * @param routeId - Optional route ID to get data for (uses current route if not provided)
+   * @returns The extracted data from the current session
+   */
+  getExtractedData<TExtracted = unknown>(
+    routeId?: string
+  ): Partial<TExtracted> {
+    if (!this.currentSession) {
+      return {} as Partial<TExtracted>;
+    }
+    if (routeId) {
+      return (
+        (this.currentSession.extractedByRoute[
+          routeId
+        ] as Partial<TExtracted>) || ({} as Partial<TExtracted>)
+      );
+    }
+    return this.currentSession.extracted as Partial<TExtracted>;
   }
 }

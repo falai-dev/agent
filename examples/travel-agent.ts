@@ -7,7 +7,7 @@ import {
   Agent,
   defineTool,
   OpenRouterProvider,
-  END_ROUTE,
+  END_STATE,
   EventSource,
   createMessageEvent,
   createSession,
@@ -200,6 +200,7 @@ async function createTravelAgent() {
       customerId: "test-123",
       customerName: "Test Customer",
     },
+    debug: true,
   });
 
   // Add domain glossary
@@ -328,7 +329,7 @@ async function createTravelAgent() {
   });
 
   provideConfirmation.transitionTo({
-    state: END_ROUTE,
+    state: END_STATE,
     condition: "Customer has confirmation, booking flow complete",
   });
 
@@ -388,7 +389,7 @@ async function createTravelAgent() {
   });
 
   provideStatus.transitionTo({
-    state: END_ROUTE,
+    state: END_STATE,
     condition: "Booking information provided to customer",
   });
 
@@ -431,16 +432,16 @@ async function main() {
     ),
   ];
 
-  console.log("Agent:", agent.name);
-  console.log("Description:", agent.description);
+  console.info("Agent:", agent.name);
+  console.info("Description:", agent.description);
 
   // Turn 1 - Agent extracts data and starts booking flow
   const response1 = await agent.respond({ history, session });
-  console.log("\n=== TURN 1 ===");
-  console.log("Agent:", response1.message);
-  console.log("Route:", response1.session?.currentRoute?.title);
-  console.log("State:", response1.session?.currentState?.id);
-  console.log("Extracted:", response1.session?.extracted);
+  console.info("\n=== TURN 1 ===");
+  console.info("Agent:", response1.message);
+  console.info("Route:", response1.session?.currentRoute?.title);
+  console.info("State:", response1.session?.currentState?.id);
+  console.info("Extracted:", response1.session?.extracted);
 
   // Session state updated with progress
   session = response1.session!;
@@ -454,10 +455,10 @@ async function main() {
     ];
 
     const response2 = await agent.respond({ history: history2, session });
-    console.log("\n=== TURN 2 ===");
-    console.log("Agent:", response2.message);
-    console.log("Updated extracted:", response2.session?.extracted);
-    console.log("Current state:", response2.session?.currentState?.id);
+    console.info("\n=== TURN 2 ===");
+    console.info("Agent:", response2.message);
+    console.info("Updated extracted:", response2.session?.extracted);
+    console.info("Current state:", response2.session?.currentState?.id);
   }
 
   // Demonstrate booking status check
@@ -474,24 +475,65 @@ async function main() {
     history: statusHistory,
     session: statusSession,
   });
-  console.log("\n=== BOOKING STATUS CHECK ===");
-  console.log("Agent:", statusResponse.message);
-  console.log("Route:", statusResponse.session?.currentRoute?.title);
-  console.log("Extracted:", statusResponse.session?.extracted);
+  console.info("\n=== BOOKING STATUS CHECK ===");
+  console.info("Agent:", statusResponse.message);
+  console.info("Route:", statusResponse.session?.currentRoute?.title);
+  console.info("Extracted:", statusResponse.session?.extracted);
 
   // Show session state management benefits
-  console.log("\n=== SESSION STATE BENEFITS ===");
-  console.log("✅ Always-on routing - respects user intent changes");
-  console.log("✅ Data persistence - extracted data survives across turns");
-  console.log(
+  console.info("\n=== SESSION STATE BENEFITS ===");
+  console.info("✅ Always-on routing - respects user intent changes");
+  console.info("✅ Data persistence - extracted data survives across turns");
+  console.info(
     "✅ State progression - intelligent flow based on collected data"
   );
-  console.log("✅ Context awareness - router sees current progress");
+  console.info("✅ Context awareness - router sees current progress");
+
+  if (statusResponse.isRouteComplete) {
+    console.info("\n✅ Booking status check complete!");
+    await logBookingStatusCheck(
+      agent.getExtractedData(
+        statusResponse.session?.id
+      ) as unknown as BookingStatusData
+    );
+  }
+}
+
+/**
+ * Mock function to send a booking confirmation.
+ * @param data - The flight booking data.
+ */
+async function sendBookingConfirmation(data: FlightBookingData) {
+  console.info("\n" + "=".repeat(60));
+  console.info("🚀 Sending Booking Confirmation...");
+  console.info("=".repeat(60));
+  console.info("Booking Details:", JSON.stringify(data, null, 2));
+  console.info(
+    `   - Sending confirmation for ${data.passengers} passengers to ${data.destination}.`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.info("✨ Confirmation sent!");
+}
+
+/**
+ * Mock function to log a booking status check.
+ * @param data - The booking status data.
+ */
+async function logBookingStatusCheck(data: BookingStatusData) {
+  console.info("\n" + "=".repeat(60));
+  console.info("📝 Logging Booking Status Check...");
+  console.info("=".repeat(60));
+  console.info("Check Details:", JSON.stringify(data, null, 2));
+  console.info(
+    `   - Logging status check for confirmation #${data.confirmationNumber}.`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  console.info("✨ Status check logged!");
 }
 
 // Run if executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(console.error);
+  main().catch((err) => console.error(err));
 }
 
 export { createTravelAgent };

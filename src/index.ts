@@ -62,7 +62,7 @@ export type {
 } from "./adapters/OpenSearchAdapter";
 
 // Constants
-export { END_ROUTE } from "./constants";
+export { END_STATE, END_STATE_ID } from "./constants";
 
 // Utils
 export { generateRouteId, generateStateId, generateToolId } from "./utils/id";

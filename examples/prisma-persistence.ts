@@ -11,7 +11,7 @@ import {
   PrismaAdapter,
   createMessageEvent,
   EventSource,
-  createSession,
+  END_STATE,
 } from "../src/index";
 
 // @ts-ignore
@@ -55,6 +55,21 @@ interface FlightBookingData {
   returnDate?: string;
   passengers: number;
   cabinClass: "economy" | "premium" | "business" | "first";
+}
+
+// Extracted data type for onboarding
+interface OnboardingData {
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+  country: string;
+}
+
+// Extracted data type for contact form
+interface ContactFormData {
+  name: string;
+  email: string;
+  message: string;
 }
 
 async function example() {
@@ -165,6 +180,8 @@ async function example() {
     chatState: "Present options and confirm booking details",
     requiredData: ["destination", "departureDate", "passengers", "cabinClass"],
   });
+
+  confirmBooking.transitionTo({ state: END_STATE });
 
   /**
    * Get persistence manager from agent
@@ -305,6 +322,13 @@ async function example() {
 
   session = response2.session!;
 
+  if (response2.isRouteComplete) {
+    console.log("\n✅ Flight booking complete!");
+    await sendFlightConfirmation(
+      agent.getExtractedData(session.id) as FlightBookingData
+    );
+  }
+
   /**
    * Load session state from database (demonstrates persistence)
    */
@@ -354,13 +378,6 @@ async function advancedExample() {
       currency: string;
       language: string;
     };
-  }
-
-  interface OnboardingData {
-    fullName: string;
-    email: string;
-    phoneNumber: string;
-    country: string;
   }
 
   const agent = new Agent<UserContext>({
@@ -447,7 +464,8 @@ async function advancedExample() {
     })
     .transitionTo({
       chatState: "Confirm and complete onboarding",
-    });
+    })
+    .transitionTo({ state: END_STATE });
 
   const persistence = agent.getPersistenceManager()!;
 
@@ -481,6 +499,13 @@ async function advancedExample() {
     content: response.message,
   });
 
+  if (response.isRouteComplete) {
+    console.log("\n✅ Onboarding complete!");
+    await sendOnboardingEmail(
+      agent.getExtractedData(sessionData.id) as OnboardingData
+    );
+  }
+
   console.log("✅ Session state automatically saved to database!");
 
   await prisma.$disconnect();
@@ -491,12 +516,6 @@ async function advancedExample() {
  */
 async function quickStart() {
   const prisma = new PrismaClient();
-
-  interface ContactFormData {
-    name: string;
-    email: string;
-    message: string;
-  }
 
   const agent = new Agent({
     name: "Support Agent",
@@ -532,7 +551,8 @@ async function quickStart() {
     })
     .transitionTo({
       chatState: "Confirm submission",
-    });
+    })
+    .transitionTo({ state: END_STATE });
 
   const persistence = agent.getPersistenceManager()!;
 
@@ -557,9 +577,63 @@ async function quickStart() {
 
   console.log("✅ Response:", response.message);
   console.log("📊 Extracted:", response.session?.extracted);
+
+  if (response.isRouteComplete) {
+    console.log("\n✅ Contact form submitted!");
+    await logContactForm(
+      agent.getExtractedData(sessionData.id) as ContactFormData
+    );
+  }
+
   console.log("💾 Session state auto-saved to Prisma!");
 
   await prisma.$disconnect();
+}
+
+/**
+ * Mock function to send a flight confirmation email.
+ * @param data - The flight booking data.
+ */
+async function sendFlightConfirmation(
+  data: Partial<FlightBookingData> | undefined
+) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Sending Flight Confirmation...");
+  console.log("=".repeat(60));
+  console.log("Booking Details:", JSON.stringify(data, null, 2));
+  console.log(
+    `   - Sending confirmation for ${data?.passengers} passengers to ${data?.destination}.`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Confirmation sent!");
+}
+
+/**
+ * Mock function to send an onboarding email.
+ * @param data - The onboarding data.
+ */
+async function sendOnboardingEmail(data: Partial<OnboardingData> | undefined) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Sending Onboarding Email...");
+  console.log("=".repeat(60));
+  console.log("Onboarding Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Sending welcome email to ${data?.email}.`);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Email sent!");
+}
+
+/**
+ * Mock function to log a contact form submission.
+ * @param data - The contact form data.
+ */
+async function logContactForm(data: Partial<ContactFormData> | undefined) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📝 Logging Contact Form Submission...");
+  console.log("=".repeat(60));
+  console.log("Submission Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Logging message from ${data?.name}.`);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  console.log("✨ Submission logged!");
 }
 
 // Run the example

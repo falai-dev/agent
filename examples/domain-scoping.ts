@@ -17,6 +17,8 @@ import {
   createMessageEvent,
   EventSource,
   createSession,
+  END_STATE,
+  defineTool,
 } from "../src/index";
 import { OpenRouterProvider } from "../src/providers";
 
@@ -102,11 +104,55 @@ agent.createRoute({
   domains: ["scraping"], // ✅ Only scraping tools available
 });
 
-agent.createRoute({
+const scheduleEventTool = defineTool({
+  id: "scheduleEvent",
+  name: "scheduleEvent",
+  description: "Schedules an event in the calendar",
+  handler: async ({ extracted }) => {
+    const { title, date, description } = extracted as {
+      title: string;
+      date: string;
+      description: string;
+    };
+    console.log(`[Calendar] Scheduling event: ${title} on ${date}`);
+    return { data: { eventId: "evt_123", success: true } };
+  },
+});
+
+agent.createRoute<{ title: string; date: string; description: string }>({
   title: "Schedule Meeting",
   description: "Book and manage appointments",
   conditions: ["User wants to schedule, view, or cancel events"],
   domains: ["calendar"], // ✅ Only calendar tools available
+  extractionSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      date: { type: "string" },
+      description: { type: "string" },
+    },
+    required: ["title", "date"],
+  },
+  steps: [
+    {
+      chatState: "What is the title of the meeting?",
+      gather: ["title"],
+    },
+    {
+      chatState: "When would you like to schedule it?",
+      gather: ["date"],
+    },
+    {
+      chatState: "Any description for the meeting?",
+      gather: ["description"],
+    },
+    {
+      toolState: scheduleEventTool,
+    },
+    {
+      chatState: "The meeting has been scheduled.",
+    },
+  ],
 });
 
 agent.createRoute({
@@ -137,11 +183,11 @@ async function demonstrateScoping() {
   // Example 1: Data Collection route - only scraping tools available
   console.log("1️⃣  Example: User wants to scrape data");
   const history1 = [
-    createMessageEvent(
-      EventSource.CUSTOMER,
-      "Alice",
-      "Can you scrape the homepage of example.com?"
-    ),
+    createMessageEvent({
+      source: EventSource.CUSTOMER,
+      participantName: "Alice",
+      message: "Can you scrape the homepage of example.com?",
+    }),
   ];
 
   // Initialize session state for multi-turn conversation
@@ -158,11 +204,11 @@ async function demonstrateScoping() {
   // Example 2: Schedule Meeting route - only calendar tools available
   console.log("2️⃣  Example: User wants to schedule a meeting");
   const history2 = [
-    createMessageEvent(
-      EventSource.CUSTOMER,
-      "Bob",
-      "Schedule a meeting for tomorrow at 2pm"
-    ),
+    createMessageEvent({
+      source: EventSource.CUSTOMER,
+      participantName: "Bob",
+      message: "Schedule a meeting for tomorrow at 2pm",
+    }),
   ];
 
   const response2 = await agent.respond({ history: history2, session });
@@ -170,17 +216,27 @@ async function demonstrateScoping() {
   console.log(`Available tools in this route: calendar only`);
   console.log(`Response: ${response2.message}\n`);
 
+  if (response2.isRouteComplete) {
+    console.log("\n✅ Meeting scheduling complete!");
+    await sendMeetingInvite(
+      agent.getExtractedData(response2.session?.id) as {
+        title: string;
+        date: string;
+      }
+    );
+  }
+
   // Update session again
   session = response2.session!;
 
   // Example 3: Customer Support route - NO tools available
   console.log("3️⃣  Example: User has a general question");
   const history3 = [
-    createMessageEvent(
-      EventSource.CUSTOMER,
-      "Charlie",
-      "What are your business hours?"
-    ),
+    createMessageEvent({
+      source: EventSource.CUSTOMER,
+      participantName: "Charlie",
+      message: "What are your business hours?",
+    }),
   ];
 
   const response3 = await agent.respond({ history: history3, session });
@@ -194,11 +250,11 @@ async function demonstrateScoping() {
   // Example 4: Admin Support route - ALL tools available (for demo purposes)
   console.log("4️⃣  Example: Admin needs full access");
   const history4 = [
-    createMessageEvent(
-      EventSource.CUSTOMER,
-      "Admin",
-      "I need to generate a report and process a refund"
-    ),
+    createMessageEvent({
+      source: EventSource.CUSTOMER,
+      participantName: "Admin",
+      message: "I need to generate a report and process a refund",
+    }),
   ];
 
   const response4 = await agent.respond({ history: history4, session });
@@ -287,6 +343,20 @@ console.log(
     "Admin Support"
   )}`
 );
+
+/**
+ * Mock function to send a meeting invite.
+ * @param data - The meeting data.
+ */
+async function sendMeetingInvite(data: { title: string; date: string }) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Sending Meeting Invite...");
+  console.log("=".repeat(60));
+  console.log("Meeting Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Sending invite for "${data.title}" on ${data.date}.`);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Invite sent!");
+}
 
 // Run demonstration
 if (import.meta.url === `file://${process.argv[1]}`) {

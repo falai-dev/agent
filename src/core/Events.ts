@@ -81,17 +81,80 @@ export function createMessageEvent(
       extracted?: Record<string, unknown>;
     };
   }
-): Event<MessageEventData> {
-  return {
-    kind: EventKind.MESSAGE,
-    source,
-    data: {
-      participant: { display_name: participantName },
-      message,
-      session: options?.session,
-    },
-    timestamp: options?.timestamp || new Date().toISOString(),
+): Event<MessageEventData>;
+export function createMessageEvent(options: {
+  source: EventSource;
+  participantName: string;
+  message: string;
+  timestamp?: string;
+  session?: {
+    routeId?: string;
+    routeTitle?: string;
+    stateId?: string;
+    stateDescription?: string;
+    extracted?: Record<string, unknown>;
   };
+}): Event<MessageEventData>;
+export function createMessageEvent(
+  sourceOrOptions:
+    | EventSource
+    | {
+        source: EventSource;
+        participantName: string;
+        message: string;
+        timestamp?: string;
+        session?: {
+          routeId?: string;
+          routeTitle?: string;
+          stateId?: string;
+          stateDescription?: string;
+          extracted?: Record<string, unknown>;
+        };
+      },
+  participantName?: string,
+  message?: string,
+  options?: {
+    timestamp?: string;
+    session?: {
+      routeId?: string;
+      routeTitle?: string;
+      stateId?: string;
+      stateDescription?: string;
+      extracted?: Record<string, unknown>;
+    };
+  }
+): Event<MessageEventData> {
+  if (typeof sourceOrOptions === "object") {
+    // New signature: createMessageEvent(options)
+    const {
+      source,
+      participantName: pName,
+      message: msg,
+      ...restOptions
+    } = sourceOrOptions;
+    return {
+      kind: EventKind.MESSAGE,
+      source,
+      data: {
+        participant: { display_name: pName },
+        message: msg,
+        session: restOptions.session,
+      },
+      timestamp: restOptions.timestamp || new Date().toISOString(),
+    };
+  } else {
+    // Original signature: createMessageEvent(source, participantName, message, options)
+    return {
+      kind: EventKind.MESSAGE,
+      source: sourceOrOptions,
+      data: {
+        participant: { display_name: participantName! },
+        message: message!,
+        session: options?.session,
+      },
+      timestamp: options?.timestamp || new Date().toISOString(),
+    };
+  }
 }
 
 /**

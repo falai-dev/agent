@@ -8,6 +8,7 @@ import type { AiProvider } from "../types/ai";
 import { enterRoute, mergeExtracted } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
 import { getLastMessageFromHistory } from "../utils/event";
+import { logger } from "../utils/logger";
 
 export interface RoutingDecisionOutput {
   context: string;
@@ -69,12 +70,12 @@ export class RoutingEngine<TContext = unknown> {
       updatedSession = enterRoute(session, route.id, route.title);
       if (route.initialData) {
         updatedSession = mergeExtracted(updatedSession, route.initialData);
-        console.log(
+        logger.debug(
           `[RoutingEngine] Single-route: Merged initial data:`,
           route.initialData
         );
       }
-      console.log(
+      logger.debug(
         `[RoutingEngine] Single-route: Entered route: ${route.title}`
       );
     }
@@ -90,7 +91,7 @@ export class RoutingEngine<TContext = unknown> {
     );
 
     if (candidates.length === 0) {
-      console.warn(`[RoutingEngine] Single-route: No valid states found`);
+      logger.warn(`[RoutingEngine] Single-route: No valid states found`);
       return { selectedRoute, session: updatedSession };
     }
 
@@ -98,20 +99,27 @@ export class RoutingEngine<TContext = unknown> {
     if (candidates.length === 1) {
       const isRouteComplete = candidates[0].isRouteComplete;
       if (isRouteComplete) {
-        console.log(
-          `[RoutingEngine] Single-route: Route complete - all data collected`
+        logger.debug(
+          `[RoutingEngine] Single-route: Route complete - all data collected, END_STATE reached`
         );
+        // Don't return a selectedState when route is complete - there's no state to enter
+        return {
+          selectedRoute,
+          selectedState: undefined,
+          session: updatedSession,
+          isRouteComplete: true,
+        };
       } else {
-        console.log(
+        logger.debug(
           `[RoutingEngine] Single-route: Only one valid state: ${candidates[0].state.id}`
         );
+        return {
+          selectedRoute,
+          selectedState: candidates[0].state,
+          session: updatedSession,
+          isRouteComplete: false,
+        };
       }
-      return {
-        selectedRoute,
-        selectedState: candidates[0].state,
-        session: updatedSession,
-        isRouteComplete,
-      };
     }
 
     // Multiple candidates - use AI to select best state
@@ -154,14 +162,14 @@ export class RoutingEngine<TContext = unknown> {
     )?.state;
 
     if (selectedState) {
-      console.log(
+      logger.debug(
         `[RoutingEngine] Single-route: AI selected state: ${selectedState.id}`
       );
-      console.log(
+      logger.debug(
         `[RoutingEngine] Single-route: Reasoning: ${stateResult.structured?.reasoning}`
       );
     } else {
-      console.warn(
+      logger.warn(
         `[RoutingEngine] Single-route: Invalid state ID returned, using first candidate`
       );
     }
@@ -175,8 +183,75 @@ export class RoutingEngine<TContext = unknown> {
   }
 
   /**
+   * Recursively traverse state chain to find first non-skipped state or END_STATE
+   * @private
+   */
+  private findFirstValidStateRecursive<TExtracted = unknown>(
+    currentState: State<TContext, TExtracted>,
+    extracted: Partial<TExtracted>,
+    visited: Set<string>
+  ): {
+    state?: State<TContext, TExtracted>;
+    condition?: string;
+    isRouteComplete?: boolean;
+  } {
+    // Prevent infinite loops
+    if (visited.has(currentState.id)) {
+      return {};
+    }
+    visited.add(currentState.id);
+
+    const transitions = currentState.getTransitions();
+
+    for (const transition of transitions) {
+      const target = transition.getTarget();
+
+      // Check for END_STATE transition
+      if (
+        !target &&
+        transition.spec.state &&
+        typeof transition.spec.state === "symbol"
+      ) {
+        // Found END_STATE - route is complete
+        return { isRouteComplete: true };
+      }
+
+      if (!target) continue;
+
+      // If target should NOT be skipped, we found our state
+      if (!target.shouldSkip(extracted)) {
+        logger.debug(
+          `[RoutingEngine] Found valid state after skipping: ${target.id}`
+        );
+        return {
+          state: target,
+          condition: transition.condition,
+        };
+      }
+
+      // Target should be skipped too - recurse deeper
+      logger.debug(
+        `[RoutingEngine] Skipping state ${target.id} (skipIf condition met), continuing traversal...`
+      );
+      const result = this.findFirstValidStateRecursive(
+        target,
+        extracted,
+        visited
+      );
+
+      // If we found something (a valid state or END_STATE), return it
+      if (result.state || result.isRouteComplete) {
+        return result;
+      }
+    }
+
+    // No valid states or END_STATE found in this branch
+    return {};
+  }
+
+  /**
    * Identify valid next candidate states based on current state and extracted data
-   * Returns state with isRouteComplete flag if route is complete (all states skipped + has END_ROUTE transition)
+   * Returns state with isRouteComplete flag if route is complete (all states skipped + has END_STATE transition)
    */
   getCandidateStates<TExtracted = unknown>(
     route: Route<TContext, TExtracted>,
@@ -200,18 +275,35 @@ export class RoutingEngine<TContext = unknown> {
     if (!currentState) {
       const initialState = route.initialState;
       if (initialState.shouldSkip(extracted)) {
-        const transitions = initialState.getTransitions();
-        for (const transition of transitions) {
-          const target = transition.getTarget();
-          if (target && !target.shouldSkip(extracted)) {
-            candidates.push({
-              state: target,
-              condition: transition.condition,
-              requiredData: target.requiredData,
-              gatherFields: target.gatherFields,
-            });
-          }
+        // Initial state should be skipped - recursively traverse to find first non-skipped state or END_STATE
+        const result = this.findFirstValidStateRecursive(
+          initialState,
+          extracted,
+          new Set<string>()
+        );
+
+        if (result.isRouteComplete) {
+          // All states are skipped and we reached END_STATE
+          logger.debug(
+            `[RoutingEngine] Route complete on entry: all states skipped, END_STATE reached`
+          );
+          return [
+            {
+              state: initialState,
+              condition: "Route complete - all data collected on entry",
+              isRouteComplete: true,
+            },
+          ];
+        } else if (result.state) {
+          // Found a non-skipped state
+          candidates.push({
+            state: result.state,
+            condition: result.condition,
+            requiredData: result.state.requiredData,
+            gatherFields: result.state.gatherFields,
+          });
         }
+        // If no state found and not complete, fall through to return empty candidates
       } else {
         candidates.push({
           state: initialState,
@@ -228,7 +320,7 @@ export class RoutingEngine<TContext = unknown> {
     for (const transition of transitions) {
       const target = transition.getTarget();
 
-      // Check for END_ROUTE transition (no target state)
+      // Check for END_STATE transition (no target state)
       if (
         !target &&
         transition.spec.state &&
@@ -241,9 +333,28 @@ export class RoutingEngine<TContext = unknown> {
       if (!target) continue;
 
       if (target.shouldSkip(extracted)) {
-        console.log(
+        logger.debug(
           `[RoutingEngine] Skipping state ${target.id} (skipIf condition met)`
         );
+
+        // Recursively traverse to find next valid state or END_STATE
+        const result = this.findFirstValidStateRecursive(
+          target,
+          extracted,
+          new Set<string>([currentState.id]) // Already visited current state
+        );
+
+        if (result.isRouteComplete) {
+          hasEndRoute = true;
+        } else if (result.state) {
+          // Found a non-skipped state deeper in the chain
+          candidates.push({
+            state: result.state,
+            condition: result.condition || transition.condition,
+            requiredData: result.state.requiredData,
+            gatherFields: result.state.gatherFields,
+          });
+        }
         continue;
       }
 
@@ -257,10 +368,10 @@ export class RoutingEngine<TContext = unknown> {
 
     // If no valid candidates found
     if (candidates.length === 0) {
-      // If current state has END_ROUTE transition, the route is complete
+      // If current state has END_STATE transition, the route is complete
       if (hasEndRoute) {
-        console.log(
-          `[RoutingEngine] Route complete: all states processed, END_ROUTE reached`
+        logger.debug(
+          `[RoutingEngine] Route complete: all states processed, END_STATE reached`
         );
         // Return current state with completion flag
         return [
@@ -360,7 +471,7 @@ export class RoutingEngine<TContext = unknown> {
         // Check if route is complete
         if (candidates.length === 1 && candidates[0].isRouteComplete) {
           isRouteComplete = true;
-          console.log(
+          logger.debug(
             `[RoutingEngine] Route ${activeRoute.title} is complete - all data collected`
           );
           // Don't include states in routing if route is complete
@@ -373,7 +484,7 @@ export class RoutingEngine<TContext = unknown> {
             requiredData: c.requiredData,
             gatherFields: c.gatherFields,
           }));
-          console.log(
+          logger.debug(
             `[RoutingEngine] Found ${activeRouteStates.length} candidate states for active route`
           );
         }
@@ -432,17 +543,17 @@ export class RoutingEngine<TContext = unknown> {
           routingResult.structured.selectedStateId
         );
         if (selectedState) {
-          console.log(
+          logger.debug(
             `[RoutingEngine] AI selected state: ${selectedState.id} in active route`
           );
-          console.log(
+          logger.debug(
             `[RoutingEngine] State reasoning: ${routingResult.structured.stateReasoning}`
           );
         }
       }
 
       if (selectedRoute) {
-        console.log(`[RoutingEngine] Selected route: ${selectedRoute.title}`);
+        logger.debug(`[RoutingEngine] Selected route: ${selectedRoute.title}`);
         if (
           !session.currentRoute ||
           session.currentRoute.id !== selectedRoute.id
@@ -457,12 +568,12 @@ export class RoutingEngine<TContext = unknown> {
               updatedSession,
               selectedRoute.initialData
             );
-            console.log(
+            logger.debug(
               `[RoutingEngine] Merged initial data:`,
               selectedRoute.initialData
             );
           }
-          console.log(`[RoutingEngine] Entered route: ${selectedRoute.title}`);
+          logger.debug(`[RoutingEngine] Entered route: ${selectedRoute.title}`);
         }
       }
     }

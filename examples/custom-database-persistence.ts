@@ -19,6 +19,7 @@ import {
   SessionState,
   MessageEventData,
   Event,
+  END_STATE,
 } from "../src/index";
 
 /**
@@ -32,6 +33,7 @@ interface CustomDatabaseSession {
   currentState?: string;
   collectedData?: {
     extracted?: Record<string, unknown>;
+    extractedByRoute?: Record<string, Partial<unknown>>;
     routeHistory?: unknown[];
     currentRouteTitle?: string;
     currentStateDescription?: string;
@@ -193,7 +195,13 @@ async function example() {
       id: "confirm_details",
       chatState: "Confirm all details",
       requiredData: ["fullName", "email", "companyName"],
-    });
+    })
+    .transitionTo({
+      id: "complete_onboarding",
+      chatState:
+        "Thank you! Your account is set up. You will receive a confirmation email shortly.",
+    })
+    .transitionTo({ state: END_STATE });
 
   /**
    * Create or load session from your custom database
@@ -234,6 +242,11 @@ async function example() {
         : undefined,
       extracted:
         (dbSession.collectedData?.extracted as Partial<OnboardingData>) || {},
+      extractedByRoute:
+        (dbSession.collectedData?.extractedByRoute as Record<
+          string,
+          Partial<OnboardingData>
+        >) || {},
       routeHistory:
         (dbSession.collectedData
           ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
@@ -373,6 +386,14 @@ async function example() {
 
   console.log("💾 Session saved to database");
 
+  // Check for route completion
+  if (response2.isRouteComplete) {
+    console.log("\n✅ Onboarding Complete!");
+    // In a real app, you would now trigger the next steps,
+    // like sending a welcome email, creating an account, etc.
+    await processOnboarding(response2.session?.extracted);
+  }
+
   /**
    * Demonstrate session recovery
    */
@@ -404,6 +425,11 @@ async function example() {
     extracted:
       (reloadedDbSession.collectedData?.extracted as Partial<OnboardingData>) ||
       {},
+    extractedByRoute:
+      (reloadedDbSession.collectedData?.extractedByRoute as Record<
+        string,
+        Partial<OnboardingData>
+      >) || {},
     routeHistory:
       (reloadedDbSession.collectedData
         ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
@@ -427,6 +453,23 @@ async function example() {
   console.log(`📜 Loaded ${messages.length} messages from history`);
 
   console.log("\n✅ Example complete!");
+}
+
+/**
+ * Mock function to simulate processing the completed onboarding data.
+ * @param data - The collected onboarding data.
+ */
+async function processOnboarding(data: Partial<OnboardingData> | undefined) {
+  console.log("\n🚀 Processing onboarding data...");
+  // Simulate creating a user account
+  console.log(
+    `   - Creating account for ${data?.fullName} at ${data?.companyName}`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Simulate sending a welcome email
+  console.log(`   - Sending welcome email to ${data?.email}`);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Onboarding processed successfully!");
 }
 
 /**

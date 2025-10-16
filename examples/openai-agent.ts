@@ -10,7 +10,7 @@ import {
   createMessageEvent,
   EventSource,
   createSession,
-  END_ROUTE,
+  END_STATE,
 } from "../src/index";
 
 // Custom context type
@@ -151,7 +151,7 @@ async function main() {
       "Present the weather information in a friendly way with temperature and condition",
   });
 
-  showWeather.transitionTo({ state: END_ROUTE });
+  showWeather.transitionTo({ state: END_STATE });
 
   // Example conversation with session state management
   console.log("🤖 Starting OpenAI Agent Example\n");
@@ -191,6 +191,14 @@ async function main() {
     // Update session with progress
     session = response.session!;
 
+    // Check for route completion
+    if (response.isRouteComplete) {
+      console.log("\n✅ Weather route complete!");
+      await logWeatherRequest(
+        agent.getExtractedData(session.id) as WeatherData
+      );
+    }
+
     console.log("\n✨ Session state benefits:");
     console.log("   ✅ Data extraction tracked across turns");
     console.log("   ✅ State progression managed automatically");
@@ -201,6 +209,20 @@ async function main() {
   } catch (error) {
     console.error("❌ Error:", error);
   }
+}
+
+/**
+ * Mock function to log the weather request for analytics.
+ * @param data - The weather data from the completed route.
+ */
+async function logWeatherRequest(data: WeatherData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("📊 Logging Weather Request for Analytics...");
+  console.log("=".repeat(60));
+  console.log("Request Details:", JSON.stringify(data, null, 2));
+  console.log(`   - Logging request for location: ${data.location}`);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  console.log("✨ Request logged!");
 }
 
 // Run if executed directly

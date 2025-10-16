@@ -24,8 +24,18 @@ export interface SessionState<TExtracted = Record<string, unknown>> {
     enteredAt: Date;
   };
 
-  /** Data extracted during the current route */
+  /**
+   * Data extracted during the current route
+   * This is a convenience reference to extractedByRoute[currentRoute.id]
+   */
   extracted: Partial<TExtracted>;
+
+  /**
+   * Extracted data organized by route ID
+   * Preserves data when switching between routes
+   * Format: { "routeId": { ...extractedData } }
+   */
+  extractedByRoute: Record<string, Partial<unknown>>;
 
   /** History of routes visited in this session */
   routeHistory: Array<{
@@ -55,6 +65,7 @@ export function createSession<TExtracted = Record<string, unknown>>(
   return {
     id: sessionId,
     extracted: {},
+    extractedByRoute: {},
     routeHistory: [],
     metadata: {
       ...metadata,
@@ -66,12 +77,19 @@ export function createSession<TExtracted = Record<string, unknown>>(
 
 /**
  * Helper to update session with new route
+ * Preserves extracted data per route in extractedByRoute map
  */
 export function enterRoute<TExtracted = Record<string, unknown>>(
   session: SessionState<TExtracted>,
   routeId: string,
   routeTitle: string
 ): SessionState<TExtracted> {
+  // Save current route's extracted data before switching
+  const extractedByRoute = { ...session.extractedByRoute };
+  if (session.currentRoute && Object.keys(session.extracted).length > 0) {
+    extractedByRoute[session.currentRoute.id] = session.extracted;
+  }
+
   // Exit current route if exists
   const routeHistory = [...session.routeHistory];
   if (session.currentRoute) {
@@ -83,6 +101,9 @@ export function enterRoute<TExtracted = Record<string, unknown>>(
     }
   }
 
+  // Load extracted data for new route (if resuming) or start fresh
+  const newExtracted = (extractedByRoute[routeId] as Partial<TExtracted>) || {};
+
   // Enter new route
   const now = new Date();
   return {
@@ -93,7 +114,8 @@ export function enterRoute<TExtracted = Record<string, unknown>>(
       enteredAt: now,
     },
     currentState: undefined,
-    extracted: {}, // Reset extracted data for new route
+    extracted: newExtracted, // Load route's data or start fresh
+    extractedByRoute,
     routeHistory: [
       ...routeHistory,
       {
@@ -133,17 +155,27 @@ export function enterState<TExtracted = Record<string, unknown>>(
 
 /**
  * Helper to merge extracted data into session
+ * Updates both the extracted field and the extractedByRoute map
  */
 export function mergeExtracted<TExtracted = Record<string, unknown>>(
   session: SessionState<TExtracted>,
   extracted: Partial<TExtracted>
 ): SessionState<TExtracted> {
+  const newExtracted = {
+    ...session.extracted,
+    ...extracted,
+  };
+
+  // Also update the extractedByRoute map for the current route
+  const extractedByRoute = { ...session.extractedByRoute };
+  if (session.currentRoute) {
+    extractedByRoute[session.currentRoute.id] = newExtracted;
+  }
+
   return {
     ...session,
-    extracted: {
-      ...session.extracted,
-      ...extracted,
-    },
+    extracted: newExtracted,
+    extractedByRoute,
     metadata: {
       ...session.metadata,
       lastUpdatedAt: new Date(),
@@ -167,6 +199,7 @@ export function sessionStateToData<TExtracted = Record<string, unknown>>(
     currentState: session.currentState?.id,
     collectedData: {
       extracted: session.extracted,
+      extractedByRoute: session.extractedByRoute, // Include per-route data
       routeHistory: session.routeHistory,
       currentRouteTitle: session.currentRoute?.title,
       currentStateDescription: session.currentState?.description,
@@ -210,6 +243,9 @@ export function sessionDataToState<TExtracted = Record<string, unknown>>(
         }
       : undefined,
     extracted: (collectedData.extracted as Partial<TExtracted>) || {},
+    extractedByRoute:
+      (collectedData.extractedByRoute as Record<string, Partial<unknown>>) ||
+      {}, // Restore per-route data
     routeHistory:
       (collectedData.routeHistory as SessionState<TExtracted>["routeHistory"]) ||
       [],

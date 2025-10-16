@@ -21,6 +21,7 @@ import {
   type Guideline,
   type Capability,
   type RouteOptions,
+  END_STATE,
 } from "../src/index";
 
 // Context type
@@ -45,24 +46,22 @@ interface LabData {
 }
 
 // Define tools with custom IDs (optional - IDs are deterministic by default)
-const getInsuranceProviders = defineTool<HealthcareContext, [], string[]>(
-  "get_insurance_providers",
-  async () => {
+const getInsuranceProviders = defineTool<HealthcareContext, [], string[]>({
+  name: "get_insurance_providers",
+  handler: async () => {
     return { data: ["MegaCare Insurance", "HealthFirst", "WellnessPlus"] };
   },
-  {
-    id: "healthcare_insurance_providers", // Custom ID for persistence
-    description: "Retrieves list of accepted insurance providers",
-  }
-);
+  id: "healthcare_insurance_providers", // Custom ID for persistence
+  description: "Retrieves list of accepted insurance providers",
+});
 
 const getAvailableSlots = defineTool<
   HealthcareContext,
   [],
   { date: string; time: string }[]
->(
-  "get_available_slots",
-  async () => {
+>({
+  name: "get_available_slots",
+  handler: async () => {
     return {
       data: [
         { date: "2025-10-20", time: "10:00 AM" },
@@ -71,19 +70,17 @@ const getAvailableSlots = defineTool<
       ],
     };
   },
-  {
-    id: "healthcare_available_slots", // Custom ID
-    description: "Gets available appointment slots",
-  }
-);
+  id: "healthcare_available_slots", // Custom ID
+  description: "Gets available appointment slots",
+});
 
 const getLabResults = defineTool<
   HealthcareContext,
   [],
   { report: string; status: string }
->(
-  "get_lab_results",
-  async ({ context, extracted }) => {
+>({
+  name: "get_lab_results",
+  handler: async ({ context, extracted }) => {
     // Tools can now access extracted data
     const labData = extracted as Partial<LabData>;
     if (labData?.testType) {
@@ -102,19 +99,13 @@ const getLabResults = defineTool<
       },
     };
   },
-  {
-    id: "healthcare_lab_results", // Custom ID
-    description: "Retrieves patient lab results",
-  }
-);
+  id: "healthcare_lab_results", // Custom ID
+  description: "Retrieves patient lab results",
+});
 
-const scheduleAppointment = defineTool<
-  HealthcareContext,
-  [],
-  { confirmation: string }
->(
-  "schedule_appointment",
-  async ({ context, extracted }) => {
+const scheduleAppointment = defineTool<HealthcareContext>({
+  name: "schedule_appointment",
+  handler: async ({ context, extracted }) => {
     // Tools can access extracted appointment data
     const appointment = extracted as Partial<AppointmentData>;
     if (!appointment?.preferredDate || !appointment?.preferredTime) {
@@ -127,11 +118,9 @@ const scheduleAppointment = defineTool<
       },
     };
   },
-  {
-    id: "healthcare_schedule_appointment",
-    description: "Schedules patient appointments",
-  }
-);
+  id: "healthcare_schedule_appointment",
+  description: "Schedules patient appointments",
+});
 
 // Declarative configuration
 const terms: Term[] = [
@@ -226,6 +215,36 @@ const routes: RouteOptions[] = [
         enabled: true,
       },
     ],
+    // NEW: Use sequential steps for a linear booking flow
+    steps: [
+      {
+        id: "ask_appointment_type",
+        chatState:
+          "What type of appointment do you need? (checkup, consultation, or followup)",
+        gather: ["appointmentType"],
+      },
+      {
+        id: "ask_date_time",
+        chatState: "When would you like to come in?",
+        gather: ["preferredDate", "preferredTime"],
+        requiredData: ["appointmentType"],
+      },
+      {
+        id: "ask_symptoms",
+        chatState: "Are you experiencing any symptoms?",
+        gather: ["symptoms"],
+      },
+      {
+        id: "confirm_appointment",
+        toolState: scheduleAppointment,
+        requiredData: ["preferredDate", "preferredTime"],
+      },
+      {
+        id: "final_confirmation",
+        chatState:
+          "Your appointment is confirmed. You will receive a notification shortly.",
+      },
+    ],
   },
   {
     id: "route_check_lab_results", // Custom ID
@@ -266,7 +285,7 @@ const routes: RouteOptions[] = [
     conditions: ["Patient asks general healthcare questions"],
     // No extractionSchema - stateless Q&A
   },
-];
+] as RouteOptions[];
 
 // Create the fully configured agent
 const agent = new Agent<HealthcareContext>({
@@ -342,6 +361,14 @@ async function main() {
 
     // Session tracks the appointment booking progress
     console.log("Current state:", response2.session?.currentState?.id);
+
+    // Check for route completion
+    if (response2.isRouteComplete && response2.session) {
+      console.log("\n✅ Appointment scheduling complete!");
+      await sendAppointmentConfirmation(
+        agent.getExtractedData(response2.session.id) as AppointmentData
+      );
+    }
   }
 
   // Note: Custom IDs ensure consistency across server restarts
@@ -350,6 +377,22 @@ async function main() {
   // - Extracting structured data throughout conversation
   // - Always-on routing that respects user intent changes
   // - State recovery for resuming conversations
+}
+
+/**
+ * Mock function to send an appointment confirmation.
+ * @param data - The appointment data.
+ */
+async function sendAppointmentConfirmation(data: AppointmentData) {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 Sending Appointment Confirmation...");
+  console.log("=".repeat(60));
+  console.log("Appointment Details:", JSON.stringify(data, null, 2));
+  console.log(
+    `   - Sending confirmation to patient for ${data.preferredDate} at ${data.preferredTime}.`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("✨ Confirmation sent!");
 }
 
 // Uncomment to run:
