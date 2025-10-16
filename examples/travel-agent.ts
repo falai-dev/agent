@@ -182,7 +182,7 @@ async function createTravelAgent() {
     apiKey: process.env.OPENROUTER_API_KEY || "test-key",
     model: "google/gemini-2.0-flash-exp",
     backupModels: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-    siteUrl: "https://github.com/gusnips/falai",
+    siteUrl: "https://github.com/falai-dev/agent",
     siteName: "Falai Travel Agent Example",
     retryConfig: {
       timeout: 60000,

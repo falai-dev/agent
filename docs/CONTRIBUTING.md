@@ -128,7 +128,7 @@ git clone https://github.com/YOUR_USERNAME/falai.git
 cd falai
 
 # Add upstream remote
-git remote add upstream https://github.com/gusnips/falai.git
+git remote add upstream https://github.com/falai-dev/agent.git
 ```
 
 ### Install Dependencies
@@ -460,8 +460,8 @@ Closes #(issue number)
 
 ## Questions?
 
-- 💬 Open a [Discussion](https://github.com/gusnips/falai/discussions)
-- 🐛 Report an [Issue](https://github.com/gusnips/falai/issues)
+- 💬 Open a [Discussion](https://github.com/falai-dev/agent/discussions)
+- 🐛 Report an [Issue](https://github.com/falai-dev/agent/issues)
 - 📧 Email: (if you want to add your email)
 
 ---

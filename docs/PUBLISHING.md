@@ -3,6 +3,7 @@
 ## Pre-publish Checklist
 
 ### 1. Build and Test
+
 ```bash
 # Clean previous builds
 rm -rf dist/
@@ -22,13 +23,15 @@ npm pack
 ### 2. Version Management
 
 Update version in `package.json`:
+
 ```json
 {
-  "version": "0.1.0"  // Follow semver: major.minor.patch
+  "version": "0.1.0" // Follow semver: major.minor.patch
 }
 ```
 
 **Semver Guidelines:**
+
 - **Patch** (0.1.X): Bug fixes, documentation updates
 - **Minor** (0.X.0): New features, backwards compatible
 - **Major** (X.0.0): Breaking changes
@@ -44,6 +47,7 @@ npm pack --dry-run
 ```
 
 Should include:
+
 - ✅ `dist/` - Compiled JavaScript + type definitions
 - ✅ `docs/` - Documentation
 - ✅ `examples/` - Example files
@@ -51,6 +55,7 @@ Should include:
 - ✅ `LICENSE` - MIT license
 
 Should NOT include:
+
 - ❌ `src/*.ts` source files (only .d.ts)
 - ❌ `node_modules/`
 - ❌ Development configs
@@ -99,11 +104,13 @@ npm view @falai/agent
 ## Post-Publish
 
 1. **Update GitHub Release**
-   - Go to https://github.com/gusnips/falai/releases
+
+   - Go to https://github.com/falai-dev/agent/releases
    - Create a new release for the tag
    - Add release notes
 
 2. **Verify Installation**
+
    ```bash
    # In a new project
    npm install @falai/agent
@@ -112,12 +119,13 @@ npm view @falai/agent
    ```
 
 3. **Test the Published Package**
+
    ```bash
    # Create test project
    mkdir test-agent && cd test-agent
    bun init -y
    bun add @falai/agent
-   
+
    # Try importing
    echo 'import { Agent } from "@falai/agent"; console.log(Agent);' > test.ts
    bun run test.ts
@@ -126,20 +134,24 @@ npm view @falai/agent
 ## Troubleshooting
 
 ### "You do not have permission to publish"
+
 - Make sure you're logged in: `npm whoami`
 - Verify you have access to the `@falai` scope
 - Contact scope owner if needed
 
 ### "Package already exists"
+
 - You can't republish the same version
 - Bump version in `package.json` and try again
 
 ### "Missing required files"
+
 - Check `package.json` `files` field
 - Ensure `dist/` exists after build
 - Run `npm pack --dry-run` to preview
 
 ### Types not working
+
 - Verify `types` field in `package.json`
 - Ensure `.d.ts` files are in `dist/`
 - Check `tsconfig.json` has `"declaration": true`

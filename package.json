@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -31,12 +31,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/gusnips/falai.git"
+    "url": "https://github.com/falai-dev/agent.git"
   },
   "bugs": {
-    "url": "https://github.com/gusnips/falai/issues"
+    "url": "https://github.com/falai-dev/agent/issues"
   },
-  "homepage": "https://github.com/gusnips/falai#readme",
+  "homepage": "https://github.com/falai-dev/agent#readme",
   "scripts": {
     "build": "npm run build:esm && npm run build:cjs && npm run fix:cjs",
     "build:esm": "tsc",

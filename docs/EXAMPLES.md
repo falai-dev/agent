@@ -305,18 +305,15 @@ Tools that validate and enrich extracted data:
 **Key concepts:** Data validation, enrichment, extractedUpdate, flags
 
 ```typescript
-const validateEmail = defineTool(
-  "validate_email",
-  async ({ extracted }) => {
-    const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extracted.email);
-    return {
-      data: isValid,
-      extractedUpdate: {
-        emailValid: isValid, // Enrich extracted data
-      },
-    };
-  }
-);
+const validateEmail = defineTool("validate_email", async ({ extracted }) => {
+  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extracted.email);
+  return {
+    data: isValid,
+    extractedUpdate: {
+      emailValid: isValid, // Enrich extracted data
+    },
+  };
+});
 ```
 
 ---
@@ -389,31 +386,33 @@ bun examples/travel-agent.ts
 
 ### Quick Reference
 
-| Example | Best For | Key Features |
-|---------|----------|--------------|
-| Declarative Agent | Learning basics | Full API coverage |
-| Travel Agent | Session state | Multi-turn conversations |
-| Business Onboarding | Complex flows | Branching, lifecycle hooks |
-| Healthcare Agent | Security | Data validation, compliance |
-| Streaming Agent | Real-time UX | Streaming responses |
-| Domain Scoping | Security | Tool isolation |
-| Prisma Persistence | Production | Database integration |
+| Example             | Best For        | Key Features                |
+| ------------------- | --------------- | --------------------------- |
+| Declarative Agent   | Learning basics | Full API coverage           |
+| Travel Agent        | Session state   | Multi-turn conversations    |
+| Business Onboarding | Complex flows   | Branching, lifecycle hooks  |
+| Healthcare Agent    | Security        | Data validation, compliance |
+| Streaming Agent     | Real-time UX    | Streaming responses         |
+| Domain Scoping      | Security        | Tool isolation              |
+| Prisma Persistence  | Production      | Database integration        |
 
 ---
 
 ## 💡 Tips
 
 **For Production:**
+
 - Use [Prisma Persistence](../examples/prisma-persistence.ts) for relational data
 - Use [Redis Persistence](../examples/redis-persistence.ts) for high-throughput
 - Implement [Domain Scoping](../examples/domain-scoping.ts) for security
 - Add [Rules & Prohibitions](../examples/rules-prohibitions.ts) for brand consistency
 
 **For Development:**
+
 - Start with [Declarative Agent](../examples/declarative-agent.ts)
 - Use [Streaming Agent](../examples/streaming-agent.ts) for better UX
 - Check [Custom Database Integration](../examples/custom-database-persistence.ts) for existing schemas
 
 ---
 
-**Need help?** Check the [full documentation](./README.md) or [open an issue](https://github.com/gusnips/falai/issues).
+**Need help?** Check the [full documentation](./README.md) or [open an issue](https://github.com/falai-dev/agent/issues).

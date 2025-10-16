@@ -351,8 +351,8 @@ MIT © 2025
 
 **Made with ❤️ for the community**
 
-[Report Bug](https://github.com/gusnips/falai/issues) • [Request Feature](https://github.com/gusnips/falai/issues) • [Contribute](https://github.com/gusnips/falai/pulls)
+[Report Bug](https://github.com/falai-dev/agent/issues) • [Request Feature](https://github.com/falai-dev/agent/issues) • [Contribute](https://github.com/falai-dev/agent/pulls)
 
-⭐ Star us on [GitHub](https://github.com/gusnips/falai) if this helped you build amazing agents!
+⭐ Star us on [GitHub](https://github.com/falai-dev/agent) if this helped you build amazing agents!
 
 </div>

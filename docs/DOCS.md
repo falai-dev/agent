@@ -245,9 +245,9 @@ All code examples are TypeScript and can be copy-pasted directly.
 ## 📱 External Resources
 
 - **Main Website:** [falai.dev](https://falai.dev)
-- **GitHub Repository:** [github.com/gusnips/falai](https://github.com/gusnips/falai)
+- **GitHub Repository:** [github.com/falai-dev/agent](https://github.com/falai-dev/agent)
 - **npm Package:** [@falai/agent](https://www.npmjs.com/package/@falai/agent)
-- **Issue Tracker:** [GitHub Issues](https://github.com/gusnips/falai/issues)
+- **Issue Tracker:** [GitHub Issues](https://github.com/falai-dev/agent/issues)
 
 ---
 
@@ -255,8 +255,8 @@ All code examples are TypeScript and can be copy-pasted directly.
 
 1. **Check the [main README](../README.md)** for an overview
 2. **Browse [all examples](../examples/)** for code patterns
-3. **Search [closed issues](https://github.com/gusnips/falai/issues?q=is%3Aissue+is%3Aclosed)** for similar questions
-4. **Open a [new issue](https://github.com/gusnips/falai/issues/new)** with your question
+3. **Search [closed issues](https://github.com/falai-dev/agent/issues?q=is%3Aissue+is%3Aclosed)** for similar questions
+4. **Open a [new issue](https://github.com/falai-dev/agent/issues/new)** with your question
 
 ---
 

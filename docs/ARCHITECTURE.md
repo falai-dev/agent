@@ -448,4 +448,4 @@ This framework draws inspiration from:
 
 ---
 
-**Questions?** Open an issue or discussion on [GitHub](https://github.com/gusnips/falai).
+**Questions?** Open an issue or discussion on [GitHub](https://github.com/falai-dev/agent).
