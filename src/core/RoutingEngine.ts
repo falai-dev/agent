@@ -87,7 +87,7 @@ export class RoutingEngine<TContext = unknown> {
     const candidates = this.getCandidateStates(
       route,
       currentState,
-      updatedSession.extracted
+      updatedSession.extracted || {}
     );
 
     if (candidates.length === 0) {
@@ -128,7 +128,7 @@ export class RoutingEngine<TContext = unknown> {
       route,
       currentState,
       candidates,
-      updatedSession.extracted,
+      updatedSession.extracted || {},
       history,
       lastUserMessage,
       agentMeta
@@ -465,7 +465,7 @@ export class RoutingEngine<TContext = unknown> {
         const candidates = this.getCandidateStates(
           activeRoute,
           currentState,
-          session.extracted
+          session.extracted || {}
         );
 
         // Check if route is complete
@@ -857,7 +857,7 @@ export class RoutingEngine<TContext = unknown> {
           sessionInfo.push(`  "${session.currentState.description}"`);
         }
       }
-      if (Object.keys(session.extracted).length > 0) {
+      if (session.extracted && Object.keys(session.extracted).length > 0) {
         sessionInfo.push(
           `- Extracted data: ${JSON.stringify(session.extracted)}`
         );

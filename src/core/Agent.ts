@@ -405,7 +405,7 @@ export class Agent<TContext = unknown> {
         const candidates = this.routingEngine.getCandidateStates(
           selectedRoute,
           undefined,
-          session.extracted
+          session.extracted || {}
         );
         if (candidates.length > 0) {
           nextState = candidates[0].state;
@@ -438,6 +438,7 @@ export class Agent<TContext = unknown> {
       // Build response prompt
       const responsePrompt = this.responseEngine.buildResponsePrompt(
         selectedRoute,
+        nextState,
         selectedRoute.getRules(),
         selectedRoute.getProhibitions(),
         responseDirectives,
@@ -735,7 +736,7 @@ export class Agent<TContext = unknown> {
         const candidates = this.routingEngine.getCandidateStates(
           selectedRoute,
           undefined,
-          session.extracted
+          session.extracted || {}
         );
         if (candidates.length > 0) {
           nextState = candidates[0].state;
@@ -768,6 +769,7 @@ export class Agent<TContext = unknown> {
       // Build response prompt
       const responsePrompt = this.responseEngine.buildResponsePrompt(
         selectedRoute,
+        nextState,
         selectedRoute.getRules(),
         selectedRoute.getProhibitions(),
         responseDirectives,
@@ -810,7 +812,7 @@ export class Agent<TContext = unknown> {
 
         // Merge gathered data into session
         if (Object.keys(gatheredData).length > 0) {
-          session = mergeExtracted(session, gatheredData);
+          session = await this.updateExtracted(session, gatheredData);
           logger.debug(`[Agent] Extracted data:`, gatheredData);
         }
       }
@@ -1014,11 +1016,11 @@ export class Agent<TContext = unknown> {
     }
     if (routeId) {
       return (
-        (this.currentSession.extractedByRoute[
+        (this.currentSession.extractedByRoute?.[
           routeId
         ] as Partial<TExtracted>) || ({} as Partial<TExtracted>)
       );
     }
-    return this.currentSession.extracted as Partial<TExtracted>;
+    return (this.currentSession.extracted as Partial<TExtracted>) || {};
   }
 }

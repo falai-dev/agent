@@ -28,14 +28,14 @@ export interface SessionState<TExtracted = Record<string, unknown>> {
    * Data extracted during the current route
    * This is a convenience reference to extractedByRoute[currentRoute.id]
    */
-  extracted: Partial<TExtracted>;
+  extracted?: Partial<TExtracted>;
 
   /**
    * Extracted data organized by route ID
    * Preserves data when switching between routes
    * Format: { "routeId": { ...extractedData } }
    */
-  extractedByRoute: Record<string, Partial<unknown>>;
+  extractedByRoute?: Record<string, Partial<unknown>>;
 
   /** History of routes visited in this session */
   routeHistory: Array<{
@@ -86,7 +86,11 @@ export function enterRoute<TExtracted = Record<string, unknown>>(
 ): SessionState<TExtracted> {
   // Save current route's extracted data before switching
   const extractedByRoute = { ...session.extractedByRoute };
-  if (session.currentRoute && Object.keys(session.extracted).length > 0) {
+  if (
+    session.currentRoute &&
+    session.extracted &&
+    Object.keys(session.extracted).length > 0
+  ) {
     extractedByRoute[session.currentRoute.id] = session.extracted;
   }
 

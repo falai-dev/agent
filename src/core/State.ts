@@ -23,6 +23,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
   public gatherFields?: string[];
   public skipIf?: (extracted: Partial<TExtracted>) => boolean;
   public requiredData?: string[];
+  public chatState?: string;
 
   constructor(
     public readonly routeId: string,
@@ -30,13 +31,15 @@ export class State<TContext = unknown, TExtracted = unknown> {
     customId?: string,
     gatherFields?: string[],
     skipIf?: (extracted: Partial<TExtracted>) => boolean,
-    requiredData?: string[]
+    requiredData?: string[],
+    chatState?: string
   ) {
     // Use provided ID or generate a deterministic one
     this.id = customId || generateStateId(routeId, description);
     this.gatherFields = gatherFields;
     this.skipIf = skipIf;
     this.requiredData = requiredData;
+    this.chatState = chatState;
   }
 
   /**
@@ -48,6 +51,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
     gatherFields?: string[];
     skipIf?: (extracted: Partial<TExtracted>) => boolean;
     requiredData?: string[];
+    chatState?: string;
   }): this {
     if (config.description !== undefined) {
       this.description = config.description;
@@ -60,6 +64,9 @@ export class State<TContext = unknown, TExtracted = unknown> {
     }
     if (config.requiredData !== undefined) {
       this.requiredData = config.requiredData;
+    }
+    if (config.chatState !== undefined) {
+      this.chatState = config.chatState;
     }
     return this;
   }
@@ -107,7 +114,8 @@ export class State<TContext = unknown, TExtracted = unknown> {
       spec.id, // Use custom ID if provided
       spec.gather,
       spec.skipIf,
-      spec.requiredData
+      spec.requiredData,
+      spec.chatState
     );
     const transition = new Transition<TContext, TExtracted>(
       this.getRef(),

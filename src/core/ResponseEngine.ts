@@ -44,6 +44,7 @@ export class ResponseEngine<TContext = unknown> {
 
   buildResponsePrompt(
     route: Route<TContext>,
+    currentState: State<TContext>,
     rules: string[],
     prohibitions: string[],
     directives: string[] | undefined,
@@ -71,6 +72,11 @@ export class ResponseEngine<TContext = unknown> {
         route.description ? ` — ${route.description}` : ""
       }`
     );
+    if (currentState.chatState) {
+      pc.addInstruction(
+        `Guideline for your response (adapt to the conversation):\n${currentState.chatState}`
+      );
+    }
     if (rules.length) pc.addInstruction(`Rules:\n- ${rules.join("\n- ")}`);
     if (prohibitions.length)
       pc.addInstruction(`Prohibitions:\n- ${prohibitions.join("\n- ")}`);
