@@ -93,33 +93,6 @@
 
 ---
 
-## 🏗️ Architecture
-
-`@falai/agent` uses a **state machine-driven architecture** where:
-
-- 🎯 **Conversations are explicit state machines** - Predictable, testable flows using the Route DSL
-- 🔧 **Tools execute automatically** - Based on state transitions and guideline matching, not AI decisions
-- 🧠 **AI only generates messages** - The AI never sees or calls tools; it just creates natural responses
-- 🔄 **Preparation iterations gather data** - Tools run in loops before message generation to enrich context
-- 📦 **Domain-based organization** - Tools grouped logically with route-level access control
-
-**Example:**
-
-```typescript
-route.initialState
-  .transitionTo({ chatState: "What's your name?" })
-  .transitionTo(
-    { toolState: saveName }, // ← Tool executes automatically
-    "User provided their name"
-  )
-  .transitionTo({ chatState: "Thanks! What's your email?" });
-```
-
-The AI generates conversational messages while the engine handles tool execution and flow control. This creates **deterministic, controllable agents** perfect for structured conversations like customer support, onboarding, and multi-step processes.
-
-📖 **[Read the full architecture guide →](./docs/ARCHITECTURE.md)**
-
----
 
 ## 📦 Installation
 
@@ -178,10 +151,10 @@ const bookingRoute = agent.createRoute({
 });
 
 bookingRoute.initialState
-  .transitionTo(
-    { toolState: checkAvailability },
-    "User provided hotel name and date"
-  )
+  .transitionTo({
+    toolState: checkAvailability,
+    condition: "User provided hotel name and date",
+  })
   .transitionTo({ chatState: "Confirm booking and provide summary" });
 
 // 4️⃣ Start conversing
