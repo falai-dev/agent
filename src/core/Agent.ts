@@ -892,7 +892,7 @@ export class Agent<TContext = unknown> {
       message,
       session, // Return updated session with route/state info
       toolCalls,
-      isRouteComplete: !isRouteComplete, // Indicates if the route has reached END_STATE with all data collected
+      isRouteComplete, // Indicates if the route has reached END_STATE with all data collected
     };
   }
 
