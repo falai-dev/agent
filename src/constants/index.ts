@@ -1,10 +1,10 @@
 /**
  * Special marker to end a route/journey
  */
-export const END_STATE = Symbol("END_STATE");
+export const END_ROUTE = Symbol("END_ROUTE");
 
 /**
- * String constant for END_STATE comparisons
- * Use this when checking if currentState.id has reached END_STATE
+ * String constant for END_ROUTE comparisons
+ * Use this when checking if currentStep.id has reached END_ROUTE
  */
-export const END_STATE_ID = "END_STATE";
+export const END_ROUTE_ID = "END_ROUTE";

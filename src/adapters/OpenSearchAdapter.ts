@@ -191,7 +191,7 @@ export class OpenSearchAdapter implements PersistenceAdapter {
               agentName: { type: "keyword" },
               status: { type: "keyword" },
               currentRoute: { type: "keyword" },
-              currentState: { type: "keyword" },
+              currentStep: { type: "keyword" },
               collectedData: { type: "object", enabled: false },
               messageCount: { type: "integer" },
               createdAt: { type: "date" },
@@ -221,7 +221,7 @@ export class OpenSearchAdapter implements PersistenceAdapter {
               role: { type: "keyword" },
               content: { type: "text" },
               route: { type: "keyword" },
-              state: { type: "keyword" },
+              step: { type: "keyword" },
               toolCalls: { type: "object", enabled: false },
               event: { type: "object", enabled: false },
               createdAt: { type: "date" },
@@ -396,10 +396,10 @@ class OpenSearchSessionRepository implements SessionRepository {
     return await this.findById(id);
   }
 
-  async updateRouteState(
+  async updateRouteStep(
     id: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null> {
     const doc: Record<string, unknown> = {
       updatedAt: new Date().toISOString(),
@@ -408,8 +408,8 @@ class OpenSearchSessionRepository implements SessionRepository {
     if (route !== undefined) {
       doc.currentRoute = route;
     }
-    if (state !== undefined) {
-      doc.currentState = state;
+    if (step !== undefined) {
+      doc.currentStep = step;
     }
 
     await this.client.update({
@@ -478,7 +478,7 @@ class OpenSearchSessionRepository implements SessionRepository {
       agentName: doc.agentName as string | undefined,
       status: doc.status as SessionData["status"],
       currentRoute: doc.currentRoute as string | undefined,
-      currentState: doc.currentState as string | undefined,
+      currentStep: doc.currentStep as string | undefined,
       collectedData: doc.collectedData as Record<string, unknown> | undefined,
       messageCount: doc.messageCount as number | undefined,
       createdAt: new Date(doc.createdAt as string),
@@ -646,7 +646,7 @@ class OpenSearchMessageRepository implements MessageRepository {
       role: doc.role as MessageData["role"],
       content: doc.content as string,
       route: doc.route as string | undefined,
-      state: doc.state as string | undefined,
+      step: doc.step as string | undefined,
       toolCalls: doc.toolCalls as
         | Array<{ toolName: string; arguments: Record<string, unknown> }>
         | undefined,

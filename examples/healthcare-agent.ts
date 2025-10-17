@@ -1,13 +1,13 @@
 /**
  * Healthcare agent example demonstrating route-based
- * Updated for v2 architecture with session state management and schema-first data extraction
+ * Updated for v2 architecture with session step management and schema-first data extraction
  */
 
 import {
   Agent,
   defineTool,
   AnthropicProvider,
-  END_STATE,
+  END_ROUTE,
   EventSource,
   createMessageEvent,
   createSession,
@@ -69,8 +69,8 @@ const scheduleAppointment = defineTool<
   HealthcareContext,
   [datetime: string],
   string
->("schedule_appointment", async ({ context, extracted }, datetime) => {
-  const appointment = extracted as Partial<AppointmentData>;
+>("schedule_appointment", async ({ context, data }, datetime) => {
+  const appointment = data as Partial<AppointmentData>;
   if (!appointment?.preferredDate || !appointment?.preferredTime) {
     return {
       data: "Please specify preferred date and time for the appointment",
@@ -85,8 +85,8 @@ const scheduleAppointment = defineTool<
 
 const getLabResults = defineTool<HealthcareContext, [], object>(
   "get_lab_results",
-  async ({ context, extracted }) => {
-    const labData = extracted as Partial<LabResultsData>;
+  async ({ context, data }) => {
+    const labData = data as Partial<LabResultsData>;
     return {
       data: {
         report: `Lab results for ${labData?.testType || "general"} tests`,
@@ -137,7 +137,7 @@ async function createHealthcareAgent() {
     title: "Schedule an Appointment",
     description: "Helps the patient find a time for their appointment.",
     conditions: ["The patient wants to schedule an appointment"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         appointmentReason: {
@@ -169,79 +169,78 @@ async function createHealthcareAgent() {
     onComplete: "Satisfaction Survey",
   });
 
-  // State 1: Gather appointment reason
-  const gatherReason = schedulingRoute.initialState.transitionTo({
-    chatState: "Ask what the patient needs an appointment for",
-    gather: ["appointmentReason"],
-    skipIf: (extracted) => !!extracted.appointmentReason,
+  // Step 1: Collect appointment reason
+  const collectReason = schedulingRoute.initialStep.nextStep({
+    instructions: "Ask what the patient needs an appointment for",
+    collect: ["appointmentReason"],
+    skipIf: (data) => !!data.appointmentReason,
     condition: "Patient hasn't specified reason for appointment yet",
   });
 
-  // State 2: Check urgency and show available slots
-  const checkUrgency = gatherReason.transitionTo({
-    chatState: "Check if this is urgent and show available slots",
-    gather: ["urgency"],
-    skipIf: (extracted) => !!extracted.urgency,
-    requiredData: ["appointmentReason"],
+  // Step 2: Check urgency and show available slots
+  const checkUrgency = collectReason.nextStep({
+    instructions: "Check if this is urgent and show available slots",
+    collect: ["urgency"],
+    skipIf: (data) => !!data.urgency,
+    requires: ["appointmentReason"],
     condition: "Reason provided, now assess urgency level",
   });
 
-  const showSlots = checkUrgency.transitionTo({
-    toolState: getUpcomingSlots,
+  const showSlots = checkUrgency.nextStep({
+    tool: getUpcomingSlots,
   });
 
-  // State 3: Present available times
-  const presentTimes = showSlots.transitionTo({
-    chatState: "List available times and ask which one works for them",
+  // Step 3: Present available times
+  const presentTimes = showSlots.nextStep({
+    instructions: "List available times and ask which one works for them",
   });
 
-  // State 4: Gather preferred time and date
-  const gatherPreferences = presentTimes.transitionTo({
-    chatState: "Collect preferred time and date",
-    gather: ["preferredTime", "preferredDate"],
-    skipIf: (extracted) =>
-      !!extracted.preferredTime && !!extracted.preferredDate,
+  // Step 4: Collect preferred time and date
+  const collectPreferences = presentTimes.nextStep({
+    instructions: "Collect preferred time and date",
+    collect: ["preferredTime", "preferredDate"],
+    skipIf: (data) => !!data.preferredTime && !!data.preferredDate,
   });
 
-  // State 5: Confirm details and schedule
-  const confirmDetails = gatherPreferences.transitionTo({
-    chatState: "Confirm the details with the patient before scheduling",
-    gather: ["appointmentType"],
-    skipIf: (extracted) => !!extracted.appointmentType,
-    requiredData: ["appointmentReason", "preferredTime", "preferredDate"],
+  // Step 5: Confirm details and schedule
+  const confirmDetails = collectPreferences.nextStep({
+    instructions: "Confirm the details with the patient before scheduling",
+    collect: ["appointmentType"],
+    skipIf: (data) => !!data.appointmentType,
+    requires: ["appointmentReason", "preferredTime", "preferredDate"],
   });
 
-  const schedule = confirmDetails.transitionTo({
-    toolState: scheduleAppointment,
-    requiredData: ["appointmentReason", "preferredTime", "preferredDate"],
+  const schedule = confirmDetails.nextStep({
+    tool: scheduleAppointment,
+    requires: ["appointmentReason", "preferredTime", "preferredDate"],
     condition: "All details confirmed, book the appointment",
   });
 
-  const confirmation = schedule.transitionTo({
-    chatState: "Confirm the appointment has been scheduled",
+  const confirmation = schedule.nextStep({
+    instructions: "Confirm the appointment has been scheduled",
   });
 
-  confirmation.transitionTo({
-    state: END_STATE,
+  confirmation.nextStep({
+    step: END_ROUTE,
     condition: "Appointment booked successfully",
   });
 
   // Alternative path: no times work - show later slots
-  const laterSlots = presentTimes.transitionTo({
-    toolState: getLaterSlots,
+  const laterSlots = presentTimes.nextStep({
+    tool: getLaterSlots,
   });
 
-  laterSlots.transitionTo({
-    chatState: "List later times and ask if any of them works",
+  laterSlots.nextStep({
+    instructions: "List later times and ask if any of them works",
   });
 
   // If no times work at all, end route
   laterSlots
-    .transitionTo({
-      chatState:
+    .nextStep({
+      instructions:
         "Ask the patient to call the office to schedule an appointment",
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   schedulingRoute.createGuideline({
     condition: "The patient says their visit is urgent",
@@ -253,7 +252,7 @@ async function createHealthcareAgent() {
     title: "Lab Results",
     description: "Retrieves the patient's lab results and explains them.",
     conditions: ["The patient wants to see their lab results"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         testType: {
@@ -274,33 +273,33 @@ async function createHealthcareAgent() {
     },
   });
 
-  // State 1: Gather test information
-  const gatherTestInfo = labResultsRoute.initialState.transitionTo({
-    chatState: "Ask what type of test results they want to see",
-    gather: ["testType"],
-    skipIf: (extracted) => !!extracted.testType,
+  // Step 1: Collect test information
+  const collectTestInfo = labResultsRoute.initialStep.nextStep({
+    instructions: "Ask what type of test results they want to see",
+    collect: ["testType"],
+    skipIf: (data) => !!data.testType,
   });
 
-  // State 2: Optional: gather test date
-  const gatherTestDate = gatherTestInfo.transitionTo({
-    chatState: "Ask for the test date if they remember it",
-    gather: ["testDate"],
-    skipIf: (extracted) => !!extracted.testDate,
-    requiredData: ["testType"],
+  // Step 2: Optional: collect test date
+  const collectTestDate = collectTestInfo.nextStep({
+    instructions: "Ask for the test date if they remember it",
+    collect: ["testDate"],
+    skipIf: (data) => !!data.testDate,
+    requires: ["testType"],
   });
 
-  // State 3: Get lab results
-  const getResults = gatherTestDate.transitionTo({
-    toolState: getLabResults,
-    requiredData: ["testType"],
+  // Step 3: Get lab results
+  const getResults = collectTestDate.nextStep({
+    tool: getLabResults,
+    requires: ["testType"],
   });
 
-  // State 4: Present results based on status
-  const presentResults = getResults.transitionTo({
-    chatState: "Present the lab results and explain what they mean",
+  // Step 4: Present results based on status
+  const presentResults = getResults.nextStep({
+    instructions: "Present the lab results and explain what they mean",
   });
 
-  presentResults.transitionTo({ state: END_STATE });
+  presentResults.nextStep({ step: END_ROUTE });
 
   labResultsRoute.createGuideline({
     condition:
@@ -314,7 +313,7 @@ async function createHealthcareAgent() {
     title: "Satisfaction Survey",
     description: "Quick satisfaction survey after scheduling",
     conditions: ["Collect patient satisfaction feedback"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         rating: {
@@ -334,24 +333,25 @@ async function createHealthcareAgent() {
     },
   });
 
-  const askRating = satisfactionRoute.initialState.transitionTo({
-    chatState:
+  const askRating = satisfactionRoute.initialStep.nextStep({
+    instructions:
       "Ask for overall satisfaction rating from 1 to 5 with the scheduling experience",
-    gather: ["rating"],
-    skipIf: (extracted) => !!extracted.rating,
+    collect: ["rating"],
+    skipIf: (data) => !!data.rating,
   });
 
-  const askComments = askRating.transitionTo({
-    chatState: "Ask if they have any additional comments or feedback (optional)",
-    gather: ["comments"],
+  const askComments = askRating.nextStep({
+    instructions:
+      "Ask if they have any additional comments or feedback (optional)",
+    collect: ["comments"],
   });
 
-  const thankYou = askComments.transitionTo({
-    chatState:
+  const thankYou = askComments.nextStep({
+    instructions:
       "Thank them for their feedback and confirm their appointment details one more time",
   });
 
-  thankYou.transitionTo({ state: END_STATE });
+  thankYou.nextStep({ step: END_ROUTE });
 
   // Global guidelines
   agent.createGuideline({
@@ -376,11 +376,11 @@ async function createHealthcareAgent() {
   return agent;
 }
 
-// Example usage with session state management
+// Example usage with session step management
 async function main() {
   const agent = await createHealthcareAgent();
 
-  // Initialize session state for multi-turn conversation
+  // Initialize session step for multi-turn conversation
   let session = createSession<AppointmentData | LabResultsData>();
 
   const history = [
@@ -403,7 +403,7 @@ async function main() {
     console.log("\n" + route.describe());
   }
 
-  // Example conversation with session state
+  // Example conversation with session step
   console.log("\n=== EXAMPLE CONVERSATION ===");
 
   // Turn 1: Patient wants to follow up
@@ -411,7 +411,7 @@ async function main() {
   console.log("Patient: Hi, I need to follow up on my visit");
   console.log("Agent:", response1.message);
   console.log("Route:", response1.session?.currentRoute?.title);
-  console.log("Extracted:", response1.session?.extracted);
+  console.log("Data:", response1.session?.data);
 
   // Update session with progress
   session = response1.session!;
@@ -431,8 +431,8 @@ async function main() {
     const response2 = await agent.respond({ history: history2, session });
     console.log("\nPatient: I need to schedule a checkup for next week");
     console.log("Agent:", response2.message);
-    console.log("Updated extracted:", response2.session?.extracted);
-    console.log("Current state:", response2.session?.currentState?.id);
+    console.log("Updated data:", response2.session?.data);
+    console.log("Current step:", response2.session?.currentStep?.id);
 
     // Update session again
     session = response2.session!;
@@ -461,16 +461,14 @@ async function main() {
     const response3 = await agent.respond({ history: history3, session });
     console.log("\nPatient: Tuesday at 2 PM works for me.");
     console.log("Agent:", response3.message);
-    console.log("Updated extracted:", response3.session?.extracted);
-    console.log("Current state:", response3.session?.currentState?.id);
+    console.log("Updated data:", response3.session?.data);
+    console.log("Current step:", response3.session?.currentStep?.id);
 
     // Check for route completion
     if (response3.isRouteComplete) {
       console.log("\n✅ Appointment scheduling complete!");
       await sendAppointmentReminder(
-        agent.getExtractedData(
-          response3.session?.id
-        ) as unknown as AppointmentData
+        agent.getData(response3.session?.id) as unknown as AppointmentData
       );
     }
   }

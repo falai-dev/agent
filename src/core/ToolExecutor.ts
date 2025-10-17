@@ -13,13 +13,13 @@ export interface ToolExecutionResult {
   success: boolean;
   data?: unknown;
   contextUpdate?: Record<string, unknown>;
-  extractedUpdate?: Record<string, unknown>;
+  collectedUpdate?: Record<string, unknown>;
   error?: string;
 }
 
-export class ToolExecutor<TContext = unknown, TExtracted = unknown> {
+export class ToolExecutor<TContext = unknown, TData = unknown> {
   /**
-   * Execute a single tool with context and extracted data
+   * Execute a single tool with context and collected data
    * @param allowedDomains - Array of domain names allowed for this execution context (undefined = all domains allowed)
    */
   async executeTool(
@@ -27,7 +27,7 @@ export class ToolExecutor<TContext = unknown, TExtracted = unknown> {
     context: TContext,
     updateContext: (updates: Partial<TContext>) => Promise<void>,
     history: Event[],
-    extracted?: Partial<TExtracted>,
+    data?: Partial<TData>,
     allowedDomains?: string[]
   ): Promise<ToolExecutionResult> {
     try {
@@ -47,15 +47,15 @@ export class ToolExecutor<TContext = unknown, TExtracted = unknown> {
         }
       }
 
-      // Build tool context with extracted data
-      const toolContext: ToolContext<TContext, TExtracted> = {
+      // Build tool context with collected data
+      const toolContext: ToolContext<TContext, TData> = {
         context,
         updateContext,
         history,
-        extracted,
+        data,
       };
 
-      // Execute tool (no arguments - tools read from context/extracted)
+      // Execute tool (no arguments - tools read from context/data)
       const result = await tool.handler(toolContext);
 
       // Return execution result
@@ -64,7 +64,7 @@ export class ToolExecutor<TContext = unknown, TExtracted = unknown> {
         success: true,
         data: result.data,
         contextUpdate: result.contextUpdate,
-        extractedUpdate: result.extractedUpdate,
+        collectedUpdate: result.collectedUpdate,
       };
     } catch (error) {
       return {
@@ -84,7 +84,7 @@ export class ToolExecutor<TContext = unknown, TExtracted = unknown> {
     context: TContext,
     updateContext: (updates: Partial<TContext>) => Promise<void>,
     history: Event[],
-    extracted?: Partial<TExtracted>,
+    data?: Partial<TData>,
     allowedDomains?: string[]
   ): Promise<ToolExecutionResult[]> {
     const results: ToolExecutionResult[] = [];
@@ -95,7 +95,7 @@ export class ToolExecutor<TContext = unknown, TExtracted = unknown> {
         context,
         updateContext,
         history,
-        extracted,
+        data,
         allowedDomains
       );
       results.push(result);

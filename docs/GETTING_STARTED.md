@@ -86,7 +86,7 @@ const bookingRoute = agent.createRoute<FlightData>({
   title: "Book Flight",
   description: "Help user book a flight",
   conditions: ["User wants to book a flight"],
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       destination: { type: "string" },
@@ -102,10 +102,10 @@ const bookingRoute = agent.createRoute<FlightData>({
   },
 });
 
-// Initialize session state
+// Initialize session step
 let session = createSession<FlightData>();
 
-// Generate a response with session state
+// Generate a response with session step
 const response = await agent.respond({
   history: [
     createMessageEvent(
@@ -118,7 +118,7 @@ const response = await agent.respond({
 });
 
 console.log("Agent:", response.message);
-console.log("Extracted:", response.session?.extracted);
+console.log("Data:", response.session?.data);
 ```
 
 ### 3. Run It!
@@ -133,9 +133,9 @@ bun run index.ts
 
 ## Next Steps
 
-### Add Session State Management
+### Add Session Step Management
 
-Continue the conversation with extracted data:
+Continue the conversation with collected data:
 
 ```typescript
 // Turn 2 - User provides more details
@@ -144,90 +144,87 @@ const response2 = await agent.respond({
     createMessageEvent(EventSource.AI_AGENT, "Bot", response.message),
     createMessageEvent(EventSource.CUSTOMER, "Alice", "Make it business class"),
   ],
-  session: response.session, // Pass previous session state
+  session: response.session, // Pass previous session step
 });
 
 console.log("Agent:", response2.message);
-console.log("Updated extracted:", response2.session?.extracted);
+console.log("Updated data:", response2.session?.data);
 // Agent remembers destination and passengers, updates cabin class
 ```
 
 ### Create Tools with Data Access
 
-Tools can access and modify extracted data:
+Tools can access and modify collected data:
 
 ```typescript
 import { defineTool } from "@falai/agent";
 
 const searchFlights = defineTool<MyContext, [], void, FlightData>(
   "search_flights",
-  async ({ context, extracted }) => {
-    // Access extracted data directly
-    if (!extracted.destination || !extracted.departureDate) {
+  async ({ context, data }) => {
+    // Access collected data directly
+    if (!data.destination || !data.departureDate) {
       return { data: undefined };
     }
 
-    // Search for flights and enrich extracted data
-    const flights = await searchFlightAPI(
-      extracted.destination,
-      extracted.departureDate
-    );
+    // Search for flights and enrich collected data
+    const flights = await searchFlightAPI(data.destination, data.departureDate);
 
     return {
       data: undefined,
       contextUpdate: { availableFlights: flights },
-      extractedUpdate: {
-        destinationCode: await lookupAirportCode(extracted.destination),
+      dataUpdate: {
+        destinationCode: await lookupAirportCode(data.destination),
       },
     };
   },
-  { description: "Search for available flights based on extracted data" }
+  { description: "Search for available flights based on collected data" }
 );
 
-// Add tool to state machine
-const searchState = bookingRoute.initialState
-  .transitionTo({
-    chatState: "Extract travel details",
-    gather: ["destination", "departureDate", "passengers"],
+// Add tool to step machine
+const searchStep = bookingRoute.initialStep
+  .nextStep({
+    instructions: "Extract travel details",
+    collect: ["destination", "departureDate", "passengers"],
   })
-  .transitionTo({
-    toolState: searchFlights,
-    requiredData: ["destination", "departureDate", "passengers"],
+  .nextStep({
+    tool: searchFlights,
+    requires: ["destination", "departureDate", "passengers"],
   });
 ```
 
-### Build Smart State Machines
+### Build Smart Step Machines
 
 Create intelligent flows with code-based logic:
 
 ```typescript
-// State machine with smart bypassing and data validation
-const askDestination = bookingRoute.initialState.transitionTo({
-  chatState: "Ask where they want to fly",
-  gather: ["destination"],
-  skipIf: (extracted) => !!extracted.destination, // Skip if already have destination
+// Step machine with smart bypassing and data validation
+const askDestination = bookingRoute.initialStep.nextStep({
+  instructions: "Ask where they want to fly",
+  collect: ["destination"],
+  skipIf: (data) => !!data.destination, // Skip if already have destination
 });
 
-const enrichDestination = askDestination.transitionTo({
-  toolState: searchFlights, // Tool executes automatically
-  requiredData: ["destination"], // Prerequisites
+const enrichDestination = askDestination.nextStep({
+  tool: searchFlights, // Tool executes automatically
+  requires: ["destination"], // Prerequisites
 });
 
-const askDates = enrichDestination.transitionTo({
-  chatState: "Ask about travel dates",
-  gather: ["departureDate"],
-  skipIf: (extracted) => !!extracted.departureDate,
-  requiredData: ["destination"], // Must have destination first
+const askDates = enrichDestination.nextStep({
+  instructions: "Ask about travel dates",
+  collect: ["departureDate"],
+  skipIf: (data) => !!data.departureDate,
+  requires: ["destination"], // Must have destination first
 });
 
-const askPassengers = askDates.transitionTo({
-  chatState: "How many passengers?",
-  gather: ["passengers"],
-  skipIf: (extracted) => !!extracted.passengers,
+const askPassengers = askDates.nextStep({
+  instructions: "How many passengers?",
+  collect: ["passengers"],
+  skipIf: (data) => !!data.passengers,
 });
 
-const presentFlights = askPassengers.transitionTo({
-  chatState: "Present available flights from search results",
+const presentFlights = askPassengers.nextStep({
+  instructions: "Present available flights from search results",
 });
 ```
 
@@ -284,12 +281,12 @@ if (user.isPremium) {
 }
 ```
 
-### Multi-Turn Conversations with Session State
+### Multi-Turn Conversations with Session Step
 
-Track conversation progress and extracted data:
+Track conversation progress and collected data:
 
 ```typescript
-import { createSession, enterRoute, mergeExtracted } from "@falai/agent";
+import { createSession, enterRoute, mergeData } from "@falai/agent";
 
 // Initialize session
 let session = createSession<FlightData>();
@@ -304,10 +301,10 @@ const history1 = [
 ];
 
 const response1 = await agent.respond({ history: history1, session });
-console.log("Turn 1 - Extracted:", response1.session?.extracted);
+console.log("Turn 1 - Data:", response1.session?.data);
 // { destination: "Paris", departureDate: "tomorrow", passengers: 2 }
 
-session = response1.session!; // Update session with extracted data
+session = response1.session!; // Update session with collected data
 
 // Turn 2 - User changes their mind
 const history2 = [
@@ -321,7 +318,7 @@ const history2 = [
 ];
 
 const response2 = await agent.respond({ history: history2, session });
-console.log("Turn 2 - Updated:", response2.session?.extracted);
+console.log("Turn 2 - Updated:", response2.session?.data);
 // { destination: "Tokyo", departureDate: "tomorrow", passengers: 2 }
 
 session = response2.session!; // Router handled the route change
@@ -335,7 +332,7 @@ const response3 = await agent.respond({
   ],
   session,
 });
-console.log("Turn 3 - Final:", response3.session?.extracted);
+console.log("Turn 3 - Final:", response3.session?.data);
 // { destination: "Tokyo", departureDate: "tomorrow", passengers: 2, cabinClass: "business" }
 ```
 
@@ -347,18 +344,18 @@ console.log("Turn 3 - Final:", response3.session?.extracted);
 
 - **Use TypeScript** - Full type safety and IntelliSense throughout
 - **Define extraction schemas** - Use JSON Schema for reliable data collection
-- **Leverage session state** - Track conversation progress across turns
-- **Use code-based logic** - `skipIf` and `requiredData` for deterministic flow
-- **Create type-safe routes** - Generic types for both context and extracted data
+- **Leverage session step** - Track conversation progress across turns
+- **Use code-based logic** - `skipIf` and `requires` for deterministic flow
+- **Create type-safe routes** - Generic types for both context and collected data
 - **Handle user changes** - Always-on routing respects "I changed my mind"
-- **Add lifecycle hooks** - Validate and enrich extracted data
-- **Mix stateful & stateless** - Use appropriate patterns for each use case
+- **Add lifecycle hooks** - Validate and enrich collected data
+- **Mix stepful & stepless** - Use appropriate patterns for each use case
 
 ### ❌ Don'ts
 
-- **Don't use `any` types** - Define proper interfaces for context and extracted data
-- **Don't rely on LLM conditions** - Use code (`skipIf`) for state logic
-- **Don't skip session management** - Pass session state between turns
+- **Don't use `any` types** - Define proper interfaces for context and collected data
+- **Don't rely on LLM conditions** - Use code (`skipIf`) for step logic
+- **Don't skip session management** - Pass session step between turns
 - **Don't forget error handling** - Wrap agent calls in try/catch
 - **Don't ignore type errors** - Fix TypeScript issues for reliability
 - **Don't create fuzzy logic** - Use explicit schemas over prompt-based parsing

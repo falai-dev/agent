@@ -110,7 +110,7 @@ export class PostgreSQLAdapter implements PersistenceAdapter {
         agent_name VARCHAR(255),
         status VARCHAR(50) DEFAULT 'active',
         current_route VARCHAR(255),
-        current_state VARCHAR(255),
+        current_step VARCHAR(255),
         collected_data JSONB,
         message_count INTEGER DEFAULT 0,
         last_message_at TIMESTAMP,
@@ -133,7 +133,7 @@ export class PostgreSQLAdapter implements PersistenceAdapter {
         role VARCHAR(50) NOT NULL,
         content TEXT NOT NULL,
         route VARCHAR(255),
-        state VARCHAR(255),
+        step VARCHAR(255),
         tool_calls JSONB,
         event JSONB,
         created_at TIMESTAMP DEFAULT NOW(),
@@ -237,9 +237,9 @@ class PostgreSQLSessionRepository implements SessionRepository {
       fields.push(`current_route = $${paramIndex++}`);
       values.push(data.currentRoute);
     }
-    if (data.currentState !== undefined) {
-      fields.push(`current_state = $${paramIndex++}`);
-      values.push(data.currentState);
+    if (data.currentStep !== undefined) {
+      fields.push(`current_step = $${paramIndex++}`);
+      values.push(data.currentStep);
     }
     if (data.messageCount !== undefined) {
       fields.push(`message_count = $${paramIndex++}`);
@@ -285,14 +285,14 @@ class PostgreSQLSessionRepository implements SessionRepository {
     return await this.update(id, { collectedData });
   }
 
-  async updateRouteState(
+  async updateRouteStep(
     id: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null> {
     return await this.update(id, {
       currentRoute: route,
-      currentState: state,
+      currentStep: step,
     });
   }
 
@@ -333,7 +333,7 @@ class PostgreSQLMessageRepository implements MessageRepository {
 
     const result = await this.client.query<MessageData>(
       `INSERT INTO ${this.tableName}
-       (id, session_id, user_id, role, content, route, state, tool_calls, event, created_at)
+       (id, session_id, user_id, role, content, route, step, tool_calls, event, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
        RETURNING *`,
       [
@@ -343,7 +343,7 @@ class PostgreSQLMessageRepository implements MessageRepository {
         data.role,
         data.content,
         data.route || null,
-        data.state || null,
+        data.step || null,
         JSON.stringify(data.toolCalls || null),
         JSON.stringify(data.event || null),
       ]

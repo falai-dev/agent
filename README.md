@@ -20,6 +20,7 @@
 ## ⚡ The @falai/agent Difference
 
 ### Traditional AI Chat:
+
 ```typescript
 // User: "I want to book the Grand Hotel for 2 people"
 // AI: "Sure! Which hotel would you like?" // 😠 Asked already!
@@ -30,11 +31,12 @@
 ```
 
 ### With @falai/agent:
+
 ```typescript
 // User: "I want to book the Grand Hotel for 2 people"
 // AI: "Sure! For what date would you like to book?"  // ✅ Skips known info
 // User: "Next Friday"
-// AI: "Booking confirmed for 2 guests at Grand Hotel on Friday!" // ✅ All data extracted
+// AI: "Booking confirmed for 2 guests at Grand Hotel on Friday!" // ✅ All data collected
 ```
 
 **No more repetitive questions. No more guessing what the AI will ask next.**
@@ -49,11 +51,11 @@ After building production AI applications, we found existing solutions either:
 
 - **Too unpredictable** - AI decides everything, including which tools to call (unreliable in production)
 - **Too complex** - Heavy Python frameworks with massive dependencies
-- **Too basic** - No structured data extraction or state management
+- **Too basic** - No structured data extraction or step management
 
 @falai/agent gives you **predictable AI** - the creativity of LLMs with the reliability of code.
 
-**The key insight:** Let AI do what it's good at (understanding intent, generating responses, extracting data), and let TypeScript handle the rest (state logic, tool execution, validation).
+**The key insight:** Let AI do what it's good at (understanding intent, generating responses, extracting data), and let TypeScript handle the rest (step logic, tool execution, validation).
 
 ---
 
@@ -86,10 +88,10 @@ After building production AI applications, we found existing solutions either:
 ### 🛤️ **Data-Driven Conversations**
 
 - **Schema-First Extraction** - Define data contracts with JSON Schema
-- **Session State Management** - Track conversation progress across turns
-- **AI-Driven State Transitions** - Smart state selection based on conversation context
+- **Session Step Management** - Track conversation progress across turns
+- **AI-Driven Step Transitions** - Smart step selection based on conversation context
 - **Text-Based Conditions** - Human-readable transition conditions for the AI to evaluate
-- **Code-Based Logic** - Deterministic state progression with `skipIf` and `requiredData`
+- **Code-Based Logic** - Deterministic step progression with `skipIf` and `requires`
 - **Always-On Routing** - Context-aware routing respects user intent changes
 - **Route Transitions** - Automatic transitions between routes with `onComplete` for seamless workflows
 
@@ -98,8 +100,8 @@ After building production AI applications, we found existing solutions either:
 
 ### 🔧 **Tools & Data Integration**
 
-- **Data-Aware Tools** - Tools access extracted data directly via `extracted` context
-- **Enrichment Hooks** - Tools can modify extracted data with `extractedUpdate`
+- **Data-Aware Tools** - Tools access collected data directly via `data` context
+- **Enrichment Hooks** - Tools can modify collected data with `dataUpdate`
 - **Action Flags** - Tools set flags for conditional execution
 - **Type-Safe Tools** - Define tools with full type inference
 
@@ -110,11 +112,11 @@ After building production AI applications, we found existing solutions either:
 
 ### 💾 **Optional Persistence**
 
-- **Session State Integration** - Automatic saving of extracted data & conversation progress
+- **Session Step Integration** - Automatic saving of collected data & conversation progress
 - **Provider Pattern** - Simple API like AI providers
 - **Multiple Adapters** - Prisma, Redis, MongoDB, PostgreSQL, SQLite, OpenSearch, Memory
-- **Custom Database Support** - Manual session state management for existing schemas
-- **Auto-save** - Automatic session state & message persistence
+- **Custom Database Support** - Manual session step management for existing schemas
+- **Auto-save** - Automatic session step & message persistence
 - **Type-Safe** - Full TypeScript support with generics
 - **Extensible** - Create adapters for any database
 
@@ -124,8 +126,8 @@ After building production AI applications, we found existing solutions either:
 ### 🎯 **Session-Aware Routing**
 
 - **Always-On Routing** - Users can change their mind mid-conversation
-- **Context Awareness** - Router sees current progress and extracted data
-- **Session State** - Track conversation progress across turns
+- **Context Awareness** - Router sees current progress and collected data
+- **Session Step** - Track conversation progress across turns
 - **Deterministic IDs** - Consistent identifiers across restarts
 
 </td>
@@ -175,16 +177,14 @@ agent.createRoute({
   title: "General Help",
   description: "Answers user questions",
   conditions: ["User needs help or asks a question"],
-  initialState: {
-    chatState: "Answer the user's question helpfully",
+  initialStep: {
+    instructions: "Answer the user's question helpfully",
   },
 });
 
 // Start chatting
 const response = await agent.respond({
-  history: [
-    { source: "customer", name: "Alice", content: "What can you do?" },
-  ],
+  history: [{ source: "customer", name: "Alice", content: "What can you do?" }],
 });
 
 console.log(response.message);
@@ -196,7 +196,7 @@ console.log(response.message);
 
 ### Level 2: Data Extraction (The Real Power)
 
-Now let's build an agent that intelligently gathers structured data:
+Now let's build an agent that intelligently collects structured data:
 
 ```typescript
 import {
@@ -205,7 +205,7 @@ import {
   defineTool,
   createMessageEvent,
   EventSource,
-  END_STATE,
+  END_ROUTE,
   type ToolContext,
 } from "@falai/agent";
 
@@ -219,7 +219,7 @@ interface HotelBookingData {
 // 2️⃣ Create your agent
 const agent = new Agent({
   name: "BookingBot",
-  description: "A hotel booking assistant that gathers information.",
+  description: "A hotel booking assistant that collects information.",
   ai: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
     model: "models/gemini-2.5-flash", // or your preferred model
@@ -229,10 +229,10 @@ const agent = new Agent({
 // 3️⃣ Define a tool that uses the collected data
 const bookHotel = defineTool(
   "book_hotel",
-  async ({ extracted }: ToolContext<{}, HotelBookingData>) => {
+  async ({ data }: ToolContext<{}, HotelBookingData>) => {
     // Logic to book the hotel...
     return {
-      data: `Booking confirmed for ${extracted?.guests} at ${extracted?.hotelName} on ${extracted?.date}!`,
+      data: `Booking confirmed for ${data?.guests} at ${data?.hotelName} on ${data?.date}!`,
     };
   },
   { description: "Books a hotel once all information is collected." }
@@ -243,7 +243,7 @@ const bookingRoute = agent.createRoute<HotelBookingData>({
   title: "Book Hotel",
   description: "Guides the user through the hotel booking process.",
   conditions: ["User wants to book a hotel"],
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       hotelName: { type: "string", description: "The name of the hotel." },
@@ -252,38 +252,38 @@ const bookingRoute = agent.createRoute<HotelBookingData>({
     },
     required: ["hotelName", "date", "guests"],
   },
-  endState: {
-    chatState: "Confirm the booking details warmly and thank the user",
+  endStep: {
+    instructions: "Confirm the booking details warmly and thank the user",
   },
 });
 
-// 5️⃣ Build the flow to gather data step-by-step
-const askHotel = bookingRoute.initialState.transitionTo({
-  chatState: "Ask which hotel they want to book",
-  gather: ["hotelName"],
-  skipIf: (extracted) => !!extracted.hotelName, // Skip if we already have it
+// 5️⃣ Build the flow to collect data step-by-step
+const askHotel = bookingRoute.initialStep.nextStep({
+  instructions: "Ask which hotel they want to book",
+  collect: ["hotelName"],
+  skipIf: (data) => !!data.hotelName, // Skip if we already have it
 });
 
-const askDate = askHotel.transitionTo({
-  chatState: "Ask for the booking date",
-  gather: ["date"],
-  skipIf: (extracted) => !!extracted.date,
+const askDate = askHotel.nextStep({
+  instructions: "Ask for the booking date",
+  collect: ["date"],
+  skipIf: (data) => !!data.date,
 });
 
-const askGuests = askDate.transitionTo({
-  chatState: "Ask for the number of guests",
-  gather: ["guests"],
-  skipIf: (extracted) => !!extracted.guests,
+const askGuests = askDate.nextStep({
+  instructions: "Ask for the number of guests",
+  collect: ["guests"],
+  skipIf: (data) => !!data.guests,
 });
 
-const confirmBooking = askGuests.transitionTo({
-  toolState: bookHotel,
+const confirmBooking = askGuests.nextStep({
+  tool: bookHotel,
   condition:
     "All required information (hotel, date, guests) has been collected.",
 });
 
-confirmBooking.transitionTo({
-  state: END_STATE, // End the conversation flow
+confirmBooking.nextStep({
+  step: END_ROUTE, // End the conversation flow
 });
 
 // 6️⃣ Start conversing
@@ -308,7 +308,7 @@ console.log(response.message);
 - ✅ **Understand the Goal** - Route to the `Book Hotel` flow based on user intent.
 - ✅ **Extract Known Data** - Automatically pull `hotelName` and `guests` from the first message.
 - ✅ **Skip Unneeded Steps** - Use `skipIf` to bypass questions for data it already has.
-- ✅ **Gather Missing Data** - Intelligently ask only for the missing `date`.
+- ✅ **Collect Missing Data** - Intelligently ask only for the missing `date`.
 - ✅ **Execute Deterministically** - Call the `bookHotel` tool only when all required data is present.
 
 This creates a flexible and natural conversation, guided by a clear data structure.
@@ -325,12 +325,12 @@ for await (const chunk of agent.respondStream({ history })) {
 }
 ```
 
-**Session state** for multi-turn conversations:
+**Session step** for multi-turn conversations:
 
 ```typescript
 let session = createSession<MyData>();
 const response = await agent.respond({ history, session });
-session = response.session!; // Tracks progress across turns, you can use it to save the current state in your database
+session = response.session!; // Tracks progress across turns, you can use it to save the current step in your database
 ```
 
 **Database persistence** with any adapter:
@@ -360,11 +360,11 @@ const agent = new Agent({
 **Feature Guides:**
 
 - 🛤️ **[Routes](./docs/ROUTES.md)** - Creating conversational routes & flows
-- 🔄 **[States](./docs/STATES.md)** - Managing states & transitions
+- 🔄 **[Steps](./docs/STEPS.md)** - Managing steps & transitions
 - 💾 **[Persistence](./docs/PERSISTENCE.md)** - Database integration with adapters
 - 🔒 **[Domains](./docs/DOMAINS.md)** - Optional tool security & organization
 - 🎛️ **[Agent](./docs/AGENT.md)** - Configuration patterns
-- 📊 **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Session state & lifecycle hooks
+- 📊 **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Session step & lifecycle hooks
 - 🤖 **[AI Providers](./docs/PROVIDERS.md)** - Anthropic, OpenAI, Gemini, OpenRouter
 
 ---
@@ -372,13 +372,15 @@ const agent = new Agent({
 ## 🎯 Examples - Pick Your Use Case
 
 ### 🤖 Conversational Flows
-Build intelligent data-gathering conversations:
+
+Build intelligent data-collecting conversations:
 
 - 🏢 **[Business Onboarding](./examples/business-onboarding.ts)** - Multi-step company setup with conditional branching
-- ✈️ **[Travel Agent](./examples/travel-agent.ts)** - Flight & hotel booking with session state
+- ✈️ **[Travel Agent](./examples/travel-agent.ts)** - Flight & hotel booking with session step
 - 🏥 **[Healthcare Assistant](./examples/healthcare-agent.ts)** - Appointment scheduling & lab result delivery
 
 ### 🏢 Production Patterns
+
 Enterprise-ready features:
 
 - 💾 **[Prisma Persistence](./examples/prisma-persistence.ts)** - Auto-save sessions with Prisma ORM
@@ -386,6 +388,7 @@ Enterprise-ready features:
 - 🔐 **[Domain Scoping](./examples/domain-scoping.ts)** - Tool security & access control
 
 ### ⚡ Advanced Techniques
+
 Power-user features:
 
 - 📋 **[Declarative Agent](./examples/declarative-agent.ts)** - Full constructor-based configuration
@@ -398,16 +401,16 @@ Power-user features:
 
 ## 🏗️ How It Works
 
-`@falai/agent` uses a **schema-first, state machine-driven architecture**:
+`@falai/agent` uses a **schema-first, step machine-driven architecture**:
 
 ```
 User Message
     ↓
 ┌─────────────────────────────────────────┐
 │ 1. PREPARATION (Tools)                  │
-│    • Execute tools for current state    │
+│    • Execute tools for current step    │
 │    • Update context with results        │
-│    • Enrich extracted data              │
+│    • Enrich collected data              │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
@@ -418,10 +421,10 @@ User Message
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 3. STATE SELECTION (Code + AI)          │
-│    • Filter states with skipIf (code)   │
-│    • AI picks best from valid states    │
-│    • Update session state               │
+│ 3. STEP SELECTION (Code + AI)          │
+│    • Filter steps with skipIf (code)   │
+│    • AI picks best from valid steps    │
+│    • Update session step               │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
@@ -436,8 +439,8 @@ Response with Structured Data
 
 ### Key Principles:
 
-✅ **AI decides:** Route selection, state selection (from valid options), message generation, data extraction
-✅ **Code decides:** Tool execution, state filtering (`skipIf`), data validation, flow control
+✅ **AI decides:** Route selection, step selection (from valid options), message generation, data extraction
+✅ **Code decides:** Tool execution, step filtering (`skipIf`), data validation, flow control
 ✅ **Result:** Predictable, testable agents with natural conversations
 
 **This architecture delivers 1-2 LLM calls per turn** (vs 3-5 in traditional approaches) while maintaining complete type safety.

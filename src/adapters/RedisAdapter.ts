@@ -223,12 +223,12 @@ class RedisSessionRepository implements SessionRepository {
     return this.update(id, { collectedData });
   }
 
-  async updateRouteState(
+  async updateRouteStep(
     id: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null> {
-    return this.update(id, { currentRoute: route, currentState: state });
+    return this.update(id, { currentRoute: route, currentStep: step });
   }
 
   async incrementMessageCount(id: string): Promise<SessionData | null> {

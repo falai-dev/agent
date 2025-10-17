@@ -1,6 +1,6 @@
 /**
  * Example: OpenAI Agent with multiple providers
- * Updated for v2 architecture with session state management and schema-first data extraction
+ * Updated for v2 architecture with session step management and schema-first data extraction
  */
 
 import {
@@ -10,7 +10,7 @@ import {
   createMessageEvent,
   EventSource,
   createSession,
-  END_STATE,
+  END_ROUTE,
 } from "../src/index";
 
 // Custom context type
@@ -27,17 +27,16 @@ interface WeatherData {
   condition?: string;
 }
 
-// Define a tool that can access extracted data
+// Define a tool that can access collected data
 const getWeather = defineTool<
   CustomerContext,
   [{ location: string }],
   { location: string; temperature: number; condition: string }
 >(
   "get_weather",
-  async ({ context, extracted }, args) => {
-    // Use extracted location if available, otherwise use args
-    const location =
-      (extracted as Partial<WeatherData>)?.location || args.location;
+  async ({ context, data }, args) => {
+    // Use data location if available, otherwise use args
+    const location = (data as Partial<WeatherData>)?.location || args.location;
 
     // Simulate API call
     return {
@@ -112,7 +111,7 @@ async function main() {
     title: "Check Weather",
     description: "Help user check weather for a location",
     conditions: ["User wants to know the weather"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         location: {
@@ -132,31 +131,31 @@ async function main() {
     },
   });
 
-  // State 1: Gather location
-  const askLocation = weatherRoute.initialState.transitionTo({
-    chatState: "Ask which city they want weather for",
-    gather: ["location"],
-    skipIf: (extracted) => !!extracted.location,
+  // Step 1: Collect location
+  const askLocation = weatherRoute.initialStep.nextStep({
+    instructions: "Ask which city they want weather for",
+    collect: ["location"],
+    skipIf: (data) => !!data.location,
   });
 
-  // State 2: Get weather data
-  const fetchWeather = askLocation.transitionTo({
-    toolState: getWeather,
-    requiredData: ["location"],
+  // Step 2: Get weather data
+  const fetchWeather = askLocation.nextStep({
+    tool: getWeather,
+    requires: ["location"],
   });
 
-  // State 3: Present weather information
-  const showWeather = fetchWeather.transitionTo({
-    chatState:
+  // Step 3: Present weather information
+  const showWeather = fetchWeather.nextStep({
+    instructions:
       "Present the weather information in a friendly way with temperature and condition",
   });
 
-  showWeather.transitionTo({ state: END_STATE });
+  showWeather.nextStep({ step: END_ROUTE });
 
-  // Example conversation with session state management
+  // Example conversation with session step management
   console.log("🤖 Starting OpenAI Agent Example\n");
 
-  // Initialize session state for multi-turn conversation
+  // Initialize session step for multi-turn conversation
   let session = createSession<WeatherData>();
 
   // Build history
@@ -169,8 +168,8 @@ async function main() {
   ];
 
   try {
-    // Turn 1: Process weather query with session state
-    console.log("📤 Processing with session state...");
+    // Turn 1: Process weather query with session step
+    console.log("📤 Processing with session step...");
     const response = await agent.respond({ history, session });
 
     console.log("\n✅ Agent Configuration:");
@@ -179,14 +178,14 @@ async function main() {
     console.log("\n🗺️  Route Configuration:");
     console.log(`   Title: ${weatherRoute.title}`);
     console.log(
-      `   States: Initial → Ask Location → Fetch Weather → Show Weather`
+      `   Steps: Initial → Ask Location → Fetch Weather → Show Weather`
     );
 
     console.log("\n💬 Conversation:");
     console.log(`   Customer: ${history[0].data.message}`);
     console.log(`   Agent: ${response.message}`);
     console.log(`   Route: ${response.session?.currentRoute?.title}`);
-    console.log(`   Extracted:`, response.session?.extracted);
+    console.log(`   Data:`, response.session?.data);
 
     // Update session with progress
     session = response.session!;
@@ -194,14 +193,12 @@ async function main() {
     // Check for route completion
     if (response.isRouteComplete) {
       console.log("\n✅ Weather route complete!");
-      await logWeatherRequest(
-        agent.getExtractedData(session.id) as WeatherData
-      );
+      await logWeatherRequest(agent.getData(session.id) as WeatherData);
     }
 
-    console.log("\n✨ Session state benefits:");
+    console.log("\n✨ Session step benefits:");
     console.log("   ✅ Data extraction tracked across turns");
-    console.log("   ✅ State progression managed automatically");
+    console.log("   ✅ Step progression managed automatically");
     console.log("   ✅ Always-on routing respects intent changes");
     console.log(
       "   (Set OPENAI_API_KEY environment variable to make actual API calls)"

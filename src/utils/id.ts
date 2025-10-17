@@ -35,10 +35,10 @@ export function generateRouteId(title: string): string {
 }
 
 /**
- * Generate a deterministic state ID
- * Format: state_{sanitized_description}_{hash} or state_{routeId}_{index}
+ * Generate a deterministic step ID
+ * Format: step_{sanitized_description}_{hash} or step_{routeId}_{index}
  */
-export function generateStateId(
+export function generateStepId(
   routeId: string,
   description?: string,
   index?: number
@@ -46,11 +46,11 @@ export function generateStateId(
   if (description) {
     const sanitized = sanitize(description);
     const hash = simpleHash(`${routeId}_${description}`);
-    return `state_${sanitized}_${hash}`;
+    return `step_${sanitized}_${hash}`;
   }
-  // Fallback for states without descriptions
+  // Fallback for steps without descriptions
   const suffix = index !== undefined ? index : simpleHash(routeId);
-  return `state_${routeId}_${suffix}`;
+  return `step_${routeId}_${suffix}`;
 }
 
 /**
@@ -61,4 +61,13 @@ export function generateToolId(name: string): string {
   const sanitized = sanitize(name);
   const hash = simpleHash(name);
   return `tool_${sanitized}_${hash}`;
+}
+
+/**
+ * Generate a deterministic tool ID for inline tool handlers
+ * Format: tool_inline_{stepId}_{hash}
+ */
+export function generateInlineToolId(stepId: string): string {
+  const hash = simpleHash(`${stepId}_inline_tool`);
+  return `tool_inline_${stepId}_${hash}`;
 }

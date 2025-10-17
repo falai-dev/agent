@@ -333,10 +333,10 @@ class PrismaSessionRepository implements SessionRepository {
     return this.unmapFields(result);
   }
 
-  async updateRouteState(
+  async updateRouteStep(
     id: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null> {
     const data: Record<string, unknown> = {
       [this.fieldMap.updatedAt || "updatedAt"]: new Date(),
@@ -344,8 +344,8 @@ class PrismaSessionRepository implements SessionRepository {
     if (route !== undefined) {
       data[this.fieldMap.currentRoute || "currentRoute"] = route;
     }
-    if (state !== undefined) {
-      data[this.fieldMap.currentState || "currentState"] = state;
+    if (step !== undefined) {
+      data[this.fieldMap.currentStep || "currentStep"] = step;
     }
     const result = await this.getModel().update({
       where: { [this.fieldMap.id || "id"]: id },

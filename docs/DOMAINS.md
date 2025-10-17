@@ -45,9 +45,9 @@ const route = agent.createRoute({
   // No domains specified = all tools available
 });
 
-route.initialState
-  .transitionTo({ toolState: saveName }) // ✅ Works
-  .transitionTo({ toolState: saveEmail }); // ✅ Works
+route.initialStep
+  .nextStep({ tool: saveName }) // ✅ Works
+  .nextStep({ tool: saveEmail }); // ✅ Works
 ```
 
 **Result**: Everything works. All tools can execute. Simple and easy!
@@ -96,17 +96,17 @@ const adminRoute = agent.createRoute({
 });
 
 // 3️⃣ Tools execute based on route restrictions
-onboardingRoute.initialState
-  .transitionTo({ toolState: agent.domain.user.saveName }) // ✅ Allowed
-  .transitionTo({ toolState: agent.domain.payment.processPayment }); // ❌ Blocked!
+onboardingRoute.initialStep
+  .nextStep({ tool: agent.domain.user.saveName }) // ✅ Allowed
+  .nextStep({ tool: agent.domain.payment.processPayment }); // ❌ Blocked!
 
-checkoutRoute.initialState
-  .transitionTo({ toolState: agent.domain.payment.processPayment }) // ✅ Allowed
-  .transitionTo({ toolState: agent.domain.user.saveName }); // ❌ Blocked!
+checkoutRoute.initialStep
+  .nextStep({ tool: agent.domain.payment.processPayment }) // ✅ Allowed
+  .nextStep({ tool: agent.domain.user.saveName }); // ❌ Blocked!
 
-adminRoute.initialState
-  .transitionTo({ toolState: agent.domain.user.saveName }) // ✅ Allowed
-  .transitionTo({ toolState: agent.domain.payment.processPayment }); // ✅ Allowed
+adminRoute.initialStep
+  .nextStep({ tool: agent.domain.user.saveName }) // ✅ Allowed
+  .nextStep({ tool: agent.domain.payment.processPayment }); // ✅ Allowed
 ```
 
 **Result**: Tools are restricted by route. Security and isolation guaranteed!
@@ -638,7 +638,7 @@ const route = agent.createRoute({
   title: "Checkout",
 });
 
-route.initialState.transitionTo({ toolState: processPayment });
+route.initialStep.nextStep({ tool: processPayment });
 
 // AFTER: With domains
 const agent = new Agent({
@@ -657,8 +657,8 @@ const route = agent.createRoute({
 });
 
 // Access via domain registry
-route.initialState.transitionTo({
-  toolState: agent.domain.payment.processPayment,
+route.initialStep.nextStep({
+  tool: agent.domain.payment.processPayment,
 });
 ```
 
@@ -705,7 +705,7 @@ if (allowedDomains !== undefined && tool.domainName) {
 
 ### What Gets Enforced
 
-✅ **Tools in state machine transitions** (`toolState`)  
+✅ **Tools in step machine transitions** (`tool`)  
 ✅ **Multiple domain access** (route can allow several domains)  
 ✅ **Empty array enforcement** (`domains: []` blocks all tools)  
 ✅ **Undefined = all allowed** (backward compatible)

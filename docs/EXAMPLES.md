@@ -13,9 +13,9 @@ Complete example demonstrating the new `onComplete` feature for seamless route t
 - ✅ Hotel booking flow transitioning to feedback collection
 - ✅ Three ways to define transitions (string, config, function)
 - ✅ Automatic transition after route completion
-- ✅ Manual transition control with `agent.transitionToRoute()`
-- ✅ Dynamic logic based on extracted data
-- ✅ Pending transition tracking in session state
+- ✅ Manual transition control with `agent.nextStepRoute()`
+- ✅ Dynamic logic based on collected data
+- ✅ Pending transition tracking in session step
 
 **Key concepts:** Route transitions, workflow chaining, feedback collection, onComplete handlers
 
@@ -27,13 +27,13 @@ const bookingRoute = agent.createRoute<BookingData>({
 
   // Or with AI condition:
   // onComplete: {
-  //   transitionTo: "Collect Feedback",
+  //   nextStep: "Collect Feedback",
   //   condition: "if booking was successful"
   // },
 
   // Or with function logic:
   // onComplete: (session) => {
-  //   if (session.extracted?.guests > 5) {
+  //   if (session.data?.guests > 5) {
   //     return "VIP Feedback";
   //   }
   //   return "Collect Feedback";
@@ -43,7 +43,7 @@ const bookingRoute = agent.createRoute<BookingData>({
 // Feedback route automatically triggered after booking
 const feedbackRoute = agent.createRoute<FeedbackData>({
   title: "Collect Feedback",
-  // ... states for collecting rating and comments
+  // ... steps for collecting rating and comments
 });
 ```
 
@@ -59,11 +59,11 @@ Comprehensive example showing declarative agent configuration:
 
 - ✅ Full constructor-based setup
 - ✅ Terms, guidelines, capabilities, routes defined upfront
-- ✅ Session state management with data extraction
-- ✅ Custom IDs for routes, states, and tools
+- ✅ Session step management with data extraction
+- ✅ Custom IDs for routes, steps, and tools
 - ✅ Dynamic additions after construction
 
-**Key concepts:** Declarative configuration, session state, data extraction schemas
+**Key concepts:** Declarative configuration, session step, data extraction schemas
 
 ```typescript
 const agent = new Agent({
@@ -72,7 +72,7 @@ const agent = new Agent({
   terms: [...],
   guidelines: [...],
   routes: [{
-    extractionSchema: { /* JSON Schema */ }
+    schema: { /* JSON Schema */ }
   }]
 });
 ```
@@ -89,7 +89,7 @@ Production-ready business onboarding with advanced patterns:
 
 - ✅ Multi-step data collection flow
 - ✅ Branching logic (physical vs online business)
-- ✅ Tools with `contextUpdate` for automatic state management
+- ✅ Tools with `contextUpdate` for automatic step management
 - ✅ Both step-by-step and fluent chaining approaches
 - ✅ Lifecycle hooks for persistence
 - ✅ Dynamic route creation based on collected data
@@ -98,43 +98,43 @@ Production-ready business onboarding with advanced patterns:
 
 ```typescript
 // Branching based on business type
-const askPhysicalLocation = askLocation.transitionTo({
-  chatState: "Get physical store address",
+const askPhysicalLocation = askLocation.nextStep({
+  instructions: "Get physical store address",
   condition: "User has a physical store",
 });
 
-const askOnlineLocation = askLocation.transitionTo({
-  chatState: "Get website and online support hours",
+const askOnlineLocation = askLocation.nextStep({
+  instructions: "Get website and online support hours",
   condition: "User does not have a physical store",
 });
 ```
 
 ### ✈️ [Travel Agent](../examples/travel-agent.ts)
 
-**Perfect for:** Multi-route systems with session state
+**Perfect for:** Multi-route systems with session step
 
 Complete travel booking system featuring:
 
 - ✅ Multi-step flight booking flow
 - ✅ Data extraction with JSON Schema
-- ✅ Session state tracking across turns
-- ✅ Tools with data access via `extracted` context
+- ✅ Session step tracking across turns
+- ✅ Tools with data access via `data` context
 - ✅ Alternative flow handling (booking vs status check)
 - ✅ Route-specific guidelines
 - ✅ **NEW:** Automatic feedback collection after booking with `onComplete`
 
-**Key concepts:** Session state, data extraction, multiple routes, tool data access, route transitions
+**Key concepts:** Session step, data extraction, multiple routes, tool data access, route transitions
 
 ```typescript
 const searchFlights = defineTool(
   "search_flights",
-  async ({ context, extracted }) => {
-    // Tool has access to extracted booking data
-    if (!extracted?.destination || !extracted?.departureDate) {
+  async ({ context, data }) => {
+    // Tool has access to data booking data
+    if (!data?.destination || !data?.departureDate) {
       return { data: [] };
     }
-    // Use extracted data to search
-    const flights = await searchAPI(extracted);
+    // Use collected data to search
+    const flights = await searchAPI(data);
     return { data: flights };
   }
 );
@@ -169,7 +169,7 @@ Real-time streaming responses:
 - ✅ Stream responses from all providers (Anthropic, OpenAI, Gemini, OpenRouter)
 - ✅ Real-time text generation with `respondStream`
 - ✅ Cancellable streams with AbortSignal
-- ✅ Access route, state, and tool information in final chunk
+- ✅ Access route, step, and tool information in final chunk
 - ✅ 5 comprehensive examples covering different use cases
 
 **Key concepts:** Streaming, real-time UX, cancellation
@@ -180,7 +180,7 @@ for await (const chunk of agent.respondStream({ history })) {
 
   if (chunk.done) {
     console.log("Route:", chunk.route?.title);
-    console.log("Extracted:", chunk.extracted);
+    console.log("Data:", chunk.data);
   }
 }
 ```
@@ -298,11 +298,11 @@ Full-text search and analytics-powered persistence:
 
 **Perfect for:** Integrating with existing database schemas
 
-Manual session state management for existing schemas:
+Manual session step management for existing schemas:
 
 - ✅ Full control over database operations
 - ✅ Works with any database (no adapter needed)
-- ✅ Manual session state save/restore
+- ✅ Manual session step save/restore
 - ✅ Perfect for integrating with existing schemas
 - ✅ Complete example with validation hooks
 
@@ -310,13 +310,13 @@ Manual session state management for existing schemas:
 
 ---
 
-## 🔧 Context & State Management
+## 🔧 Context & Step Management
 
 ### 💾 [Persistent Onboarding Agent](../examples/persistent-onboarding.ts)
 
 **Perfect for:** Multi-turn conversations with persistence
 
-Multi-turn conversation with state persistence:
+Multi-turn conversation with step persistence:
 
 - ✅ Context lifecycle hooks for database integration
 - ✅ Automatic persistence on context updates
@@ -339,27 +339,27 @@ const agent = new Agent({
 });
 ```
 
-### 🔄 [Extracted Data Modification](../examples/extracted-data-modification.ts)
+### 🔄 [Collected data Modification](../examples/data-data-modification.ts)
 
 **Perfect for:** Data validation and enrichment
 
-Tools that validate and enrich extracted data:
+Tools that validate and enrich collected data:
 
-- ✅ Tools can modify extracted data with `extractedUpdate`
+- ✅ Tools can modify collected data with `dataUpdate`
 - ✅ Data validation and enrichment patterns
 - ✅ Flag-based conditional execution
 - ✅ Error handling and data correction
 - ✅ Multi-step data refinement
 
-**Key concepts:** Data validation, enrichment, extractedUpdate, flags
+**Key concepts:** Data validation, enrichment, dataUpdate, flags
 
 ```typescript
-const validateEmail = defineTool("validate_email", async ({ extracted }) => {
-  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extracted.email);
+const validateEmail = defineTool("validate_email", async ({ data }) => {
+  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email);
   return {
     data: isValid,
-    extractedUpdate: {
-      emailValid: isValid, // Enrich extracted data
+    dataUpdate: {
+      emailValid: isValid, // Enrich collected data
     },
   };
 });
@@ -397,16 +397,16 @@ See how different AI providers work:
 
 ### 📊 [Company Q&A Agent](../examples/company-qna-agent.ts)
 
-**Perfect for:** Stateless question-answering systems
+**Perfect for:** Stepless question-answering systems
 
 Simple Q&A agent with knowledge base:
 
-- ✅ Stateless routes (no data extraction)
+- ✅ Stepless routes (no data extraction)
 - ✅ Knowledge base integration
 - ✅ Simple request-response pattern
 - ✅ Perfect for FAQ bots
 
-**Key concepts:** Stateless routing, Q&A patterns
+**Key concepts:** Stepless routing, Q&A patterns
 
 ---
 
@@ -428,7 +428,7 @@ bun examples/travel-agent.ts
 ### Learning Path
 
 1. **Start here:** [Declarative Agent](../examples/declarative-agent.ts) - Learn the basics
-2. **Simple flow:** [Travel Agent](../examples/travel-agent.ts) - Session state & extraction
+2. **Simple flow:** [Travel Agent](../examples/travel-agent.ts) - Session step & extraction
 3. **Complex flow:** [Business Onboarding](../examples/business-onboarding.ts) - Branching & lifecycle
 4. **Add persistence:** [Prisma Persistence](../examples/prisma-persistence.ts) - Database integration
 5. **Add security:** [Domain Scoping](../examples/domain-scoping.ts) - Tool isolation
@@ -438,7 +438,7 @@ bun examples/travel-agent.ts
 | Example             | Best For        | Key Features                |
 | ------------------- | --------------- | --------------------------- |
 | Declarative Agent   | Learning basics | Full API coverage           |
-| Travel Agent        | Session state   | Multi-turn conversations    |
+| Travel Agent        | Session step    | Multi-turn conversations    |
 | Business Onboarding | Complex flows   | Branching, lifecycle hooks  |
 | Healthcare Agent    | Security        | Data validation, compliance |
 | Streaming Agent     | Real-time UX    | Streaming responses         |

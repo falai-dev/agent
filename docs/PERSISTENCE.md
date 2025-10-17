@@ -1,16 +1,16 @@
 # Persistence with @falai/agent
 
-The `@falai/agent` framework provides optional, flexible persistence for automatically saving conversation sessions, extracted data, and messages to your database.
+The `@falai/agent` framework provides optional, flexible persistence for automatically saving conversation sessions, collected data, and messages to your database.
 
 ## Features
 
 - ✅ **Optional** - Persistence is completely optional
 - ✅ **Provider Pattern** - Simple API like AI providers (`new PrismaAdapter({ prisma })`)
 - ✅ **Type-safe** - Full TypeScript support with generics
-- ✅ **Session State Integration** - Automatic saving of extracted data and conversation progress
+- ✅ **Session Step Integration** - Automatic saving of collected data and conversation progress
 - ✅ **Multiple Adapters** - Prisma, Redis, MongoDB, PostgreSQL, SQLite, OpenSearch, Memory
 - ✅ **Extensible** - Create adapters for any database
-- ✅ **Auto-save** - Automatic session state and message persistence
+- ✅ **Auto-save** - Automatic session step and message persistence
 
 ## Quick Start with Prisma
 
@@ -41,7 +41,7 @@ model AgentSession {
   agentName       String?   @map("agent_name")
   status          String    @default("active")
   currentRoute    String?   @map("current_route")
-  currentState    String?   @map("current_state")
+  currentStep    String?   @map("current_step")
   collectedData   Json?     @map("collected_data")
   messageCount    Int       @default(0) @map("message_count")
   lastMessageAt   DateTime? @map("last_message_at")
@@ -62,7 +62,7 @@ model AgentMessage {
   role      String
   content   String   @db.Text
   route     String?
-  state     String?
+  step     String?
   toolCalls Json?    @map("tool_calls")
   event     Json?
   createdAt DateTime @default(now()) @map("created_at")
@@ -81,7 +81,7 @@ npx prisma generate
 npx prisma migrate dev --name init
 ```
 
-### 4. Use in Your Agent with Session State (That's it!)
+### 4. Use in Your Agent with Session Step (That's it!)
 
 ```typescript
 import { Agent, PrismaAdapter, GeminiProvider } from "@falai/agent";
@@ -89,7 +89,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Define your extracted data type
+// Define your collected data type
 interface BookingData {
   destination: string;
   date: string;
@@ -103,14 +103,14 @@ const agent = new Agent({
   persistence: {
     adapter: new PrismaAdapter({ prisma }),
     userId: "user_123",
-    autoSave: true, // Auto-saves session state!
+    autoSave: true, // Auto-saves session step!
   },
 });
 
 // Create a route with data extraction
 const bookingRoute = agent.createRoute<BookingData>({
   title: "Book Flight",
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       destination: { type: "string" },
@@ -121,45 +121,45 @@ const bookingRoute = agent.createRoute<BookingData>({
   },
 });
 
-// Define states with smart data gathering and custom IDs
-bookingRoute.initialState
-  .transitionTo({
-    id: "collect_details", // ✅ Custom state ID for easier tracking
-    chatState: "Collect booking details",
-    gather: ["destination", "date", "passengers"],
+// Define steps with smart data collecting and custom IDs
+bookingRoute.initialStep
+  .nextStep({
+    id: "collect_details", // ✅ Custom step ID for easier tracking
+    instructions: "Collect booking details",
+    collect: ["destination", "date", "passengers"],
   })
-  .transitionTo({
-    id: "confirm_booking", // ✅ Custom state ID
-    chatState: "Confirm all details",
-    requiredData: ["destination", "date", "passengers"],
+  .nextStep({
+    id: "confirm_booking", // ✅ Custom step ID
+    instructions: "Confirm all details",
+    requires: ["destination", "date", "passengers"],
   });
 
 // Access persistence methods
 const persistence = agent.getPersistenceManager();
 
-// Create a session with state support
-const { sessionData, sessionState } =
-  await persistence.createSessionWithState<BookingData>({
+// Create a session with step support
+const { sessionData, sessionStep } =
+  await persistence.createSessionWithStep<BookingData>({
     userId: "user_123",
     agentName: "My Agent",
   });
 
 // Session ID is automatically set in metadata
-console.log("Session ID:", sessionState.metadata?.sessionId);
+console.log("Session ID:", sessionStep.metadata?.sessionId);
 // Outputs: sessionData.id (e.g., "cuid_abc123")
 
 // Load history
 const history = await persistence.loadSessionHistory(sessionData.id);
 
-// Generate response with session state
+// Generate response with session step
 const response = await agent.respond({
   history,
-  session: sessionState, // Pass session state with ID
+  session: sessionStep, // Pass session step with ID
 });
 
-// Session state is auto-saved! ✨
-console.log("Extracted data:", response.session?.extracted);
-console.log("Current state ID:", response.session?.currentState?.id); // Custom or auto-generated ID
+// Session step is auto-saved! ✨
+console.log("Collected data:", response.session?.data);
+console.log("Current step ID:", response.session?.currentStep?.id); // Custom or auto-generated ID
 
 // Save message
 await persistence.saveMessage({
@@ -268,26 +268,26 @@ const agent = new Agent({
 await agent.updateContext({ preferences: { theme: "dark" } });
 ```
 
-## Session State Integration
+## Session Step Integration
 
-The new architecture automatically saves and loads `SessionState<TExtracted>` which includes:
+The new architecture automatically saves and loads `SessionStep<TData>` which includes:
 
-- **Current route and state** - Track conversation progress
-- **Extracted data** - All data gathered via `extractionSchema` and `gather` fields
+- **Current route and step** - Track conversation progress
+- **Collected data** - All data collected via `schema` and `collect` fields
 - **Route history** - History of route transitions
 - **Metadata** - Session timestamps and custom data
 
 ### How It Works
 
-1. **Auto-Save**: When `autoSave: true`, session state is automatically persisted after each `respond()` call
-2. **Conversion**: `SessionState` is automatically converted to `SessionData` for storage
-3. **Recovery**: Load session state from database to resume conversations
+1. **Auto-Save**: When `autoSave: true`, session step is automatically persisted after each `respond()` call
+2. **Conversion**: `SessionStep` is automatically converted to `SessionData` for storage
+3. **Recovery**: Load session step from database to resume conversations
 
-### Create Session with State
+### Create Session with Step
 
 ```typescript
-const { sessionData, sessionState } =
-  await persistence.createSessionWithState<YourDataType>({
+const { sessionData, sessionStep } =
+  await persistence.createSessionWithStep<YourDataType>({
     userId: "user_123",
     agentName: "My Agent",
     initialData: {
@@ -296,23 +296,21 @@ const { sessionData, sessionState } =
   });
 
 // sessionData: Database record
-// sessionState: In-memory session state ready to use
+// sessionStep: In-memory session step ready to use
 ```
 
-### Save Session State
+### Save Session Step
 
 ```typescript
 // Manual save (not needed if autoSave: true)
-await persistence.saveSessionState(sessionId, sessionState);
+await persistence.saveSessionStep(sessionId, sessionStep);
 ```
 
-### Load Session State
+### Load Session Step
 
 ```typescript
-// Load session state from database
-const sessionState = await persistence.loadSessionState<YourDataType>(
-  sessionId
-);
+// Load session step from database
+const sessionStep = await persistence.loadSessionStep<YourDataType>(sessionId);
 
 // Load message history
 const history = await persistence.loadSessionHistory(sessionId);
@@ -320,13 +318,13 @@ const history = await persistence.loadSessionHistory(sessionId);
 // Resume conversation
 const response = await agent.respond({
   history,
-  session: sessionState,
+  session: sessionStep,
 });
 ```
 
 ### What Gets Persisted
 
-The session state stores:
+The session step stores:
 
 ```typescript
 {
@@ -335,12 +333,12 @@ The session state stores:
     title: "Book a Flight",
     enteredAt: Date
   },
-  currentState: {
+  currentStep: {
     id: "ask_dates",
     description: "Ask about travel dates",
     enteredAt: Date
   },
-  extracted: {
+  data: {
     destination: "Paris",
     departureDate: "2025-06-15",
     passengers: 2
@@ -365,9 +363,9 @@ Access via `agent.getPersistenceManager()`:
 ### Session Methods
 
 ```typescript
-// Create session with state support (NEW!)
-const { sessionData, sessionState } =
-  await persistence.createSessionWithState<YourDataType>({
+// Create session with step support (NEW!)
+const { sessionData, sessionStep } =
+  await persistence.createSessionWithStep<YourDataType>({
     userId: "user_123",
     agentName: "My Agent",
     initialData: {
@@ -375,13 +373,11 @@ const { sessionData, sessionState } =
     },
   });
 
-// Save session state (NEW!)
-await persistence.saveSessionState(sessionId, sessionState);
+// Save session step (NEW!)
+await persistence.saveSessionStep(sessionId, sessionStep);
 
-// Load session state (NEW!)
-const sessionState = await persistence.loadSessionState<YourDataType>(
-  sessionId
-);
+// Load session step (NEW!)
+const sessionStep = await persistence.loadSessionStep<YourDataType>(sessionId);
 
 // Create session (legacy)
 await persistence.createSession({
@@ -402,7 +398,7 @@ await persistence.getUserSessions(userId);
 // Update session
 await persistence.updateSessionStatus(sessionId, "completed");
 await persistence.updateCollectedData(sessionId, { key: "value" });
-await persistence.updateRouteState(sessionId, routeId, stateId);
+await persistence.updateRouteStep(sessionId, routeId, stepId);
 
 // Complete/abandon session
 await persistence.completeSession(sessionId);
@@ -422,7 +418,7 @@ await persistence.saveMessage({
   role: "user" | "agent" | "system",
   content: "Hello!",
   route: "route_id",
-  state: "state_id",
+  step: "step_id",
   toolCalls: [...],
 });
 
@@ -508,7 +504,7 @@ await persistence.saveMessage({
 - `agentName`: Name of the agent
 - `status`: `"active" | "completed" | "abandoned"`
 - `currentRoute`: Current route ID
-- `currentState`: Current state ID
+- `currentStep`: Current step ID
 - `collectedData`: JSON object for custom data
 - `messageCount`: Number of messages in session
 - `lastMessageAt`: Timestamp of last message
@@ -524,19 +520,19 @@ await persistence.saveMessage({
 - `role`: `"user" | "agent" | "system"`
 - `content`: Message text
 - `route`: Route ID when message was sent
-- `state`: State ID when message was sent
+- `step`: Step ID when message was sent
 - `toolCalls`: Array of tool calls (if any)
 - `event`: Full event data (optional)
 - `createdAt`: Message creation time
 
 ## Best Practices
 
-1. ✅ **Use `createSessionWithState()`** - Get both database record and session state in one call
-2. ✅ **Enable `autoSave: true`** - Automatically persist session state after each response
-3. ✅ **Define extraction schemas** - Use `extractionSchema` in routes for structured data collection
-4. ✅ **Pass session state** - Always pass `session` parameter to `agent.respond()`
-5. ✅ **Load session state** - Use `loadSessionState()` to resume conversations
-6. ✅ **Store extracted data** - Leverage `collectedData.extracted` for user input tracking
+1. ✅ **Use `createSessionWithStep()`** - Get both database record and session step in one call
+2. ✅ **Enable `autoSave: true`** - Automatically persist session step after each response
+3. ✅ **Define extraction schemas** - Use `schema` in routes for structured data collection
+4. ✅ **Pass session step** - Always pass `session` parameter to `agent.respond()`
+5. ✅ **Load session step** - Use `loadSessionStep()` to resume conversations
+6. ✅ **Store collected data** - Leverage `collectedData.data` for user input tracking
 7. ✅ **Index frequently queried fields** - Add database indexes on `userId`, `status`, etc.
 8. ✅ **Use cascading deletes** - Clean up messages automatically when deleting sessions
 9. ✅ **Complete sessions** - Mark sessions as completed when conversation ends
@@ -802,7 +798,7 @@ describe("Agent persistence", () => {
   const adapter = new MemoryAdapter();
 
   afterEach(() => {
-    adapter.clear(); // Clean state between tests
+    adapter.clear(); // Clean step between tests
   });
 
   it("should save session", async () => {

@@ -1,9 +1,9 @@
 /**
- * Example: Using OpenSearch for Persistence with Session State
+ * Example: Using OpenSearch for Persistence with Session Step
  *
  * OpenSearch provides powerful persistence with:
  * - Full-text search across conversations
- * - Analytics and aggregations on extracted data
+ * - Analytics and aggregations on collected data
  * - Time-series analysis of sessions
  * - Compatible with Elasticsearch 7.x
  */
@@ -16,7 +16,7 @@ import {
   EventSource,
   MessageEventData,
   Event,
-  END_STATE,
+  END_ROUTE,
 } from "../src/index";
 // @ts-ignore
 import { Client } from "@opensearch-project/opensearch";
@@ -92,7 +92,7 @@ async function example() {
     },
     persistence: {
       adapter,
-      autoSave: true, // Auto-save session state with extracted data
+      autoSave: true, // Auto-save session step with collected data
       userId,
     },
   });
@@ -106,7 +106,7 @@ async function example() {
       "User reports an issue or problem",
       "User is dissatisfied",
     ],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         category: {
@@ -136,37 +136,37 @@ async function example() {
     },
   });
 
-  // State flow
-  complaintRoute.initialState
-    .transitionTo({
-      chatState: "Understand the complaint",
-      gather: ["category", "severity", "description"],
+  // Step flow
+  complaintRoute.initialStep
+    .nextStep({
+      instructions: "Understand the complaint",
+      collect: ["category", "severity", "description"],
       skipIf: (data) => !!data.description,
     })
-    .transitionTo({
-      chatState: "Identify affected service",
-      gather: ["affectedService"],
+    .nextStep({
+      instructions: "Identify affected service",
+      collect: ["affectedService"],
       skipIf: (data) => !!data.affectedService,
-      requiredData: ["description"],
+      requires: ["description"],
     })
-    .transitionTo({
-      chatState: "Ask for desired resolution",
-      gather: ["requestedResolution"],
+    .nextStep({
+      instructions: "Ask for desired resolution",
+      collect: ["requestedResolution"],
       skipIf: (data) => !!data.requestedResolution,
-      requiredData: ["category", "description"],
+      requires: ["category", "description"],
     })
-    .transitionTo({
-      chatState: "Propose solution and close complaint",
-      requiredData: ["category", "description"],
+    .nextStep({
+      instructions: "Propose solution and close complaint",
+      requires: ["category", "description"],
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   const persistence = agent.getPersistenceManager();
   if (!persistence) return;
 
-  // Create session with state
-  const { sessionData, sessionState } =
-    await persistence.createSessionWithState<ComplaintData>({
+  // Create session with step
+  const { sessionData, sessionStep } =
+    await persistence.createSessionWithStep<ComplaintData>({
       userId,
       agentName: "Customer Service Agent",
       initialData: {
@@ -178,7 +178,7 @@ async function example() {
 
   // Conversation flow
   const history: Event<MessageEventData>[] = [];
-  let session = sessionState;
+  let session = sessionStep;
 
   // Turn 1
   console.log("\n--- Turn 1 ---");
@@ -192,7 +192,7 @@ async function example() {
   const response1 = await agent.respond({ history, session });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Extracted:", response1.session?.extracted);
+  console.log("📊 Data:", response1.session?.data);
 
   await persistence.saveMessage({
     sessionId: sessionData.id,
@@ -206,7 +206,7 @@ async function example() {
     role: "agent",
     content: response1.message,
     route: response1.session?.currentRoute?.id,
-    state: response1.session?.currentState?.id,
+    step: response1.session?.currentStep?.id,
   });
 
   session = response1.session!;
@@ -227,7 +227,7 @@ async function example() {
   const response2 = await agent.respond({ history, session });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Extracted:", response2.session?.extracted);
+  console.log("📊 Data:", response2.session?.data);
 
   await persistence.saveMessage({
     sessionId: sessionData.id,
@@ -243,20 +243,18 @@ async function example() {
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Complaint route complete!");
-    await createSupportTicket(
-      agent.getExtractedData(session.id) as ComplaintData
-    );
+    await createSupportTicket(agent.getData(session.id) as ComplaintData);
   }
 
   // Load session from OpenSearch
   console.log("\n--- Loading Session from OpenSearch ---");
-  const loadedSession = await persistence.loadSessionState<ComplaintData>(
+  const loadedSession = await persistence.loadSessionStep<ComplaintData>(
     sessionData.id
   );
 
   console.log("📥 Loaded session:", {
     currentRoute: loadedSession?.currentRoute?.title,
-    extracted: loadedSession?.extracted,
+    data: loadedSession?.data,
   });
 
   // Demonstrate full-text search
@@ -306,7 +304,7 @@ async function example() {
 }
 
 /**
- * Advanced Example: Search and Analytics on Extracted Data
+ * Advanced Example: Search and Analytics on Collected data
  */
 async function analyticsExample() {
   const client = new Client({
@@ -346,7 +344,7 @@ async function analyticsExample() {
 
   const ticketRoute = agent.createRoute<TicketData>({
     title: "Analyze Support Ticket",
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         ticketType: { type: "string" },
@@ -360,17 +358,17 @@ async function analyticsExample() {
     },
   });
 
-  ticketRoute.initialState.transitionTo({
-    chatState: "Analyze and categorize ticket",
-    gather: ["ticketType", "priority", "tags"],
+  ticketRoute.initialStep.nextStep({
+    instructions: "Analyze and categorize ticket",
+    collect: ["ticketType", "priority", "tags"],
   });
 
   const persistence = agent.getPersistenceManager()!;
 
   // Create multiple sessions
   for (let i = 0; i < 3; i++) {
-    const { sessionData, sessionState } =
-      await persistence.createSessionWithState<TicketData>({
+    const { sessionData, sessionStep } =
+      await persistence.createSessionWithStep<TicketData>({
         userId: "analyst_001",
         agentName: "Support Analyzer",
       });
@@ -385,7 +383,7 @@ async function analyticsExample() {
           }`
         ),
       ],
-      session: sessionState,
+      session: sessionStep,
     });
 
     await persistence.saveMessage({
@@ -410,14 +408,14 @@ async function analyticsExample() {
     `📊 Total sessions indexed: ${allSessions.body.hits.total.value}`
   );
 
-  // Analyze extracted data patterns
-  console.log("\n--- Analyze Extracted Data ---");
+  // Analyze collected data patterns
+  console.log("\n--- Analyze Collected data ---");
   const sessions = allSessions.body.hits.hits;
 
   sessions.forEach((hit: any) => {
     const collectedData = hit._source.collectedData;
     console.log(`Session ${hit._id}:`, {
-      extracted: collectedData?.extracted,
+      data: collectedData?.data,
       route: hit._source.currentRoute,
     });
   });

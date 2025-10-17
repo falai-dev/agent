@@ -1,19 +1,13 @@
 import type { Event } from "../types/history";
 import type { Route } from "./Route";
-import type { State } from "./State";
+import type { Step } from "./Step";
 import type { StructuredSchema } from "../types/schema";
 import { PromptComposer } from "./PromptComposer";
 
-export interface ResponseOutput<TData = unknown> {
-  message: string;
-  data?: TData;
-  contextUpdate?: Record<string, unknown>;
-}
-
 export class ResponseEngine<TContext = unknown> {
-  responseSchemaForRoute<TExtracted = unknown>(
-    route: Route<TContext, TExtracted>,
-    currentState?: State<TContext, TExtracted>
+  responseSchemaForRoute<TData = unknown>(
+    route: Route<TContext, TData>,
+    currentStep?: Step<TContext, TData>
   ): StructuredSchema {
     const base: StructuredSchema = {
       type: "object",
@@ -29,10 +23,10 @@ export class ResponseEngine<TContext = unknown> {
       base.properties!.data = route.responseOutputSchema;
     }
 
-    // Add gather fields from current state
-    if (currentState?.gatherFields && route.extractionSchema?.properties) {
-      for (const field of currentState.gatherFields) {
-        const fieldSchema = route.extractionSchema.properties[field];
+    // Add collect fields from current step
+    if (currentStep?.collectFields && route.schema?.properties) {
+      for (const field of currentStep.collectFields) {
+        const fieldSchema = route.schema.properties[field];
         if (fieldSchema) {
           base.properties![field] = fieldSchema;
         }
@@ -44,7 +38,7 @@ export class ResponseEngine<TContext = unknown> {
 
   buildResponsePrompt(
     route: Route<TContext>,
-    currentState: State<TContext>,
+    currentStep: Step<TContext>,
     rules: string[],
     prohibitions: string[],
     directives: string[] | undefined,
@@ -72,9 +66,9 @@ export class ResponseEngine<TContext = unknown> {
         route.description ? ` — ${route.description}` : ""
       }`
     );
-    if (currentState.chatState) {
+    if (currentStep.instructions) {
       pc.addInstruction(
-        `Guideline for your response (adapt to the conversation):\n${currentState.chatState}`
+        `Guideline for your response (adapt to the conversation):\n${currentStep.instructions}`
       );
     }
     if (rules.length) pc.addInstruction(`Rules:\n- ${rules.join("\n- ")}`);

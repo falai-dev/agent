@@ -48,50 +48,50 @@ Gets allowed domains for a specific route by ID. Returns filtered domains based 
 
 Gets allowed domains for a specific route by title. Returns filtered domains based on route's `domains` property, or all domains if route has no restrictions.
 
-##### `getExtractedData<TExtracted>(routeId?): Partial<TExtracted>`
+##### `getData<TData>(routeId?): Partial<TData>`
 
-Gets the extracted data from current session, optionally for a specific route.
+Gets the collected data from current session, optionally for a specific route.
 
 ```typescript
 // Option 1: Using current session (set with setCurrentSession)
 agent.setCurrentSession(session);
-const extracted = agent.getExtractedData(); // Uses current session
+const data = agent.getData(); // Uses current session
 
 // Option 2: Get data for specific route
-const routeData = agent.getExtractedData("onboarding"); // Route-specific data
+const routeData = agent.getData("onboarding"); // Route-specific data
 
 // Option 3: From response (with current session set)
 const response = await agent.respond({ history });
-const extracted = agent.getExtractedData(); // Uses current session
+const data = agent.getData(); // Uses current session
 ```
 
 **Parameters:**
 
 - `routeId` (optional): Route ID to get data for. If not provided, returns current route data.
 
-**Returns:** The extracted data from the current session
+**Returns:** The collected data from the current session
 
 **Note:** Returns empty object if no current session is set.
 
 ##### `setCurrentSession(session): void`
 
-Sets the current session for convenience methods. Once set, methods like `getExtractedData()` don't need the session parameter.
+Sets the current session for convenience methods. Once set, methods like `getData()` don't need the session parameter.
 
 ```typescript
 // Set current session
 agent.setCurrentSession(session);
 
 // Now methods use the current session automatically
-const extracted = agent.getExtractedData();
-// Get extracted data for route
-const routeData = agent.getExtractedData("onboarding");
+const data = agent.getData();
+// Get collected data for route
+const routeData = agent.getData("onboarding");
 ```
 
 **Parameters:**
 
-- `session`: Session state to use as current session
+- `session`: Session step to use as current session
 
-##### `getCurrentSession(): SessionState | undefined`
+##### `getCurrentSession(): SessionStep | undefined`
 
 Gets the currently set session.
 
@@ -114,12 +114,12 @@ agent.clearCurrentSession();
 
 ##### `respond(input: RespondInput<TContext>): Promise<RespondOutput>`
 
-Generates an AI response with session state management, data extraction, and intelligent routing.
+Generates an AI response with session step management, data extraction, and intelligent routing.
 
 ```typescript
 interface RespondInput<TContext> {
   history: Event[];
-  session?: SessionState; // NEW: Session state for conversation tracking
+  session?: SessionStep; // NEW: Session step for conversation tracking
   contextOverride?: Partial<TContext>;
   signal?: AbortSignal;
 }
@@ -127,15 +127,15 @@ interface RespondInput<TContext> {
 interface RespondOutput {
   /** The message to send to the user */
   message: string;
-  /** Updated session state (includes extracted data, current route/state) */
-  session?: SessionState;
+  /** Updated session step (includes collected data, current route/step) */
+  session?: SessionStep;
   /** Tool calls executed during response (for debugging) */
   toolCalls?: Array<{
     toolName: string;
     arguments: Record<string, unknown>;
   }>;
   /**
-   * NEW: Indicates if the current route has reached END_STATE
+   * NEW: Indicates if the current route has reached END_ROUTE
    * When true, all required data has been collected and the route is complete.
    * Your application should handle this appropriately (e.g., process collected data,
    * show completion UI, start a new route, etc.)
@@ -146,18 +146,18 @@ interface RespondOutput {
 
 **Enhanced Response Pipeline:**
 
-1. **Tool Execution** - Execute tools if current state has `toolState`
+1. **Tool Execution** - Execute tools if current step has `tool`
 2. **Always-On Routing** - Score all routes, respect user intent to change direction
-3. **State Traversal** - Use `skipIf` and `requiredData` to determine next state
-4. **Response Generation** - Build schema with `gather` fields, extract data
-5. **Session Update** - Merge extracted data into session state
+3. **Step Traversal** - Use `skipIf` and `requires` to determine next step
+4. **Response Generation** - Build schema with `collect` fields, extract data
+5. **Session Update** - Merge collected data into session step
 
-**Session State Management:**
+**Session Step Management:**
 
-- Tracks current route, state, and extracted data across turns
+- Tracks current route, step, and collected data across turns
 - Enables "I changed my mind" scenarios with context-aware routing
-- Automatically merges new extracted data with existing session data
-- **Per-route data preservation** - Extracted data is organized by route ID, allowing users to switch routes without losing progress
+- Automatically merges new collected data with existing session data
+- **Per-route data preservation** - Collected data is organized by route ID, allowing users to switch routes without losing progress
 
 **Example with Persistence Adapters:**
 
@@ -165,40 +165,40 @@ interface RespondOutput {
 import { createSession } from "@falai/agent";
 
 // Using built-in persistence adapters
-const { sessionData, sessionState } =
-  await persistence.createSessionWithState<FlightData>({
+const { sessionData, sessionStep } =
+  await persistence.createSessionWithStep<FlightData>({
     userId: "user_123",
     agentName: "Travel Agent",
   });
 
 // Option 1: Set current session for convenience
-agent.setCurrentSession(sessionState);
+agent.setCurrentSession(sessionStep);
 
 const response = await agent.respond({
   history,
-  // session: sessionState, // No longer required!
+  // session: sessionStep, // No longer required!
 });
 
 // Use convenience methods without passing session
-const extracted = agent.getExtractedData();
+const data = agent.getData();
 
 // Option 2: Still pass session explicitly if preferred
 const response2 = await agent.respond({
   history,
-  session: sessionState,
+  session: sessionStep,
 });
 ```
 
 **Example with Custom Database (Manual):**
 
 ```typescript
-import { createSession, SessionState } from "@falai/agent";
+import { createSession, SessionStep } from "@falai/agent";
 
 // Load from your custom database
 const dbSession = await yourDb.sessions.findOne({ id: sessionId });
 
-// Restore or create session state
-let agentSession: SessionState<YourDataType>;
+// Restore or create session step
+let agentSession: SessionStep<YourDataType>;
 
 if (dbSession && dbSession.currentRoute && dbSession.collectedData) {
   // Restore existing session from database
@@ -209,14 +209,14 @@ if (dbSession && dbSession.currentRoute && dbSession.collectedData) {
         dbSession.collectedData?.currentRouteTitle || dbSession.currentRoute,
       enteredAt: new Date(),
     },
-    currentState: dbSession.currentState
+    currentStep: dbSession.currentStep
       ? {
-          id: dbSession.currentState,
-          description: dbSession.collectedData?.currentStateDescription,
+          id: dbSession.currentStep,
+          description: dbSession.collectedData?.currentStepDescription,
           enteredAt: new Date(),
         }
       : undefined,
-    extracted: dbSession.collectedData?.extracted || {},
+    data: dbSession.collectedData?.data || {},
     routeHistory: dbSession.collectedData?.routeHistory || [],
     metadata: {
       sessionId: dbSession.id,
@@ -241,12 +241,12 @@ const response = await agent.respond({
 await yourDb.sessions.update({
   id: dbSession.id,
   currentRoute: response.session?.currentRoute?.id,
-  currentState: response.session?.currentState?.id,
+  currentStep: response.session?.currentStep?.id,
   collectedData: {
-    extracted: response.session?.extracted,
+    data: response.session?.data,
     routeHistory: response.session?.routeHistory,
     currentRouteTitle: response.session?.currentRoute?.title,
-    currentStateDescription: response.session?.currentState?.description,
+    currentStepDescription: response.session?.currentStep?.description,
     metadata: response.session?.metadata,
   },
   lastMessageAt: new Date(),
@@ -258,13 +258,13 @@ await yourDb.messages.create({
   role: "agent",
   content: response.message,
   route: response.session?.currentRoute?.id,
-  state: response.session?.currentState?.id,
+  step: response.session?.currentStep?.id,
 });
 ```
 
 **Handling Route Completion:**
 
-When a route reaches its END_STATE transition (all required data collected), the response includes `isRouteComplete: true`:
+When a route reaches its END_ROUTE transition (all required data collected), the response includes `isRouteComplete: true`:
 
 ```typescript
 const response = await agent.respond({
@@ -277,7 +277,7 @@ if (response.isRouteComplete) {
   console.log("✅ Route completed!");
 
   // Get all the collected data
-  const collectedData = agent.getExtractedData(response.session!);
+  const collectedData = agent.getData(response.session!);
   console.log("Collected data:", collectedData);
 
   // Handle completion in your application:
@@ -303,31 +303,31 @@ if (response.isRouteComplete) {
 const onboardingRoute = agent.createRoute<OnboardingData>({
   id: "onboarding",
   title: "User Onboarding",
-  extractionSchema: ONBOARDING_SCHEMA,
+  schema: ONBOARDING_SCHEMA,
   initialData: existingUserData, // Pre-fill with existing data
 });
 
-// Build states with skipIf conditions
-const welcome = onboardingRoute.initialState.transitionTo({
+// Build steps with skipIf conditions
+const welcome = onboardingRoute.initialStep.nextStep({
   id: "ask_name",
-  chatState: "What's your name?",
-  gather: ["name"],
+  instructions: "What's your name?",
+  collect: ["name"],
   skipIf: (data) => !!data.name, // Skip if name already collected
 });
 
-const askEmail = welcome.transitionTo({
+const askEmail = welcome.nextStep({
   id: "ask_email",
-  chatState: "What's your email?",
-  gather: ["email"],
+  instructions: "What's your email?",
+  collect: ["email"],
   skipIf: (data) => !!data.email, // Skip if email already collected
 });
 
-const complete = askEmail.transitionTo({
+const complete = askEmail.nextStep({
   id: "complete",
-  chatState: "All done! Thank you.",
+  instructions: "All done! Thank you.",
 });
 
-complete.transitionTo({ state: END_STATE });
+complete.nextStep({ step: END_ROUTE });
 
 // Option 1: Set current session for convenience
 agent.setCurrentSession(session);
@@ -336,26 +336,26 @@ const response = await agent.respond({ history });
 
 if (response.isRouteComplete) {
   // If all data was pre-filled, the route completes immediately!
-  // The routing engine recursively skips all states and reaches END_STATE
-  const data = agent.getExtractedData(); // No need to pass session!
+  // The routing engine recursively skips all steps and reaches END_ROUTE
+  const data = agent.getData(); // No need to pass session!
   await saveUserProfile(data);
   return "Profile updated successfully!";
 }
 
 // Get route-specific data if needed
-const onboardingData = agent.getExtractedDataForRoute("onboarding");
-const bookingData = agent.getExtractedDataForRoute("booking");
+const onboardingData = agent.getDataForRoute("onboarding");
+const bookingData = agent.getDataForRoute("booking");
 
 return response.message;
 ```
 
 **Important Notes:**
 
-- `isRouteComplete` is `true` when the route reaches an `END_STATE` transition
+- `isRouteComplete` is `true` when the route reaches an `END_ROUTE` transition
 - The `message` will be empty (`""`) when `isRouteComplete` is `true`
 - You should check `isRouteComplete` and handle completion appropriately
-- If all states are skipped (due to `skipIf` conditions), the route can complete immediately on entry
-- Use `agent.getExtractedData(session)` to retrieve all collected data
+- If all steps are skipped (due to `skipIf` conditions), the route can complete immediately on entry
+- Use `agent.getData(session)` to retrieve all collected data
 
 See also: [Custom Database Integration Example](../examples/custom-database-persistence.ts)
 
@@ -371,15 +371,15 @@ interface StreamChunk {
   accumulated: string;
   /** Whether this is the final chunk */
   done: boolean;
-  /** Updated session state (includes extracted data, current route/state) */
-  session?: SessionState;
+  /** Updated session step (includes collected data, current route/step) */
+  session?: SessionStep;
   /** Tool calls requested by the agent (only in final chunk) */
   toolCalls?: Array<{
     toolName: string;
     arguments: Record<string, unknown>;
   }>;
   /**
-   * Indicates if the current route has reached END_STATE (only in final chunk)
+   * Indicates if the current route has reached END_ROUTE (only in final chunk)
    * When true, all required data has been collected and the route is complete.
    */
   isRouteComplete?: boolean;
@@ -389,7 +389,7 @@ interface StreamChunk {
 **Key Features:**
 
 - 🌊 Real-time streaming for better perceived performance
-- 📊 Access to route, state, and tool information in final chunk
+- 📊 Access to route, step, and tool information in final chunk
 - 🛑 Cancellable with AbortSignal
 - ✅ Supported by all providers (Anthropic, OpenAI, Gemini, OpenRouter)
 
@@ -409,11 +409,11 @@ for await (const chunk of agent.respondStream({ history, session })) {
     // Check if route is complete
     if (chunk.isRouteComplete) {
       console.log("🎉 Route completed!");
-      const data = agent.getExtractedData(chunk.session!);
+      const data = agent.getData(chunk.session!);
       await handleCompletion(data);
     }
 
-    // Access session state
+    // Access session step
     if (chunk.session?.currentRoute) {
       console.log("Route:", chunk.session.currentRoute.title);
     }
@@ -493,14 +493,14 @@ Dynamic domain registry access.
 
 ### `Route`
 
-Represents a conversation flow with states and transitions.
+Represents a conversation flow with steps and transitions.
 
 #### Constructor
 
 ```typescript
 new Route(options: RouteOptions)
 
-interface RouteOptions<TExtracted = unknown> {
+interface RouteOptions<TData = unknown> {
   id?: string;              // Optional custom ID (deterministic ID generated from title if not provided)
   title: string;            // Route title
   description?: string;     // Route description
@@ -511,36 +511,36 @@ interface RouteOptions<TExtracted = unknown> {
   prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do in this route
 
   // NEW: Schema-first data extraction
-  extractionSchema?: {
+  schema?: {
     type: "object";
     properties: Record<string, any>;
     required?: string[];
     additionalProperties?: boolean;
   };
 
-  // NEW: Pre-populate extracted data when entering route
-  initialData?: Partial<TExtracted>;
+  // NEW: Pre-populate collected data when entering route
+  initialData?: Partial<TData>;
 
-  // NEW: Configure the initial state
-  initialState?: {
-    id?: string;              // Custom ID for the initial state
-    chatState?: string;       // Description for the initial state
-    gather?: string[];        // Fields to gather in the initial state
-    skipIf?: (extracted: Partial<TExtracted>) => boolean;  // Skip condition
-    requiredData?: string[];  // Required data prerequisites
+  // NEW: Configure the initial step
+  initialStep?: {
+    id?: string;              // Custom ID for the initial step
+    instructions?: string;       // Description for the initial step
+    collect?: string[];        // Fields to collect in the initial step
+    skipIf?: (data: Partial<TData>) => boolean;  // Skip condition
+    requires?: string[];  // Required data prerequisites
   };
 
   // NEW: Sequential steps for simple linear flows
-  steps?: TransitionSpec<unknown, TExtracted>[];
+  steps?: TransitionSpec<unknown, TData>[];
 }
 ```
 
 **Note on IDs:** Route IDs are deterministic by default, generated from the title using a hash function. This ensures consistency across server restarts. You can provide a custom ID if you need specific control over the identifier.
 
-**Initial State Configuration:** You can configure the initial state in two ways:
+**Initial Step Configuration:** You can configure the initial step in two ways:
 
-1. Using `initialState` option when creating the route
-2. Using `route.initialState.configure()` method after route creation
+1. Using `initialStep` option when creating the route
+2. Using `route.initialStep.configure()` method after route creation
 
 #### Methods
 
@@ -568,7 +568,7 @@ Returns the prohibitions that must never be done in this route.
 
 Returns a reference to this route.
 
-**Note:** Routes no longer have a `getExtractedData()` method. Use `agent.getExtractedData()` or `agent.getExtractedDataForRoute(routeId)` instead.
+**Note:** Routes no longer have a `getData()` method. Use `agent.getData()` or `agent.getDataForRoute(routeId)` instead.
 
 ##### `describe(): string`
 
@@ -592,55 +592,53 @@ Route description (readonly).
 
 Conditions that trigger this route (readonly).
 
-##### `initialState: State`
+##### `initialStep: Step`
 
-Starting state of the route (readonly).
+Starting step of the route (readonly).
 
 ---
 
-### `State`
+### `Step`
 
-Represents a state within a conversation route.
+Represents a step within a conversation route.
 
 #### Methods
 
-##### `transitionTo(spec: TransitionSpec): TransitionResult`
+##### `nextStep(spec: TransitionSpec): TransitionResult`
 
-Creates a transition from this state and returns a chainable result.
+Creates a transition from this step and returns a chainable result.
 
 ```typescript
-interface TransitionSpec<TExtracted = unknown> {
-  chatState?: string; // Transition to a chat interaction
-  toolState?: ToolRef; // Transition to execute a tool
-  state?: StateRef | symbol; // Transition to specific state or END_STATE
+interface TransitionSpec<TData = unknown> {
+  instructions?: string; // Transition to a chat interaction
+  tool?: ToolRef; // Transition to execute a tool
+  step?: StepRef | symbol; // Transition to specific step or END_ROUTE
 
-  // NEW: Data extraction fields for this state
-  gather?: string[];
+  // NEW: Data extraction fields for this step
+  collect?: string[];
 
-  // NEW: Code-based condition to skip this state
-  skipIf?: (extracted: Partial<TExtracted>) => boolean;
+  // NEW: Code-based condition to skip this step
+  skipIf?: (data: Partial<TData>) => boolean;
 
-  // NEW: Prerequisites that must be met to enter this state
-  requiredData?: string[];
+  // NEW: Prerequisites that must be met to enter this step
+  requires?: string[];
 
   // Optional: AI-evaluated text condition for this transition
   condition?: string;
 }
 
-interface TransitionResult<TExtracted = unknown> {
-  id: string; // State identifier
+interface TransitionResult<TData = unknown> {
+  id: string; // Step identifier
   routeId: string; // Route identifier
-  transitionTo: (
-    spec: TransitionSpec<TExtracted>
-  ) => TransitionResult<TExtracted>;
+  nextStep: (spec: TransitionSpec<TData>) => TransitionResult<TData>;
 }
 ```
 
 **Parameters:**
 
-- `spec`: The transition specification (see `TransitionSpec` above). Can include an optional `condition` property for AI-evaluated state selection guidance.
+- `spec`: The transition specification (see `TransitionSpec` above). Can include an optional `condition` property for AI-evaluated step selection guidance.
 
-**Returns:** A `TransitionResult` that includes the target state's reference (`id`, `routeId`) and a `transitionTo` method for chaining additional transitions.
+**Returns:** A `TransitionResult` that includes the target step's reference (`id`, `routeId`) and a `nextStep` method for chaining additional transitions.
 
 **Example:**
 
@@ -655,7 +653,7 @@ interface FlightData {
 // Create a data-driven route
 const flightRoute = agent.createRoute<FlightData>({
   title: "Book Flight",
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       destination: { type: "string" },
@@ -667,79 +665,79 @@ const flightRoute = agent.createRoute<FlightData>({
 });
 
 // Approach 1: Step-by-step with data extraction and text conditions
-const askDestination = flightRoute.initialState.transitionTo({
-  chatState: "Ask where they want to fly",
-  gather: ["destination"],
-  skipIf: (extracted) => !!extracted.destination, // Skip if already have destination
+const askDestination = flightRoute.initialStep.nextStep({
+  instructions: "Ask where they want to fly",
+  collect: ["destination"],
+  skipIf: (data) => !!data.destination, // Skip if already have destination
   condition: "Customer hasn't specified destination yet", // AI-evaluated condition
 });
 
-const askDates = askDestination.transitionTo({
-  chatState: "Ask about travel dates",
-  gather: ["departureDate"],
-  skipIf: (extracted) => !!extracted.departureDate,
-  requiredData: ["destination"], // Must have destination first
+const askDates = askDestination.nextStep({
+  instructions: "Ask about travel dates",
+  collect: ["departureDate"],
+  skipIf: (data) => !!data.departureDate,
+  requires: ["destination"], // Must have destination first
   condition: "Destination confirmed, need travel dates",
 });
 
-const askPassengers = askDates.transitionTo({
-  chatState: "How many passengers?",
-  gather: ["passengers"],
-  skipIf: (extracted) => !!extracted.passengers,
+const askPassengers = askDates.nextStep({
+  instructions: "How many passengers?",
+  collect: ["passengers"],
+  skipIf: (data) => !!data.passengers,
 });
 
-// Access state properties
-console.log(askDestination.id); // State ID
+// Access step properties
+console.log(askDestination.id); // Step ID
 console.log(askDestination.routeId); // Route ID
 
 // Approach 2: Fluent chaining for linear flows
-flightRoute.initialState
-  .transitionTo({
-    chatState: "Extract travel details",
-    gather: ["destination", "departureDate", "passengers"],
+flightRoute.initialStep
+  .nextStep({
+    instructions: "Extract travel details",
+    collect: ["destination", "departureDate", "passengers"],
   })
-  .transitionTo({
-    chatState: "Present available flights",
+  .nextStep({
+    instructions: "Present available flights",
   })
-  .transitionTo({ state: END_STATE });
+  .nextStep({ step: END_ROUTE });
 
-// Use with session state
+// Use with session step
 let session = createSession<FlightData>();
 const response = await agent.respond({ history, session });
-console.log(response.session?.extracted); // { destination: "Paris", ... }
+console.log(response.session?.data); // { destination: "Paris", ... }
 ```
 
 ##### `addGuideline(guideline: Guideline): void`
 
-Adds a guideline specific to this state.
+Adds a guideline specific to this step.
 
 ##### `configure(config): this`
 
-Configure the state properties after creation. Useful for overriding initial state configuration. Returns `this` for chaining.
+Configure the step properties after creation. Useful for overriding initial step configuration. Returns `this` for chaining.
 
 ```typescript
-// Configure initial state after route creation
-route.initialState.configure({
+// Configure initial step after route creation
+route.initialStep.configure({
   description: "Welcome! Let's get started",
-  gatherFields: ["name", "email"],
-  skipIf: (extracted) => !!extracted.name && !!extracted.email,
-  requiredData: [],
+  collectFields: ["name", "email"],
+  skipIf: (data) => !!data.name && !!data.email,
+  requires: [],
 });
 
-// Or configure any state
-const askName = route.initialState.transitionTo({ chatState: "Ask for name" });
+// Or configure any step
+const askName = route.initialStep.nextStep({ instructions: "Ask for name" });
 askName.configure({
-  gatherFields: ["firstName", "lastName"],
+  collectFields: ["firstName", "lastName"],
 });
 ```
 
 **Parameters:**
 
 - `config`: Configuration object with optional properties:
-  - `description?: string` - State description
-  - `gatherFields?: string[]` - Fields to gather in this state
-  - `skipIf?: (extracted: Partial<TExtracted>) => boolean` - Skip condition function
-  - `requiredData?: string[]` - Required data prerequisites
+  - `description?: string` - Step description
+  - `collectFields?: string[]` - Fields to collect in this step
+  - `skipIf?: (data: Partial<TData>) => boolean` - Skip condition function
+  - `requires?: string[]` - Required data prerequisites
 
 **Returns:** `this` for method chaining
 
@@ -747,15 +745,15 @@ askName.configure({
 
 ##### `id: string`
 
-Unique state identifier (readonly).
+Unique step identifier (readonly).
 
 ##### `routeId: string`
 
-ID of the route this state belongs to (readonly).
+ID of the route this step belongs to (readonly).
 
 ##### `description: string`
 
-State description (readonly).
+Step description (readonly).
 
 ---
 
@@ -1461,7 +1459,7 @@ interface SessionData {
   agentName?: string;
   status: SessionStatus; // "active" | "completed" | "abandoned"
   currentRoute?: string;
-  currentState?: string;
+  currentStep?: string;
   collectedData?: Record<string, unknown>;
   messageCount: number;
   lastMessageAt?: Date;
@@ -1481,7 +1479,7 @@ interface MessageData {
   role: MessageRole; // "user" | "agent" | "system"
   content: string;
   route?: string;
-  state?: string;
+  step?: string;
   toolCalls?: Array<{
     toolName: string;
     arguments: Record<string, unknown>;
@@ -1747,12 +1745,12 @@ interface ToolResult<TReturn> {
 
 ## Types
 
-### `SessionState<TExtracted>`
+### `SessionStep<TData>`
 
-Tracks the current position in the conversation flow and data extracted during route progression.
+Tracks the current position in the conversation flow and data collected during route progression.
 
 ```typescript
-interface SessionState<TExtracted = Record<string, unknown>> {
+interface SessionStep<TData = Record<string, unknown>> {
   /** Unique session identifier (useful for persistence) */
   id?: string;
 
@@ -1763,25 +1761,25 @@ interface SessionState<TExtracted = Record<string, unknown>> {
     enteredAt: Date;
   };
 
-  /** Current state within the route */
-  currentState?: {
+  /** Current step within the route */
+  currentStep?: {
     id: string;
     description?: string;
     enteredAt: Date;
   };
 
   /**
-   * Data extracted during the current route
-   * Convenience reference to extractedByRoute[currentRoute.id]
+   * Data collected during the current route
+   * Convenience reference to dataByRoute[currentRoute.id]
    */
-  extracted: Partial<TExtracted>;
+  data: Partial<TData>;
 
   /**
-   * Extracted data organized by route ID
+   * Collected data organized by route ID
    * Preserves data when switching between routes
-   * Format: { "routeId": { ...extractedData } }
+   * Format: { "routeId": { ...dataData } }
    */
-  extractedByRoute: Record<string, Partial<unknown>>;
+  dataByRoute: Record<string, Partial<unknown>>;
 
   /** History of routes visited in this session */
   routeHistory: Array<{
@@ -1803,9 +1801,9 @@ interface SessionState<TExtracted = Record<string, unknown>> {
 **Key Features:**
 
 - **`id`** - Optional session identifier that persists across database operations
-- **`extracted`** - Type-safe data collected via `extractionSchema` for the **current route**
-- **`extractedByRoute`** - **NEW:** Per-route data map that preserves extracted data when switching routes
-- **`currentRoute`** / **`currentState`** - Track conversation position
+- **`data`** - Type-safe data collected via `schema` for the **current route**
+- **`dataByRoute`** - **NEW:** Per-route data map that preserves collected data when switching routes
+- **`currentRoute`** / **`currentStep`** - Track conversation position
 - **`routeHistory`** - Full audit trail of route transitions
 - **`metadata`** - Custom data (timestamps, user info, etc.)
 
@@ -1813,15 +1811,15 @@ interface SessionState<TExtracted = Record<string, unknown>> {
 
 When users switch routes (e.g., "Actually, I want to book a hotel instead"), the framework automatically:
 
-- Saves current route's `extracted` data to `extractedByRoute[routeId]`
-- Loads the new route's data from `extractedByRoute[newRouteId]` (if resuming)
-- Keeps `extracted` as a convenient reference to the current route's data
+- Saves current route's `data` data to `dataByRoute[routeId]`
+- Loads the new route's data from `dataByRoute[newRouteId]` (if resuming)
+- Keeps `data` as a convenient reference to the current route's data
 
 This allows users to:
 
 - Switch routes without losing progress
 - Resume incomplete routes where they left off
-- Access historical data from previous routes via `session.extractedByRoute["route_id"]`
+- Access historical data from previous routes via `session.dataByRoute["route_id"]`
 
 **Usage:**
 
@@ -1837,17 +1835,17 @@ const session = createSession<FlightData>("session_abc123");
 // Use in conversation
 const response = await agent.respond({ history, session });
 
-// Access extracted data
-console.log(response.session?.extracted.destination); // Type-safe!
+// Access collected data
+console.log(response.session?.data.destination); // Type-safe!
 ```
 
 ---
 
 ### Session Helper Functions
 
-#### `createSession<TExtracted>(sessionId?, metadata?): SessionState<TExtracted>`
+#### `createSession<TData>(sessionId?, metadata?): SessionStep<TData>`
 
-Creates a new session state object.
+Creates a new session step object.
 
 **Parameters:**
 
@@ -1870,12 +1868,12 @@ const session = createSession<OnboardingData>("session_123", {
 });
 ```
 
-#### `enterRoute<TExtracted>(session, routeId, routeTitle): SessionState<TExtracted>`
+#### `enterRoute<TData>(session, routeId, routeTitle): SessionStep<TData>`
 
 Updates session when entering a new route. Automatically:
 
 - Exits previous route (if exists)
-- Resets extracted data
+- Resets collected data
 - Adds route to history
 - Updates timestamps
 
@@ -1888,52 +1886,52 @@ let session = createSession<FlightData>();
 session = enterRoute(session, "book_flight", "Book a Flight");
 
 console.log(session.currentRoute?.title); // "Book a Flight"
-console.log(session.extracted); // {} (reset for new route)
+console.log(session.data); // {} (reset for new route)
 ```
 
-#### `enterState<TExtracted>(session, stateId, description?): SessionState<TExtracted>`
+#### `enterStep<TData>(session, stepId, description?): SessionStep<TData>`
 
-Updates session when entering a new state within a route.
+Updates session when entering a new step within a route.
 
 **Example:**
 
 ```typescript
-session = enterState(session, "ask_destination", "Ask where to fly");
+session = enterStep(session, "ask_destination", "Ask where to fly");
 
-console.log(session.currentState?.id); // "ask_destination"
-console.log(session.currentState?.description); // "Ask where to fly"
+console.log(session.currentStep?.id); // "ask_destination"
+console.log(session.currentStep?.description); // "Ask where to fly"
 ```
 
-#### `mergeExtracted<TExtracted>(session, data): SessionState<TExtracted>`
+#### `mergeData<TData>(session, data): SessionStep<TData>`
 
-Merges new extracted data into session. Updates timestamps automatically.
+Merges new collected data into session. Updates timestamps automatically.
 
 **Example:**
 
 ```typescript
-session = mergeExtracted(session, {
+session = mergeData(session, {
   destination: "Paris",
   departureDate: "2025-06-15",
 });
 
-console.log(session.extracted); // { destination: "Paris", departureDate: "2025-06-15" }
+console.log(session.data); // { destination: "Paris", departureDate: "2025-06-15" }
 ```
 
-#### `sessionStateToData<TExtracted>(session): object`
+#### `sessionStepToData<TData>(session): object`
 
-Converts SessionState to persistence-friendly format for database storage.
+Converts SessionStep to persistence-friendly format for database storage.
 
 **Returns:**
 
 ```typescript
 {
   currentRoute?: string;          // Route ID
-  currentState?: string;          // State ID
+  currentStep?: string;          // Step ID
   collectedData: {                // All session data
-    extracted: Partial<TExtracted>;
+    data: Partial<TData>;
     routeHistory: Array<...>;
     currentRouteTitle?: string;
-    currentStateDescription?: string;
+    currentStepDescription?: string;
     metadata?: object;
   };
 }
@@ -1946,22 +1944,22 @@ const session = createSession<FlightData>("session_123");
 // ... conversation happens ...
 
 // Save to database
-const dbData = sessionStateToData(session);
+const dbData = sessionStepToData(session);
 await db.sessions.update(session.id!, {
   currentRoute: dbData.currentRoute,
-  currentState: dbData.currentState,
+  currentStep: dbData.currentStep,
   collectedData: dbData.collectedData,
 });
 ```
 
-#### `sessionDataToState<TExtracted>(sessionId, data): SessionState<TExtracted>`
+#### `sessionDataToStep<TData>(sessionId, data): SessionStep<TData>`
 
-Converts database data back to SessionState for resuming conversations.
+Converts database data back to SessionStep for resuming conversations.
 
 **Parameters:**
 
 - `sessionId`: The database session ID
-- `data`: Database session data (currentRoute, currentState, collectedData)
+- `data`: Database session data (currentRoute, currentStep, collectedData)
 
 **Example:**
 
@@ -1969,10 +1967,10 @@ Converts database data back to SessionState for resuming conversations.
 // Load from database
 const dbSession = await db.sessions.findById("session_123");
 
-// Restore session state
-const session = sessionDataToState<FlightData>(dbSession.id, {
+// Restore session step
+const session = sessionDataToStep<FlightData>(dbSession.id, {
   currentRoute: dbSession.currentRoute,
-  currentState: dbSession.currentState,
+  currentStep: dbSession.currentStep,
   collectedData: dbSession.collectedData,
 });
 
@@ -1988,17 +1986,17 @@ let session = createSession<FlightData>(dbSession.id);
 
 // CONVERSATION: Extract data
 const response1 = await agent.respond({ history: history1, session });
-session = response1.session!; // { extracted: { destination: "Paris" } }
+session = response1.session!; // { data: { destination: "Paris" } }
 
 // SAVE: To database
-const saveData = sessionStateToData(session);
+const saveData = sessionStepToData(session);
 await db.sessions.update(session.id!, saveData);
 
 // ---  Later (new request) ---
 
 // LOAD: From database
 const loaded = await db.sessions.findById("session_123");
-const restored = sessionDataToState<FlightData>(loaded.id, loaded);
+const restored = sessionDataToStep<FlightData>(loaded.id, loaded);
 
 // CONTINUE: Conversation
 const response2 = await agent.respond({ history: history2, session: restored });
@@ -2016,8 +2014,8 @@ interface AgentStructuredResponse {
   message: string;
   /** Route chosen by the agent (route title or null if no route) */
   route?: string | null;
-  /** Current state within the route (state description or null) */
-  state?: string | null;
+  /** Current step within the route (step description or null) */
+  step?: string | null;
   /** Tool calls the agent wants to execute */
   toolCalls?: Array<{
     toolName: string;
@@ -2047,15 +2045,15 @@ const routeId = generateRouteId("User Onboarding");
 // Returns: "route_user_onboarding_{hash}"
 ```
 
-#### `generateStateId(routeId: string, description?: string, index?: number): string`
+#### `generateStepId(routeId: string, description?: string, index?: number): string`
 
-Generates a deterministic state ID.
+Generates a deterministic step ID.
 
 ```typescript
-import { generateStateId } from "@falai/agent";
+import { generateStepId } from "@falai/agent";
 
-const stateId = generateStateId("route_123", "Ask for name");
-// Returns: "state_ask_for_name_{hash}"
+const stepId = generateStepId("route_123", "Ask for name");
+// Returns: "step_ask_for_name_{hash}"
 ```
 
 #### `generateToolId(name: string): string`
@@ -2082,27 +2080,27 @@ All IDs are generated deterministically using a hash function of their content (
 
 ## Constants
 
-### `END_STATE`
+### `END_ROUTE`
 
 Symbol marking the end of a conversation route. Use this when building routes to mark where they should end.
 
 ```typescript
-import { END_STATE } from "@falai/agent";
+import { END_ROUTE } from "@falai/agent";
 
-const thankYou = askEmail.transitionTo({
-  chatState: "Thank you for your information!",
+const thankYou = askEmail.nextStep({
+  instructions: "Thank you for your information!",
 });
 
 // Mark the end of the route
-thankYou.transitionTo({ state: END_STATE });
+thankYou.nextStep({ step: END_ROUTE });
 ```
 
-### `END_STATE_ID`
+### `END_ROUTE_ID`
 
-String constant representing END_STATE for runtime comparisons. When a route completes, `currentState.id` is set to this value.
+String constant representing END_ROUTE for runtime comparisons. When a route completes, `currentStep.id` is set to this value.
 
 ```typescript
-import { END_STATE_ID } from "@falai/agent";
+import { END_ROUTE_ID } from "@falai/agent";
 
 const response = await agent.respond({ history, session });
 
@@ -2111,13 +2109,13 @@ if (response.isRouteComplete) {
   console.log("Route completed!");
 }
 
-// Method 2: Using END_STATE_ID constant
-if (response.session?.currentState?.id === END_STATE_ID) {
+// Method 2: Using END_ROUTE_ID constant
+if (response.session?.currentStep?.id === END_ROUTE_ID) {
   console.log("Route completed!");
 }
 ```
 
-**Note:** Both methods are equivalent. Use `isRouteComplete` for simplicity, or `END_STATE_ID` for consistency with how you build routes.
+**Note:** Both methods are equivalent. Use `isRouteComplete` for simplicity, or `END_ROUTE_ID` for consistency with how you build routes.
 
 ---
 

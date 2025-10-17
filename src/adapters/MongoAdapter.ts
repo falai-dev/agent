@@ -206,14 +206,14 @@ class MongoSessionRepository implements SessionRepository {
     return await this.update(id, { collectedData });
   }
 
-  async updateRouteState(
+  async updateRouteStep(
     id: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null> {
     return await this.update(id, {
       currentRoute: route,
-      currentState: state,
+      currentStep: step,
     });
   }
 

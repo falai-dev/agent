@@ -1,5 +1,5 @@
 /**
- * Example: Declarative Agent Configuration with Session State
+ * Example: Declarative Agent Configuration with Session Step
  *
  * This example demonstrates how to configure an entire agent
  * using declarative syntax in the constructor, including:
@@ -7,7 +7,7 @@
  * - Guidelines (behavior rules)
  * - Capabilities
  * - Routes with data extraction schemas and custom IDs
- * - Session state management for multi-turn conversations
+ * - Session step management for multi-turn conversations
  */
 
 import {
@@ -21,7 +21,7 @@ import {
   type Guideline,
   type Capability,
   type RouteOptions,
-  END_STATE,
+  END_ROUTE,
 } from "../src/index";
 
 // Context type
@@ -80,9 +80,9 @@ const getLabResults = defineTool<
   { report: string; status: string }
 >({
   name: "get_lab_results",
-  handler: async ({ context, extracted }) => {
-    // Tools can now access extracted data
-    const labData = extracted as Partial<LabData>;
+  handler: async ({ context, data }) => {
+    // Tools can now access collected data
+    const labData = data as Partial<LabData>;
     if (labData?.testType) {
       return {
         data: {
@@ -105,9 +105,9 @@ const getLabResults = defineTool<
 
 const scheduleAppointment = defineTool<HealthcareContext>({
   name: "schedule_appointment",
-  handler: async ({ context, extracted }) => {
-    // Tools can access extracted appointment data
-    const appointment = extracted as Partial<AppointmentData>;
+  handler: async ({ context, data }) => {
+    // Tools can access data appointment data
+    const appointment = data as Partial<AppointmentData>;
     if (!appointment?.preferredDate || !appointment?.preferredTime) {
       return { data: { confirmation: "Please provide appointment details" } };
     }
@@ -179,7 +179,7 @@ const routes: RouteOptions[] = [
     title: "Schedule Appointment",
     description: "Helps the patient schedule an appointment",
     conditions: ["The patient wants to schedule an appointment"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         appointmentType: {
@@ -219,29 +219,29 @@ const routes: RouteOptions[] = [
     steps: [
       {
         id: "ask_appointment_type",
-        chatState:
+        instructions:
           "What type of appointment do you need? (checkup, consultation, or followup)",
-        gather: ["appointmentType"],
+        collect: ["appointmentType"],
       },
       {
         id: "ask_date_time",
-        chatState: "When would you like to come in?",
-        gather: ["preferredDate", "preferredTime"],
-        requiredData: ["appointmentType"],
+        instructions: "When would you like to come in?",
+        collect: ["preferredDate", "preferredTime"],
+        requires: ["appointmentType"],
       },
       {
         id: "ask_symptoms",
-        chatState: "Are you experiencing any symptoms?",
-        gather: ["symptoms"],
+        instructions: "Are you experiencing any symptoms?",
+        collect: ["symptoms"],
       },
       {
         id: "confirm_appointment",
-        toolState: scheduleAppointment,
-        requiredData: ["preferredDate", "preferredTime"],
+        tool: scheduleAppointment,
+        requires: ["preferredDate", "preferredTime"],
       },
       {
         id: "final_confirmation",
-        chatState:
+        instructions:
           "Your appointment is confirmed. You will receive a notification shortly.",
       },
     ],
@@ -251,7 +251,7 @@ const routes: RouteOptions[] = [
     title: "Check Lab Results",
     description: "Retrieves and explains patient lab results",
     conditions: ["The patient wants to see their lab results"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         testType: {
@@ -283,7 +283,7 @@ const routes: RouteOptions[] = [
     title: "General Healthcare Questions",
     description: "Answer general healthcare questions",
     conditions: ["Patient asks general healthcare questions"],
-    // No extractionSchema - stateless Q&A
+    // No schema - stepless Q&A
   },
 ] as RouteOptions[];
 
@@ -320,9 +320,9 @@ agent
     synonyms: ["virtual visit", "video appointment"],
   });
 
-// Example usage with session state
+// Example usage with session step
 async function main() {
-  // Initialize session state
+  // Initialize session step
   let session = createSession<AppointmentData | LabData>();
 
   // Create events with custom timestamps (useful for historical data)
@@ -338,12 +338,12 @@ async function main() {
   const response = await agent.respond({ history, session });
   console.log("Agent:", response.message);
   console.log("Route chosen:", response.session?.currentRoute?.title);
-  console.log("Extracted data:", response.session?.extracted);
+  console.log("Collected data:", response.session?.data);
 
-  // Session state is updated with progress
+  // Session step is updated with progress
   session = response.session!;
 
-  // Turn 2 - Continue conversation with session state
+  // Turn 2 - Continue conversation with session step
   if (response.session?.currentRoute?.title === "Schedule Appointment") {
     const history2 = [
       ...history,
@@ -357,26 +357,26 @@ async function main() {
 
     const response2 = await agent.respond({ history: history2, session });
     console.log("Agent:", response2.message);
-    console.log("Updated extracted:", response2.session?.extracted);
+    console.log("Updated data:", response2.session?.data);
 
     // Session tracks the appointment booking progress
-    console.log("Current state:", response2.session?.currentState?.id);
+    console.log("Current step:", response2.session?.currentStep?.id);
 
     // Check for route completion
     if (response2.isRouteComplete && response2.session) {
       console.log("\n✅ Appointment scheduling complete!");
       await sendAppointmentConfirmation(
-        agent.getExtractedData(response2.session.id) as AppointmentData
+        agent.getData(response2.session.id) as AppointmentData
       );
     }
   }
 
   // Note: Custom IDs ensure consistency across server restarts
-  // Session state enables:
+  // Session step enables:
   // - Tracking conversation progress across turns
   // - Extracting structured data throughout conversation
   // - Always-on routing that respects user intent changes
-  // - State recovery for resuming conversations
+  // - Step recovery for resuming conversations
 }
 
 /**

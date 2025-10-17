@@ -58,9 +58,9 @@ export interface MessageEventData {
   session?: {
     routeId?: string;
     routeTitle?: string;
-    stateId?: string;
-    stateDescription?: string;
-    extracted?: Record<string, unknown>;
+    stepId?: string;
+    stepDescription?: string;
+    data?: Record<string, unknown>;
   };
 }
 

@@ -2,22 +2,22 @@
  * Tool system type definitions
  */
 
-import type { Event, StateRef } from "./index";
+import type { Event, StepRef } from "./index";
 
 /**
  * Context provided to tool handlers
  */
-export interface ToolContext<TContext = unknown, TExtracted = unknown> {
+export interface ToolContext<TContext = unknown, TData = unknown> {
   /** The agent's context data */
   context: TContext;
   /** Update the agent's context (triggers lifecycle hooks if configured) */
   updateContext: (updates: Partial<TContext>) => Promise<void>;
-  /** Current state reference (if in a route) */
-  state?: StateRef;
+  /** Current step reference (if in a route) */
+  step?: StepRef;
   /** Interaction history */
   history: Event[];
-  /** Data extracted so far in the current route */
-  extracted?: Partial<TExtracted>;
+  /** Data collected so far in the current route */
+  data?: Partial<TData>;
   /** Additional metadata */
   metadata?: Record<string, unknown>;
 }
@@ -28,14 +28,14 @@ export interface ToolContext<TContext = unknown, TExtracted = unknown> {
 export interface ToolResult<
   TData = unknown,
   TContext = unknown,
-  TExtracted = unknown
+  TCollected = unknown
 > {
   /** The result data */
   data: TData;
   /** Optional context update to be merged with current context */
   contextUpdate?: Partial<TContext>;
-  /** Optional extracted data update to be merged with session state */
-  extractedUpdate?: Partial<TExtracted>;
+  /** Optional collected data update to be merged with session step */
+  collectedUpdate?: Partial<TCollected>;
   /** Optional metadata about the execution */
   meta?: Record<string, unknown>;
 }
@@ -47,13 +47,13 @@ export type ToolHandler<
   TContext,
   TArgs extends unknown[],
   TResult,
-  TExtracted = unknown
+  TData = unknown
 > = (
-  context: ToolContext<TContext, TExtracted>,
+  context: ToolContext<TContext, TData>,
   ...args: TArgs
 ) =>
-  | Promise<ToolResult<TResult, TContext, TExtracted>>
-  | ToolResult<TResult, TContext, TExtracted>;
+  | Promise<ToolResult<TResult, TContext, TData>>
+  | ToolResult<TResult, TContext, TData>;
 
 /**
  * Reference to a defined tool
@@ -62,14 +62,14 @@ export interface ToolRef<
   TContext,
   TArgs extends unknown[],
   TResult,
-  TExtracted = unknown
+  TData = unknown
 > {
   /** Tool identifier */
   id: string;
   /** Tool name */
   name: string;
   /** Tool handler function */
-  handler: ToolHandler<TContext, TArgs, TResult, TExtracted>;
+  handler: ToolHandler<TContext, TArgs, TResult, TData>;
   /** Description of what the tool does */
   description?: string;
   /** Parameter schema or description */

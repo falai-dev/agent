@@ -1,7 +1,7 @@
 /**
- * Example: Custom Database Integration (Manual Session State Management)
+ * Example: Custom Database Integration (Manual Session Step Management)
  *
- * This example shows how to manually manage session state when using your own
+ * This example shows how to manually manage session step when using your own
  * database structure instead of the built-in persistence adapters.
  *
  * Use this approach if you:
@@ -16,10 +16,10 @@ import {
   createMessageEvent,
   EventSource,
   createSession,
-  SessionState,
+  SessionStep,
   MessageEventData,
   Event,
-  END_STATE,
+  END_ROUTE,
 } from "../src/index";
 
 /**
@@ -30,13 +30,13 @@ interface CustomDatabaseSession {
   id: string;
   userId: string;
   currentRoute?: string;
-  currentState?: string;
+  currentStep?: string;
   collectedData?: {
-    extracted?: Record<string, unknown>;
-    extractedByRoute?: Record<string, Partial<unknown>>;
+    data?: Record<string, unknown>;
+    dataByRoute?: Record<string, Partial<unknown>>;
     routeHistory?: unknown[];
     currentRouteTitle?: string;
-    currentStateDescription?: string;
+    currentStepDescription?: string;
     metadata?: Record<string, unknown>;
   };
   createdAt: Date;
@@ -50,7 +50,7 @@ interface CustomDatabaseMessage {
   role: "user" | "agent" | "system";
   content: string;
   route?: string;
-  state?: string;
+  step?: string;
   createdAt: Date;
 }
 
@@ -148,7 +148,7 @@ async function example() {
       "User is a new customer",
       "User needs to set up their account",
     ],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         fullName: { type: "string" },
@@ -161,47 +161,47 @@ async function example() {
     },
   });
 
-  // Define states with custom IDs
-  onboardingRoute.initialState
-    .transitionTo({
+  // Define steps with custom IDs
+  onboardingRoute.initialStep
+    .nextStep({
       id: "ask_name",
-      chatState: "Ask for full name",
-      gather: ["fullName"],
+      instructions: "Ask for full name",
+      collect: ["fullName"],
       skipIf: (data) => !!data.fullName,
     })
-    .transitionTo({
+    .nextStep({
       id: "ask_email",
-      chatState: "Ask for email address",
-      gather: ["email"],
+      instructions: "Ask for email address",
+      collect: ["email"],
       skipIf: (data) => !!data.email,
     })
-    .transitionTo({
+    .nextStep({
       id: "ask_company",
-      chatState: "Ask for company name",
-      gather: ["companyName"],
+      instructions: "Ask for company name",
+      collect: ["companyName"],
       skipIf: (data) => !!data.companyName,
     })
-    .transitionTo({
+    .nextStep({
       id: "ask_phone",
-      chatState: "Ask for phone number (optional)",
-      gather: ["phoneNumber"],
+      instructions: "Ask for phone number (optional)",
+      collect: ["phoneNumber"],
     })
-    .transitionTo({
+    .nextStep({
       id: "ask_industry",
-      chatState: "Ask for industry",
-      gather: ["industry"],
+      instructions: "Ask for industry",
+      collect: ["industry"],
     })
-    .transitionTo({
+    .nextStep({
       id: "confirm_details",
-      chatState: "Confirm all details",
-      requiredData: ["fullName", "email", "companyName"],
+      instructions: "Confirm all details",
+      requires: ["fullName", "email", "companyName"],
     })
-    .transitionTo({
+    .nextStep({
       id: "complete_onboarding",
-      chatState:
+      instructions:
         "Thank you! Your account is set up. You will receive a confirmation email shortly.",
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   /**
    * Create or load session from your custom database
@@ -218,9 +218,9 @@ async function example() {
   }
 
   /**
-   * Convert database session to agent SessionState
+   * Convert database session to agent SessionStep
    */
-  let agentSession: SessionState<OnboardingData>;
+  let agentSession: SessionStep<OnboardingData>;
 
   if (dbSession.currentRoute && dbSession.collectedData) {
     // Restore existing session from database
@@ -233,23 +233,22 @@ async function example() {
           dbSession.collectedData?.currentRouteTitle || dbSession.currentRoute,
         enteredAt: new Date(),
       },
-      currentState: dbSession.currentState
+      currentStep: dbSession.currentStep
         ? {
-            id: dbSession.currentState,
-            description: dbSession.collectedData?.currentStateDescription,
+            id: dbSession.currentStep,
+            description: dbSession.collectedData?.currentStepDescription,
             enteredAt: new Date(),
           }
         : undefined,
-      extracted:
-        (dbSession.collectedData?.extracted as Partial<OnboardingData>) || {},
-      extractedByRoute:
-        (dbSession.collectedData?.extractedByRoute as Record<
+      data: (dbSession.collectedData?.data as Partial<OnboardingData>) || {},
+      dataByRoute:
+        (dbSession.collectedData?.dataByRoute as Record<
           string,
           Partial<OnboardingData>
         >) || {},
       routeHistory:
         (dbSession.collectedData
-          ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
+          ?.routeHistory as SessionStep<OnboardingData>["routeHistory"]) || [],
       metadata: {
         sessionId: dbSession.id,
         userId,
@@ -262,12 +261,12 @@ async function example() {
     console.log("✅ Session restored:", {
       sessionId: agentSession.metadata?.sessionId,
       currentRoute: agentSession.currentRoute?.title,
-      currentState: agentSession.currentState?.id,
-      extracted: agentSession.extracted,
+      currentStep: agentSession.currentStep?.id,
+      data: agentSession.data,
     });
   } else {
-    // Create new session state
-    console.log("🆕 Creating new session state...");
+    // Create new session step
+    console.log("🆕 Creating new session step...");
 
     agentSession = createSession<OnboardingData>(dbSession.id, {
       sessionId: dbSession.id,
@@ -304,7 +303,7 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Extracted so far:", response1.session?.extracted);
+  console.log("📊 Data so far:", response1.session?.data);
 
   // Save agent message to database
   await db.createMessage({
@@ -313,18 +312,18 @@ async function example() {
     role: "agent",
     content: response1.message,
     route: response1.session?.currentRoute?.id,
-    state: response1.session?.currentState?.id,
+    step: response1.session?.currentStep?.id,
   });
 
-  // Manually save session state back to database
+  // Manually save session step back to database
   await db.updateSession(dbSession.id, {
     currentRoute: response1.session?.currentRoute?.id,
-    currentState: response1.session?.currentState?.id,
+    currentStep: response1.session?.currentStep?.id,
     collectedData: {
-      extracted: response1.session?.extracted,
+      data: response1.session?.data,
       routeHistory: response1.session?.routeHistory,
       currentRouteTitle: response1.session?.currentRoute?.title,
-      currentStateDescription: response1.session?.currentState?.description,
+      currentStepDescription: response1.session?.currentStep?.description,
       metadata: response1.session?.metadata,
     },
   });
@@ -360,7 +359,7 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Extracted so far:", response2.session?.extracted);
+  console.log("📊 Data so far:", response2.session?.data);
 
   await db.createMessage({
     sessionId: dbSession.id,
@@ -368,18 +367,18 @@ async function example() {
     role: "agent",
     content: response2.message,
     route: response2.session?.currentRoute?.id,
-    state: response2.session?.currentState?.id,
+    step: response2.session?.currentStep?.id,
   });
 
-  // Save session state
+  // Save session step
   await db.updateSession(dbSession.id, {
     currentRoute: response2.session?.currentRoute?.id,
-    currentState: response2.session?.currentState?.id,
+    currentStep: response2.session?.currentStep?.id,
     collectedData: {
-      extracted: response2.session?.extracted,
+      data: response2.session?.data,
       routeHistory: response2.session?.routeHistory,
       currentRouteTitle: response2.session?.currentRoute?.title,
-      currentStateDescription: response2.session?.currentState?.description,
+      currentStepDescription: response2.session?.currentStep?.description,
       metadata: response2.session?.metadata,
     },
   });
@@ -391,7 +390,7 @@ async function example() {
     console.log("\n✅ Onboarding Complete!");
     // In a real app, you would now trigger the next steps,
     // like sending a welcome email, creating an account, etc.
-    await processOnboarding(response2.session?.extracted);
+    await processOnboarding(response2.session?.data);
   }
 
   /**
@@ -404,8 +403,8 @@ async function example() {
   const reloadedDbSession = await db.findSession(dbSession.id);
   if (!reloadedDbSession) throw new Error("Session not found");
 
-  // Reconstruct session state
-  const recoveredSession: SessionState<OnboardingData> = {
+  // Reconstruct session step
+  const recoveredSession: SessionStep<OnboardingData> = {
     currentRoute: reloadedDbSession.currentRoute
       ? {
           id: reloadedDbSession.currentRoute,
@@ -415,24 +414,23 @@ async function example() {
           enteredAt: new Date(),
         }
       : undefined,
-    currentState: reloadedDbSession.currentState
+    currentStep: reloadedDbSession.currentStep
       ? {
-          id: reloadedDbSession.currentState,
-          description: reloadedDbSession.collectedData?.currentStateDescription,
+          id: reloadedDbSession.currentStep,
+          description: reloadedDbSession.collectedData?.currentStepDescription,
           enteredAt: new Date(),
         }
       : undefined,
-    extracted:
-      (reloadedDbSession.collectedData?.extracted as Partial<OnboardingData>) ||
-      {},
-    extractedByRoute:
-      (reloadedDbSession.collectedData?.extractedByRoute as Record<
+    data:
+      (reloadedDbSession.collectedData?.data as Partial<OnboardingData>) || {},
+    dataByRoute:
+      (reloadedDbSession.collectedData?.dataByRoute as Record<
         string,
         Partial<OnboardingData>
       >) || {},
     routeHistory:
       (reloadedDbSession.collectedData
-        ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
+        ?.routeHistory as SessionStep<OnboardingData>["routeHistory"]) || [],
     metadata: {
       sessionId: reloadedDbSession.id,
       userId,
@@ -444,8 +442,8 @@ async function example() {
   console.log("✅ Session recovered from database:", {
     sessionId: recoveredSession.metadata?.sessionId,
     currentRoute: recoveredSession.currentRoute?.title,
-    currentState: recoveredSession.currentState?.id,
-    extracted: recoveredSession.extracted,
+    currentStep: recoveredSession.currentStep?.id,
+    data: recoveredSession.data,
   });
 
   // Load message history
@@ -486,28 +484,28 @@ async function advancedExample() {
       model: "models/gemini-2.0-flash-exp",
     }),
     hooks: {
-      // Validate and enrich extracted data
-      onExtractedUpdate: async (extracted, previous) => {
-        console.log("🔄 Data extracted, validating...");
+      // Validate and enrich collected data
+      onDataUpdate: async (data, previous) => {
+        console.log("🔄 Data collected, validating...");
 
         // Normalize email
-        if (extracted.email) {
-          extracted.email = extracted.email.toLowerCase().trim();
+        if (data.email) {
+          data.email = data.email.toLowerCase().trim();
         }
 
         // Normalize phone
-        if (extracted.phoneNumber) {
-          extracted.phoneNumber = extracted.phoneNumber.replace(/\D/g, "");
+        if (data.phoneNumber) {
+          data.phoneNumber = data.phoneNumber.replace(/\D/g, "");
         }
 
-        return extracted;
+        return data;
       },
     },
   });
 
   const route = agent.createRoute<OnboardingData>({
     title: "Onboarding",
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         fullName: { type: "string" },
@@ -519,10 +517,10 @@ async function advancedExample() {
     },
   });
 
-  route.initialState.transitionTo({
+  route.initialStep.nextStep({
     id: "collect_all",
-    chatState: "Collect all information",
-    gather: ["fullName", "email", "companyName", "phoneNumber"],
+    instructions: "Collect all information",
+    collect: ["fullName", "email", "companyName", "phoneNumber"],
   });
 
   // Create database session
@@ -549,18 +547,18 @@ async function advancedExample() {
   });
 
   console.log("🤖 Agent:", response.message);
-  console.log("📊 Normalized data:", response.session?.extracted);
+  console.log("📊 Normalized data:", response.session?.data);
   // Shows: { email: "alice@example.com", phoneNumber: "5551234567", ... }
 
   // Save to database
   await db.updateSession(dbSession.id, {
     currentRoute: response.session?.currentRoute?.id,
-    currentState: response.session?.currentState?.id,
+    currentStep: response.session?.currentStep?.id,
     collectedData: {
-      extracted: response.session?.extracted,
+      data: response.session?.data,
       routeHistory: response.session?.routeHistory,
       currentRouteTitle: response.session?.currentRoute?.title,
-      currentStateDescription: response.session?.currentState?.description,
+      currentStepDescription: response.session?.currentStep?.description,
       metadata: response.session?.metadata,
     },
   });

@@ -14,11 +14,11 @@ import type {
   MessageRepository,
 } from "../types/persistence";
 import type { Event } from "../types/history";
-import type { SessionState } from "../types/session";
+import type { SessionStep } from "../types/session";
 import {
   createSession,
-  sessionStateToData,
-  sessionDataToState,
+  sessionStepToData,
+  sessionDataToStep,
 } from "../types/session";
 
 /**
@@ -119,18 +119,14 @@ export class PersistenceManager {
   }
 
   /**
-   * Update current route and state
+   * Update current route and step
    */
-  async updateRouteState(
+  async updateRouteStep(
     sessionId: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null> {
-    return await this.sessionRepository.updateRouteState(
-      sessionId,
-      route,
-      state
-    );
+    return await this.sessionRepository.updateRouteStep(sessionId, route, step);
   }
 
   /**
@@ -145,7 +141,7 @@ export class PersistenceManager {
       role: options.role,
       content: options.content,
       route: options.route,
-      state: options.state,
+      step: options.step,
       toolCalls: options.toolCalls,
       event: options.event,
     });
@@ -227,77 +223,77 @@ export class PersistenceManager {
   }
 
   /**
-   * Save SessionState to database
-   * Converts SessionState to SessionData and persists it
+   * Save SessionStep to database
+   * Converts SessionStep to SessionData and persists it
    */
-  async saveSessionState<TExtracted = Record<string, unknown>>(
+  async saveSessionStep<TData = Record<string, unknown>>(
     sessionId: string,
-    sessionState: SessionState<TExtracted>
+    sessionStep: SessionStep<TData>
   ): Promise<SessionData | null> {
-    const persistenceData = sessionStateToData(sessionState);
+    const persistenceData = sessionStepToData(sessionStep);
 
     return await this.sessionRepository.update(sessionId, {
       currentRoute: persistenceData.currentRoute,
-      currentState: persistenceData.currentState,
+      currentStep: persistenceData.currentStep,
       collectedData: persistenceData.collectedData,
       lastMessageAt: new Date(),
     });
   }
 
   /**
-   * Load SessionState from database
-   * Converts SessionData to SessionState
+   * Load SessionStep from database
+   * Converts SessionData to SessionStep
    */
-  async loadSessionState<TExtracted = Record<string, unknown>>(
+  async loadSessionStep<TData = Record<string, unknown>>(
     sessionId: string
-  ): Promise<SessionState<TExtracted> | null> {
+  ): Promise<SessionStep<TData> | null> {
     const sessionData = await this.sessionRepository.findById(sessionId);
 
     if (!sessionData) {
       return null;
     }
 
-    const stateData = sessionDataToState<TExtracted>(sessionId, {
+    const stepData = sessionDataToStep<TData>(sessionId, {
       currentRoute: sessionData.currentRoute,
-      currentState: sessionData.currentState,
+      currentStep: sessionData.currentStep,
       collectedData: sessionData.collectedData,
     });
 
-    // Create a full session state with the loaded data
-    const session = createSession<TExtracted>(sessionId, {
+    // Create a full session step with the loaded data
+    const session = createSession<TData>(sessionId, {
       createdAt: sessionData.createdAt,
       lastUpdatedAt: sessionData.updatedAt,
     });
 
     return {
       ...session,
-      ...stateData,
+      ...stepData,
     };
   }
 
   /**
-   * Create session with SessionState support
-   * Returns both SessionData and initialized SessionState
+   * Create session with SessionStep support
+   * Returns both SessionData and initialized SessionStep
    */
-  async createSessionWithState<TExtracted = Record<string, unknown>>(
+  async createSessionWithStep<TData = Record<string, unknown>>(
     options: CreateSessionOptions
   ): Promise<{
     sessionData: SessionData;
-    sessionState: SessionState<TExtracted>;
+    sessionStep: SessionStep<TData>;
   }> {
     const sessionData = await this.createSession(options);
 
-    // Create SessionState with database session ID
-    const sessionState = createSession<TExtracted>(sessionData.id, {
+    // Create SessionStep with database session ID
+    const sessionStep = createSession<TData>(sessionData.id, {
       createdAt: sessionData.createdAt,
       lastUpdatedAt: sessionData.updatedAt,
     });
 
-    // If initial data was provided, merge it as extracted data
+    // If initial data was provided, merge it as collected data
     if (options.initialData) {
-      sessionState.extracted = options.initialData as Partial<TExtracted>;
+      sessionStep.data = options.initialData as Partial<TData>;
     }
 
-    return { sessionData, sessionState };
+    return { sessionData, sessionStep };
   }
 }

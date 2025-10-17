@@ -1,6 +1,6 @@
 /**
  * Rules & Prohibitions Example
- * Updated for v2 architecture with session state management
+ * Updated for v2 architecture with session step management
  *
  * Demonstrates how to use rules and prohibitions to control agent behavior
  * in different conversation routes (e.g., WhatsApp bot with different styles)
@@ -12,7 +12,7 @@ import {
   type MessageEventData,
   EventKind,
   EventSource,
-  END_STATE,
+  END_ROUTE,
 } from "../src";
 import { OpenAIProvider } from "../src/providers/OpenAIProvider";
 
@@ -99,26 +99,26 @@ agent.createRoute({
   ],
 });
 
-// Add a stateful feedback flow to the Technical Support route
+// Add a stepful feedback flow to the Technical Support route
 const techSupportRoute = agent
   .getRoutes()
   .find((r) => r.title === "Technical Support")!;
-techSupportRoute.initialState
-  .transitionTo({
-    chatState: "Provide step-by-step technical assistance.",
+techSupportRoute.initialStep
+  .nextStep({
+    instructions: "Provide step-by-step technical assistance.",
   })
-  .transitionTo({
-    chatState: "Ask for a rating of the support provided (1-5).",
-    gather: ["feedbackRating"],
+  .nextStep({
+    instructions: "Ask for a rating of the support provided (1-5).",
+    collect: ["feedbackRating"],
   })
-  .transitionTo({
-    chatState: "Ask for any additional comments.",
-    gather: ["feedbackComments"],
+  .nextStep({
+    instructions: "Ask for any additional comments.",
+    collect: ["feedbackComments"],
   })
-  .transitionTo({
-    chatState: "Thank the user for their feedback.",
+  .nextStep({
+    instructions: "Thank the user for their feedback.",
   })
-  .transitionTo({ state: END_STATE });
+  .nextStep({ step: END_ROUTE });
 
 agent.createRoute({
   title: "Emergency Support",
@@ -231,26 +231,26 @@ async function demonstrateRulesAndProhibitions() {
     ],
   });
 
-  // Add a stateful feedback flow to the Technical Support route
+  // Add a stepful feedback flow to the Technical Support route
   const techSupportRoute = agent
     .getRoutes()
     .find((r) => r.title === "Technical Support")!;
-  techSupportRoute.initialState
-    .transitionTo({
-      chatState: "Provide step-by-step technical assistance.",
+  techSupportRoute.initialStep
+    .nextStep({
+      instructions: "Provide step-by-step technical assistance.",
     })
-    .transitionTo({
-      chatState: "Ask for a rating of the support provided (1-5).",
-      gather: ["feedbackRating"],
+    .nextStep({
+      instructions: "Ask for a rating of the support provided (1-5).",
+      collect: ["feedbackRating"],
     })
-    .transitionTo({
-      chatState: "Ask for any additional comments.",
-      gather: ["feedbackComments"],
+    .nextStep({
+      instructions: "Ask for any additional comments.",
+      collect: ["feedbackComments"],
     })
-    .transitionTo({
-      chatState: "Thank the user for their feedback.",
+    .nextStep({
+      instructions: "Thank the user for their feedback.",
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   agent.createRoute({
     title: "Emergency Support",

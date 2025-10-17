@@ -7,7 +7,7 @@
 // Core
 export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
-export { State } from "./core/State";
+export { Step } from "./core/Step";
 export { Transition } from "./core/Transition";
 export { defineTool } from "./core/Tool";
 export { DomainRegistry } from "./core/DomainRegistry";
@@ -51,7 +51,7 @@ export type {
 export { SQLiteAdapter } from "./adapters/SQLiteAdapter";
 export type {
   SqliteDatabase,
-  SqliteStatement,
+  SqliteStepment,
   SQLiteAdapterOptions,
 } from "./adapters/SQLiteAdapter";
 export { MemoryAdapter } from "./adapters/MemoryAdapter";
@@ -62,10 +62,10 @@ export type {
 } from "./adapters/OpenSearchAdapter";
 
 // Constants
-export { END_STATE, END_STATE_ID } from "./constants";
+export { END_ROUTE, END_ROUTE_ID } from "./constants";
 
 // Utils
-export { generateRouteId, generateStateId, generateToolId } from "./utils/id";
+export { generateRouteId, generateStepId, generateToolId } from "./utils/id";
 
 // Types
 export type {
@@ -91,7 +91,7 @@ export { EventKind, EventSource } from "./types/history";
 
 export type {
   RouteRef,
-  StateRef,
+  StepRef,
   RouteOptions,
   TransitionSpec,
   TransitionResult,
@@ -99,12 +99,12 @@ export type {
   RouteCompletionHandler,
 } from "./types/route";
 
-export type { SessionState, PendingTransition } from "./types/session";
+export type { SessionStep, PendingTransition } from "./types/session";
 export {
   createSession,
   enterRoute,
-  enterState,
-  mergeExtracted,
+  enterStep,
+  mergeCollected,
 } from "./types/session";
 
 export type {

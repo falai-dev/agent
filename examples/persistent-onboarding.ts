@@ -1,13 +1,13 @@
 /**
  * Persistent multi-turn onboarding agent example
- * Updated for v2 architecture with session state management and schema-first data extraction
+ * Updated for v2 architecture with session step management and schema-first data extraction
  */
 
 import {
   Agent,
   defineTool,
   GeminiProvider,
-  END_STATE,
+  END_ROUTE,
   EventSource,
   createMessageEvent,
   createSession,
@@ -100,25 +100,24 @@ async function createPersistentOnboardingAgent(sessionId: string) {
 
   // Define lifecycle hooks for automatic persistence
   const hooks = {
-    // Called after data extraction - validate and enrich extracted data
-    onExtractedUpdate: async (extracted: Partial<OnboardingData>) => {
-      console.log("🔄 Processing extracted data...");
+    // Called after data extraction - validate and enrich collected data
+    onDataUpdate: async (data: Partial<OnboardingData>) => {
+      console.log("🔄 Processing collected data...");
 
-      // Update completed steps based on what's been extracted
+      // Update completed steps based on what's been data
       const completedSteps: string[] = [];
-      if (extracted.businessName) completedSteps.push("business_info");
-      if (extracted.businessDescription)
-        completedSteps.push("business_description");
-      if (extracted.industry) completedSteps.push("industry");
-      if (extracted.contactEmail) completedSteps.push("contact");
+      if (data.businessName) completedSteps.push("business_info");
+      if (data.businessDescription) completedSteps.push("business_description");
+      if (data.industry) completedSteps.push("industry");
+      if (data.contactEmail) completedSteps.push("contact");
 
       // Persist to database
       await db.sessions.update(sessionId, {
-        collectedData: extracted,
+        collectedData: data,
         completedSteps,
       });
 
-      return extracted;
+      return data;
     },
   };
 
@@ -244,7 +243,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     title: "Business Onboarding",
     description: "Guide user through business information collection",
     conditions: ["User is onboarding their business"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         businessName: {
@@ -266,55 +265,55 @@ async function createPersistentOnboardingAgent(sessionId: string) {
       },
       required: ["businessName", "businessDescription"],
     },
-    endState: {
-      chatState: "Summarize all collected information warmly and confirm onboarding is complete",
+    endStep: {
+      instructions:
+        "Summarize all collected information warmly and confirm onboarding is complete",
     },
   });
 
-  // State 1: Gather business name and description
-  const gatherBusinessInfo = onboardingRoute.initialState.transitionTo({
-    chatState: "Ask for business name and a brief description",
-    gather: ["businessName", "businessDescription"],
-    skipIf: (extracted) =>
-      !!extracted.businessName && !!extracted.businessDescription,
+  // Step 1: Collect business name and description
+  const collectBusinessInfo = onboardingRoute.initialStep.nextStep({
+    instructions: "Ask for business name and a brief description",
+    collect: ["businessName", "businessDescription"],
+    skipIf: (data) => !!data.businessName && !!data.businessDescription,
     condition: "Need to collect basic business information first",
   });
 
-  // State 2: Save business info (tool execution)
-  const saveBusiness = gatherBusinessInfo.transitionTo({
-    toolState: saveBusinessInfo,
-    requiredData: ["businessName", "businessDescription"],
+  // Step 2: Save business info (tool execution)
+  const saveBusiness = collectBusinessInfo.nextStep({
+    tool: saveBusinessInfo,
+    requires: ["businessName", "businessDescription"],
     condition: "Business name and description provided, save to database",
   });
 
-  // State 3: Gather industry
-  const gatherIndustry = saveBusiness.transitionTo({
-    chatState: "Ask what industry the business operates in",
-    gather: ["industry"],
-    skipIf: (extracted) => !!extracted.industry,
+  // Step 3: Collect industry
+  const collectIndustry = saveBusiness.nextStep({
+    instructions: "Ask what industry the business operates in",
+    collect: ["industry"],
+    skipIf: (data) => !!data.industry,
   });
 
-  // State 4: Save industry (tool execution)
-  const saveIndustryStep = gatherIndustry.transitionTo({
-    toolState: saveIndustry,
-    requiredData: ["industry"],
+  // Step 4: Save industry (tool execution)
+  const saveIndustryStep = collectIndustry.nextStep({
+    tool: saveIndustry,
+    requires: ["industry"],
   });
 
-  // State 5: Gather contact email
-  const gatherContact = saveIndustryStep.transitionTo({
-    chatState: "Ask for their contact email",
-    gather: ["contactEmail"],
-    skipIf: (extracted) => !!extracted.contactEmail,
+  // Step 5: Collect contact email
+  const collectContact = saveIndustryStep.nextStep({
+    instructions: "Ask for their contact email",
+    collect: ["contactEmail"],
+    skipIf: (data) => !!data.contactEmail,
   });
 
-  // State 6: Save contact (tool execution)
-  const saveContact = gatherContact.transitionTo({
-    toolState: saveContactEmail,
-    requiredData: ["contactEmail"],
+  // Step 6: Save contact (tool execution)
+  const saveContact = collectContact.nextStep({
+    tool: saveContactEmail,
+    requires: ["contactEmail"],
   });
 
-  // State 7: Confirmation - uses route-level endState
-  saveContact.transitionTo({ state: END_STATE });
+  // Step 7: Confirmation - uses route-level endStep
+  saveContact.nextStep({ step: END_ROUTE });
 
   // Guidelines
   onboardingRoute.createGuideline({
@@ -415,7 +414,7 @@ async function main() {
 
   console.log("=== MULTI-TURN CONVERSATION SIMULATION ===\n");
 
-  // Initialize session state for multi-turn conversation
+  // Initialize session step for multi-turn conversation
   let session = createSession<OnboardingData>();
 
   // Turn 1: Start onboarding
@@ -431,7 +430,7 @@ async function main() {
     session,
   });
   console.log("🤖 Bot:", response1.message);
-  console.log("📊 Extracted after turn 1:", response1.session?.extracted);
+  console.log("📊 Data after turn 1:", response1.session?.data);
   console.log("📊 Route:", response1.session?.currentRoute?.title);
 
   // Check route completion after turn 1
@@ -464,7 +463,7 @@ async function main() {
   ];
   const response2 = await agent.respond({ history: history2, session });
   console.log("🤖 Bot:", response2.message);
-  console.log("📊 Extracted after turn 2:", response2.session?.extracted);
+  console.log("📊 Data after turn 2:", response2.session?.data);
 
   // Check route completion after turn 2
   console.log("🔍 Route Completion Check (Turn 2):");
@@ -492,7 +491,7 @@ async function main() {
   ];
   const response3 = await agent.respond({ history: history3, session });
   console.log("🤖 Bot:", response3.message);
-  console.log("📊 Extracted after turn 3:", response3.session?.extracted);
+  console.log("📊 Data after turn 3:", response3.session?.data);
 
   // Check route completion after turn 3
   console.log("🔍 Route Completion Check (Turn 3):");
@@ -520,13 +519,13 @@ async function main() {
   ];
   const response4 = await agent.respond({ history: history4, session });
   console.log("🤖 Bot:", response4.message);
-  console.log("📊 Extracted after turn 4:", response4.session?.extracted);
+  console.log("📊 Data after turn 4:", response4.session?.data);
 
   // Check for route completion
   if (response4.isRouteComplete) {
     console.log("\n✅ Onboarding complete!");
     await finalizeOnboarding(
-      agent.getExtractedData(response4.session?.id) as unknown as OnboardingData
+      agent.getData(response4.session?.id) as unknown as OnboardingData
     );
   }
 
@@ -544,17 +543,17 @@ async function main() {
 // ============================================================================
 
 /*
- * ✅ PATTERN 1: Session State Management (Core v2 pattern)
- *    - createSession<T>(): Initialize typed session state
+ * ✅ PATTERN 1: Session Step Management (Core v2 pattern)
+ *    - createSession<T>(): Initialize typed session step
  *    - Pass session to respond() calls
- *    - Session tracks extracted data across turns
+ *    - Session tracks collected data across turns
  *    - Always-on routing respects intent changes
  *
  * ✅ PATTERN 2: Schema-First Data Extraction
- *    - extractionSchema: Define data contracts upfront
+ *    - schema: Define data contracts upfront
  *    - Type-safe extraction throughout conversation
- *    - skipIf functions for deterministic state logic
- *    - requiredData arrays for prerequisites
+ *    - skipIf functions for deterministic step logic
+ *    - requires arrays for prerequisites
  *
  * ✅ PATTERN 3: Context Provider (For external data sources)
  *    - contextProvider: Load fresh context from database/API
@@ -562,19 +561,19 @@ async function main() {
  *    - Perfect for real-time external data
  *
  * ✅ PATTERN 4: Lifecycle Hooks (Data validation & enrichment)
- *    - onExtractedUpdate: Process extracted data after extraction
- *    - Validate, enrich, and persist extracted data
- *    - Return modified extracted data
+ *    - onDataUpdate: Process collected data after extraction
+ *    - Validate, enrich, and persist collected data
+ *    - Return modified collected data
  *
  * ✅ PATTERN 5: Tool Integration (Enhanced context access)
- *    - Tools access extracted data via context parameter
- *    - Can return extractedUpdate to modify extracted data
+ *    - Tools access collected data via context parameter
+ *    - Can return dataUpdate to modify collected data
  *    - Perfect for data validation and enrichment
  *
- * ✅ PATTERN 6: State Progression (Code-based logic)
+ * ✅ PATTERN 6: Step Progression (Code-based logic)
  *    - skipIf: Deterministic functions instead of fuzzy conditions
- *    - requiredData: Prerequisites for state transitions
- *    - No more LLM interpretation of state logic
+ *    - requires: Prerequisites for step transitions
+ *    - No more LLM interpretation of step logic
  */
 
 /**

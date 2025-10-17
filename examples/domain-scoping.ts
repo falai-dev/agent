@@ -1,6 +1,6 @@
 /**
  * Domain Scoping Example
- * Updated for v2 architecture with session state management
+ * Updated for v2 architecture with session step management
  *
  * This example demonstrates how to use domain scoping to restrict which tools
  * can EXECUTE in different conversation routes for security and isolation.
@@ -9,7 +9,7 @@
  * available everywhere. Use domains when you need security and organization.
  *
  * Key Concept: The AI never sees tools. Domains control which tools can
- * execute automatically when triggered by the state machine or guidelines.
+ * execute automatically when triggered by the step machine or guidelines.
  */
 
 import {
@@ -17,7 +17,7 @@ import {
   createMessageEvent,
   EventSource,
   createSession,
-  END_STATE,
+  END_ROUTE,
   defineTool,
 } from "../src/index";
 import { OpenRouterProvider } from "../src/providers";
@@ -108,8 +108,8 @@ const scheduleEventTool = defineTool({
   id: "scheduleEvent",
   name: "scheduleEvent",
   description: "Schedules an event in the calendar",
-  handler: async ({ extracted }) => {
-    const { title, date, description } = extracted as {
+  handler: async ({ data }) => {
+    const { title, date, description } = data as {
       title: string;
       date: string;
       description: string;
@@ -124,7 +124,7 @@ agent.createRoute<{ title: string; date: string; description: string }>({
   description: "Book and manage appointments",
   conditions: ["User wants to schedule, view, or cancel events"],
   domains: ["calendar"], // ✅ Only calendar tools available
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       title: { type: "string" },
@@ -135,22 +135,22 @@ agent.createRoute<{ title: string; date: string; description: string }>({
   },
   steps: [
     {
-      chatState: "What is the title of the meeting?",
-      gather: ["title"],
+      instructions: "What is the title of the meeting?",
+      collect: ["title"],
     },
     {
-      chatState: "When would you like to schedule it?",
-      gather: ["date"],
+      instructions: "When would you like to schedule it?",
+      collect: ["date"],
     },
     {
-      chatState: "Any description for the meeting?",
-      gather: ["description"],
+      instructions: "Any description for the meeting?",
+      collect: ["description"],
     },
     {
-      toolState: scheduleEventTool,
+      tool: scheduleEventTool,
     },
     {
-      chatState: "The meeting has been scheduled.",
+      instructions: "The meeting has been scheduled.",
     },
   ],
 });
@@ -190,7 +190,7 @@ async function demonstrateScoping() {
     }),
   ];
 
-  // Initialize session state for multi-turn conversation
+  // Initialize session step for multi-turn conversation
   let session = createSession();
 
   const response1 = await agent.respond({ history: history1, session });
@@ -219,7 +219,7 @@ async function demonstrateScoping() {
   if (response2.isRouteComplete) {
     console.log("\n✅ Meeting scheduling complete!");
     await sendMeetingInvite(
-      agent.getExtractedData(response2.session?.id) as {
+      agent.getData(response2.session?.id) as {
         title: string;
         date: string;
       }
@@ -270,7 +270,7 @@ console.log(`
 - Data Collection route cannot execute calendar.scheduleEvent()
 - Each route has minimum necessary tool permissions
 - Prevents prompt injection attacks from calling sensitive tools
-- Session state ensures domain scoping persists across turns
+- Session step ensures domain scoping persists across turns
 
 🎯 Isolation Benefits:
 - Route execution is isolated - tools can't cross boundaries
@@ -283,7 +283,7 @@ console.log(`
 - Easy to audit what each route can execute
 - Better debugging when tools are called
 - Self-documenting security model
-- Session state tracks domain-scoped conversations
+- Session step tracks domain-scoped conversations
 `);
 
 // Inspect route configurations

@@ -12,7 +12,7 @@ Start here if you're new to the framework:
 
 Build your first AI agent in 5 minutes with step-by-step instructions.
 
-**Topics:** Installation, first agent, basic routes, data extraction, session state
+**Topics:** Installation, first agent, basic routes, data extraction, session step
 
 ---
 
@@ -24,7 +24,7 @@ Essential guides for understanding how the framework works:
 
 Design principles, philosophy, and how the framework works under the hood.
 
-**Topics:** Schema-first extraction, session state, code-based logic, state machines, deterministic IDs
+**Topics:** Schema-first extraction, session step, code-based logic, step machines, deterministic IDs
 
 ### [Agent](./AGENT.md)
 
@@ -34,9 +34,9 @@ Comprehensive guide to agent configuration patterns.
 
 ### [Context Management](./CONTEXT_MANAGEMENT.md)
 
-Session state, lifecycle hooks, and persistent conversations.
+Session step, lifecycle hooks, and persistent conversations.
 
-**Topics:** Session state, lifecycle hooks, context updates, multi-turn conversations, persistence patterns
+**Topics:** Session step, lifecycle hooks, context updates, multi-turn conversations, persistence patterns
 
 ---
 
@@ -48,19 +48,19 @@ Deep dives into specific features:
 
 Complete guide to creating and managing conversational routes.
 
-**Topics:** Route creation, initial state configuration, data extraction, sequential steps, security, branching logic
+**Topics:** Route creation, initial step configuration, data extraction, sequential steps, security, branching logic
 
-### [States Guide](./STATES.md)
+### [Steps Guide](./STEPS.md)
 
-Complete guide to creating and managing states in conversational flows.
+Complete guide to creating and managing steps in conversational flows.
 
-**Topics:** State types, transitions, data gathering, state logic, skip conditions, configuration, advanced patterns
+**Topics:** Step types, transitions, data collecting, step logic, skip conditions, configuration, advanced patterns
 
 ### [API Reference](./API_REFERENCE.md)
 
 Complete API documentation for all classes, methods, and types.
 
-**Topics:** Agent class, Route class, State class, defineTool, providers, all APIs
+**Topics:** Agent class, Route class, Step class, defineTool, providers, all APIs
 
 ### [AI Providers](./PROVIDERS.md)
 
@@ -103,7 +103,7 @@ Comprehensive guide to all 15+ production-ready examples.
 Browse the `/examples` directory for runnable code:
 
 - [Business Onboarding](../examples/business-onboarding.ts) - Complex multi-step workflows
-- [Travel Agent](../examples/travel-agent.ts) - Session state & data extraction
+- [Travel Agent](../examples/travel-agent.ts) - Session step & data extraction
 - [Healthcare Agent](../examples/healthcare-agent.ts) - Security & validation
 - [Streaming Agent](../examples/streaming-agent.ts) - Real-time responses
 - [Prisma Persistence](../examples/prisma-persistence.ts) - Database integration
@@ -140,7 +140,7 @@ Internal guide for maintainers on publishing releases.
 - **Understand the design** → [Architecture](./ARCHITECTURE.md)
 - **Configure my agent** → [Agent](./AGENT.md)
 - **Create conversational flows** → [Routes Guide](./ROUTES.md)
-- **Manage states** → [States Guide](./STATES.md)
+- **Manage steps** → [Steps Guide](./STEPS.md)
 - **Persist conversations** → [Persistence Guide](./PERSISTENCE.md)
 - **Add tool security** → [Domain Organization](./DOMAINS.md)
 - **See real examples** → [Examples Guide](./EXAMPLES.md)
@@ -162,13 +162,13 @@ Internal guide for maintainers on publishing releases.
 - [Context Management](./CONTEXT_MANAGEMENT.md)
 - [Getting Started](./GETTING_STARTED.md)
 
-**Routes & State Machines:**
+**Routes & Step Machines:**
 
 - [Routes Guide](./ROUTES.md) - Complete guide to routes
-- [States Guide](./STATES.md) - Complete guide to states
+- [Steps Guide](./STEPS.md) - Complete guide to steps
 - [API Reference - Routes](./API_REFERENCE.md#route)
-- [API Reference - States](./API_REFERENCE.md#state)
-- [Architecture - State Machines](./ARCHITECTURE.md#state-machines)
+- [API Reference - Steps](./API_REFERENCE.md#step)
+- [Architecture - Step Machines](./ARCHITECTURE.md#step-machines)
 - [Examples - Complex Flows](./EXAMPLES.md#-real-world-applications)
 
 **Tools & Domains:**
@@ -180,13 +180,13 @@ Internal guide for maintainers on publishing releases.
 **Data Extraction:**
 
 - [Architecture - Schema-First](./ARCHITECTURE.md#schema-first-data-extraction)
-- [API Reference - extractionSchema](./API_REFERENCE.md#extractionschema)
+- [API Reference - schema](./API_REFERENCE.md#schema)
 - [Examples - Travel Agent](./EXAMPLES.md#-travel-agent)
 
-**Session State:**
+**Session Step:**
 
 - [Context Management](./CONTEXT_MANAGEMENT.md)
-- [Architecture - Session State](./ARCHITECTURE.md#session-state-management)
+- [Architecture - Session Step](./ARCHITECTURE.md#session-step-management)
 - [API Reference - createSession](./API_REFERENCE.md#createsession)
 
 **Persistence:**

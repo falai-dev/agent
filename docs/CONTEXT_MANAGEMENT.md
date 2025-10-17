@@ -1,21 +1,21 @@
-# Session State & Data Management
+# Session Step & Data Management
 
 ## Overview
 
-The `@falai/agent` framework provides **session state management** for tracking conversation progress, extracted data, and user intent across multiple turns. This enables sophisticated data-driven conversations with intelligent state progression.
+The `@falai/agent` framework provides **session step management** for tracking conversation progress, collected data, and user intent across multiple turns. This enables sophisticated data-driven conversations with intelligent step progression.
 
 ---
 
-## 🎯 Session State: The Foundation
+## 🎯 Session Step: The Foundation
 
-Session state tracks three key aspects of a conversation:
+Session step tracks three key aspects of a conversation:
 
 1. **Current Route** - Which conversation flow the user is in
-2. **Current State** - Where in the flow they currently are
-3. **Extracted Data** - Structured data collected so far
+2. **Current Step** - Where in the flow they currently are
+3. **Collected data** - Structured data collected so far
 
 ```typescript
-import { createSession, SessionState } from "@falai/agent";
+import { createSession, SessionStep } from "@falai/agent";
 
 // Define your data extraction type
 interface FlightData {
@@ -25,33 +25,33 @@ interface FlightData {
   cabinClass: "economy" | "business" | "first";
 }
 
-// Initialize session state
+// Initialize session step
 let session = createSession<FlightData>();
 
 // Session starts empty
 console.log(session.currentRoute); // undefined
-console.log(session.currentState); // undefined
-console.log(session.extracted); // {}
+console.log(session.currentStep); // undefined
+console.log(session.data); // {}
 
 // Use in conversation
 const response = await agent.respond({ history, session });
 
-// Session updated with progress and extracted data
+// Session updated with progress and collected data
 console.log(response.session?.currentRoute?.title); // "Book Flight"
-console.log(response.session?.currentState?.id); // "ask_destination"
-console.log(response.session?.extracted); // { destination: "Paris", ... }
+console.log(response.session?.currentStep?.id); // "ask_destination"
+console.log(response.session?.data); // { destination: "Paris", ... }
 ```
 
-**Benefits of Session State:**
+**Benefits of Session Step:**
 
 - **Always-On Routing** - Users can change their mind mid-conversation
-- **Data Persistence** - Extracted data survives across turns
-- **Context Awareness** - Router sees current progress and extracted data
-- **State Recovery** - Resume conversations from any point
+- **Data Persistence** - Collected data survives across turns
+- **Context Awareness** - Router sees current progress and collected data
+- **Step Recovery** - Resume conversations from any point
 
 ---
 
-## 🔄 Session State Helpers
+## 🔄 Session Step Helpers
 
 ### Creating and Managing Sessions
 
@@ -59,9 +59,9 @@ console.log(response.session?.extracted); // { destination: "Paris", ... }
 import {
   createSession,
   enterRoute,
-  enterState,
-  mergeExtracted,
-  type SessionState,
+  enterStep,
+  mergeData,
+  type SessionStep,
 } from "@falai/agent";
 
 // Create a new session
@@ -70,32 +70,32 @@ let session = createSession<FlightData>();
 // Enter a route (when routing decides to switch)
 session = enterRoute(session, "book_flight", "Book Flight");
 
-// Enter a state (when progressing through the flow)
-session = enterState(session, "ask_destination", "Ask where they want to fly");
+// Enter a step (when progressing through the flow)
+session = enterStep(session, "ask_destination", "Ask where they want to fly");
 
-// Merge extracted data (when AI extracts new information)
-session = mergeExtracted(session, {
+// Merge collected data (when AI extracts new information)
+session = mergeData(session, {
   destination: "Paris",
   departureDate: "2025-10-15",
   passengers: 2,
 });
 ```
 
-### Session State Structure
+### Session Step Structure
 
 ```typescript
-interface SessionState<TExtracted = unknown> {
+interface SessionStep<TData = unknown> {
   currentRoute?: {
     id: string;
     title: string;
     enteredAt: Date;
   };
-  currentState?: {
+  currentStep?: {
     id: string;
     description?: string;
     enteredAt: Date;
   };
-  extracted: Partial<TExtracted>; // Data collected so far
+  data: Partial<TData>; // Data collected so far
   routeHistory: Array<{
     routeId: string;
     routeTitle: string;
@@ -125,25 +125,23 @@ const agent = new Agent({
       await saveUserData(newContext.userId, newContext);
     },
 
-    // NEW: Validate and enrich extracted data
-    onExtractedUpdate: async (extracted, previousExtracted) => {
+    // NEW: Validate and enrich collected data
+    onDataUpdate: async (data, previousData) => {
       // Normalize passenger count
-      if (extracted.passengers < 1) extracted.passengers = 1;
-      if (extracted.passengers > 9) extracted.passengers = 9;
+      if (data.passengers < 1) data.passengers = 1;
+      if (data.passengers > 9) data.passengers = 9;
 
       // Enrich with computed fields
-      if (extracted.destination) {
-        extracted.destinationCode = await lookupAirportCode(
-          extracted.destination
-        );
+      if (data.destination) {
+        data.destinationCode = await lookupAirportCode(data.destination);
       }
 
       // Auto-trigger actions
-      if (hasAllRequiredData(extracted)) {
-        extracted.shouldSearchFlights = true;
+      if (hasAllRequires(data)) {
+        data.shouldSearchFlights = true;
       }
 
-      return extracted;
+      return data;
     },
   },
 });
@@ -165,7 +163,7 @@ const agent = new Agent({
 
 ## 📊 Data Extraction Pipeline
 
-Schema-first data extraction with intelligent state progression:
+Schema-first data extraction with intelligent step progression:
 
 ### 1. Define Your Data Schema
 
@@ -182,7 +180,7 @@ interface FlightData {
 
 const route = agent.createRoute<FlightData>({
   title: "Book Flight",
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       destination: { type: "string" },
@@ -202,65 +200,62 @@ const route = agent.createRoute<FlightData>({
 });
 ```
 
-### 2. Create Smart State Machines
+### 2. Create Smart Step Machines
 
 ```typescript
-// State with code-based logic (no fuzzy LLM conditions!)
-const askDestination = route.initialState.transitionTo({
-  chatState: "Ask where they want to fly",
-  gather: ["destination"],
-  skipIf: (extracted) => !!extracted.destination, // Skip if already have destination
+// Step with code-based logic (no fuzzy LLM conditions!)
+const askDestination = route.initialStep.nextStep({
+  instructions: "Ask where they want to fly",
+  collect: ["destination"],
+  skipIf: (data) => !!data.destination, // Skip if already have destination
 });
 
-const enrichDestination = askDestination.transitionTo({
-  toolState: lookupAirportCode, // Tool executes automatically
-  requiredData: ["destination"], // Prerequisites
+const enrichDestination = askDestination.nextStep({
+  tool: lookupAirportCode, // Tool executes automatically
+  requires: ["destination"], // Prerequisites
 });
 
-const askDates = enrichDestination.transitionTo({
-  chatState: "Ask about travel dates",
-  gather: ["departureDate"],
-  skipIf: (extracted) => !!extracted.departureDate,
-  requiredData: ["destination"], // Must have destination first
+const askDates = enrichDestination.nextStep({
+  instructions: "Ask about travel dates",
+  collect: ["departureDate"],
+  skipIf: (data) => !!data.departureDate,
+  requires: ["destination"], // Must have destination first
 });
 
-const validateDate = askDates.transitionTo({
-  toolState: parseAndValidateDate,
-  requiredData: ["departureDate"],
+const validateDate = askDates.nextStep({
+  tool: parseAndValidateDate,
+  requires: ["departureDate"],
 });
 
-const askPassengers = validateDate.transitionTo({
-  chatState: "How many passengers?",
-  gather: ["passengers"],
-  skipIf: (extracted) => !!extracted.passengers,
+const askPassengers = validateDate.nextStep({
+  instructions: "How many passengers?",
+  collect: ["passengers"],
+  skipIf: (data) => !!data.passengers,
 });
 
-const searchFlights = askPassengers.transitionTo({
-  toolState: searchFlightAPI,
+const searchFlights = askPassengers.nextStep({
+  tool: searchFlightAPI,
   // Triggered when shouldSearchFlights flag is set by hook
 });
 ```
 
-### 3. Tools Access Extracted Data
+### 3. Tools Access Collected data
 
 ```typescript
 const searchFlights = defineTool<Context, [], void, FlightData>(
   "search_flights",
-  async ({ context, extracted }) => {
-    // Access extracted data directly (no LLM extraction needed!)
-    if (!extracted.destination || !extracted.departureDate) {
+  async ({ context, data }) => {
+    // Access collected data directly (no LLM extraction needed!)
+    if (!data.destination || !data.departureDate) {
       return { data: undefined };
     }
 
-    const flights = await searchFlightAPI(
-      extracted.destination,
-      extracted.departureDate
-    );
+    const flights = await searchFlightAPI(data.destination, data.departureDate);
 
     return {
       data: undefined,
       contextUpdate: { availableFlights: flights },
-      extractedUpdate: {
+      dataUpdate: {
         shouldSearchFlights: false, // Clear the flag
       },
     };
@@ -274,24 +269,22 @@ const searchFlights = defineTool<Context, [], void, FlightData>(
 const agent = new Agent({
   // ... other options
   hooks: {
-    onExtractedUpdate: async (extracted, previous) => {
+    onDataUpdate: async (data, previous) => {
       // Normalize data
-      if (extracted.passengers < 1) extracted.passengers = 1;
-      if (extracted.passengers > 9) extracted.passengers = 9;
+      if (data.passengers < 1) data.passengers = 1;
+      if (data.passengers > 9) data.passengers = 9;
 
       // Enrich data
-      if (extracted.destination && !extracted.destinationCode) {
-        extracted.destinationCode = await lookupAirportCode(
-          extracted.destination
-        );
+      if (data.destination && !data.destinationCode) {
+        data.destinationCode = await lookupAirportCode(data.destination);
       }
 
       // Auto-trigger actions
-      if (hasAllRequiredData(extracted) && !extracted.shouldSearchFlights) {
-        extracted.shouldSearchFlights = true;
+      if (hasAllRequires(data) && !data.shouldSearchFlights) {
+        data.shouldSearchFlights = true;
       }
 
-      return extracted;
+      return data;
     },
   },
 });
@@ -329,8 +322,8 @@ const response2 = await agent.respond({
 
 // Router understands:
 // - Current route: "Book Flight"
-// - Current state: "ask_passengers"
-// - Extracted data: { destination: "Paris", departureDate: "tomorrow", passengers: 2 }
+// - Current step: "ask_passengers"
+// - Collected data: { destination: "Paris", departureDate: "tomorrow", passengers: 2 }
 // - User intent: "Tokyo instead" → switches to new destination
 ```
 
@@ -456,7 +449,7 @@ const agent = new Agent({
 **Difference from `beforeRespond`:**
 
 - `contextProvider`: **Replaces** the context entirely
-- `beforeRespond`: **Updates** the existing context (can access previous state)
+- `beforeRespond`: **Updates** the existing context (can access previous step)
 
 ---
 
@@ -579,7 +572,7 @@ async function handleUserMessage(sessionId: string, message: string) {
 
 - **Cache agent instances** across requests (context gets stale)
 - **Mutate context directly** without using `updateContext()` or `contextUpdate`
-- **Rely on in-memory state** for multi-turn conversations
+- **Rely on in-memory step** for multi-turn conversations
 - **Forget to handle** `onContextUpdate` failures (could lose data)
 - **Mix** `context` and `contextProvider` (will throw an error)
 

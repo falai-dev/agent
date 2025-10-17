@@ -1,10 +1,10 @@
 /**
- * Example: Company Q&A Agent (Stateless, Knowledge-Based)
+ * Example: Company Q&A Agent (Stepless, Knowledge-Based)
  *
  * This demonstrates:
- * 1. Schema-first architecture for stateless Q&A routes (no extractionSchema)
+ * 1. Schema-first architecture for stepless Q&A routes (no schema)
  * 2. Tools for context enrichment (not data extraction)
- * 3. Session state management even for stateless conversations
+ * 3. Session step management even for stepless conversations
  * 4. Always-on routing with context awareness
  * 5. Three-phase pipeline: PREPARATION → ROUTING → RESPONSE
  */
@@ -15,7 +15,7 @@ import {
   EventSource,
   createMessageEvent,
   EventKind,
-  END_STATE,
+  END_ROUTE,
   OpenAIProvider,
 } from "../src";
 import type { Event } from "../src/types";
@@ -231,10 +231,10 @@ const agent = new Agent<CompanyContext>({
 });
 
 // ==============================================================================
-// ROUTES: STATELESS Q&A ROUTES (Schema-First Architecture)
+// ROUTES: STEPLESS Q&A ROUTES (Schema-First Architecture)
 // ==============================================================================
 
-// Route 1: Company Information (stateless - no data extraction)
+// Route 1: Company Information (stepless - no data extraction)
 const companyInfoRoute = agent.createRoute({
   title: "Company Information",
   description: "Answer general questions about Acme Corp",
@@ -245,13 +245,13 @@ const companyInfoRoute = agent.createRoute({
     "How many employees",
     "Where is the headquarters",
   ],
-  // NO extractionSchema - stateless Q&A route
-  // Just use initial state with chatState for response generation
+  // NO schema - stepless Q&A route
+  // Just use initial step with instructions for response generation
 });
 
-// Initial state: Answer from knowledge base (no data gathering needed)
+// Initial step: Answer from knowledge base (no data collecting needed)
 
-// Route 2: Product Information (stateless)
+// Route 2: Product Information (stepless)
 const productInfoRoute = agent.createRoute({
   title: "Product Information",
   description: "Answer questions about products",
@@ -261,12 +261,12 @@ const productInfoRoute = agent.createRoute({
     "What products do you offer",
     "Tell me about your widgets",
   ],
-  // NO extractionSchema - just answering questions
+  // NO schema - just answering questions
 });
 
-// Initial state is enough - no transitions needed for simple Q&A
+// Initial step is enough - no transitions needed for simple Q&A
 
-// Route 3: Policy Questions (stateless)
+// Route 3: Policy Questions (stepless)
 const policyRoute = agent.createRoute({
   title: "Policy Information",
   description: "Answer questions about company policies",
@@ -276,12 +276,12 @@ const policyRoute = agent.createRoute({
     "Shipping information",
     "Warranty questions",
   ],
-  // NO extractionSchema
+  // NO schema
 });
 
-// Initial state is enough - no extra setup needed
+// Initial step is enough - no extra setup needed
 
-// Route 4: News & Updates (uses tool, but still stateless)
+// Route 4: News & Updates (uses tool, but still stepless)
 const newsRoute = agent.createRoute({
   title: "Company News",
   description: "Share latest company news and updates",
@@ -293,13 +293,13 @@ const newsRoute = agent.createRoute({
   ],
 });
 
-// Add tool to initial state to fetch news
-const fetchNews = newsRoute.initialState.transitionTo({
-  toolState: fetchNewsTool,
+// Add tool to initial step to fetch news
+const fetchNews = newsRoute.initialStep.nextStep({
+  tool: fetchNewsTool,
 });
 
-const shareNews = fetchNews.transitionTo({
-  chatState: "Share the latest company news from context",
+const shareNews = fetchNews.nextStep({
+  instructions: "Share the latest company news from context",
 });
 
 // Route 5: General FAQ Search (uses tool)
@@ -314,12 +314,12 @@ const faqRoute = agent.createRoute({
   ],
 });
 
-const searchFaqs = faqRoute.initialState.transitionTo({
-  toolState: searchKnowledgeTool,
+const searchFaqs = faqRoute.initialStep.nextStep({
+  tool: searchKnowledgeTool,
 });
 
-const provideFaqAnswer = searchFaqs.transitionTo({
-  chatState: "Provide answer based on FAQ search results",
+const provideFaqAnswer = searchFaqs.nextStep({
+  instructions: "Provide answer based on FAQ search results",
 });
 
 // Route 6: Fallback (generic response)
@@ -334,14 +334,14 @@ const fallbackRoute = agent.createRoute({
   ],
 });
 
-// Initial state is enough for fallback conversations
+// Initial step is enough for fallback conversations
 
-// Route 7: Collect Feedback (Stateful Example)
+// Route 7: Collect Feedback (Stepful Example)
 const feedbackRoute = agent.createRoute<FeedbackData>({
   title: "Collect Feedback",
   description: "Collect user feedback about their experience",
   conditions: ["User wants to leave feedback", "User seems satisfied or upset"],
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       rating: {
@@ -358,33 +358,34 @@ const feedbackRoute = agent.createRoute<FeedbackData>({
     },
     required: ["rating", "comments"],
   },
-  endState: {
-    chatState: "Thank the user warmly for their valuable feedback and let them know we appreciate their time",
+  endStep: {
+    instructions:
+      "Thank the user warmly for their valuable feedback and let them know we appreciate their time",
   },
 });
 
-feedbackRoute.initialState
-  .transitionTo({
+feedbackRoute.initialStep
+  .nextStep({
     id: "ask_rating",
-    chatState:
+    instructions:
       "I'd love to hear your feedback. On a scale of 1 to 5, how would you rate your experience with me today?",
-    gather: ["rating"],
+    collect: ["rating"],
   })
-  .transitionTo({
+  .nextStep({
     id: "ask_comments",
-    chatState:
+    instructions:
       "Thanks for the rating! Do you have any specific comments or suggestions?",
-    gather: ["comments"],
-    requiredData: ["rating"],
+    collect: ["comments"],
+    requires: ["rating"],
   })
-  .transitionTo({
+  .nextStep({
     id: "ask_permission",
-    chatState:
+    instructions:
       "Thank you for the detailed feedback. Would it be okay if our team contacted you for more details?",
-    gather: ["contactPermission"],
-    requiredData: ["comments"],
+    collect: ["contactPermission"],
+    requires: ["comments"],
   })
-  .transitionTo({ state: END_STATE }); // Uses route-level endState configuration
+  .nextStep({ step: END_ROUTE }); // Uses route-level endStep configuration
 
 // ==============================================================================
 // USAGE EXAMPLES: Three-Phase Pipeline Demonstration
@@ -394,9 +395,9 @@ async function exampleConversations() {
   let session = createSession();
 
   // =========================================================================
-  // Example 1: Simple company info question (stateless)
+  // Example 1: Simple company info question (stepless)
   // =========================================================================
-  console.log("\n=== EXAMPLE 1: Company Info (Stateless Q&A) ===");
+  console.log("\n=== EXAMPLE 1: Company Info (Stepless Q&A) ===");
   const history1: Event[] = [
     createMessageEvent(
       EventSource.CUSTOMER,
@@ -415,12 +416,12 @@ async function exampleConversations() {
    * 2. ROUTING: Framework routes to "Company Information" (score: 95)
    * 3. RESPONSE: AI answers from context knowledge
    *    - Route: "Company Information"
-   *    - Session: Updated with route/state (even for stateless)
-   *    - No data extraction (stateless route)
+   *    - Session: Updated with route/step (even for stepless)
+   *    - No data extraction (stepless route)
    */
 
   // =========================================================================
-  // Example 2: Product question (stateless)
+  // Example 2: Product question (stepless)
   // =========================================================================
   console.log("\n=== EXAMPLE 2: Product Info ===");
   const history2: Event[] = [
@@ -438,7 +439,7 @@ async function exampleConversations() {
   // Route: "Product Information"
 
   // =========================================================================
-  // Example 3: Policy question (stateless)
+  // Example 3: Policy question (stepless)
   // =========================================================================
   console.log("\n=== EXAMPLE 3: Policy Question ===");
   const history3: Event[] = [
@@ -456,7 +457,7 @@ async function exampleConversations() {
   // Route: "Policy Information"
 
   // =========================================================================
-  // Example 4: News request (tool execution, but still stateless)
+  // Example 4: News request (tool execution, but still stepless)
   // =========================================================================
   console.log("\n=== EXAMPLE 4: Latest News ===");
   const history4: Event[] = [
@@ -502,9 +503,9 @@ async function exampleConversations() {
   // AI understands "it" refers to Acme Widget from context
 
   // =========================================================================
-  // Example 6: Stateful feedback collection
+  // Example 6: Stepful feedback collection
   // =========================================================================
-  console.log("\n=== EXAMPLE 6: Stateful Feedback Collection ===");
+  console.log("\n=== EXAMPLE 6: Stepful Feedback Collection ===");
   const feedbackHistory: Event[] = [
     createMessageEvent(
       EventSource.CUSTOMER,
@@ -522,7 +523,7 @@ async function exampleConversations() {
 
   if (feedbackResponse.isRouteComplete) {
     console.log("\n✅ Feedback collection complete!");
-    await processFeedback(agent.getExtractedData(feedbackResponse.session?.id));
+    await processFeedback(agent.getData(feedbackResponse.session?.id));
   } else {
     console.log("\n⏳ Feedback collection in progress...");
   }
@@ -551,10 +552,10 @@ async function processFeedback(data: Partial<FeedbackData>) {
 // ==============================================================================
 
 /*
- * 1. NO STATE MACHINES REQUIRED
- *    - Just use the initial state with a chatState description
- *    - No gather, no skipIf, no state transitions
- *    - Perfect for stateless question-answering
+ * 1. NO STEP MACHINES REQUIRED
+ *    - Just use the initial step with a instructions description
+ *    - No collect, no skipIf, no step transitions
+ *    - Perfect for stepless question-answering
  *
  * 2. ROUTING STILL WORKS
  *    - Framework routes to most relevant Q&A route
@@ -563,7 +564,7 @@ async function processFeedback(data: Partial<FeedbackData>) {
  *
  * 3. TOOLS FOR CONTEXT ENRICHMENT
  *    - Tools fetch additional data (news, search results)
- *    - Updates context (not extracted data)
+ *    - Updates context (not collected data)
  *    - AI uses enriched context to answer
  *
  * 4. KNOWLEDGE IN CONTEXT
@@ -571,14 +572,14 @@ async function processFeedback(data: Partial<FeedbackData>) {
  *    - Use contextProvider for always-fresh data
  *    - Tools can augment context at runtime
  *
- * 5. MIX STATEFUL & STATELESS
- *    - Have Q&A routes (stateless)
- *    - AND booking/onboarding routes (stateful)
+ * 5. MIX STEPFUL & STEPLESS
+ *    - Have Q&A routes (stepless)
+ *    - AND booking/onboarding routes (stepful)
  *    - Framework handles both seamlessly
  *
  * 6. GUIDELINES FOR BEHAVIOR
  *    - Use guidelines for general behavioral rules
- *    - No need for complex state machines for simple policies
+ *    - No need for complex step machines for simple policies
  *    - Keep it simple!
  *
  * ARCHITECTURE FOR Q&A:
@@ -591,21 +592,21 @@ async function processFeedback(data: Partial<FeedbackData>) {
  *       ↓
  *   Response (AI answers from context)
  *       ↓
- *   Done (no state tracking needed)
+ *   Done (no step tracking needed)
  *
- * vs. STATEFUL FLOWS (booking, onboarding):
+ * vs. STEPFUL FLOWS (booking, onboarding):
  *
  *   User Intent
  *       ↓
  *   Routing
  *       ↓
- *   State Machine (gather data step-by-step)
+ *   Step Machine (collect data step-by-step)
  *       ↓
- *   Tools (validate/enrich extracted data)
+ *   Tools (validate/enrich collected data)
  *       ↓
  *   Response (continue conversation)
  *       ↓
- *   Track Session (extracted data, current state)
+ *   Track Session (collected data, current step)
  */
 
 if (require.main === module) {

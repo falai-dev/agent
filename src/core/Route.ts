@@ -13,13 +13,13 @@ import type {
 import type { StructuredSchema } from "../types/schema";
 import type { Guideline } from "../types/agent";
 
-import { State } from "./State";
+import { Step } from "./Step";
 import { generateRouteId } from "../utils/id";
 
 /**
  * Represents a conversational route/journey
  */
-export class Route<TContext = unknown, TExtracted = unknown> {
+export class Route<TContext = unknown, TData = unknown> {
   public readonly id: string;
   public readonly title: string;
   public readonly description?: string;
@@ -27,16 +27,22 @@ export class Route<TContext = unknown, TExtracted = unknown> {
   public readonly domains?: string[];
   public readonly rules: string[];
   public readonly prohibitions: string[];
-  public readonly initialState: State<TContext, TExtracted>;
-  public readonly endStateSpec: Omit<TransitionSpec<TContext, TExtracted>, "state" | "condition" | "skipIf">;
+  public readonly initialStep: Step<TContext, TData>;
+  public readonly endStepSpec: Omit<
+    TransitionSpec<TContext, TData>,
+    "step" | "condition" | "skipIf"
+  >;
   public readonly responseOutputSchema?: StructuredSchema;
-  public readonly extractionSchema?: StructuredSchema;
-  public readonly initialData?: Partial<TExtracted>;
-  public readonly onComplete?: string | RouteTransitionConfig | RouteCompletionHandler<TContext, TExtracted>;
+  public readonly schema?: StructuredSchema;
+  public readonly initialData?: Partial<TData>;
+  public readonly onComplete?:
+    | string
+    | RouteTransitionConfig
+    | RouteCompletionHandler<TContext, TData>;
   private routingExtrasSchema?: StructuredSchema;
   private guidelines: Guideline[] = [];
 
-  constructor(options: RouteOptions<TExtracted>) {
+  constructor(options: RouteOptions<TContext, TData>) {
     // Use provided ID or generate a deterministic one from the title
     this.id = options.id || generateRouteId(options.title);
     this.title = options.title;
@@ -45,22 +51,23 @@ export class Route<TContext = unknown, TExtracted = unknown> {
     this.domains = options.domains;
     this.rules = options.rules || ([] as string[]);
     this.prohibitions = options.prohibitions || ([] as string[]);
-    this.initialState = new State<TContext, TExtracted>(
+    this.initialStep = new Step<TContext, TData>(
       this.id,
-      options.initialState?.chatState || "Initial state",
-      options.initialState?.id,
-      options.initialState?.gather,
-      options.initialState?.skipIf,
-      options.initialState?.requiredData,
-      options.initialState?.chatState
+      options.initialStep?.instructions || "Initial step",
+      options.initialStep?.id,
+      options.initialStep?.collect,
+      options.initialStep?.skipIf,
+      options.initialStep?.requires,
+      options.initialStep?.instructions
     );
-    // Store endState spec (will be used when route completes)
-    this.endStateSpec = options.endState || {
-      chatState: "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
+    // Store endStep spec (will be used when route completes)
+    this.endStepSpec = options.endStep || {
+      instructions:
+        "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
     };
     this.routingExtrasSchema = options.routingExtrasSchema;
     this.responseOutputSchema = options.responseOutputSchema;
-    this.extractionSchema = options.extractionSchema;
+    this.schema = options.schema;
     this.initialData = options.initialData;
     this.onComplete = options.onComplete;
 
@@ -78,24 +85,23 @@ export class Route<TContext = unknown, TExtracted = unknown> {
   }
 
   /**
-   * Build a sequential state machine from an array of steps
+   * Build a sequential step machine from an array of steps
    * @private
    */
   private buildSequentialSteps(
-    steps: Array<TransitionSpec<TContext, TExtracted>>
+    steps: Array<TransitionSpec<TContext, TData>>
   ): void {
-    // Import END_STATE dynamically to avoid circular dependency
-    const END_STATE = Symbol.for("END_STATE");
+    // Import END_ROUTE dynamically to avoid circular dependency
+    const END_ROUTE = Symbol.for("END_ROUTE");
 
-    let currentState: TransitionResult<TContext, TExtracted> =
-      this.initialState;
+    let currentStep: TransitionResult<TContext, TData> = this.initialStep;
 
     for (const step of steps) {
-      currentState = currentState.transitionTo(step);
+      currentStep = currentStep.nextStep(step);
     }
 
     // End the route
-    currentState.transitionTo({ state: END_STATE });
+    currentStep.nextStep({ step: END_ROUTE });
   }
 
   /**
@@ -163,12 +169,12 @@ export class Route<TContext = unknown, TExtracted = unknown> {
   }
 
   /**
-   * Get all states in this route (via traversal from initial state)
+   * Get all steps in this route (via traversal from initial step)
    */
-  getAllStates(): State<TContext, TExtracted>[] {
+  getAllSteps(): Step<TContext, TData>[] {
     const visited = new Set<string>();
-    const states: State<TContext, TExtracted>[] = [];
-    const queue: State<TContext, TExtracted>[] = [this.initialState];
+    const steps: Step<TContext, TData>[] = [];
+    const queue: Step<TContext, TData>[] = [this.initialStep];
 
     while (queue.length > 0) {
       const current = queue.shift()!;
@@ -178,9 +184,9 @@ export class Route<TContext = unknown, TExtracted = unknown> {
       }
 
       visited.add(current.id);
-      states.push(current);
+      steps.push(current);
 
-      // Add target states from transitions
+      // Add target steps from transitions
       for (const transition of current.getTransitions()) {
         const target = transition.getTarget();
         if (target && !visited.has(target.id)) {
@@ -189,17 +195,17 @@ export class Route<TContext = unknown, TExtracted = unknown> {
       }
     }
 
-    return states;
+    return steps;
   }
 
   /**
-   * Get a specific state by ID
-   * @param stateId - The state ID to find
-   * @returns The state if found, undefined otherwise
+   * Get a specific step by ID
+   * @param stepId - The step ID to find
+   * @returns The step if found, undefined otherwise
    */
-  getState(stateId: string): State<TContext, TExtracted> | undefined {
-    const states = this.getAllStates();
-    return states.find((state) => state.id === stateId);
+  getStep(stepId: string): Step<TContext, TData> | undefined {
+    const steps = this.getAllSteps();
+    return steps.find((step) => step.id === stepId);
   }
 
   /**
@@ -212,16 +218,16 @@ export class Route<TContext = unknown, TExtracted = unknown> {
       `Description: ${this.description || "N/A"}`,
       `Conditions: ${this.conditions.join(", ") || "None"}`,
       "",
-      "States:",
+      "Steps:",
     ];
 
-    const states = this.getAllStates();
-    for (const state of states) {
+    const steps = this.getAllSteps();
+    for (const step of steps) {
       lines.push(
-        `  - ${state.id}${state.description ? `: ${state.description}` : ""}`
+        `  - ${step.id}${step.description ? `: ${step.description}` : ""}`
       );
 
-      const transitions = state.getTransitions();
+      const transitions = step.getTransitions();
       for (const transition of transitions) {
         lines.push(`    -> ${transition.describe()}`);
       }
@@ -232,12 +238,12 @@ export class Route<TContext = unknown, TExtracted = unknown> {
 
   /**
    * Evaluate the onComplete handler and return transition config
-   * @param session - Current session state
+   * @param session - Current session step
    * @param context - Agent context
    * @returns Transition config or undefined if no transition
    */
   async evaluateOnComplete(
-    session: { extracted?: Partial<TExtracted> },
+    session: { data?: Partial<TData> },
     context?: TContext
   ): Promise<RouteTransitionConfig | undefined> {
     if (!this.onComplete) {
@@ -247,7 +253,7 @@ export class Route<TContext = unknown, TExtracted = unknown> {
     // String form: just route ID/title
     if (typeof this.onComplete === "string") {
       return {
-        transitionTo: this.onComplete,
+        nextStep: this.onComplete,
       };
     }
 
@@ -261,7 +267,7 @@ export class Route<TContext = unknown, TExtracted = unknown> {
 
       if (typeof result === "string") {
         return {
-          transitionTo: result,
+          nextStep: result,
         };
       }
 

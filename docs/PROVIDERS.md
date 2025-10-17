@@ -21,7 +21,7 @@ Streaming provides:
 - 🌊 Real-time text generation for better UX
 - 📊 Incremental delivery with `delta` and `accumulated` properties
 - 🛑 Cancellable streams using AbortSignal
-- ✅ Full compatibility with routes, states, and tool calls
+- ✅ Full compatibility with routes, steps, and tool calls
 
 **Example:**
 
@@ -51,7 +51,7 @@ See [streaming-agent.ts](../examples/streaming-agent.ts) for comprehensive examp
 
 Anthropic's Claude models are known for their exceptional reasoning, analysis, and long context windows. Claude 3.5 Sonnet offers:
 
-- State-of-the-art reasoning and analysis
+- Step-of-the-art reasoning and analysis
 - 200K context window
 - Excellent at following complex instructions
 - Strong coding and writing capabilities

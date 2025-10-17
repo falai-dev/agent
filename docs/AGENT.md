@@ -25,7 +25,7 @@ interface AgentOptions<TContext = unknown> {
   context?: TContext;
 
   // Optional current session for convenience methods
-  session?: SessionState;
+  session?: SessionStep;
 
   // Context provider for always-fresh context
   contextProvider?: () => Promise<TContext> | TContext;
@@ -40,9 +40,9 @@ interface AgentOptions<TContext = unknown> {
       newContext: TContext,
       previousContext: TContext
     ) => Promise<void> | void;
-    onExtractedUpdate?: (
-      extracted: Record<string, unknown>,
-      previousExtracted: Record<string, unknown>
+    onDataUpdate?: (
+      data: Record<string, unknown>,
+      previousData: Record<string, unknown>
     ) => Promise<Record<string, unknown>> | Record<string, unknown>;
   };
 
@@ -54,7 +54,7 @@ interface AgentOptions<TContext = unknown> {
 }
 ```
 
-### Example: Data-Driven Agent with Session State
+### Example: Data-Driven Agent with Session Step
 
 ```typescript
 // Define your data extraction types
@@ -66,20 +66,20 @@ interface FlightData {
 }
 
 const agent = new Agent<FlightBookingContext>({
-  name: 'FlightBot',
-  description: 'Helpful flight booking assistant',
-  goal: 'Book flights efficiently',
-  ai: new GeminiProvider({ apiKey: '...', model: '...' }),
+  name: "FlightBot",
+  description: "Helpful flight booking assistant",
+  goal: "Book flights efficiently",
+  ai: new GeminiProvider({ apiKey: "...", model: "..." }),
 
   // Static context
   context: {
-    userId: '123',
+    userId: "123",
     availableFlights: [],
   },
 
   // Optional: Set initial session for convenience methods
   session: createSession<FlightData>({
-    extracted: { destination: 'Paris' }, // Pre-populate with known data
+    data: { destination: "Paris" }, // Pre-populate with known data
   }),
 
   // Enhanced lifecycle hooks
@@ -90,40 +90,40 @@ const agent = new Agent<FlightBookingContext>({
       return { ...ctx, userCredits: freshUser.credits };
     },
 
-    // Validate and enrich extracted data
-    onExtractedUpdate: async (extracted, previous) => {
+    // Validate and enrich collected data
+    onDataUpdate: async (data, previous) => {
       // Normalize passenger count
-      if (extracted.passengers < 1) extracted.passengers = 1;
-      if (extracted.passengers > 9) extracted.passengers = 9;
+      if (data.passengers < 1) data.passengers = 1;
+      if (data.passengers > 9) data.passengers = 9;
 
       // Auto-trigger flight search when we have enough data
-      if (extracted.destination && extracted.departureDate && extracted.passengers) {
-        extracted.shouldSearchFlights = true;
+      if (data.destination && data.departureDate && data.passengers) {
+        data.shouldSearchFlights = true;
       }
 
-      return extracted;
+      return data;
     },
   },
 
   // Declarative routes with data extraction
   routes: [
     {
-      title: 'Book Flight',
-      description: 'Help user book a flight',
-      conditions: ['User wants to book a flight'],
-      extractionSchema: {
-        type: 'object',
+      title: "Book Flight",
+      description: "Help user book a flight",
+      conditions: ["User wants to book a flight"],
+      schema: {
+        type: "object",
         properties: {
-          destination: { type: 'string' },
-          departureDate: { type: 'string' },
-          passengers: { type: 'number', minimum: 1, maximum: 9 },
+          destination: { type: "string" },
+          departureDate: { type: "string" },
+          passengers: { type: "number", minimum: 1, maximum: 9 },
           cabinClass: {
-            type: 'string',
-            enum: ['economy', 'business', 'first'],
-            default: 'economy',
+            type: "string",
+            enum: ["economy", "business", "first"],
+            default: "economy",
           },
         },
-        required: ['destination', 'departureDate', 'passengers'],
+        required: ["destination", "departureDate", "passengers"],
       },
     },
   ],
@@ -131,44 +131,46 @@ const agent = new Agent<FlightBookingContext>({
   // Domain glossary
   terms: [
     {
-      name: 'Premium Plan',
-      description: 'Our top-tier subscription at $99/month',
-      synonyms: ['pro plan', 'premium subscription'],
+      name: "Premium Plan",
+      description: "Our top-tier subscription at $99/month",
+      synonyms: ["pro plan", "premium subscription"],
     },
   ],
 
   // Behavioral guidelines
   guidelines: [
     {
-      action: 'Always be polite and professional',
+      action: "Always be polite and professional",
       enabled: true,
     },
     {
-      condition: 'User seems frustrated',
-      action: 'Apologize sincerely and offer to escalate to human support',
+      condition: "User seems frustrated",
+      action: "Apologize sincerely and offer to escalate to human support",
       enabled: true,
     },
   ],
 
   capabilities: [
-    { title: 'Ticket Management', description: 'Create and track tickets' },
+    { title: "Ticket Management", description: "Create and track tickets" },
   ],
 });
 
 // Option 1: Use session passed to respond (traditional)
 let session = createSession<FlightData>();
 const response = await agent.respond({ history, session });
-console.log(response.session?.extracted); // Extracted flight data
+console.log(response.session?.data); // Data flight data
 
 // Option 2: Use session set in constructor (convenience methods)
 // Since we set session in constructor, no need to pass it!
 const response2 = await agent.respond({ history });
-console.log(agent.getExtractedData()); // Uses constructor session
+console.log(agent.getData()); // Uses constructor session
 
 // Option 3: Override session for specific calls
-const customSession = createSession<FlightData>({ extracted: { destination: 'Tokyo' } });
+const customSession = createSession<FlightData>({
+  data: { destination: "Tokyo" },
+});
 const response3 = await agent.respond({ history, session: customSession });
-console.log(response3.session?.extracted); // Uses custom session
+console.log(response3.session?.data); // Uses custom session
 ```
 
 ````
@@ -177,7 +179,7 @@ console.log(response3.session?.extracted); // Uses custom session
 
 ## 💾 Session Management
 
-The agent supports flexible session management for conversation state tracking:
+The agent supports flexible session management for conversation step tracking:
 
 ### Constructor Session (Optional)
 
@@ -188,13 +190,13 @@ const agent = new Agent({
   name: 'Bot',
   ai: provider,
   session: createSession<MyData>({
-    extracted: { name: 'John' }, // Pre-populate data
+    data: { name: 'John' }, // Pre-populate data
   }),
 });
 
 // Use convenience methods without passing session
 const response = await agent.respond({ history });
-const data = agent.getExtractedData(); // Uses constructor session
+const data = agent.getData(); // Uses constructor session
 ```
 
 ### Runtime Session Management
@@ -204,8 +206,8 @@ const data = agent.getExtractedData(); // Uses constructor session
 agent.setCurrentSession(session);
 
 // Use without passing session parameter
-const extracted = agent.getExtractedData();
-const routeData = agent.getExtractedData('onboarding');
+const data = agent.getData();
+const routeData = agent.getData('onboarding');
 
 // Override for specific calls
 const response = await agent.respond({ history, session: customSession });
@@ -216,15 +218,15 @@ agent.clearCurrentSession();
 
 ### Session Preservation
 
-When switching routes, extracted data is preserved in `extractedByRoute`:
+When switching routes, collected data is preserved in `dataByRoute`:
 
 ```typescript
 // User switches from onboarding to booking
 const response = await agent.respond({ history }); // Switches routes
 
 // Access data from previous routes
-const onboardingData = agent.getExtractedData('onboarding');
-const bookingData = agent.getExtractedData('booking');
+const onboardingData = agent.getData('onboarding');
+const bookingData = agent.getData('booking');
 ```
 
 ---
@@ -232,7 +234,7 @@ const bookingData = agent.getExtractedData('booking');
 ## 🛤️ Route Agent
 
 ```typescript
-interface RouteOptions<TExtracted = unknown> {
+interface RouteOptions<TData = unknown> {
   // Required
   title: string;
 
@@ -246,15 +248,15 @@ interface RouteOptions<TExtracted = unknown> {
   prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do
 
   // NEW: Schema-first data extraction
-  extractionSchema?: {
+  schema?: {
     type: "object";
     properties: Record<string, any>;
     required?: string[];
     additionalProperties?: boolean;
   };
 
-  // NEW: Pre-populate extracted data when entering route
-  initialData?: Partial<TExtracted>;
+  // NEW: Pre-populate collected data when entering route
+  initialData?: Partial<TData>;
 }
 ````
 
@@ -472,7 +474,7 @@ route.createGuideline({ condition: "...", action: "..." });
 ### Use Fluent When:
 
 - ✅ Logic is **dynamic** or **conditional**
-- ✅ Building routes with **complex state machines**
+- ✅ Building routes with **complex step machines**
 - ✅ Adding features **based on runtime conditions**
 - ✅ You prefer **step-by-step construction**
 
@@ -520,7 +522,7 @@ const agent = new Agent<MyContext>({
   goal?: string,
   ai: AiProvider,
   context?: MyContext,
-  session?: SessionState,        // Optional current session
+  session?: SessionStep,        // Optional current session
   maxEngineIterations?: number,
   compositionMode?: CompositionMode,
   terms?: Term[],

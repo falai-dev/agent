@@ -1,13 +1,13 @@
 /**
- * Travel agent example with session state management
- * Demonstrates data-driven conversations with schema extraction and state progression
+ * Travel agent example with session step management
+ * Demonstrates data-driven conversations with schema extraction and step progression
  */
 
 import {
   Agent,
   defineTool,
   OpenRouterProvider,
-  END_STATE,
+  END_ROUTE,
   EventSource,
   createMessageEvent,
   createSession,
@@ -63,11 +63,8 @@ const getAvailableDestinations = defineTool(
 
 const lookupDestinationCode = defineTool(
   "lookup_destination_code",
-  async ({
-    context,
-    extracted,
-  }: ToolContext<TravelContext, FlightBookingData>) => {
-    if (!extracted?.destination) {
+  async ({ context, data }: ToolContext<TravelContext, FlightBookingData>) => {
+    if (!data?.destination) {
       return { data: undefined };
     }
 
@@ -81,8 +78,8 @@ const lookupDestinationCode = defineTool(
 
     return {
       data: undefined,
-      extractedUpdate: {
-        destinationCode: codes[extracted.destination],
+      dataUpdate: {
+        destinationCode: codes[data.destination],
       },
     };
   },
@@ -93,46 +90,40 @@ const lookupDestinationCode = defineTool(
 
 const searchFlights = defineTool(
   "search_flights",
-  async ({
-    context,
-    extracted,
-  }: ToolContext<TravelContext, FlightBookingData>) => {
-    if (!extracted?.destination || !extracted?.departureDate) {
+  async ({ context, data }: ToolContext<TravelContext, FlightBookingData>) => {
+    if (!data?.destination || !data?.departureDate) {
       return { data: [] };
     }
 
-    // Simulate flight search based on extracted data
+    // Simulate flight search based on collected data
     const flights = [
-      `Flight 123 - ${extracted.departureDate}, 9:00 AM, $${
+      `Flight 123 - ${data.departureDate}, 9:00 AM, $${
         800 + Math.floor(Math.random() * 200)
       }`,
-      `Flight 321 - ${extracted.departureDate}, 2:30 PM, $${
+      `Flight 321 - ${data.departureDate}, 2:30 PM, $${
         700 + Math.floor(Math.random() * 200)
       }`,
-      `Flight 987 - ${extracted.departureDate}, 6:45 PM, $${
+      `Flight 987 - ${data.departureDate}, 6:45 PM, $${
         600 + Math.floor(Math.random() * 200)
       }`,
     ];
 
     return {
       data: flights,
-      extractedUpdate: {
+      dataUpdate: {
         shouldSearchFlights: false, // Clear the flag
       },
     };
   },
   {
-    description: "Search for flights based on extracted travel data",
+    description: "Search for flights based on data travel data",
   }
 );
 
 const bookFlight = defineTool(
   "book_flight",
-  async ({
-    context,
-    extracted,
-  }: ToolContext<TravelContext, FlightBookingData>) => {
-    if (!extracted) {
+  async ({ context, data }: ToolContext<TravelContext, FlightBookingData>) => {
+    if (!data) {
       return { data: "Please provide flight details" };
     }
 
@@ -142,11 +133,11 @@ const bookFlight = defineTool(
       .replace(/-/g, "")}-001`;
 
     return {
-      data: `Flight booked for ${context.customerName} to ${extracted.destination}. Confirmation: ${confirmationNumber}`,
+      data: `Flight booked for ${context.customerName} to ${data.destination}. Confirmation: ${confirmationNumber}`,
     };
   },
   {
-    description: "Book a flight using extracted travel data",
+    description: "Book a flight using data travel data",
   }
 );
 
@@ -156,11 +147,8 @@ const getBookingStatus = defineTool<
   { status: string; details: string; notes?: string }
 >(
   "get_booking_status",
-  async ({
-    context,
-    extracted,
-  }: ToolContext<TravelContext, BookingStatusData>) => {
-    if (!extracted?.confirmationNumber) {
+  async ({ context, data }: ToolContext<TravelContext, BookingStatusData>) => {
+    if (!data?.confirmationNumber) {
       return {
         data: {
           status: "Error",
@@ -172,13 +160,13 @@ const getBookingStatus = defineTool<
     return {
       data: {
         status: "Confirmed",
-        details: `Flight booking ${extracted.confirmationNumber} is confirmed.`,
+        details: `Flight booking ${data.confirmationNumber} is confirmed.`,
         notes: "Check-in opens 24 hours before departure.",
       },
     };
   },
   {
-    description: "Get booking status using extracted confirmation number",
+    description: "Get booking status using data confirmation number",
   }
 );
 
@@ -234,12 +222,12 @@ async function createTravelAgent() {
     // NEW: Transition to feedback collection after successful booking
     onComplete: (session) => {
       // Dynamic logic: only collect feedback if destination is known
-      if (session.extracted?.destination) {
+      if (session.data?.destination) {
         return "Travel Feedback";
       }
       return undefined; // No transition
     },
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         destination: {
@@ -285,66 +273,66 @@ async function createTravelAgent() {
     },
   });
 
-  // Build the route flow with data extraction and smart state progression
-  const askDestination = flightBookingRoute.initialState.transitionTo({
-    chatState: "Ask about the destination",
-    gather: ["destination"],
-    skipIf: (extracted) => !!extracted.destination,
+  // Build the route flow with data extraction and smart step progression
+  const askDestination = flightBookingRoute.initialStep.nextStep({
+    instructions: "Ask about the destination",
+    collect: ["destination"],
+    skipIf: (data) => !!data.destination,
     condition: "Customer needs to specify their travel destination",
   });
 
-  const enrichDestination = askDestination.transitionTo({
-    toolState: lookupDestinationCode,
-    requiredData: ["destination"],
+  const enrichDestination = askDestination.nextStep({
+    tool: lookupDestinationCode,
+    requires: ["destination"],
     condition: "Destination provided, lookup airport code",
   });
 
-  const askDates = enrichDestination.transitionTo({
-    chatState: "Ask about preferred travel dates",
-    gather: ["departureDate"],
-    skipIf: (extracted) => !!extracted.departureDate,
-    requiredData: ["destination"],
+  const askDates = enrichDestination.nextStep({
+    instructions: "Ask about preferred travel dates",
+    collect: ["departureDate"],
+    skipIf: (data) => !!data.departureDate,
+    requires: ["destination"],
     condition: "Destination confirmed, need travel dates",
   });
 
-  const askPassengers = askDates.transitionTo({
-    chatState: "Ask for number of passengers",
-    gather: ["passengers"],
-    skipIf: (extracted) => !!extracted.passengers,
-    requiredData: ["destination", "departureDate"],
+  const askPassengers = askDates.nextStep({
+    instructions: "Ask for number of passengers",
+    collect: ["passengers"],
+    skipIf: (data) => !!data.passengers,
+    requires: ["destination", "departureDate"],
     condition: "Dates confirmed, need passenger count",
   });
 
-  const searchFlightsState = askPassengers.transitionTo({
-    toolState: searchFlights,
+  const searchFlightsStep = askPassengers.nextStep({
+    tool: searchFlights,
     // Triggered when shouldSearchFlights flag is set by hook
-    condition: "All basic info gathered, search for available flights",
+    condition: "All basic info collected, search for available flights",
   });
 
-  const presentFlights = searchFlightsState.transitionTo({
-    chatState: "Present available flights and ask which one works for them",
+  const presentFlights = searchFlightsStep.nextStep({
+    instructions: "Present available flights and ask which one works for them",
     condition: "Flight search complete, present options to customer",
   });
 
   // Happy path: customer selects a flight
-  const confirmBooking = presentFlights.transitionTo({
-    chatState: "Confirm booking details before proceeding",
-    gather: ["cabinClass", "urgency"], // Additional optional data
+  const confirmBooking = presentFlights.nextStep({
+    instructions: "Confirm booking details before proceeding",
+    collect: ["cabinClass", "urgency"], // Additional optional data
     condition: "Customer interested in a flight, confirm booking details",
   });
 
-  const bookFlightState = confirmBooking.transitionTo({
-    toolState: bookFlight,
+  const bookFlightStep = confirmBooking.nextStep({
+    tool: bookFlight,
     condition: "Customer confirmed, proceed with booking",
   });
 
-  const provideConfirmation = bookFlightState.transitionTo({
-    chatState: "Provide confirmation number and booking summary",
+  const provideConfirmation = bookFlightStep.nextStep({
+    instructions: "Provide confirmation number and booking summary",
     condition: "Booking completed successfully",
   });
 
-  provideConfirmation.transitionTo({
-    state: END_STATE,
+  provideConfirmation.nextStep({
+    step: END_ROUTE,
     condition: "Customer has confirmation, booking flow complete",
   });
 
@@ -368,7 +356,7 @@ async function createTravelAgent() {
     description:
       "Retrieves the customer's booking status and provides relevant information.",
     conditions: ["The customer wants to check their booking status"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         confirmationNumber: {
@@ -384,27 +372,27 @@ async function createTravelAgent() {
     },
   });
 
-  const askConfirmation = bookingStatusRoute.initialState.transitionTo({
-    chatState: "Ask for the confirmation number or booking reference",
-    gather: ["confirmationNumber"],
-    skipIf: (extracted) => !!extracted.confirmationNumber,
+  const askConfirmation = bookingStatusRoute.initialStep.nextStep({
+    instructions: "Ask for the confirmation number or booking reference",
+    collect: ["confirmationNumber"],
+    skipIf: (data) => !!data.confirmationNumber,
     condition:
       "Customer wants to check booking status but hasn't provided confirmation number",
   });
 
-  const checkStatus = askConfirmation.transitionTo({
-    toolState: getBookingStatus,
-    requiredData: ["confirmationNumber"],
+  const checkStatus = askConfirmation.nextStep({
+    tool: getBookingStatus,
+    requires: ["confirmationNumber"],
     condition: "Confirmation number provided, look up booking details",
   });
 
-  const provideStatus = checkStatus.transitionTo({
-    chatState: "Provide booking status and relevant information",
+  const provideStatus = checkStatus.nextStep({
+    instructions: "Provide booking status and relevant information",
     condition: "Booking status retrieved successfully",
   });
 
-  provideStatus.transitionTo({
-    state: END_STATE,
+  provideStatus.nextStep({
+    step: END_ROUTE,
     condition: "Booking information provided to customer",
   });
 
@@ -413,7 +401,7 @@ async function createTravelAgent() {
     title: "Travel Feedback",
     description: "Collects customer feedback after flight booking",
     conditions: ["Collect travel booking feedback"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         rating: {
@@ -433,25 +421,24 @@ async function createTravelAgent() {
     },
   });
 
-  const askFeedbackRating = feedbackRoute.initialState.transitionTo({
-    chatState:
+  const askFeedbackRating = feedbackRoute.initialStep.nextStep({
+    instructions:
       "Ask for overall rating from 1 to 5 for the booking experience",
-    gather: ["rating"],
-    skipIf: (extracted) => !!extracted.rating,
+    collect: ["rating"],
+    skipIf: (data) => !!data.rating,
   });
 
-  const askRecommendation = askFeedbackRating.transitionTo({
-    chatState:
+  const askRecommendation = askFeedbackRating.nextStep({
+    instructions:
       "Ask if they would recommend our service to a friend (yes/no)",
-    gather: ["recommendToFriend"],
+    collect: ["recommendToFriend"],
   });
 
-  const thankForFeedback = askRecommendation.transitionTo({
-    chatState:
-      "Thank them for their feedback and wish them a great trip!",
+  const thankForFeedback = askRecommendation.nextStep({
+    instructions: "Thank them for their feedback and wish them a great trip!",
   });
 
-  thankForFeedback.transitionTo({ state: END_STATE });
+  thankForFeedback.nextStep({ step: END_ROUTE });
 
   // Global guidelines
   agent.createGuideline({
@@ -476,11 +463,11 @@ async function createTravelAgent() {
   return agent;
 }
 
-// Example usage with session state
+// Example usage with session step
 async function main() {
   const agent = await createTravelAgent();
 
-  // Initialize session state
+  // Initialize session step
   let session = createSession<FlightBookingData | BookingStatusData>();
 
   // Simulate a conversation
@@ -500,13 +487,13 @@ async function main() {
   console.info("\n=== TURN 1 ===");
   console.info("Agent:", response1.message);
   console.info("Route:", response1.session?.currentRoute?.title);
-  console.info("State:", response1.session?.currentState?.id);
-  console.info("Extracted:", response1.session?.extracted);
+  console.info("Step:", response1.session?.currentStep?.id);
+  console.info("Data:", response1.session?.data);
 
-  // Session state updated with progress
+  // Session step updated with progress
   session = response1.session!;
 
-  // Turn 2 - Continue with session state
+  // Turn 2 - Continue with session step
   if (response1.session?.currentRoute?.title === "Book a Flight") {
     const history2 = [
       ...history,
@@ -517,8 +504,8 @@ async function main() {
     const response2 = await agent.respond({ history: history2, session });
     console.info("\n=== TURN 2 ===");
     console.info("Agent:", response2.message);
-    console.info("Updated extracted:", response2.session?.extracted);
-    console.info("Current state:", response2.session?.currentState?.id);
+    console.info("Updated data:", response2.session?.data);
+    console.info("Current step:", response2.session?.currentStep?.id);
   }
 
   // Demonstrate booking status check
@@ -538,23 +525,21 @@ async function main() {
   console.info("\n=== BOOKING STATUS CHECK ===");
   console.info("Agent:", statusResponse.message);
   console.info("Route:", statusResponse.session?.currentRoute?.title);
-  console.info("Extracted:", statusResponse.session?.extracted);
+  console.info("Data:", statusResponse.session?.data);
 
-  // Show session state management benefits
-  console.info("\n=== SESSION STATE BENEFITS ===");
+  // Show session step management benefits
+  console.info("\n=== SESSION STEP BENEFITS ===");
   console.info("✅ Always-on routing - respects user intent changes");
-  console.info("✅ Data persistence - extracted data survives across turns");
+  console.info("✅ Data persistence - collected data survives across turns");
   console.info(
-    "✅ State progression - intelligent flow based on collected data"
+    "✅ Step progression - intelligent flow based on collected data"
   );
   console.info("✅ Context awareness - router sees current progress");
 
   if (statusResponse.isRouteComplete) {
     console.info("\n✅ Booking status check complete!");
     await logBookingStatusCheck(
-      agent.getExtractedData(
-        statusResponse.session?.id
-      ) as unknown as BookingStatusData
+      agent.getData(statusResponse.session?.id) as unknown as BookingStatusData
     );
   }
 }

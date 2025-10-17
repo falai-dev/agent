@@ -13,8 +13,8 @@ import {
   GeminiProvider,
   createMessageEvent,
   EventSource,
-  END_STATE,
-  type SessionState,
+  END_ROUTE,
+  type SessionStep,
 } from "../src/index";
 
 // Type definitions for our booking data
@@ -46,7 +46,7 @@ async function main() {
     title: "Book Hotel",
     description: "Collects hotel booking information",
     conditions: ["User wants to book a hotel"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         hotelName: { type: "string" },
@@ -56,46 +56,47 @@ async function main() {
       required: ["hotelName", "date", "guests"],
     },
     // Configure completion message at route level
-    endState: {
-      chatState: "Confirm the booking with a summary of the hotel, date, and number of guests. Be enthusiastic!",
+    endStep: {
+      instructions:
+        "Confirm the booking with a summary of the hotel, date, and number of guests. Be enthusiastic!",
     },
     // Option 1: Simple string
     onComplete: "Collect Feedback",
     // Option 2: Object with condition
     // onComplete: {
-    //   transitionTo: "Collect Feedback",
+    //   nextStep: "Collect Feedback",
     //   condition: "if booking was successful"
     // },
     // Option 3: Function with logic
     // onComplete: (session) => {
-    //   if (session.extracted?.guests && session.extracted.guests > 5) {
+    //   if (session.data?.guests && session.data.guests > 5) {
     //     return "VIP Feedback"; // Different feedback for large groups
     //   }
     //   return "Collect Feedback";
     // },
   });
 
-  const askHotel = bookingRoute.initialState.transitionTo({
-    chatState: "Ask which hotel they want to book",
-    gather: ["hotelName"],
-    skipIf: (extracted) => !!extracted.hotelName,
+  const askHotel = bookingRoute.initialStep.nextStep({
+    instructions: "Ask which hotel they want to book",
+    collect: ["hotelName"],
+    skipIf: (data) => !!data.hotelName,
   });
 
-  const askDate = askHotel.transitionTo({
-    chatState: "Ask for the booking date",
-    gather: ["date"],
-    skipIf: (extracted) => !!extracted.date,
+  const askDate = askHotel.nextStep({
+    instructions: "Ask for the booking date",
+    collect: ["date"],
+    skipIf: (data) => !!data.date,
   });
 
-  const askGuests = askDate.transitionTo({
-    chatState: "Ask for the number of guests",
-    gather: ["guests"],
-    skipIf: (extracted) => !!extracted.guests,
+  const askGuests = askDate.nextStep({
+    instructions: "Ask for the number of guests",
+    collect: ["guests"],
+    skipIf: (data) => !!data.guests,
   });
 
-  // No need to specify chatState here - using route-level endState configuration
-  askGuests.transitionTo({
-    state: END_STATE,
+  // No need to specify instructions here - using route-level endStep configuration
+  askGuests.nextStep({
+    step: END_ROUTE,
   });
 
   // Route 2: Feedback Collection
@@ -103,7 +104,7 @@ async function main() {
     title: "Collect Feedback",
     description: "Collects user feedback after booking",
     conditions: ["User wants to provide feedback"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         rating: { type: "number" },
@@ -112,31 +113,32 @@ async function main() {
       required: ["rating"],
     },
     // Configure completion message for feedback route
-    endState: {
-      chatState: "Thank the user warmly for their feedback and let them know their input is valuable",
+    endStep: {
+      instructions:
+        "Thank the user warmly for their feedback and let them know their input is valuable",
     },
   });
 
-  const askRating = feedbackRoute.initialState.transitionTo({
-    chatState: "Ask for rating from 1 to 5",
-    gather: ["rating"],
-    skipIf: (extracted) => !!extracted.rating,
+  const askRating = feedbackRoute.initialStep.nextStep({
+    instructions: "Ask for rating from 1 to 5",
+    collect: ["rating"],
+    skipIf: (data) => !!data.rating,
   });
 
-  const askComments = askRating.transitionTo({
-    chatState: "Ask for any additional comments (optional)",
-    gather: ["comments"],
+  const askComments = askRating.nextStep({
+    instructions: "Ask for any additional comments (optional)",
+    collect: ["comments"],
   });
 
-  // No need to specify chatState here - using route-level endState configuration
-  askComments.transitionTo({
-    state: END_STATE,
+  // No need to specify instructions here - using route-level endStep configuration
+  askComments.nextStep({
+    step: END_ROUTE,
   });
 
   console.log("\n=== Route Transitions Example ===\n");
 
   // Conversation 1: User provides all booking info at once
-  let session: SessionState | undefined;
+  let session: SessionStep | undefined;
   let history = [
     createMessageEvent(
       EventSource.CUSTOMER,
@@ -155,12 +157,15 @@ async function main() {
     "Pending transition?",
     response1.session?.pendingTransition?.targetRouteId
   );
-  console.log("Extracted booking data:", response1.session?.extracted);
+  console.log("Data booking data:", response1.session?.data);
 
   session = response1.session;
   history = [
     ...history,
-    { ...createMessageEvent(EventSource.AI_AGENT, "Bot", response1.message), id: "2" },
+    {
+      ...createMessageEvent(EventSource.AI_AGENT, "Bot", response1.message),
+      id: "2",
+    },
   ];
 
   // Second response - should auto-transition to a feedback route
@@ -178,7 +183,10 @@ async function main() {
   session = response2.session;
   history = [
     ...history,
-    { ...createMessageEvent(EventSource.AI_AGENT, "Bot", response2.message), id: "4" },
+    {
+      ...createMessageEvent(EventSource.AI_AGENT, "Bot", response2.message),
+      id: "4",
+    },
   ];
 
   // Third response - provide rating
@@ -195,13 +203,13 @@ async function main() {
   const response3 = await agent.respond({ history, session });
   console.log("\nBot:", response3.message);
   console.log("Current route:", response3.session?.currentRoute?.title);
-  console.log("Extracted feedback data:", response3.session?.extracted);
+  console.log("Data feedback data:", response3.session?.data);
   console.log("Route complete?", response3.isRouteComplete);
 
   console.log("\n=== Manual Transition Example ===\n");
 
-  // Demonstrate manual transition using agent.transitionToRoute()
-  let session2: SessionState | undefined;
+  // Demonstrate manual transition using agent.nextStepRoute()
+  let session2: SessionStep | undefined;
   let history2 = [
     createMessageEvent(
       EventSource.CUSTOMER,
@@ -212,14 +220,17 @@ async function main() {
 
   console.log("User:", history2[0].data.message);
 
-  const manualResponse = await agent.respond({ history: history2, session: session2 });
+  const manualResponse = await agent.respond({
+    history: history2,
+    session: session2,
+  });
   console.log("\nBot:", manualResponse.message);
   console.log("Route complete?", manualResponse.isRouteComplete);
 
   if (manualResponse.isRouteComplete && manualResponse.session) {
     // Manually trigger transition instead of auto-transition
     console.log("\n[Manually transitioning to feedback route...]");
-    session2 = agent.transitionToRoute("Collect Feedback", manualResponse.session);
+    session2 = agent.nextStepRoute("Collect Feedback", manualResponse.session);
     console.log(
       "Pending transition set:",
       session2.pendingTransition?.targetRouteId
@@ -227,13 +238,26 @@ async function main() {
 
     history2 = [
       ...history2,
-      { ...createMessageEvent(EventSource.AI_AGENT, "Bot", manualResponse.message), id: "2" },
+      {
+        ...createMessageEvent(
+          EventSource.AI_AGENT,
+          "Bot",
+          manualResponse.message
+        ),
+        id: "2",
+      },
       createMessageEvent(EventSource.CUSTOMER, "Bob", "Great!"),
     ];
 
-    const feedbackResponse = await agent.respond({ history: history2, session: session2 });
+    const feedbackResponse = await agent.respond({
+      history: history2,
+      session: session2,
+    });
     console.log("\nBot:", feedbackResponse.message);
-    console.log("Current route:", feedbackResponse.session?.currentRoute?.title);
+    console.log(
+      "Current route:",
+      feedbackResponse.session?.currentRoute?.title
+    );
   }
 
   console.log("\n=== Done ===\n");

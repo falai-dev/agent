@@ -1,19 +1,19 @@
 /**
  * Business Onboarding Example
- * Updated for v2 architecture with session state management and schema-first data extraction
+ * Updated for v2 architecture with session step management and schema-first data extraction
  *
  * Real-world example showing:
  * - Complex multi-step onboarding flow with schema-based data extraction
- * - Tools with enhanced context access for automatic state management
+ * - Tools with enhanced context access for automatic step management
  * - Lifecycle hooks for data validation and persistence
  * - Branching logic (physical vs online business) with skipIf conditions
- * - Code-based state progression instead of fuzzy conditions
+ * - Code-based step progression instead of fuzzy conditions
  */
 
 import {
   Agent,
   defineTool,
-  END_STATE,
+  END_ROUTE,
   EventSource,
   createMessageEvent,
   OpenAIProvider,
@@ -32,7 +32,7 @@ interface BusinessInfo {
 interface LocationInfo {
   address?: string;
   city?: string;
-  state?: string;
+  step?: string;
   hasPhysicalStore?: boolean;
 }
 
@@ -157,7 +157,7 @@ const saveProductsServices = defineTool<
  */
 const saveLocationInfo = defineTool<
   OnboardingContext,
-  [address: string, city: string, state: string, hasPhysicalStore: boolean],
+  [address: string, city: string, step: string, hasPhysicalStore: boolean],
   boolean
 >(
   "save_location_info",
@@ -165,7 +165,7 @@ const saveLocationInfo = defineTool<
     toolContext: ToolContext<OnboardingContext>,
     address: string,
     city: string,
-    state: string,
+    step: string,
     hasPhysicalStore: boolean
   ) => {
     return {
@@ -176,7 +176,7 @@ const saveLocationInfo = defineTool<
           location: {
             address,
             city,
-            state,
+            step,
             hasPhysicalStore,
           },
         },
@@ -185,7 +185,7 @@ const saveLocationInfo = defineTool<
   },
   {
     description:
-      "Save location information: full address, city, state, and physical store status",
+      "Save location information: full address, city, step, and physical store status",
   }
 );
 
@@ -339,7 +339,7 @@ const addConversationRoute = defineTool<
 /**
  * Get all collected data for review
  */
-const getCollectedData = defineTool<OnboardingContext, [], OnboardingData>(
+const getData = defineTool<OnboardingContext, [], OnboardingData>(
   "get_collected_data",
   async (toolContext: ToolContext<OnboardingContext>) => {
     return { data: toolContext.context.collectedData };
@@ -417,19 +417,20 @@ async function createBusinessOnboardingAgent(
     title: "Business Onboarding",
     description: "Complete onboarding process to configure personalized routes",
     conditions: ["User is starting the onboarding process"],
-    endState: {
-      chatState: "🎉 Perfect! Setup complete! Your WhatsApp assistant is ready and will use all this information to automatically serve your customers. If you have any questions or need adjustments, just let me know!",
+    endStep: {
+      instructions:
+        "🎉 Perfect! Setup complete! Your WhatsApp assistant is ready and will use all this information to automatically serve your customers. If you have any questions or need adjustments, just let me know!",
     },
   });
 
   // ==================== Build the Flow ====================
 
   // For complex flows with branching, we use step-by-step approach
-  // This makes it easier to reference states for branching logic
+  // This makes it easier to reference steps for branching logic
 
   // Step 0: Welcome
-  const welcome = onboardingRoute.initialState.transitionTo({
-    chatState: `Hello ${userName}! 👋 I'm your setup assistant. I'll help you configure your WhatsApp assistant by collecting practical information about your business. ${
+  const welcome = onboardingRoute.initialStep.nextStep({
+    instructions: `Hello ${userName}! 👋 I'm your setup assistant. I'll help you configure your WhatsApp assistant by collecting practical information about your business. ${
       initialData.business?.businessName
         ? `I see your company is "${initialData.business.businessName}".`
         : ""
@@ -437,8 +438,8 @@ async function createBusinessOnboardingAgent(
   });
 
   // Step 1: Business basics - Ask
-  const askBusiness = welcome.transitionTo({
-    chatState:
+  const askBusiness = welcome.nextStep({
+    instructions:
       initialData.business?.businessName &&
       initialData.business?.businessDescription &&
       initialData.business?.businessSector
@@ -449,119 +450,119 @@ async function createBusinessOnboardingAgent(
   });
 
   // Step 1: Business basics - Save
-  const saveBusiness = askBusiness.transitionTo({
-    toolState: saveBusinessInfo,
+  const saveBusiness = askBusiness.nextStep({
+    tool: saveBusinessInfo,
     condition: "User provided company name, sector, and description",
   });
 
   // Step 2: Products/Services - Ask
-  const askProducts = saveBusiness.transitionTo({
-    chatState:
+  const askProducts = saveBusiness.nextStep({
+    instructions:
       "Perfect! Now tell me: what are the main products or services you offer? And who is your target audience? (e.g., 'We sell women's clothing and accessories for women aged 25-45')",
   });
 
   // Step 2: Products/Services - Save
-  const saveProducts = askProducts.transitionTo({
-    toolState: saveProductsServices,
+  const saveProducts = askProducts.nextStep({
+    tool: saveProductsServices,
     condition: "User listed products/services and target audience",
   });
 
   // Step 3: Location - Branch point
-  const askLocation = saveProducts.transitionTo({
-    chatState:
+  const askLocation = saveProducts.nextStep({
+    instructions:
       "Great! Do you have a physical store or in-person service location? (answer 'yes' or 'no')",
   });
 
   // Step 3a: Physical store path
-  const askPhysicalLocation = askLocation.transitionTo({
-    chatState:
-      "I see! Since you have a physical presence, I need the complete address (street, number, city, and state) and business hours. This is important for your assistant to inform customers. (e.g., 'José Silva Street, 123, São Paulo - SP - Mon to Fri: 9am to 6pm')",
+  const askPhysicalLocation = askLocation.nextStep({
+    instructions:
+      "I see! Since you have a physical presence, I need the complete address (street, number, city, and step) and business hours. This is important for your assistant to inform customers. (e.g., 'José Silva Street, 123, São Paulo - SP - Mon to Fri: 9am to 6pm')",
     condition: "User has a physical store",
   });
 
-  const savePhysicalLocation = askPhysicalLocation.transitionTo({
-    toolState: saveLocationInfo,
+  const savePhysicalLocation = askPhysicalLocation.nextStep({
+    tool: saveLocationInfo,
     condition: "User provided physical address",
   });
 
   // Step 3b: Online-only path
-  const askOnlineLocation = askLocation.transitionTo({
-    chatState:
+  const askOnlineLocation = askLocation.nextStep({
+    instructions:
       "Perfect! Since it's online only, please share your main website or social media where customers can find you? And what are your support hours? (e.g., 'www.example.com - 24/7 support' or 'Instagram @mycompany - Mon to Fri: 9am-6pm')",
     condition: "User does not have a physical store",
   });
 
-  const saveOnlineLocation = askOnlineLocation.transitionTo({
-    toolState: saveContactInfo,
+  const saveOnlineLocation = askOnlineLocation.nextStep({
+    tool: saveContactInfo,
     condition: "User provided website/social media and support hours",
   });
 
   // Step 4: Contact info (convergence point for physical stores)
-  const askContact = savePhysicalLocation.transitionTo({
-    chatState:
+  const askContact = savePhysicalLocation.nextStep({
+    instructions:
       "Do you also have a website or social media? If yes, which one? (if not, you can skip by saying 'I don't have one')",
   });
 
-  const saveContact = askContact.transitionTo({
-    toolState: saveContactInfo,
+  const saveContact = askContact.nextStep({
+    tool: saveContactInfo,
     condition: "User provided website/social media",
   });
 
   // Step 5: Payment info (convergence point from both paths)
-  const askPayment = saveContact.transitionTo({
-    chatState:
+  const askPayment = saveContact.nextStep({
+    instructions:
       "Now about payment: do you sell products/services that customers pay for? If yes, what payment methods do you accept? If you accept Pix, provide the key and type (CPF, CNPJ, email, phone). Do you offer installments? (e.g., 'Pix CPF: 12345678900, Credit card up to 12x, Bank slip' - or say 'not applicable' if you don't sell)",
   });
 
   // Also connect online path to payment
-  saveOnlineLocation.transitionTo({ state: askPayment });
+  saveOnlineLocation.nextStep({ step: askPayment });
 
-  const savePayment = askPayment.transitionTo({
-    toolState: savePaymentInfo,
+  const savePayment = askPayment.nextStep({
+    tool: savePaymentInfo,
     condition: "User provided payment methods or said not applicable",
   });
 
   // Step 6: Suggest automatic routes
-  const suggestRoutes = savePayment.transitionTo({
-    chatState:
+  const suggestRoutes = savePayment.nextStep({
+    instructions:
       "Perfect! Now I'll create the essential routes. Based on what you told me, I'll automatically create:\n\n1. **Products and Services** - for when they ask what you offer\n2. **Pricing and Quotes** - for questions about prices\n3. **Payment Information** - payment methods and installments\n4. **Location and Contact** - address, website, and hours\n\nThese are the most important routes for any business. I'll create them automatically with the information you provided. Sound good?",
   });
 
-  const createRoutes = suggestRoutes.transitionTo({
-    toolState: addConversationRoute,
+  const createRoutes = suggestRoutes.nextStep({
+    tool: addConversationRoute,
     condition: "User approved automatic route creation",
   });
 
   // Step 7: Review collected data
-  const reviewData = createRoutes.transitionTo({
-    toolState: getCollectedData,
+  const reviewData = createRoutes.nextStep({
+    tool: getData,
     condition: "Routes created successfully",
   });
 
   // Step 8: Summary and options
-  const summary = reviewData.transitionTo({
-    chatState:
+  const summary = reviewData.nextStep({
+    instructions:
       "Done! ✅ I've configured everything:\n\n✓ Business information\n✓ Products/services and target audience\n✓ Location and contact\n✓ Payment methods\n✓ Essential conversation routes\n\nYour assistant is ready! It will use this information to automatically respond when customers ask. Do you want to add any custom routes or is everything good?",
   });
 
   // Step 9a: Add more routes
-  const askCustomRoute = summary.transitionTo({
-    chatState:
+  const askCustomRoute = summary.nextStep({
+    instructions:
       "Got it! Tell me about this additional route: what's the title, what kind of questions should it answer, and what keywords do customers use? (e.g., 'Warranty and Exchange - answers about warranty, exchange, and returns - keywords: warranty, exchange, return')",
     condition: "User wants to add more routes",
   });
 
-  const saveCustomRoute = askCustomRoute.transitionTo({
-    toolState: addConversationRoute,
+  const saveCustomRoute = askCustomRoute.nextStep({
+    tool: addConversationRoute,
     condition: "User provided custom route information",
   });
 
   // Loop back to summary after adding custom route
-  saveCustomRoute.transitionTo({ state: summary });
+  saveCustomRoute.nextStep({ step: summary });
 
-  // Step 9b: Final confirmation - transition to END_STATE (uses route-level endState)
-  summary.transitionTo({
-    state: END_STATE,
+  // Step 9b: Final confirmation - transition to END_ROUTE (uses route-level endStep)
+  summary.nextStep({
+    step: END_ROUTE,
     condition: "User confirmed everything is okay",
   });
 
@@ -576,19 +577,20 @@ async function createBusinessOnboardingAgent(
     steps: [
       {
         id: "ask_rating",
-        chatState: "How would you rate your onboarding experience? (1-5 stars)",
+        instructions:
+          "How would you rate your onboarding experience? (1-5 stars)",
       },
       {
         id: "ask_liked_most",
-        chatState: "What did you like most about the process?",
+        instructions: "What did you like most about the process?",
       },
       {
         id: "ask_improve",
-        chatState: "Is there anything we could improve?",
+        instructions: "Is there anything we could improve?",
       },
       {
         id: "thank_you",
-        chatState: "Thank you for your feedback! It helps us improve. 🙏",
+        instructions: "Thank you for your feedback! It helps us improve. 🙏",
       },
     ],
   });
@@ -598,26 +600,27 @@ async function createBusinessOnboardingAgent(
     title: "Manual Feedback Route",
     description: "Same flow using traditional chaining",
     conditions: ["User wants manual feedback flow"],
-    endState: {
-      chatState: "Thank you for your feedback! It helps us improve. 🙏",
+    endStep: {
+      instructions: "Thank you for your feedback! It helps us improve. 🙏",
     },
   });
 
-  manualFeedbackRoute.initialState
-    .transitionTo({
+  manualFeedbackRoute.initialStep
+    .nextStep({
       id: "ask_rating",
-      chatState: "How would you rate your onboarding experience? (1-5 stars)",
+      instructions:
+        "How would you rate your onboarding experience? (1-5 stars)",
     })
-    .transitionTo({
+    .nextStep({
       id: "ask_liked_most",
-      chatState: "What did you like most about the process?",
+      instructions: "What did you like most about the process?",
     })
-    .transitionTo({
+    .nextStep({
       id: "ask_improve",
-      chatState: "Is there anything we could improve?",
+      instructions: "Is there anything we could improve?",
       condition: "User wants to provide feedback",
     })
-    .transitionTo({ state: END_STATE }); // Uses route-level endState
+    .nextStep({ step: END_ROUTE }); // Uses route-level endStep
 
   // ==================== Global Guidelines ====================
 
@@ -632,7 +635,7 @@ async function createBusinessOnboardingAgent(
       id: "guideline_incomplete",
       condition: "User provides incomplete or very vague information",
       action:
-        "Politely ask for the missing specific details. E.g., 'You mentioned the address, but what's the city and state?'",
+        "Politely ask for the missing specific details. E.g., 'You mentioned the address, but what's the city and step?'",
     })
     .createGuideline({
       id: "guideline_skip",
@@ -718,7 +721,7 @@ async function main() {
 
   // Generate response (requires valid API key)
   try {
-    // Initialize session state for multi-turn conversation
+    // Initialize session step for multi-turn conversation
     let session = createSession<OnboardingData>();
     agent.setCurrentSession(session);
 
@@ -726,9 +729,9 @@ async function main() {
     console.log("Agent:", response.message);
     console.log("\nRoute:", response.session?.currentRoute?.title);
 
-    // After the conversation, you can get the extracted data
-    const extractedData = agent.getExtractedData<OnboardingData>();
-    console.log("Extracted:", extractedData);
+    // After the conversation, you can get the collected data
+    const dataData = agent.getData<OnboardingData>();
+    console.log("Data:", dataData);
 
     // Update session with progress
     session = response.session!;
@@ -740,14 +743,14 @@ async function main() {
     if (response.isRouteComplete) {
       console.log("\n✅ Onboarding route complete!");
       // Here you would typically save the complete data to your database
-      await processOnboardingData(agent.getExtractedData());
+      await processOnboardingData(agent.getData());
     } else {
       console.log("\n⏳ Onboarding route in progress...");
     }
 
-    console.log("\n✅ Session state benefits:");
+    console.log("\n✅ Session step benefits:");
     console.log("   - Data extraction tracked across turns");
-    console.log("   - State progression managed automatically");
+    console.log("   - Step progression managed automatically");
     console.log("   - Always-on routing respects intent changes");
   } catch (error: any) {
     console.log("\n(Skipping AI response - requires valid API key)");

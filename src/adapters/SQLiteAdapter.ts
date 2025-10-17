@@ -16,15 +16,15 @@ import type {
  * SQLite database interface - matches better-sqlite3
  */
 export interface SqliteDatabase {
-  prepare(sql: string): SqliteStatement;
+  prepare(sql: string): SqliteStepment;
   exec(sql: string): void;
   close(): void;
 }
 
 /**
- * SQLite statement interface
+ * SQLite stepment interface
  */
-export interface SqliteStatement {
+export interface SqliteStepment {
   run(...params: unknown[]): { changes: number; lastInsertRowid: number };
   get(...params: unknown[]): Record<string, unknown> | undefined;
   all(...params: unknown[]): Array<Record<string, unknown>>;
@@ -95,7 +95,7 @@ export class SQLiteAdapter implements PersistenceAdapter {
         agent_name TEXT,
         status TEXT DEFAULT 'active',
         current_route TEXT,
-        current_state TEXT,
+        current_step TEXT,
         collected_data TEXT,
         message_count INTEGER DEFAULT 0,
         last_message_at TEXT,
@@ -120,7 +120,7 @@ export class SQLiteAdapter implements PersistenceAdapter {
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         route TEXT,
-        state TEXT,
+        step TEXT,
         tool_calls TEXT,
         event TEXT,
         created_at TEXT NOT NULL,
@@ -232,9 +232,9 @@ class SQLiteSessionRepository implements SessionRepository {
       fields.push("current_route = ?");
       values.push(data.currentRoute);
     }
-    if (data.currentState !== undefined) {
-      fields.push("current_state = ?");
-      values.push(data.currentState);
+    if (data.currentStep !== undefined) {
+      fields.push("current_step = ?");
+      values.push(data.currentStep);
     }
     if (data.messageCount !== undefined) {
       fields.push("message_count = ?");
@@ -281,14 +281,14 @@ class SQLiteSessionRepository implements SessionRepository {
     return await this.update(id, { collectedData });
   }
 
-  async updateRouteState(
+  async updateRouteStep(
     id: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null> {
     return await this.update(id, {
       currentRoute: route,
-      currentState: state,
+      currentStep: step,
     });
   }
 
@@ -321,7 +321,7 @@ class SQLiteSessionRepository implements SessionRepository {
       agentName: (row.agent_name as string) || undefined,
       status: row.status as SessionStatus,
       currentRoute: (row.current_route as string) || undefined,
-      currentState: (row.current_state as string) || undefined,
+      currentStep: (row.current_step as string) || undefined,
       collectedData: row.collected_data
         ? (JSON.parse(row.collected_data as string) as Record<string, unknown>)
         : undefined,
@@ -356,7 +356,7 @@ class SQLiteMessageRepository implements MessageRepository {
 
     const stmt = this.db.prepare(`
       INSERT INTO ${this.tableName}
-      (id, session_id, user_id, role, content, route, state, tool_calls, event, created_at)
+      (id, session_id, user_id, role, content, route, step, tool_calls, event, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
@@ -367,7 +367,7 @@ class SQLiteMessageRepository implements MessageRepository {
       data.role,
       data.content,
       data.route || null,
-      data.state || null,
+      data.step || null,
       JSON.stringify(data.toolCalls || null),
       JSON.stringify(data.event || null),
       now.toISOString()
@@ -436,7 +436,7 @@ class SQLiteMessageRepository implements MessageRepository {
       role: row.role as MessageData["role"],
       content: row.content as string,
       route: (row.route as string) || undefined,
-      state: (row.state as string) || undefined,
+      step: (row.step as string) || undefined,
       toolCalls: row.tool_calls
         ? (JSON.parse(row.tool_calls as string) as MessageData["toolCalls"])
         : undefined,

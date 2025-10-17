@@ -1,11 +1,11 @@
 /**
- * Example: Modifying Extracted Data with Tools and Hooks
+ * Example: Modifying Collected data with Tools and Hooks
  *
  * This demonstrates:
  * 1. Schema-first data extraction with JSON Schema
- * 2. Tools that modify extracted data (validation, enrichment)
+ * 2. Tools that modify collected data (validation, enrichment)
  * 3. Lifecycle hooks for data validation and business logic
- * 4. Data-driven state flows with code-based logic (skipIf, requiredData)
+ * 4. Data-driven step flows with code-based logic (skipIf, requires)
  * 5. Three-phase pipeline: PREPARATION → ROUTING → RESPONSE
  */
 
@@ -14,14 +14,14 @@ import {
   createSession,
   EventSource,
   createMessageEvent,
-  END_STATE,
+  END_ROUTE,
   OpenAIProvider,
 } from "../src";
 import type { Event } from "../src/types";
 import type { ToolRef } from "../src/types/tool";
 
 // ==============================================================================
-// CONTEXT & EXTRACTED DATA TYPES
+// CONTEXT & COLLECTED DATA TYPES
 // ==============================================================================
 
 interface FlightBookingContext {
@@ -59,8 +59,8 @@ const enrichDestinationTool: ToolRef<
   name: "Enrich Destination",
   description: "Convert city names to IATA airport codes",
   handler: async (context) => {
-    const { extracted } = context;
-    const destination = (extracted as Partial<FlightData>)?.destination;
+    const { data } = context;
+    const destination = (data as Partial<FlightData>)?.destination;
 
     if (!destination) {
       return { data: undefined };
@@ -81,7 +81,7 @@ const enrichDestinationTool: ToolRef<
 
     return {
       data: undefined,
-      extractedUpdate: {
+      dataUpdate: {
         destinationCode,
       } as Partial<FlightData>,
     };
@@ -95,8 +95,8 @@ const validateDateTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
   description:
     "Parse relative dates (today, tomorrow) to ISO format and validate",
   handler: async (context) => {
-    const { extracted } = context;
-    const departureDate = (extracted as Partial<FlightData>)?.departureDate;
+    const { data } = context;
+    const departureDate = (data as Partial<FlightData>)?.departureDate;
 
     if (!departureDate) {
       return { data: undefined };
@@ -133,7 +133,7 @@ const validateDateTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
 
     return {
       data: undefined,
-      extractedUpdate: {
+      dataUpdate: {
         departureDateParsed: parsedDate,
       } as Partial<FlightData>,
     };
@@ -144,10 +144,10 @@ const validateDateTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
 const searchFlightsTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
   id: "search_flights",
   name: "Search Flights",
-  description: "Search for available flights based on gathered data",
+  description: "Search for available flights based on collected data",
   handler: async (context) => {
-    const { extracted } = context;
-    const flightData = extracted as Partial<FlightData>;
+    const { data } = context;
+    const flightData = data as Partial<FlightData>;
 
     if (!flightData?.destinationCode || !flightData?.departureDateParsed) {
       console.log("[Tool] Cannot search flights: missing required data");
@@ -179,7 +179,7 @@ const searchFlightsTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
       contextUpdate: {
         availableFlights: flights,
       },
-      extractedUpdate: {
+      dataUpdate: {
         shouldSearchFlights: false, // Clear the flag to prevent re-execution
       } as Partial<FlightData>,
     };
@@ -192,8 +192,8 @@ const bookFlightTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
   name: "Book Flight",
   description: "Finalize the flight booking",
   handler: async (context) => {
-    const { extracted } = context;
-    const flightData = extracted as Partial<FlightData>;
+    const { data } = context;
+    const flightData = data as Partial<FlightData>;
     console.log("[Tool] Booking flight with data:", flightData);
     // Simulate booking API call
     return { data: undefined };
@@ -204,49 +204,44 @@ const bookFlightTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
 // LIFECYCLE HOOKS: Data Validation & Business Logic (RESPONSE Phase)
 // ==============================================================================
 
-async function onExtractedUpdate(
-  extracted: Record<string, unknown>,
-  previousExtracted: Record<string, unknown>
+async function onDataUpdate(
+  data: Record<string, unknown>,
+  previousData: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
-  console.log("[Hook] onExtractedUpdate called");
-  console.log("  Previous:", previousExtracted);
-  console.log("  New:", extracted);
+  console.log("[Hook] onDataUpdate called");
+  console.log("  Previous:", previousData);
+  console.log("  New:", data);
 
   // Example: Validate passenger count
-  const passengers = extracted.passengers as number | undefined;
+  const passengers = data.passengers as number | undefined;
   if (typeof passengers === "number") {
     if (passengers < 1) {
       console.warn("[Hook] Invalid passengers count, setting to 1");
-      extracted.passengers = 1;
+      data.passengers = 1;
     }
     if (passengers > 9) {
       console.warn("[Hook] Too many passengers, capping at 9");
-      extracted.passengers = 9;
+      data.passengers = 9;
     }
   }
 
   // Example: Normalize cabin class
-  const cabinClass = extracted.cabinClass as string | undefined;
+  const cabinClass = data.cabinClass as string | undefined;
   if (typeof cabinClass === "string") {
-    extracted.cabinClass = cabinClass.toLowerCase();
+    data.cabinClass = cabinClass.toLowerCase();
   }
 
   // Example: Auto-trigger flight search when we have enough data
-  const hasDestination = extracted.destinationCode || extracted.destination;
-  const hasDate = extracted.departureDateParsed || extracted.departureDate;
+  const hasDestination = data.destinationCode || data.destination;
+  const hasDate = data.departureDateParsed || data.departureDate;
   const hasPassengers = typeof passengers === "number";
 
-  if (
-    hasDestination &&
-    hasDate &&
-    hasPassengers &&
-    !extracted.shouldSearchFlights
-  ) {
-    console.log("[Hook] All required data gathered, triggering flight search");
-    extracted.shouldSearchFlights = true;
+  if (hasDestination && hasDate && hasPassengers && !data.shouldSearchFlights) {
+    console.log("[Hook] All required data collected, triggering flight search");
+    data.shouldSearchFlights = true;
   }
 
-  return extracted;
+  return data;
 }
 
 // ==============================================================================
@@ -263,7 +258,7 @@ const agent = new Agent<FlightBookingContext>({
   }),
   context: {},
   hooks: {
-    onExtractedUpdate, // Validation & enrichment hook
+    onDataUpdate, // Validation & enrichment hook
   },
 });
 
@@ -275,7 +270,7 @@ const bookingRoute = agent.createRoute<FlightData>({
     "User wants to book a flight",
     "User mentions flying, traveling, or booking",
   ],
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       destination: {
@@ -313,65 +308,65 @@ const bookingRoute = agent.createRoute<FlightData>({
   },
 });
 
-// State 1: Gather destination
-const gatherDestination = bookingRoute.initialState.transitionTo({
-  chatState: "Ask where they want to fly",
-  gather: ["destination"],
+// Step 1: Collect destination
+const collectDestination = bookingRoute.initialStep.nextStep({
+  instructions: "Ask where they want to fly",
+  collect: ["destination"],
   skipIf: (data) => !!data.destination,
 });
 
-// State 2: Enrich destination (tool execution)
-const enrichDestination = gatherDestination.transitionTo({
-  toolState: enrichDestinationTool,
-  requiredData: ["destination"],
+// Step 2: Enrich destination (tool execution)
+const enrichDestination = collectDestination.nextStep({
+  tool: enrichDestinationTool,
+  requires: ["destination"],
 });
 
-// State 3: Gather date
-const gatherDate = enrichDestination.transitionTo({
-  chatState: "Ask when they want to depart",
-  gather: ["departureDate"],
+// Step 3: Collect date
+const collectDate = enrichDestination.nextStep({
+  instructions: "Ask when they want to depart",
+  collect: ["departureDate"],
   skipIf: (data) => !!data.departureDate,
 });
 
-// State 4: Validate/parse date (tool execution)
-const validateDate = gatherDate.transitionTo({
-  toolState: validateDateTool,
-  requiredData: ["departureDate"],
+// Step 4: Validate/parse date (tool execution)
+const validateDate = collectDate.nextStep({
+  tool: validateDateTool,
+  requires: ["departureDate"],
 });
 
-// State 5: Gather passengers
-const gatherPassengers = validateDate.transitionTo({
-  chatState: "Ask how many passengers",
-  gather: ["passengers"],
+// Step 5: Collect passengers
+const collectPassengers = validateDate.nextStep({
+  instructions: "Ask how many passengers",
+  collect: ["passengers"],
   skipIf: (data) => !!data.passengers,
 });
 
-// State 6: Search flights (triggered by hook setting shouldSearchFlights)
-const searchFlights = gatherPassengers.transitionTo({
-  toolState: searchFlightsTool,
-  // This state is entered when shouldSearchFlights is true
-  // The hook automatically sets this flag when all data is gathered
+// Step 6: Search flights (triggered by hook setting shouldSearchFlights)
+const searchFlights = collectPassengers.nextStep({
+  tool: searchFlightsTool,
+  // This step is entered when shouldSearchFlights is true
+  // The hook automatically sets this flag when all data is collected
 });
 
-// State 7: Present results
-const presentResults = searchFlights.transitionTo({
-  chatState: "Present available flights to the user",
+// Step 7: Present results
+const presentResults = searchFlights.nextStep({
+  instructions: "Present available flights to the user",
 });
 
-// State 8: Confirm booking
-const confirmBooking = presentResults.transitionTo({
-  chatState: "Ask user to confirm the booking",
-  requiredData: ["destinationCode", "departureDateParsed", "passengers"],
+// Step 8: Confirm booking
+const confirmBooking = presentResults.nextStep({
+  instructions: "Ask user to confirm the booking",
+  requires: ["destinationCode", "departureDateParsed", "passengers"],
 });
 
-// State 9: Finalize booking
-const finalizeBooking = confirmBooking.transitionTo({
-  toolState: bookFlightTool,
+// Step 9: Finalize booking
+const finalizeBooking = confirmBooking.nextStep({
+  tool: bookFlightTool,
   condition: "User confirms the booking",
 });
 
-// State 10: End of conversation
-finalizeBooking.transitionTo({ state: END_STATE });
+// Step 10: End of conversation
+finalizeBooking.nextStep({ step: END_ROUTE });
 
 // ==============================================================================
 // USAGE EXAMPLE: Three-Phase Pipeline Demonstration
@@ -393,12 +388,12 @@ async function main() {
 
   console.log("\n=== RESPONSE ===");
   console.log("Message:", response.message);
-  console.log("Extracted:", response.session?.extracted);
+  console.log("Data:", response.session?.data);
   console.log("Context:", agent["context"]);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Flight booking complete!");
-    await sendBookingConfirmation(response.session?.extracted);
+    await sendBookingConfirmation(response.session?.data);
   }
 
   /*
@@ -406,14 +401,14 @@ async function main() {
    * 1. AI extracts: { destination: "Paris", departureDate: "tomorrow", passengers: 2 }
    * 2. Hook validates passengers ✓
    * 3. Hook detects all data present, sets shouldSearchFlights: true
-   * 4. State machine:
-   *    - Skips gatherDestination (has destination)
+   * 4. Step machine:
+   *    - Skips collectDestination (has destination)
    *    - Runs enrichDestination tool → adds destinationCode: "CDG"
-   *    - Skips gatherDate (has departureDate)
+   *    - Skips collectDate (has departureDate)
    *    - Runs validateDate tool → adds departureDateParsed: "2025-10-16"
-   *    - Skips gatherPassengers (has passengers)
+   *    - Skips collectPassengers (has passengers)
    *    - Runs searchFlights tool → updates context with flights, clears flag
-   *    - Enters presentResults state
+   *    - Enters presentResults step
    * 5. AI generates response with flight options
    */
 }
@@ -446,30 +441,30 @@ async function sendBookingConfirmation(data: Partial<FlightData> | undefined) {
  *    - Type-safe extraction throughout the conversation
  *    - Predictable data structure every time
  *
- * 2. CODE-BASED STATE LOGIC
- *    - Use TypeScript functions (skipIf, requiredData) instead of LLM conditions
- *    - Deterministic flow based on extracted data
- *    - No fuzzy LLM interpretation of state logic
+ * 2. CODE-BASED STEP LOGIC
+ *    - Use TypeScript functions (skipIf, requires) instead of LLM conditions
+ *    - Deterministic flow based on collected data
+ *    - No fuzzy LLM interpretation of step logic
  *
- * 3. TOOLS ENRICH EXTRACTED DATA (PREPARATION Phase)
- *    - Tools modify extracted data via `extractedUpdate`
+ * 3. TOOLS ENRICH COLLECTED DATA (PREPARATION Phase)
+ *    - Tools modify collected data via `dataUpdate`
  *    - Great for: validation, enrichment, normalization, computed fields
  *    - Execute before AI sees the conversation
  *
  * 4. LIFECYCLE HOOKS (RESPONSE Phase)
- *    - onExtractedUpdate runs after each data extraction
+ *    - onDataUpdate runs after each data extraction
  *    - Cross-cutting logic: validation, business rules, auto-triggering
- *    - Return modified extracted data
+ *    - Return modified collected data
  *
  * 5. THREE-PHASE PIPELINE
  *    - PREPARATION: Tools execute and enrich context/data
- *    - ROUTING: AI scores routes based on current state
+ *    - ROUTING: AI scores routes based on current step
  *    - RESPONSE: AI generates message with schema-enforced extraction
  *
- * 6. SESSION STATE MANAGEMENT
- *    - Extracted data persists across conversation turns
+ * 6. SESSION STEP MANAGEMENT
+ *    - Collected data persists across conversation turns
  *    - Always-on routing respects user intent changes
- *    - State recovery enables conversation resumption
+ *    - Step recovery enables conversation resumption
  */
 
 if (require.main === module) {

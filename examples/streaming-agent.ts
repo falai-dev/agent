@@ -1,6 +1,6 @@
 /**
  * Example: Streaming Responses
- * Updated for v2 architecture with session state management
+ * Updated for v2 architecture with session step management
  *
  * This example demonstrates how to use the respondStream method
  * to stream AI responses in real-time for better user experience
@@ -14,7 +14,7 @@ import {
   OpenAIProvider,
   GeminiProvider,
   createSession,
-  END_STATE,
+  END_ROUTE,
 } from "../src/index";
 
 // Custom context type
@@ -73,10 +73,10 @@ async function streamingWithAnthropic() {
     console.log("📤 Streaming response from Claude...\n");
     console.log("Response: ");
 
-    // Initialize session state for streaming conversation
+    // Initialize session step for streaming conversation
     let session = createSession();
 
-    // Use respondStream for real-time streaming with session state
+    // Use respondStream for real-time streaming with session step
     let fullMessage = "";
     for await (const chunk of agent.respondStream({ history, session })) {
       // chunk.delta contains the new text
@@ -94,7 +94,7 @@ async function streamingWithAnthropic() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Extracted:`, chunk.session?.extracted || "None");
+        console.log(`   - Data:`, chunk.session?.data || "None");
         console.log(`   - Tool Calls: ${chunk.toolCalls?.length || 0}`);
 
         // Update session with progress
@@ -142,7 +142,7 @@ async function streamingWithOpenAI() {
     console.log("📤 Streaming response from OpenAI...\n");
     console.log("Response: ");
 
-    // Initialize session state for streaming conversation
+    // Initialize session step for streaming conversation
     let session = createSession();
 
     for await (const chunk of agent.respondStream({ history, session })) {
@@ -155,7 +155,7 @@ async function streamingWithOpenAI() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Extracted:`, chunk.session?.extracted || "None");
+        console.log(`   - Data:`, chunk.session?.data || "None");
 
         // Update session with progress
         session = chunk.session!;
@@ -202,7 +202,7 @@ async function streamingWithGemini() {
     console.log("📤 Streaming response from Gemini...\n");
     console.log("Response: ");
 
-    // Initialize session state for streaming conversation
+    // Initialize session step for streaming conversation
     let session = createSession();
 
     for await (const chunk of agent.respondStream({ history, session })) {
@@ -215,7 +215,7 @@ async function streamingWithGemini() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Extracted:`, chunk.session?.extracted || "None");
+        console.log(`   - Data:`, chunk.session?.data || "None");
 
         // Update session with progress
         session = chunk.session!;
@@ -227,7 +227,7 @@ async function streamingWithGemini() {
 }
 
 async function streamingWithRoutes() {
-  console.log("\n🤖 Example 4: Streaming with Routes and States\n");
+  console.log("\n🤖 Example 4: Streaming with Routes and Steps\n");
 
   const provider = new AnthropicProvider({
     apiKey: process.env.ANTHROPIC_API_KEY || "",
@@ -254,8 +254,8 @@ async function streamingWithRoutes() {
     conditions: ["User asks about product features or issues"],
   });
 
-  supportRoute.initialState.transitionTo({
-    chatState: "Understand the user's product question",
+  supportRoute.initialStep.nextStep({
+    instructions: "Understand the user's product question",
   });
 
   // Create a feedback route
@@ -266,7 +266,7 @@ async function streamingWithRoutes() {
     title: "Collect Feedback",
     description: "Collect user feedback on their support experience",
     conditions: ["User wants to provide feedback"],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         rating: { type: "number", minimum: 1, maximum: 5 },
@@ -276,15 +276,15 @@ async function streamingWithRoutes() {
     },
     steps: [
       {
-        chatState: "How would you rate your support experience from 1 to 5?",
-        gather: ["rating"],
+        instructions: "How would you rate your support experience from 1 to 5?",
+        collect: ["rating"],
       },
       {
-        chatState: "Thanks for the rating! Any other comments?",
-        gather: ["comments"],
+        instructions: "Thanks for the rating! Any other comments?",
+        collect: ["comments"],
       },
       {
-        chatState: "We appreciate your feedback!",
+        instructions: "We appreciate your feedback!",
       },
     ],
   });
@@ -301,7 +301,7 @@ async function streamingWithRoutes() {
     console.log("📤 Streaming response with route detection...\n");
     console.log("Response: ");
 
-    // Initialize session state for streaming conversation
+    // Initialize session step for streaming conversation
     let session = createSession();
 
     for await (const chunk of agent.respondStream({ history, session })) {
@@ -315,14 +315,14 @@ async function streamingWithRoutes() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Extracted:`, chunk.session?.extracted || "None");
+        console.log(`   - Data:`, chunk.session?.data || "None");
 
         // Check for route completion
         if (chunk.isRouteComplete) {
           console.log("\n✅ Route complete!");
           if (chunk.session?.currentRoute?.title === "Collect Feedback") {
             await logFeedback(
-              agent.getExtractedData(chunk.session?.id) as {
+              agent.getData(chunk.session?.id) as {
                 rating: number;
                 comments: string;
               }
@@ -381,7 +381,7 @@ async function streamingWithAbortSignal() {
     console.log("📤 Streaming response (will abort after 3s)...\n");
     console.log("Response: ");
 
-    // Initialize session state for streaming conversation
+    // Initialize session step for streaming conversation
     let session = createSession();
 
     for await (const chunk of agent.respondStream({
@@ -399,7 +399,7 @@ async function streamingWithAbortSignal() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Extracted:`, chunk.session?.extracted || "None");
+        console.log(`   - Data:`, chunk.session?.data || "None");
 
         // Update session with progress
         session = chunk.session!;
@@ -453,7 +453,7 @@ async function main() {
   console.log("   - Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY");
   console.log("   - Streaming provides real-time responses for better UX");
   console.log("   - Use AbortSignal to cancel long-running streams");
-  console.log("   - Access chunk.route and chunk.state for flow information");
+  console.log("   - Access chunk.route and chunk.step for flow information");
 
   console.log("\n" + "=".repeat(60));
 

@@ -76,9 +76,9 @@ export function createMessageEvent(
     session?: {
       routeId?: string;
       routeTitle?: string;
-      stateId?: string;
-      stateDescription?: string;
-      extracted?: Record<string, unknown>;
+      stepId?: string;
+      stepDescription?: string;
+      data?: Record<string, unknown>;
     };
   }
 ): Event<MessageEventData>;
@@ -90,9 +90,9 @@ export function createMessageEvent(options: {
   session?: {
     routeId?: string;
     routeTitle?: string;
-    stateId?: string;
-    stateDescription?: string;
-    extracted?: Record<string, unknown>;
+    stepId?: string;
+    stepDescription?: string;
+    data?: Record<string, unknown>;
   };
 }): Event<MessageEventData>;
 export function createMessageEvent(
@@ -106,9 +106,9 @@ export function createMessageEvent(
         session?: {
           routeId?: string;
           routeTitle?: string;
-          stateId?: string;
-          stateDescription?: string;
-          extracted?: Record<string, unknown>;
+          stepId?: string;
+          stepDescription?: string;
+          data?: Record<string, unknown>;
         };
       },
   participantName?: string,
@@ -118,9 +118,9 @@ export function createMessageEvent(
     session?: {
       routeId?: string;
       routeTitle?: string;
-      stateId?: string;
-      stateDescription?: string;
-      extracted?: Record<string, unknown>;
+      stepId?: string;
+      stepDescription?: string;
+      data?: Record<string, unknown>;
     };
   }
 ): Event<MessageEventData> {

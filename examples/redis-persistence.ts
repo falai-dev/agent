@@ -1,9 +1,9 @@
 /**
- * Example: Using Redis for Persistence with Session State
+ * Example: Using Redis for Persistence with Session Step
  *
  * Fast, in-memory persistence perfect for:
  * - High-throughput applications
- * - Session caching with extracted data
+ * - Session caching with collected data
  * - Real-time chat applications
  * - Temporary conversation storage
  */
@@ -16,7 +16,7 @@ import {
   EventSource,
   MessageEventData,
   Event,
-  END_STATE,
+  END_ROUTE,
 } from "../src/index";
 // @ts-ignore
 import Redis from "ioredis";
@@ -86,12 +86,12 @@ async function example() {
         sessionTTL: 24 * 60 * 60, // 24 hours
         messageTTL: 7 * 24 * 60 * 60, // 7 days
       }),
-      autoSave: true, // Auto-save session state
+      autoSave: true, // Auto-save session step
       userId,
     },
   });
 
-  // Create support ticket route with data gathering
+  // Create support ticket route with data collecting
   const ticketRoute = agent.createRoute<SupportTicketData>({
     title: "Create Support Ticket",
     description: "Help user create and track support tickets",
@@ -100,7 +100,7 @@ async function example() {
       "User wants to report a problem",
       "User mentions support, help, or issue",
     ],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         issue: {
@@ -127,37 +127,37 @@ async function example() {
     },
   });
 
-  // State flow
-  ticketRoute.initialState
-    .transitionTo({
-      chatState: "Ask what the issue is",
-      gather: ["issue", "category"],
+  // Step flow
+  ticketRoute.initialStep
+    .nextStep({
+      instructions: "Ask what the issue is",
+      collect: ["issue", "category"],
       skipIf: (data) => !!data.issue && !!data.category,
     })
-    .transitionTo({
-      chatState: "Ask for priority",
-      gather: ["priority"],
+    .nextStep({
+      instructions: "Ask for priority",
+      collect: ["priority"],
       skipIf: (data) => !!data.priority,
-      requiredData: ["issue", "category"],
+      requires: ["issue", "category"],
     })
-    .transitionTo({
-      chatState: "Ask for detailed description",
-      gather: ["description"],
+    .nextStep({
+      instructions: "Ask for detailed description",
+      collect: ["description"],
       skipIf: (data) => !!data.description,
-      requiredData: ["issue", "category"],
+      requires: ["issue", "category"],
     })
-    .transitionTo({
-      chatState: "Confirm and create ticket",
-      requiredData: ["issue", "category", "description"],
+    .nextStep({
+      instructions: "Confirm and create ticket",
+      requires: ["issue", "category", "description"],
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   const persistence = agent.getPersistenceManager();
   if (!persistence) return;
 
-  // Create session with state support
-  const { sessionData, sessionState } =
-    await persistence.createSessionWithState<SupportTicketData>({
+  // Create session with step support
+  const { sessionData, sessionStep } =
+    await persistence.createSessionWithStep<SupportTicketData>({
       userId,
       agentName: "Support Assistant",
       initialData: {
@@ -166,13 +166,13 @@ async function example() {
     });
 
   console.log("✨ Session created in Redis:", sessionData.id);
-  console.log("📊 Initial state:", {
-    extracted: sessionState.extracted,
+  console.log("📊 Initial step:", {
+    data: sessionStep.data,
   });
 
   // Turn 1: User provides issue
   const history: Event<MessageEventData>[] = [];
-  let session = sessionState;
+  let session = sessionStep;
 
   const message1 = createMessageEvent(
     EventSource.CUSTOMER,
@@ -188,7 +188,7 @@ async function example() {
 
   console.log("\n--- Turn 1 ---");
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Extracted data:", response1.session?.extracted);
+  console.log("📊 Collected data:", response1.session?.data);
 
   // Save messages
   await persistence.saveMessage({
@@ -202,7 +202,7 @@ async function example() {
     role: "agent",
     content: response1.message,
     route: response1.session?.currentRoute?.id,
-    state: response1.session?.currentState?.id,
+    step: response1.session?.currentStep?.id,
   });
 
   session = response1.session!;
@@ -230,7 +230,7 @@ async function example() {
 
   console.log("\n--- Turn 2 ---");
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Extracted data:", response2.session?.extracted);
+  console.log("📊 Collected data:", response2.session?.data);
 
   await persistence.saveMessage({
     sessionId: sessionData.id,
@@ -246,20 +246,18 @@ async function example() {
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Support ticket route complete!");
-    await fileSupportTicket(
-      agent.getExtractedData(session.id) as SupportTicketData
-    );
+    await fileSupportTicket(agent.getData(session.id) as SupportTicketData);
   }
 
-  // Load session state from Redis (demonstrates persistence)
+  // Load session step from Redis (demonstrates persistence)
   console.log("\n--- Loading Session from Redis ---");
-  const loadedSession = await persistence.loadSessionState<SupportTicketData>(
+  const loadedSession = await persistence.loadSessionStep<SupportTicketData>(
     sessionData.id
   );
 
   console.log("📥 Loaded session:", {
     currentRoute: loadedSession?.currentRoute?.title,
-    extracted: loadedSession?.extracted,
+    data: loadedSession?.data,
   });
 
   // Get messages
@@ -275,7 +273,7 @@ async function example() {
 }
 
 /**
- * Advanced Example: High-Throughput Chat with Session State
+ * Advanced Example: High-Throughput Chat with Session Step
  */
 async function highThroughputExample() {
   const redis = new Redis();
@@ -301,7 +299,7 @@ async function highThroughputExample() {
   // Simple chat route that extracts topic and sentiment
   const chatRoute = agent.createRoute<QuickChatData>({
     title: "General Chat",
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         topic: {
@@ -318,18 +316,18 @@ async function highThroughputExample() {
     },
   });
 
-  chatRoute.initialState
-    .transitionTo({
-      chatState: "Chat and extract topic/sentiment",
-      gather: ["topic", "sentiment"],
+  chatRoute.initialStep
+    .nextStep({
+      instructions: "Chat and extract topic/sentiment",
+      collect: ["topic", "sentiment"],
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   const persistence = agent.getPersistenceManager()!;
 
   // Create session
-  const { sessionData, sessionState } =
-    await persistence.createSessionWithState<QuickChatData>({
+  const { sessionData, sessionStep } =
+    await persistence.createSessionWithStep<QuickChatData>({
       userId: "user_456",
       agentName: "Chat Bot",
     });
@@ -343,20 +341,18 @@ async function highThroughputExample() {
         "I'm loving the new features you added!"
       ),
     ],
-    session: sessionState,
+    session: sessionStep,
   });
 
   console.log("🤖 Response:", response.message);
-  console.log("📊 Extracted:", response.session?.extracted);
+  console.log("📊 Data:", response.session?.data);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Chat analytics route complete!");
-    await logChatAnalytics(
-      agent.getExtractedData(sessionData.id) as QuickChatData
-    );
+    await logChatAnalytics(agent.getData(sessionData.id) as QuickChatData);
   }
 
-  console.log("💾 Session state cached in Redis!");
+  console.log("💾 Session step cached in Redis!");
 
   await redis.quit();
 }
@@ -383,7 +379,7 @@ async function sessionRecoveryExample() {
 
   const orderRoute = agent.createRoute<OrderData>({
     title: "Place Order",
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         productId: { type: "string" },
@@ -394,22 +390,22 @@ async function sessionRecoveryExample() {
     },
   });
 
-  orderRoute.initialState
-    .transitionTo({
-      chatState: "Ask what to order",
-      gather: ["productId", "quantity"],
+  orderRoute.initialStep
+    .nextStep({
+      instructions: "Ask what to order",
+      collect: ["productId", "quantity"],
     })
-    .transitionTo({
-      chatState: "Ask for shipping address",
-      gather: ["shippingAddress"],
+    .nextStep({
+      instructions: "Ask for shipping address",
+      collect: ["shippingAddress"],
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   const persistence = agent.getPersistenceManager()!;
 
   // Start a new session
-  const { sessionData, sessionState } =
-    await persistence.createSessionWithState<OrderData>({
+  const { sessionData, sessionStep } =
+    await persistence.createSessionWithStep<OrderData>({
       userId: "user_789",
       agentName: "Order Assistant",
     });
@@ -427,23 +423,23 @@ async function sessionRecoveryExample() {
         "I want to order product ABC123, 2 units"
       ),
     ],
-    session: sessionState,
+    session: sessionStep,
   });
 
   console.log("🤖 Response:", response1.message);
-  console.log("📊 Extracted so far:", response1.session?.extracted);
+  console.log("📊 Data so far:", response1.session?.data);
 
   // --- Simulate user disconnecting and reconnecting ---
   console.log("\n--- User Reconnects ---");
 
   // Load session from Redis
-  const recoveredSession = await persistence.loadSessionState<OrderData>(
+  const recoveredSession = await persistence.loadSessionStep<OrderData>(
     sessionId
   );
 
-  console.log("📥 Recovered session state:", {
+  console.log("📥 Recovered session step:", {
     currentRoute: recoveredSession?.currentRoute?.title,
-    extracted: recoveredSession?.extracted,
+    data: recoveredSession?.data,
   });
 
   // Load message history
@@ -465,13 +461,11 @@ async function sessionRecoveryExample() {
   });
 
   console.log("🤖 Response:", response2.message);
-  console.log("📊 Final extracted data:", response2.session?.extracted);
+  console.log("📊 Final collected data:", response2.session?.data);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Order placement complete!");
-    await processOrder(
-      agent.getExtractedData(sessionId) as unknown as OrderData
-    );
+    await processOrder(agent.getData(sessionId) as unknown as OrderData);
   }
 
   console.log("✅ Order complete with recovered session!");

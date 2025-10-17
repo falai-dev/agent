@@ -1,5 +1,5 @@
 /**
- * Session state types for tracking conversation progress
+ * Session step types for tracking conversation progress
  */
 
 /**
@@ -15,10 +15,10 @@ export interface PendingTransition {
 }
 
 /**
- * Session state tracks the current position in the conversation flow
- * and data extracted during the route progression
+ * Session step tracks the current position in the conversation flow
+ * and data collected during the route progression
  */
-export interface SessionState<TExtracted = Record<string, unknown>> {
+export interface SessionStep<TData = Record<string, unknown>> {
   /** Unique session identifier (useful for persistence) */
   id?: string;
 
@@ -29,25 +29,25 @@ export interface SessionState<TExtracted = Record<string, unknown>> {
     enteredAt: Date;
   };
 
-  /** Current state within the route */
-  currentState?: {
+  /** Current step within the route */
+  currentStep?: {
     id: string;
     description?: string;
     enteredAt: Date;
   };
 
   /**
-   * Data extracted during the current route
-   * This is a convenience reference to extractedByRoute[currentRoute.id]
+   * Data collected during the current route
+   * This is a convenience reference to dataByRoute[currentRoute.id]
    */
-  extracted?: Partial<TExtracted>;
+  data?: Partial<TData>;
 
   /**
-   * Extracted data organized by route ID
+   * Collected data organized by route ID
    * Preserves data when switching between routes
-   * Format: { "routeId": { ...extractedData } }
+   * Format: { "routeId": { ...dataData } }
    */
-  extractedByRoute?: Record<string, Partial<unknown>>;
+  dataByRoute?: Record<string, Partial<unknown>>;
 
   /** History of routes visited in this session */
   routeHistory: Array<{
@@ -76,14 +76,14 @@ export interface SessionState<TExtracted = Record<string, unknown>> {
  * @param sessionId - Optional session ID (e.g., from database)
  * @param metadata - Optional metadata to attach
  */
-export function createSession<TExtracted = Record<string, unknown>>(
+export function createSession<TData = Record<string, unknown>>(
   sessionId?: string,
-  metadata?: SessionState<TExtracted>["metadata"]
-): SessionState<TExtracted> {
+  metadata?: SessionStep<TData>["metadata"]
+): SessionStep<TData> {
   return {
     id: sessionId,
-    extracted: {},
-    extractedByRoute: {},
+    data: {},
+    dataByRoute: {},
     routeHistory: [],
     metadata: {
       ...metadata,
@@ -95,21 +95,21 @@ export function createSession<TExtracted = Record<string, unknown>>(
 
 /**
  * Helper to update session with new route
- * Preserves extracted data per route in extractedByRoute map
+ * Preserves collected data per route in dataByRoute map
  */
-export function enterRoute<TExtracted = Record<string, unknown>>(
-  session: SessionState<TExtracted>,
+export function enterRoute<TData = Record<string, unknown>>(
+  session: SessionStep<TData>,
   routeId: string,
   routeTitle: string
-): SessionState<TExtracted> {
-  // Save current route's extracted data before switching
-  const extractedByRoute = { ...session.extractedByRoute };
+): SessionStep<TData> {
+  // Save current route's collected data before switching
+  const dataByRoute = { ...session.dataByRoute };
   if (
     session.currentRoute &&
-    session.extracted &&
-    Object.keys(session.extracted).length > 0
+    session.data &&
+    Object.keys(session.data).length > 0
   ) {
-    extractedByRoute[session.currentRoute.id] = session.extracted;
+    dataByRoute[session.currentRoute.id] = session.data;
   }
 
   // Exit current route if exists
@@ -123,8 +123,8 @@ export function enterRoute<TExtracted = Record<string, unknown>>(
     }
   }
 
-  // Load extracted data for new route (if resuming) or start fresh
-  const newExtracted = (extractedByRoute[routeId] as Partial<TExtracted>) || {};
+  // Load collected data for new route (if resuming) or start fresh
+  const newCollected = (dataByRoute[routeId] as Partial<TData>) || {};
 
   // Enter new route
   const now = new Date();
@@ -135,9 +135,9 @@ export function enterRoute<TExtracted = Record<string, unknown>>(
       title: routeTitle,
       enteredAt: now,
     },
-    currentState: undefined,
-    extracted: newExtracted, // Load route's data or start fresh
-    extractedByRoute,
+    currentStep: undefined,
+    data: newCollected, // Load route's data or start fresh
+    dataByRoute,
     routeHistory: [
       ...routeHistory,
       {
@@ -154,18 +154,18 @@ export function enterRoute<TExtracted = Record<string, unknown>>(
 }
 
 /**
- * Helper to update session with new state
+ * Helper to update session with new step
  */
-export function enterState<TExtracted = Record<string, unknown>>(
-  session: SessionState<TExtracted>,
-  stateId: string,
-  stateDescription?: string
-): SessionState<TExtracted> {
+export function enterStep<TData = Record<string, unknown>>(
+  session: SessionStep<TData>,
+  stepId: string,
+  stepDescription?: string
+): SessionStep<TData> {
   return {
     ...session,
-    currentState: {
-      id: stateId,
-      description: stateDescription,
+    currentStep: {
+      id: stepId,
+      description: stepDescription,
       enteredAt: new Date(),
     },
     metadata: {
@@ -176,28 +176,28 @@ export function enterState<TExtracted = Record<string, unknown>>(
 }
 
 /**
- * Helper to merge extracted data into session
- * Updates both the extracted field and the extractedByRoute map
+ * Helper to merge collected data into session
+ * Updates both the data field and the dataByRoute map
  */
-export function mergeExtracted<TExtracted = Record<string, unknown>>(
-  session: SessionState<TExtracted>,
-  extracted: Partial<unknown>
-): SessionState<TExtracted> {
-  const newExtracted = {
-    ...session.extracted,
-    ...extracted,
-  } as Partial<TExtracted>;
+export function mergeCollected<TData = Record<string, unknown>>(
+  session: SessionStep<TData>,
+  data: Partial<unknown>
+): SessionStep<TData> {
+  const newCollected = {
+    ...session.data,
+    ...data,
+  } as Partial<TData>;
 
-  // Also update the extractedByRoute map for the current route
-  const extractedByRoute = { ...session.extractedByRoute };
+  // Also update the dataByRoute map for the current route
+  const dataByRoute = { ...session.dataByRoute };
   if (session.currentRoute) {
-    extractedByRoute[session.currentRoute.id] = newExtracted;
+    dataByRoute[session.currentRoute.id] = newCollected;
   }
 
   return {
     ...session,
-    extracted: newExtracted,
-    extractedByRoute,
+    data: newCollected,
+    dataByRoute,
     metadata: {
       ...session.metadata,
       lastUpdatedAt: new Date(),
@@ -206,44 +206,44 @@ export function mergeExtracted<TExtracted = Record<string, unknown>>(
 }
 
 /**
- * Helper to convert SessionState to persistence-friendly format
+ * Helper to convert SessionStep to persistence-friendly format
  * Used when saving to database
  */
-export function sessionStateToData<TExtracted = Record<string, unknown>>(
-  session: SessionState<TExtracted>
+export function sessionStepToData<TData = Record<string, unknown>>(
+  session: SessionStep<TData>
 ): {
   currentRoute?: string;
-  currentState?: string;
+  currentStep?: string;
   collectedData: Record<string, unknown>;
 } {
   return {
     currentRoute: session.currentRoute?.id,
-    currentState: session.currentState?.id,
+    currentStep: session.currentStep?.id,
     collectedData: {
-      extracted: session.extracted,
-      extractedByRoute: session.extractedByRoute, // Include per-route data
+      data: session.data,
+      dataByRoute: session.dataByRoute, // Include per-route data
       routeHistory: session.routeHistory,
       currentRouteTitle: session.currentRoute?.title,
-      currentStateDescription: session.currentState?.description,
+      currentStepDescription: session.currentStep?.description,
       metadata: session.metadata,
     },
   };
 }
 
 /**
- * Helper to convert database SessionData back to SessionState
+ * Helper to convert database SessionData back to SessionStep
  * Used when loading from database
  * @param sessionId - The database session ID
  * @param data - The database session data
  */
-export function sessionDataToState<TExtracted = Record<string, unknown>>(
+export function sessionDataToStep<TData = Record<string, unknown>>(
   sessionId: string,
   data: {
     currentRoute?: string;
-    currentState?: string;
+    currentStep?: string;
     collectedData?: Record<string, unknown>;
   }
-): SessionState<TExtracted> {
+): SessionStep<TData> {
   const collectedData = data.collectedData || {};
 
   return {
@@ -256,22 +256,19 @@ export function sessionDataToState<TExtracted = Record<string, unknown>>(
           enteredAt: new Date(),
         }
       : undefined,
-    currentState: data.currentState
+    currentStep: data.currentStep
       ? {
-          id: data.currentState,
+          id: data.currentStep,
           description:
-            (collectedData.currentStateDescription as string) || undefined,
+            (collectedData.currentStepDescription as string) || undefined,
           enteredAt: new Date(),
         }
       : undefined,
-    extracted: (collectedData.extracted as Partial<TExtracted>) || {},
-    extractedByRoute:
-      (collectedData.extractedByRoute as Record<string, Partial<unknown>>) ||
-      {}, // Restore per-route data
+    data: (collectedData.data as Partial<TData>) || {},
+    dataByRoute:
+      (collectedData.dataByRoute as Record<string, Partial<unknown>>) || {}, // Restore per-route data
     routeHistory:
-      (collectedData.routeHistory as SessionState<TExtracted>["routeHistory"]) ||
-      [],
-    metadata:
-      (collectedData.metadata as SessionState<TExtracted>["metadata"]) || {},
+      (collectedData.routeHistory as SessionStep<TData>["routeHistory"]) || [],
+    metadata: (collectedData.metadata as SessionStep<TData>["metadata"]) || {},
   };
 }

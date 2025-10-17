@@ -1,8 +1,8 @@
 /**
- * Example: Using Prisma ORM for Persistence with Session State
+ * Example: Using Prisma ORM for Persistence with Session Step
  *
  * This example shows how to use @falai/agent with Prisma for automatic
- * session state persistence - with the new data-driven architecture!
+ * session step persistence - with the new data-driven architecture!
  */
 
 import {
@@ -11,7 +11,7 @@ import {
   PrismaAdapter,
   createMessageEvent,
   EventSource,
-  END_STATE,
+  END_ROUTE,
 } from "../src/index";
 
 // @ts-ignore
@@ -48,7 +48,7 @@ interface ConversationContext {
   };
 }
 
-// Extracted data type for flight booking
+// Collected data type for flight booking
 interface FlightBookingData {
   destination: string;
   departureDate: string;
@@ -57,7 +57,7 @@ interface FlightBookingData {
   cabinClass: "economy" | "premium" | "business" | "first";
 }
 
-// Extracted data type for onboarding
+// Collected data type for onboarding
 interface OnboardingData {
   fullName: string;
   email: string;
@@ -65,7 +65,7 @@ interface OnboardingData {
   country: string;
 }
 
-// Extracted data type for contact form
+// Collected data type for contact form
 interface ContactFormData {
   name: string;
   email: string;
@@ -96,7 +96,7 @@ async function example() {
     // ✨ Just pass the adapter - that's it!
     persistence: {
       adapter: new PrismaAdapter({ prisma }),
-      autoSave: true, // Auto-saves session state after each response
+      autoSave: true, // Auto-saves session step after each response
       userId,
     },
   });
@@ -111,7 +111,7 @@ async function example() {
       "User wants to book a flight",
       "User mentions travel, flying, or booking tickets",
     ],
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         destination: {
@@ -143,45 +143,45 @@ async function example() {
     },
   });
 
-  // State flow with smart data gathering and custom IDs
-  const askDestination = flightRoute.initialState.transitionTo({
-    id: "ask_destination", // Custom state ID for easier tracking
-    chatState: "Ask where they want to fly",
-    gather: ["destination"],
-    skipIf: (extracted) => !!extracted.destination,
+  // Step flow with smart data collecting and custom IDs
+  const askDestination = flightRoute.initialStep.nextStep({
+    id: "ask_destination", // Custom step ID for easier tracking
+    instructions: "Ask where they want to fly",
+    collect: ["destination"],
+    skipIf: (data) => !!data.destination,
   });
 
-  const askDates = askDestination.transitionTo({
-    id: "ask_dates", // Custom state ID
-    chatState: "Ask about travel dates",
-    gather: ["departureDate", "returnDate"],
-    skipIf: (extracted) => !!extracted.departureDate,
-    requiredData: ["destination"],
+  const askDates = askDestination.nextStep({
+    id: "ask_dates", // Custom step ID
+    instructions: "Ask about travel dates",
+    collect: ["departureDate", "returnDate"],
+    skipIf: (data) => !!data.departureDate,
+    requires: ["destination"],
   });
 
-  const askPassengers = askDates.transitionTo({
-    id: "ask_passengers", // Custom state ID
-    chatState: "Ask how many passengers",
-    gather: ["passengers"],
-    skipIf: (extracted) => !!extracted.passengers,
-    requiredData: ["destination", "departureDate"],
+  const askPassengers = askDates.nextStep({
+    id: "ask_passengers", // Custom step ID
+    instructions: "Ask how many passengers",
+    collect: ["passengers"],
+    skipIf: (data) => !!data.passengers,
+    requires: ["destination", "departureDate"],
   });
 
-  const askCabinClass = askPassengers.transitionTo({
-    id: "ask_cabin_class", // Custom state ID
-    chatState: "Ask about cabin class preference",
-    gather: ["cabinClass"],
-    skipIf: (extracted) => !!extracted.cabinClass,
-    requiredData: ["destination", "departureDate", "passengers"],
+  const askCabinClass = askPassengers.nextStep({
+    id: "ask_cabin_class", // Custom step ID
+    instructions: "Ask about cabin class preference",
+    collect: ["cabinClass"],
+    skipIf: (data) => !!data.cabinClass,
+    requires: ["destination", "departureDate", "passengers"],
   });
 
-  const confirmBooking = askCabinClass.transitionTo({
-    id: "confirm_booking", // Custom state ID
-    chatState: "Present options and confirm booking details",
-    requiredData: ["destination", "departureDate", "passengers", "cabinClass"],
+  const confirmBooking = askCabinClass.nextStep({
+    id: "confirm_booking", // Custom step ID
+    instructions: "Present options and confirm booking details",
+    requires: ["destination", "departureDate", "passengers", "cabinClass"],
   });
 
-  confirmBooking.transitionTo({ state: END_STATE });
+  confirmBooking.nextStep({ step: END_ROUTE });
 
   /**
    * Get persistence manager from agent
@@ -196,7 +196,7 @@ async function example() {
    * Create or find a session - New Pattern!
    */
   let sessionResult =
-    await persistence.createSessionWithState<FlightBookingData>({
+    await persistence.createSessionWithStep<FlightBookingData>({
       userId,
       agentName: "Travel Assistant",
       initialData: {
@@ -204,7 +204,7 @@ async function example() {
       },
     });
 
-  let session = sessionResult.sessionState;
+  let session = sessionResult.sessionStep;
   const dbSessionId = sessionResult.sessionData.id;
 
   console.log("✨ Created new session:", dbSessionId);
@@ -212,9 +212,9 @@ async function example() {
     sessionId: session.metadata?.sessionId, // Same as dbSessionId
     createdAt: session.metadata?.createdAt,
   });
-  console.log("📊 Initial session state:", {
+  console.log("📊 Initial session step:", {
     currentRoute: session.currentRoute,
-    extracted: session.extracted,
+    data: session.data,
   });
 
   /**
@@ -237,16 +237,16 @@ async function example() {
 
   const response1 = await agent.respond({
     history,
-    session, // Pass session state
+    session, // Pass session step
   });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Session state after turn 1:", {
+  console.log("📊 Session step after turn 1:", {
     sessionId: response1.session?.metadata?.sessionId,
     currentRoute: response1.session?.currentRoute?.title,
-    currentStateId: response1.session?.currentState?.id, // Custom ID like "ask_destination"
-    currentStateDescription: response1.session?.currentState?.description,
-    extracted: response1.session?.extracted,
+    currentStepId: response1.session?.currentStep?.id, // Custom ID like "ask_destination"
+    currentStepDescription: response1.session?.currentStep?.description,
+    data: response1.session?.data,
   });
 
   // Save user message
@@ -258,14 +258,14 @@ async function example() {
     event: userMessage1,
   });
 
-  // Save agent message (session state is auto-saved by Agent!)
+  // Save agent message (session step is auto-saved by Agent!)
   await persistence.saveMessage({
     sessionId: dbSessionId,
     userId,
     role: "agent",
     content: response1.message,
     route: response1.session?.currentRoute?.id,
-    state: response1.session?.currentState?.id,
+    step: response1.session?.currentStep?.id,
   });
 
   // Update session for next turn
@@ -296,10 +296,10 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Session state after turn 2:", {
+  console.log("📊 Session step after turn 2:", {
     currentRoute: response2.session?.currentRoute?.title,
-    currentState: response2.session?.currentState?.id,
-    extracted: response2.session?.extracted,
+    currentStep: response2.session?.currentStep?.id,
+    data: response2.session?.data,
   });
 
   // Save messages
@@ -317,7 +317,7 @@ async function example() {
     role: "agent",
     content: response2.message,
     route: response2.session?.currentRoute?.id,
-    state: response2.session?.currentState?.id,
+    step: response2.session?.currentStep?.id,
   });
 
   session = response2.session!;
@@ -325,22 +325,22 @@ async function example() {
   if (response2.isRouteComplete) {
     console.log("\n✅ Flight booking complete!");
     await sendFlightConfirmation(
-      agent.getExtractedData(session.id) as FlightBookingData
+      agent.getData(session.id) as FlightBookingData
     );
   }
 
   /**
-   * Load session state from database (demonstrates persistence)
+   * Load session step from database (demonstrates persistence)
    */
   console.log("\n--- Loading Session from Database ---");
-  const loadedSession = await persistence.loadSessionState<FlightBookingData>(
+  const loadedSession = await persistence.loadSessionStep<FlightBookingData>(
     dbSessionId
   );
 
-  console.log("📥 Loaded session state:", {
+  console.log("📥 Loaded session step:", {
     currentRoute: loadedSession?.currentRoute?.title,
-    currentState: loadedSession?.currentState?.id,
-    extracted: loadedSession?.extracted,
+    currentStep: loadedSession?.currentStep?.id,
+    data: loadedSession?.data,
   });
 
   /**
@@ -365,7 +365,7 @@ async function example() {
 }
 
 /**
- * Advanced Example: Session State with Lifecycle Hooks
+ * Advanced Example: Session Step with Lifecycle Hooks
  */
 async function advancedExample() {
   const prisma = new PrismaClient();
@@ -395,26 +395,26 @@ async function advancedExample() {
         language: "en",
       },
     },
-    // Lifecycle hooks for session state enrichment
+    // Lifecycle hooks for session step enrichment
     hooks: {
-      // Enrich extracted data before saving
-      onExtractedUpdate: async (extracted, previous) => {
-        console.log("🔄 Extracted data updated:", { extracted, previous });
+      // Enrich collected data before saving
+      onDataUpdate: async (data, previous) => {
+        console.log("🔄 Collected data updated:", { data, previous });
 
         // Normalize phone numbers
-        if (extracted.phoneNumber) {
-          extracted.phoneNumber = extracted.phoneNumber.replace(/\D/g, "");
+        if (data.phoneNumber) {
+          data.phoneNumber = data.phoneNumber.replace(/\D/g, "");
         }
 
         // Validate email
-        if (extracted.email && !extracted.email.includes("@")) {
+        if (data.email && !data.email.includes("@")) {
           console.warn("⚠️ Invalid email detected");
         }
 
-        return extracted;
+        return data;
       },
 
-      // Update context when session state changes
+      // Update context when session step changes
       onContextUpdate: async (newContext, oldContext) => {
         console.log("🔄 Context updated:", { newContext, oldContext });
       },
@@ -430,7 +430,7 @@ async function advancedExample() {
   const onboardingRoute = agent.createRoute<OnboardingData>({
     title: "User Onboarding",
     description: "Collect user information for account setup",
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         fullName: { type: "string" },
@@ -442,36 +442,36 @@ async function advancedExample() {
     },
   });
 
-  onboardingRoute.initialState
-    .transitionTo({
-      chatState: "Welcome and ask for name",
-      gather: ["fullName"],
+  onboardingRoute.initialStep
+    .nextStep({
+      instructions: "Welcome and ask for name",
+      collect: ["fullName"],
       skipIf: (data) => !!data.fullName,
     })
-    .transitionTo({
-      chatState: "Ask for email",
-      gather: ["email"],
+    .nextStep({
+      instructions: "Ask for email",
+      collect: ["email"],
       skipIf: (data) => !!data.email,
     })
-    .transitionTo({
-      chatState: "Ask for phone number (optional)",
-      gather: ["phoneNumber"],
+    .nextStep({
+      instructions: "Ask for phone number (optional)",
+      collect: ["phoneNumber"],
     })
-    .transitionTo({
-      chatState: "Ask for country",
-      gather: ["country"],
+    .nextStep({
+      instructions: "Ask for country",
+      collect: ["country"],
       skipIf: (data) => !!data.country,
     })
-    .transitionTo({
-      chatState: "Confirm and complete onboarding",
+    .nextStep({
+      instructions: "Confirm and complete onboarding",
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   const persistence = agent.getPersistenceManager()!;
 
-  // Create session with state
-  const { sessionData, sessionState } =
-    await persistence.createSessionWithState<OnboardingData>({
+  // Create session with step
+  const { sessionData, sessionStep } =
+    await persistence.createSessionWithStep<OnboardingData>({
       userId,
       agentName: "Onboarding Assistant",
     });
@@ -480,7 +480,7 @@ async function advancedExample() {
 
   // Simulate conversation
   const history = [];
-  let session = sessionState;
+  let session = sessionStep;
 
   const response = await agent.respond({
     history: [
@@ -490,7 +490,7 @@ async function advancedExample() {
   });
 
   console.log("🤖 Agent:", response.message);
-  console.log("📊 Extracted so far:", response.session?.extracted);
+  console.log("📊 Data so far:", response.session?.data);
 
   await persistence.saveMessage({
     sessionId: sessionData.id,
@@ -501,12 +501,10 @@ async function advancedExample() {
 
   if (response.isRouteComplete) {
     console.log("\n✅ Onboarding complete!");
-    await sendOnboardingEmail(
-      agent.getExtractedData(sessionData.id) as OnboardingData
-    );
+    await sendOnboardingEmail(agent.getData(sessionData.id) as OnboardingData);
   }
 
-  console.log("✅ Session state automatically saved to database!");
+  console.log("✅ Session step automatically saved to database!");
 
   await prisma.$disconnect();
 }
@@ -526,14 +524,14 @@ async function quickStart() {
     persistence: {
       adapter: new PrismaAdapter({ prisma }),
       userId: "user_789",
-      autoSave: true, // ✨ Automatically saves session state!
+      autoSave: true, // ✨ Automatically saves session step!
     },
   });
 
   // Create a simple contact form route
   const contactRoute = agent.createRoute<ContactFormData>({
     title: "Contact Form",
-    extractionSchema: {
+    schema: {
       type: "object",
       properties: {
         name: { type: "string" },
@@ -544,21 +542,21 @@ async function quickStart() {
     },
   });
 
-  contactRoute.initialState
-    .transitionTo({
-      chatState: "Collect all information",
-      gather: ["name", "email", "message"],
+  contactRoute.initialStep
+    .nextStep({
+      instructions: "Collect all information",
+      collect: ["name", "email", "message"],
     })
-    .transitionTo({
-      chatState: "Confirm submission",
+    .nextStep({
+      instructions: "Confirm submission",
     })
-    .transitionTo({ state: END_STATE });
+    .nextStep({ step: END_ROUTE });
 
   const persistence = agent.getPersistenceManager()!;
 
-  // Create session with state support
-  const { sessionData, sessionState } =
-    await persistence.createSessionWithState<ContactFormData>({
+  // Create session with step support
+  const { sessionData, sessionStep } =
+    await persistence.createSessionWithStep<ContactFormData>({
       userId: "user_789",
       agentName: "Support Agent",
     });
@@ -572,20 +570,18 @@ async function quickStart() {
         "I need help, my name is John and my email is john@example.com"
       ),
     ],
-    session: sessionState,
+    session: sessionStep,
   });
 
   console.log("✅ Response:", response.message);
-  console.log("📊 Extracted:", response.session?.extracted);
+  console.log("📊 Data:", response.session?.data);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Contact form submitted!");
-    await logContactForm(
-      agent.getExtractedData(sessionData.id) as ContactFormData
-    );
+    await logContactForm(agent.getData(sessionData.id) as ContactFormData);
   }
 
-  console.log("💾 Session state auto-saved to Prisma!");
+  console.log("💾 Session step auto-saved to Prisma!");
 
   await prisma.$disconnect();
 }

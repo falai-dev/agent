@@ -1,11 +1,11 @@
 import type { Event } from "../types/history";
 import type { Route } from "./Route";
-import type { State } from "./State";
+import type { Step } from "./Step";
 import type { StructuredSchema } from "../types/schema";
 import type { RoutingDecision } from "../types/routing";
-import type { SessionState } from "../types/session";
+import type { SessionStep } from "../types/session";
 import type { AiProvider } from "../types/ai";
-import { enterRoute, mergeExtracted } from "../types/session";
+import { enterRoute, mergeCollected } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
 import { getLastMessageFromHistory } from "../utils/event";
 import { logger } from "../utils/logger";
@@ -13,8 +13,8 @@ import { logger } from "../utils/logger";
 export interface RoutingDecisionOutput {
   context: string;
   routes: Record<string, number>;
-  selectedStateId?: string; // For active route, which state to transition to
-  stateReasoning?: string; // Why this state was selected
+  selectedStepId?: string; // For active route, which step to transition to
+  stepReasoning?: string; // Why this step was selected
   responseDirectives?: string[];
   extractions?: Array<{
     name: string;
@@ -37,12 +37,12 @@ export class RoutingEngine<TContext = unknown> {
 
   /**
    * Optimized decision for single-route scenarios
-   * Skips route scoring and only does state selection
+   * Skips route scoring and only does step selection
    * @private
    */
-  private async decideSingleRouteState(params: {
+  private async decideSingleRouteStep(params: {
     route: Route<TContext, unknown>;
-    session: SessionState;
+    session: SessionStep;
     history: Event[];
     agentMeta?: {
       name?: string;
@@ -55,9 +55,9 @@ export class RoutingEngine<TContext = unknown> {
     signal?: AbortSignal;
   }): Promise<{
     selectedRoute?: Route<TContext>;
-    selectedState?: State<TContext>;
+    selectedStep?: Step<TContext>;
     responseDirectives?: string[];
-    session: SessionState;
+    session: SessionStep;
     isRouteComplete?: boolean;
   }> {
     const { route, session, history, agentMeta, ai, context, signal } = params;
@@ -69,7 +69,7 @@ export class RoutingEngine<TContext = unknown> {
     if (!session.currentRoute || session.currentRoute.id !== route.id) {
       updatedSession = enterRoute(session, route.id, route.title);
       if (route.initialData) {
-        updatedSession = mergeExtracted(updatedSession, route.initialData);
+        updatedSession = mergeCollected(updatedSession, route.initialData);
         logger.debug(
           `[RoutingEngine] Single-route: Merged initial data:`,
           route.initialData
@@ -80,18 +80,18 @@ export class RoutingEngine<TContext = unknown> {
       );
     }
 
-    // Get candidate states
-    const currentState = updatedSession.currentState
-      ? route.getState(updatedSession.currentState.id)
+    // Get candidate steps
+    const currentStep = updatedSession.currentStep
+      ? route.getStep(updatedSession.currentStep.id)
       : undefined;
-    const candidates = this.getCandidateStates(
+    const candidates = this.getCandidateSteps(
       route,
-      currentState,
-      updatedSession.extracted || {}
+      currentStep,
+      updatedSession.data || {}
     );
 
     if (candidates.length === 0) {
-      logger.warn(`[RoutingEngine] Single-route: No valid states found`);
+      logger.warn(`[RoutingEngine] Single-route: No valid steps found`);
       return { selectedRoute, session: updatedSession };
     }
 
@@ -100,233 +100,229 @@ export class RoutingEngine<TContext = unknown> {
       const isRouteComplete = candidates[0].isRouteComplete;
       if (isRouteComplete) {
         logger.debug(
-          `[RoutingEngine] Single-route: Route complete - all data collected, END_STATE reached`
+          `[RoutingEngine] Single-route: Route complete - all data collected, END_ROUTE reached`
         );
-        // Don't return a selectedState when route is complete - there's no state to enter
+        // Don't return a selectedStep when route is complete - there's no step to enter
         return {
           selectedRoute,
-          selectedState: undefined,
+          selectedStep: undefined,
           session: updatedSession,
           isRouteComplete: true,
         };
       } else {
         logger.debug(
-          `[RoutingEngine] Single-route: Only one valid state: ${candidates[0].state.id}`
+          `[RoutingEngine] Single-route: Only one valid step: ${candidates[0].step.id}`
         );
         return {
           selectedRoute,
-          selectedState: candidates[0].state,
+          selectedStep: candidates[0].step,
           session: updatedSession,
           isRouteComplete: false,
         };
       }
     }
 
-    // Multiple candidates - use AI to select best state
+    // Multiple candidates - use AI to select best step
     const lastUserMessage = getLastMessageFromHistory(history);
-    const statePrompt = this.buildStateSelectionPrompt(
+    const stepPrompt = this.buildStepSelectionPrompt(
       route,
-      currentState,
+      currentStep,
       candidates,
-      updatedSession.extracted || {},
+      updatedSession.data || {},
       history,
       lastUserMessage,
       agentMeta
     );
 
-    const stateSchema = this.buildStateSelectionSchema(
-      candidates.map((c) => c.state.id)
+    const stepSchema = this.buildStepSelectionSchema(
+      candidates.map((c) => c.step.id)
     );
 
-    const stateResult = await ai.generateMessage<
+    const stepResult = await ai.generateMessage<
       TContext,
       {
         reasoning: string;
-        selectedStateId: string;
+        selectedStepId: string;
         responseDirectives?: string[];
       }
     >({
-      prompt: statePrompt,
+      prompt: stepPrompt,
       history,
       context,
       signal,
       parameters: {
-        jsonSchema: stateSchema,
-        schemaName: "state_selection",
+        jsonSchema: stepSchema,
+        schemaName: "step_selection",
       },
     });
 
-    const selectedStateId = stateResult.structured?.selectedStateId;
-    const selectedState = candidates.find(
-      (c) => c.state.id === selectedStateId
-    )?.state;
+    const selectedStepId = stepResult.structured?.selectedStepId;
+    const selectedStep = candidates.find(
+      (c) => c.step.id === selectedStepId
+    )?.step;
 
-    if (selectedState) {
+    if (selectedStep) {
       logger.debug(
-        `[RoutingEngine] Single-route: AI selected state: ${selectedState.id}`
+        `[RoutingEngine] Single-route: AI selected step: ${selectedStep.id}`
       );
       logger.debug(
-        `[RoutingEngine] Single-route: Reasoning: ${stateResult.structured?.reasoning}`
+        `[RoutingEngine] Single-route: Reasoning: ${stepResult.structured?.reasoning}`
       );
     } else {
       logger.warn(
-        `[RoutingEngine] Single-route: Invalid state ID returned, using first candidate`
+        `[RoutingEngine] Single-route: Invalid step ID returned, using first candidate`
       );
     }
 
     return {
       selectedRoute,
-      selectedState: selectedState || candidates[0].state,
-      responseDirectives: stateResult.structured?.responseDirectives,
+      selectedStep: selectedStep || candidates[0].step,
+      responseDirectives: stepResult.structured?.responseDirectives,
       session: updatedSession,
     };
   }
 
   /**
-   * Recursively traverse state chain to find first non-skipped state or END_STATE
+   * Recursively traverse step chain to find first non-skipped step or END_ROUTE
    * @private
    */
-  private findFirstValidStateRecursive<TExtracted = unknown>(
-    currentState: State<TContext, TExtracted>,
-    extracted: Partial<TExtracted>,
+  private findFirstValidStepRecursive<TData = unknown>(
+    currentStep: Step<TContext, TData>,
+    data: Partial<TData>,
     visited: Set<string>
   ): {
-    state?: State<TContext, TExtracted>;
+    step?: Step<TContext, TData>;
     condition?: string;
     isRouteComplete?: boolean;
   } {
     // Prevent infinite loops
-    if (visited.has(currentState.id)) {
+    if (visited.has(currentStep.id)) {
       return {};
     }
-    visited.add(currentState.id);
+    visited.add(currentStep.id);
 
-    const transitions = currentState.getTransitions();
+    const transitions = currentStep.getTransitions();
 
     for (const transition of transitions) {
       const target = transition.getTarget();
 
-      // Check for END_STATE transition
+      // Check for END_ROUTE transition
       if (
         !target &&
-        transition.spec.state &&
-        typeof transition.spec.state === "symbol"
+        transition.spec.step &&
+        typeof transition.spec.step === "symbol"
       ) {
-        // Found END_STATE - route is complete
+        // Found END_ROUTE - route is complete
         return {
-          isRouteComplete: true
+          isRouteComplete: true,
         };
       }
 
       if (!target) continue;
 
-      // If target should NOT be skipped, we found our state
-      if (!target.shouldSkip(extracted)) {
+      // If target should NOT be skipped, we found our step
+      if (!target.shouldSkip(data)) {
         logger.debug(
-          `[RoutingEngine] Found valid state after skipping: ${target.id}`
+          `[RoutingEngine] Found valid step after skipping: ${target.id}`
         );
         return {
-          state: target,
+          step: target,
           condition: transition.condition,
         };
       }
 
       // Target should be skipped too - recurse deeper
       logger.debug(
-        `[RoutingEngine] Skipping state ${target.id} (skipIf condition met), continuing traversal...`
+        `[RoutingEngine] Skipping step ${target.id} (skipIf condition met), continuing traversal...`
       );
-      const result = this.findFirstValidStateRecursive(
-        target,
-        extracted,
-        visited
-      );
+      const result = this.findFirstValidStepRecursive(target, data, visited);
 
-      // If we found something (a valid state or END_STATE), return it
-      if (result.state || result.isRouteComplete) {
+      // If we found something (a valid step or END_ROUTE), return it
+      if (result.step || result.isRouteComplete) {
         return result;
       }
     }
 
-    // No valid states or END_STATE found in this branch
+    // No valid steps or END_ROUTE found in this branch
     return {};
   }
 
   /**
-   * Identify valid next candidate states based on current state and extracted data
-   * Returns state with isRouteComplete flag if route is complete (all states skipped + has END_STATE transition)
+   * Identify valid next candidate steps based on current step and collected data
+   * Returns step with isRouteComplete flag if route is complete (all steps skipped + has END_ROUTE transition)
    */
-  getCandidateStates<TExtracted = unknown>(
-    route: Route<TContext, TExtracted>,
-    currentState: State<TContext, TExtracted> | undefined,
-    extracted: Partial<TExtracted>
+  getCandidateSteps<TData = unknown>(
+    route: Route<TContext, TData>,
+    currentStep: Step<TContext, TData> | undefined,
+    data: Partial<TData>
   ): Array<{
-    state: State<TContext, TExtracted>;
+    step: Step<TContext, TData>;
     condition?: string;
-    requiredData?: string[];
-    gatherFields?: string[];
+    requires?: string[];
+    collectFields?: string[];
     isRouteComplete?: boolean;
   }> {
     const candidates: Array<{
-      state: State<TContext, TExtracted>;
+      step: Step<TContext, TData>;
       condition?: string;
-      requiredData?: string[];
-      gatherFields?: string[];
+      requires?: string[];
+      collectFields?: string[];
       isRouteComplete?: boolean;
     }> = [];
 
-    if (!currentState) {
-      const initialState = route.initialState;
-      if (initialState.shouldSkip(extracted)) {
-        // Initial state should be skipped - recursively traverse to find first non-skipped state or END_STATE
-        const result = this.findFirstValidStateRecursive(
-          initialState,
-          extracted,
+    if (!currentStep) {
+      const initialStep = route.initialStep;
+      if (initialStep.shouldSkip(data)) {
+        // Initial step should be skipped - recursively traverse to find first non-skipped step or END_ROUTE
+        const result = this.findFirstValidStepRecursive(
+          initialStep,
+          data,
           new Set<string>()
         );
 
         if (result.isRouteComplete) {
-          // All states are skipped and we reached END_STATE
+          // All steps are skipped and we reached END_ROUTE
           logger.debug(
-            `[RoutingEngine] Route complete on entry: all states skipped, END_STATE reached`
+            `[RoutingEngine] Route complete on entry: all steps skipped, END_ROUTE reached`
           );
           return [
             {
-              state: initialState,
+              step: initialStep,
               condition: "Route complete - all data collected on entry",
               isRouteComplete: true,
             },
           ];
-        } else if (result.state) {
-          // Found a non-skipped state
+        } else if (result.step) {
+          // Found a non-skipped step
           candidates.push({
-            state: result.state,
+            step: result.step,
             condition: result.condition,
-            requiredData: result.state.requiredData,
-            gatherFields: result.state.gatherFields,
+            requires: result.step.requires,
+            collectFields: result.step.collectFields,
           });
         }
-        // If no state found and not complete, fall through to return empty candidates
+        // If no step found and not complete, fall through to return empty candidates
       } else {
         candidates.push({
-          state: initialState,
-          requiredData: initialState.requiredData,
-          gatherFields: initialState.gatherFields,
+          step: initialStep,
+          requires: initialStep.requires,
+          collectFields: initialStep.collectFields,
         });
       }
       return candidates;
     }
 
-    const transitions = currentState.getTransitions();
+    const transitions = currentStep.getTransitions();
     let hasEndRoute = false;
 
     for (const transition of transitions) {
       const target = transition.getTarget();
 
-      // Check for END_STATE transition (no target state)
+      // Check for END_ROUTE transition (no target step)
       if (
         !target &&
-        transition.spec.state &&
-        typeof transition.spec.state === "symbol"
+        transition.spec.step &&
+        typeof transition.spec.step === "symbol"
       ) {
         hasEndRoute = true;
         continue;
@@ -334,64 +330,64 @@ export class RoutingEngine<TContext = unknown> {
 
       if (!target) continue;
 
-      if (target.shouldSkip(extracted)) {
+      if (target.shouldSkip(data)) {
         logger.debug(
-          `[RoutingEngine] Skipping state ${target.id} (skipIf condition met)`
+          `[RoutingEngine] Skipping step ${target.id} (skipIf condition met)`
         );
 
-        // Recursively traverse to find next valid state or END_STATE
-        const result = this.findFirstValidStateRecursive(
+        // Recursively traverse to find next valid step or END_ROUTE
+        const result = this.findFirstValidStepRecursive(
           target,
-          extracted,
-          new Set<string>([currentState.id]) // Already visited current state
+          data,
+          new Set<string>([currentStep.id]) // Already visited current step
         );
 
         if (result.isRouteComplete) {
           hasEndRoute = true;
-        } else if (result.state) {
-          // Found a non-skipped state deeper in the chain
+        } else if (result.step) {
+          // Found a non-skipped step deeper in the chain
           candidates.push({
-            state: result.state,
+            step: result.step,
             condition: result.condition || transition.condition,
-            requiredData: result.state.requiredData,
-            gatherFields: result.state.gatherFields,
+            requires: result.step.requires,
+            collectFields: result.step.collectFields,
           });
         }
         continue;
       }
 
       candidates.push({
-        state: target,
+        step: target,
         condition: transition.condition,
-        requiredData: target.requiredData,
-        gatherFields: target.gatherFields,
+        requires: target.requires,
+        collectFields: target.collectFields,
       });
     }
 
     // If no valid candidates found
     if (candidates.length === 0) {
-      // If current state has END_STATE transition, the route is complete
+      // If current step has END_ROUTE transition, the route is complete
       if (hasEndRoute) {
         logger.debug(
-          `[RoutingEngine] Route complete: all states processed, END_STATE reached`
+          `[RoutingEngine] Route complete: all steps processed, END_ROUTE reached`
         );
-        // Return current state with completion flag
+        // Return current step with completion flag
         return [
           {
-            state: currentState,
+            step: currentStep,
             condition: "Route complete - all data collected",
             isRouteComplete: true,
           },
         ];
       }
 
-      // Otherwise, stay in current state if it's still valid
-      if (!currentState.shouldSkip(extracted)) {
+      // Otherwise, stay in current step if it's still valid
+      if (!currentStep.shouldSkip(data)) {
         candidates.push({
-          state: currentState,
-          condition: "Continue in current state (no valid transitions)",
-          requiredData: currentState.requiredData,
-          gatherFields: currentState.gatherFields,
+          step: currentStep,
+          condition: "Continue in current step (no valid transitions)",
+          requires: currentStep.requires,
+          collectFields: currentStep.collectFields,
         });
       }
     }
@@ -400,14 +396,14 @@ export class RoutingEngine<TContext = unknown> {
   }
 
   /**
-   * Full routing orchestration: builds prompt and schema, calls AI, selects route/state,
+   * Full routing orchestration: builds prompt and schema, calls AI, selects route/step,
    * and updates the session (including initialData merge when entering a new route).
    *
-   * OPTIMIZATION: If there's only 1 route, skips route scoring and only does state selection.
+   * OPTIMIZATION: If there's only 1 route, skips route scoring and only does step selection.
    */
-  async decideRouteAndState(params: {
+  async decideRouteAndStep(params: {
     routes: Route<TContext, unknown>[];
-    session: SessionState;
+    session: SessionStep;
     history: Event[];
     agentMeta?: {
       name?: string;
@@ -420,9 +416,9 @@ export class RoutingEngine<TContext = unknown> {
     signal?: AbortSignal;
   }): Promise<{
     selectedRoute?: Route<TContext>;
-    selectedState?: State<TContext>;
+    selectedStep?: Step<TContext>;
     responseDirectives?: string[];
-    session: SessionState;
+    session: SessionStep;
     isRouteComplete?: boolean;
   }> {
     const { routes, session, history, agentMeta, ai, context, signal } = params;
@@ -431,9 +427,9 @@ export class RoutingEngine<TContext = unknown> {
       return { session };
     }
 
-    // OPTIMIZATION: Single route - skip route scoring, only do state selection
+    // OPTIMIZATION: Single route - skip route scoring, only do step selection
     if (routes.length === 1) {
-      return this.decideSingleRouteState({
+      return this.decideSingleRouteStep({
         route: routes[0],
         session,
         history,
@@ -446,13 +442,13 @@ export class RoutingEngine<TContext = unknown> {
 
     const lastUserMessage = getLastMessageFromHistory(history);
 
-    let activeRouteStates:
+    let activeRouteSteps:
       | Array<{
-          stateId: string;
+          stepId: string;
           description: string;
           condition?: string;
-          requiredData?: string[];
-          gatherFields?: string[];
+          requires?: string[];
+          collectFields?: string[];
         }>
       | undefined;
     let activeRoute: Route<TContext> | undefined;
@@ -461,13 +457,13 @@ export class RoutingEngine<TContext = unknown> {
     if (session.currentRoute) {
       activeRoute = routes.find((r) => r.id === session.currentRoute?.id);
       if (activeRoute) {
-        const currentState = session.currentState
-          ? activeRoute.getState(session.currentState.id)
+        const currentStep = session.currentStep
+          ? activeRoute.getStep(session.currentStep.id)
           : undefined;
-        const candidates = this.getCandidateStates(
+        const candidates = this.getCandidateSteps(
           activeRoute,
-          currentState,
-          session.extracted || {}
+          currentStep,
+          session.data || {}
         );
 
         // Check if route is complete
@@ -476,18 +472,18 @@ export class RoutingEngine<TContext = unknown> {
           logger.debug(
             `[RoutingEngine] Route ${activeRoute.title} is complete - all data collected`
           );
-          // Don't include states in routing if route is complete
-          activeRouteStates = undefined;
+          // Don't include steps in routing if route is complete
+          activeRouteSteps = undefined;
         } else {
-          activeRouteStates = candidates.map((c) => ({
-            stateId: c.state.id,
-            description: c.state.description || "",
+          activeRouteSteps = candidates.map((c) => ({
+            stepId: c.step.id,
+            description: c.step.description || "",
             condition: c.condition,
-            requiredData: c.requiredData,
-            gatherFields: c.gatherFields,
+            requires: c.requires,
+            collectFields: c.collectFields,
           }));
           logger.debug(
-            `[RoutingEngine] Found ${activeRouteStates.length} candidate states for active route`
+            `[RoutingEngine] Found ${activeRouteSteps.length} candidate steps for active route`
           );
         }
       }
@@ -496,7 +492,7 @@ export class RoutingEngine<TContext = unknown> {
     const routingSchema = this.buildDynamicRoutingSchema(
       routes,
       undefined,
-      activeRouteStates
+      activeRouteSteps
     );
 
     const routingPrompt = this.buildRoutingPrompt(
@@ -505,7 +501,7 @@ export class RoutingEngine<TContext = unknown> {
       lastUserMessage,
       agentMeta,
       session,
-      activeRouteStates
+      activeRouteSteps
     );
 
     const routingResult = await ai.generateMessage<
@@ -523,7 +519,7 @@ export class RoutingEngine<TContext = unknown> {
     });
 
     let selectedRoute: Route<TContext> | undefined;
-    let selectedState: State<TContext> | undefined;
+    let selectedStep: Step<TContext> | undefined;
     let responseDirectives: string[] | undefined;
     let updatedSession = session;
 
@@ -538,18 +534,18 @@ export class RoutingEngine<TContext = unknown> {
 
       if (
         selectedRoute === activeRoute &&
-        routingResult.structured.selectedStateId &&
+        routingResult.structured.selectedStepId &&
         activeRoute
       ) {
-        selectedState = activeRoute.getState(
-          routingResult.structured.selectedStateId
+        selectedStep = activeRoute.getStep(
+          routingResult.structured.selectedStepId
         );
-        if (selectedState) {
+        if (selectedStep) {
           logger.debug(
-            `[RoutingEngine] AI selected state: ${selectedState.id} in active route`
+            `[RoutingEngine] AI selected step: ${selectedStep.id} in active route`
           );
           logger.debug(
-            `[RoutingEngine] State reasoning: ${routingResult.structured.stateReasoning}`
+            `[RoutingEngine] Step reasoning: ${routingResult.structured.stepReasoning}`
           );
         }
       }
@@ -566,7 +562,7 @@ export class RoutingEngine<TContext = unknown> {
             selectedRoute.title
           );
           if (selectedRoute.initialData) {
-            updatedSession = mergeExtracted(
+            updatedSession = mergeCollected(
               updatedSession,
               selectedRoute.initialData
             );
@@ -582,7 +578,7 @@ export class RoutingEngine<TContext = unknown> {
 
     return {
       selectedRoute,
-      selectedState,
+      selectedStep,
       responseDirectives,
       session: updatedSession,
       isRouteComplete,
@@ -590,19 +586,19 @@ export class RoutingEngine<TContext = unknown> {
   }
 
   /**
-   * Build prompt for state selection within a single route
+   * Build prompt for step selection within a single route
    * @private
    */
-  private buildStateSelectionPrompt(
+  private buildStepSelectionPrompt(
     route: Route<TContext>,
-    currentState: State<TContext> | undefined,
+    currentStep: Step<TContext> | undefined,
     candidates: Array<{
-      state: State<TContext>;
+      step: Step<TContext>;
       condition?: string;
-      requiredData?: string[];
-      gatherFields?: string[];
+      requires?: string[];
+      collectFields?: string[];
     }>,
-    extracted: Partial<unknown>,
+    data: Partial<unknown>,
     history: Event[],
     lastMessage: string,
     agentMeta?: {
@@ -632,71 +628,71 @@ export class RoutingEngine<TContext = unknown> {
       `Active Route: ${route.title}\nDescription: ${route.description || "N/A"}`
     );
 
-    // Add current state context
-    if (currentState) {
+    // Add current step context
+    if (currentStep) {
       pc.addInstruction(
-        `Current State: ${currentState.id}\nDescription: ${
-          currentState.description || "N/A"
+        `Current Step: ${currentStep.id}\nDescription: ${
+          currentStep.description || "N/A"
         }`
       );
     } else {
-      pc.addInstruction("Current State: None (entering route)");
+      pc.addInstruction("Current Step: None (entering route)");
     }
 
-    // Add extracted data context
-    if (Object.keys(extracted).length > 0) {
+    // Add collected data context
+    if (Object.keys(data).length > 0) {
       pc.addInstruction(
-        `Extracted Data So Far:\n${JSON.stringify(extracted, null, 2)}`
+        `Collected Data So Far:\n${JSON.stringify(data, null, 2)}`
       );
     } else {
-      pc.addInstruction("Extracted Data: None yet");
+      pc.addInstruction("Collected Data: None yet");
     }
 
     // Add conversation history
     pc.addInteractionHistory(history);
     pc.addLastMessage(lastMessage);
 
-    // Add candidate states
-    const stateDescriptions = candidates.map((candidate, idx) => {
+    // Add candidate steps
+    const stepDescriptions = candidates.map((candidate, idx) => {
       const parts = [
-        `${idx + 1}. State ID: ${candidate.state.id}`,
-        `   Description: ${candidate.state.description || "N/A"}`,
+        `${idx + 1}. Step ID: ${candidate.step.id}`,
+        `   Description: ${candidate.step.description || "N/A"}`,
       ];
 
       if (candidate.condition) {
         parts.push(`   Condition: ${candidate.condition}`);
       }
 
-      if (candidate.requiredData && candidate.requiredData.length > 0) {
-        parts.push(`   Required Data: ${candidate.requiredData.join(", ")}`);
+      if (candidate.requires && candidate.requires.length > 0) {
+        parts.push(`   Required Data: ${candidate.requires.join(", ")}`);
       }
 
-      if (candidate.gatherFields && candidate.gatherFields.length > 0) {
-        parts.push(`   Gathers: ${candidate.gatherFields.join(", ")}`);
+      if (candidate.collectFields && candidate.collectFields.length > 0) {
+        parts.push(`   Collects: ${candidate.collectFields.join(", ")}`);
       }
 
       return parts.join("\n");
     });
 
     pc.addInstruction(
-      `Available States to Transition To:\n${stateDescriptions.join("\n\n")}`
+      `Available Steps to Transition To:\n${stepDescriptions.join("\n\n")}`
     );
 
     // Add decision instructions
     pc.addInstruction(
       [
-        "Task: Decide which state to transition to based on:",
+        "Task: Decide which step to transition to based on:",
         "1. The user's current message and intent",
         "2. The conversation history and context",
-        "3. The extracted data we already have",
-        "4. The conditions and requirements of each state",
+        "3. The collected data we already have",
+        "4. The conditions and requirements of each step",
         "5. The logical flow of the conversation",
         "",
         "Rules:",
-        "- If a state has a condition, evaluate whether it's met based on context",
-        "- If a state requires data we don't have, consider if we should gather it now",
-        "- Choose the state that makes the most sense for moving the conversation forward",
-        "- States with skipIf conditions that are met have already been filtered out",
+        "- If a step has a condition, evaluate whether it's met based on context",
+        "- If a step requires data we don't have, consider if we should collect it now",
+        "- Choose the step that makes the most sense for moving the conversation forward",
+        "- Steps with skipIf conditions that are met have already been filtered out",
         "",
         "Return ONLY JSON matching the provided schema.",
       ].join("\n")
@@ -706,25 +702,25 @@ export class RoutingEngine<TContext = unknown> {
   }
 
   /**
-   * Build schema for state selection
+   * Build schema for step selection
    * @private
    */
-  private buildStateSelectionSchema(validStateIds: string[]): StructuredSchema {
+  private buildStepSelectionSchema(validStepIds: string[]): StructuredSchema {
     return {
       description:
-        "State transition decision based on conversation context and extracted data",
+        "Step transition decision based on conversation context and collected data",
       type: "object",
       properties: {
         reasoning: {
           type: "string",
           nullable: false,
-          description: "Brief explanation of why this state was selected",
+          description: "Brief explanation of why this step was selected",
         },
-        selectedStateId: {
+        selectedStepId: {
           type: "string",
           nullable: false,
-          description: "The ID of the selected state to transition to",
-          enum: validStateIds,
+          description: "The ID of the selected step to transition to",
+          enum: validStepIds,
         },
         responseDirectives: {
           type: "array",
@@ -733,7 +729,7 @@ export class RoutingEngine<TContext = unknown> {
             "Optional bullet points the response should address (concise)",
         },
       },
-      required: ["reasoning", "selectedStateId"],
+      required: ["reasoning", "selectedStepId"],
       additionalProperties: false,
     };
   }
@@ -741,7 +737,7 @@ export class RoutingEngine<TContext = unknown> {
   buildDynamicRoutingSchema(
     routes: Route<TContext>[],
     extrasSchema?: StructuredSchema,
-    activeRouteStates?: { stateId: string; description: string }[]
+    activeRouteSteps?: { stepId: string; description: string }[]
   ): StructuredSchema {
     const routeIds = routes.map((r) => r.id);
     const routeProperties: Record<string, StructuredSchema> = {};
@@ -783,25 +779,25 @@ export class RoutingEngine<TContext = unknown> {
       additionalProperties: false,
     };
 
-    // Add state selection fields if there's an active route with states
-    if (activeRouteStates && activeRouteStates.length > 0) {
+    // Add step selection fields if there's an active route with steps
+    if (activeRouteSteps && activeRouteSteps.length > 0) {
       base.properties = base.properties || {};
-      base.properties.selectedStateId = {
+      base.properties.selectedStepId = {
         type: "string",
         nullable: false,
         description:
-          "The state ID to transition to within the active route (required if continuing in current route)",
-        enum: activeRouteStates.map((s) => s.stateId),
+          "The step ID to transition to within the active route (required if continuing in current route)",
+        enum: activeRouteSteps.map((s) => s.stepId),
       };
-      base.properties.stateReasoning = {
+      base.properties.stepReasoning = {
         type: "string",
         nullable: false,
-        description: "Brief explanation of why this state was selected",
+        description: "Brief explanation of why this step was selected",
       };
       base.required = [
         ...(base.required || []),
-        "selectedStateId",
-        "stateReasoning",
+        "selectedStepId",
+        "stepReasoning",
       ];
     }
 
@@ -823,13 +819,13 @@ export class RoutingEngine<TContext = unknown> {
       description?: string;
       personality?: string;
     },
-    session?: SessionState,
-    activeRouteStates?: Array<{
-      stateId: string;
+    session?: SessionStep,
+    activeRouteSteps?: Array<{
+      stepId: string;
       description: string;
       condition?: string;
-      requiredData?: string[];
-      gatherFields?: string[];
+      requires?: string[];
+      collectFields?: string[];
     }>
   ): string {
     const pc = new PromptComposer();
@@ -853,54 +849,50 @@ export class RoutingEngine<TContext = unknown> {
         "Current conversation context:",
         `- Active route: ${session.currentRoute.title} (${session.currentRoute.id})`,
       ];
-      if (session.currentState) {
-        sessionInfo.push(`- Current state: ${session.currentState.id}`);
-        if (session.currentState.description) {
-          sessionInfo.push(`  "${session.currentState.description}"`);
+      if (session.currentStep) {
+        sessionInfo.push(`- Current step: ${session.currentStep.id}`);
+        if (session.currentStep.description) {
+          sessionInfo.push(`  "${session.currentStep.description}"`);
         }
       }
-      if (session.extracted && Object.keys(session.extracted).length > 0) {
-        sessionInfo.push(
-          `- Extracted data: ${JSON.stringify(session.extracted)}`
-        );
+      if (session.data && Object.keys(session.data).length > 0) {
+        sessionInfo.push(`- Collected data: ${JSON.stringify(session.data)}`);
       }
       sessionInfo.push(
         "Note: User is mid-conversation. They may want to continue current route or switch to a new one based on their intent."
       );
       pc.addInstruction(sessionInfo.join("\n"));
 
-      // Add available states for the active route
-      if (activeRouteStates && activeRouteStates.length > 0) {
-        const stateInfo = [
+      // Add available steps for the active route
+      if (activeRouteSteps && activeRouteSteps.length > 0) {
+        const stepInfo = [
           "",
-          "Available states in active route (choose one to transition to):",
+          "Available steps in active route (choose one to transition to):",
         ];
-        activeRouteStates.forEach((state, idx) => {
-          stateInfo.push(`${idx + 1}. State: ${state.stateId}`);
-          if (state.description) {
-            stateInfo.push(`   Description: ${state.description}`);
+        activeRouteSteps.forEach((step, idx) => {
+          stepInfo.push(`${idx + 1}. Step: ${step.stepId}`);
+          if (step.description) {
+            stepInfo.push(`   Description: ${step.description}`);
           }
-          if (state.condition) {
-            stateInfo.push(`   Condition: ${state.condition}`);
+          if (step.condition) {
+            stepInfo.push(`   Condition: ${step.condition}`);
           }
-          if (state.requiredData && state.requiredData.length > 0) {
-            stateInfo.push(
-              `   Required data: ${state.requiredData.join(", ")}`
-            );
+          if (step.requires && step.requires.length > 0) {
+            stepInfo.push(`   Required data: ${step.requires.join(", ")}`);
           }
-          if (state.gatherFields && state.gatherFields.length > 0) {
-            stateInfo.push(`   Will gather: ${state.gatherFields.join(", ")}`);
+          if (step.collectFields && step.collectFields.length > 0) {
+            stepInfo.push(`   Will collect: ${step.collectFields.join(", ")}`);
           }
         });
-        stateInfo.push("");
-        stateInfo.push(
-          "IMPORTANT: You MUST select a state to transition to. Evaluate which state makes the most sense based on:"
+        stepInfo.push("");
+        stepInfo.push(
+          "IMPORTANT: You MUST select a step to transition to. Evaluate which step makes the most sense based on:"
         );
-        stateInfo.push("- The conversation flow and what's been collected");
-        stateInfo.push("- What data is still needed vs already present");
-        stateInfo.push("- The logical next step in the conversation");
-        stateInfo.push("- Whether conditions for states are met");
-        pc.addInstruction(stateInfo.join("\n"));
+        stepInfo.push("- The conversation flow and what's been collected");
+        stepInfo.push("- What data is still needed vs already present");
+        stepInfo.push("- The logical next step in the conversation");
+        stepInfo.push("- Whether conditions for steps are met");
+        pc.addInstruction(stepInfo.join("\n"));
       }
     }
 

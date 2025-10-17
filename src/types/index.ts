@@ -28,7 +28,7 @@ export { EventKind, EventSource } from "./history";
 // Route types
 export type {
   RouteRef,
-  StateRef,
+  StepRef,
   RouteOptions,
   TransitionSpec,
   TransitionResult,

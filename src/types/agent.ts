@@ -6,7 +6,7 @@ import type { AiProvider } from "./ai";
 import type { ToolRef } from "./tool";
 import type { RouteOptions } from "./route";
 import type { PersistenceConfig } from "./persistence";
-import type { SessionState } from "./session";
+import type { SessionStep } from "./session";
 
 /**
  * Composition mode determines how the agent processes and structures responses
@@ -23,7 +23,7 @@ export enum CompositionMode {
 }
 
 /**
- * Context lifecycle hooks for managing state persistence
+ * Context lifecycle hooks for managing step persistence
  */
 export interface ContextLifecycleHooks<TContext = unknown> {
   /**
@@ -42,17 +42,17 @@ export interface ContextLifecycleHooks<TContext = unknown> {
   ) => Promise<void> | void;
 
   /**
-   * Called after extracted data is updated (from AI response or tool execution)
-   * Useful for validation, enrichment, or persistence of gathered data
-   * Return modified extracted data or the same data to keep it unchanged
+   * Called after collected data is updated (from AI response or tool execution)
+   * Useful for validation, enrichment, or persistence of collected data
+   * Return modified collected data or the same data to keep it unchanged
    *
-   * Note: This hook works with ANY route's extracted data (since an agent can have
+   * Note: This hook works with ANY route's collected data (since an agent can have
    * multiple routes with different extraction schemas). Use type guards or runtime
    * checks if you need type-specific logic.
    */
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onExtractedUpdate?: (extracted: any, previousExtracted: any) => any;
+  onDataUpdate?: (data: any, previousCollected: any) => any;
 }
 
 /**
@@ -80,7 +80,7 @@ export interface AgentOptions<TContext = unknown> {
   /** Default context data available to the agent */
   context?: TContext;
   /** Optional current session for convenience methods */
-  session?: SessionState;
+  session?: SessionStep;
   /** Context provider function for always-fresh context (alternative to static context) */
   contextProvider?: ContextProvider<TContext>;
   /** Lifecycle hooks for context management */

@@ -64,8 +64,8 @@ export interface AgentStructuredResponse {
   message: string;
   /** Route chosen by the agent (route title or null if no route) */
   route?: string | null;
-  /** Current state within the route (state description or null) */
-  state?: string | null;
+  /** Current step within the route (step description or null) */
+  step?: string | null;
   /** Tool calls the agent wants to execute */
   toolCalls?: Array<{
     /** Name of the tool to call */

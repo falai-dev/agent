@@ -24,7 +24,7 @@ export interface SessionData {
   agentName?: string;
   status: SessionStatus;
   currentRoute?: string;
-  currentState?: string;
+  currentStep?: string;
   collectedData?: Record<string, unknown>;
   messageCount?: number;
   lastMessageAt?: Date;
@@ -43,7 +43,7 @@ export interface MessageData {
   role: MessageRole;
   content: string;
   route?: string;
-  state?: string;
+  step?: string;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   event?: Event; // Optional: store full event data
   createdAt: Date;
@@ -102,12 +102,12 @@ export interface SessionRepository {
   ): Promise<SessionData | null>;
 
   /**
-   * Update current route and state
+   * Update current route and step
    */
-  updateRouteState(
+  updateRouteStep(
     id: string,
     route?: string,
-    state?: string
+    step?: string
   ): Promise<SessionData | null>;
 
   /**
@@ -228,7 +228,7 @@ export interface SaveMessageOptions {
   role: MessageRole;
   content: string;
   route?: string;
-  state?: string;
+  step?: string;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   event?: Event;
 }

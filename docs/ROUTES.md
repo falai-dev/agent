@@ -8,8 +8,8 @@ A complete guide to creating and managing conversational routes in `@falai/agent
 
 - [What is a Route?](#what-is-a-route)
 - [Creating Routes](#creating-routes)
-- [Initial State Configuration](#initial-state-configuration)
-- [End State Configuration](#end-state-configuration)
+- [Initial Step Configuration](#initial-step-configuration)
+- [End Step Configuration](#end-step-configuration)
 - [Data Extraction](#data-extraction)
 - [Sequential Steps](#sequential-steps)
 - [Route Properties](#route-properties)
@@ -20,7 +20,7 @@ A complete guide to creating and managing conversational routes in `@falai/agent
 
 ## What is a Route?
 
-A **Route** (also called a "Journey") represents a specific conversational flow in your agent. Think of it as a state machine that guides the conversation through a series of steps to accomplish a specific goal.
+A **Route** (also called a "Journey") represents a specific conversational flow in your agent. Think of it as a step machine that guides the conversation through a series of steps to accomplish a specific goal.
 
 ```typescript
 // Example: A route for booking flights
@@ -34,7 +34,7 @@ const bookingRoute = agent.createRoute<FlightData>({
 **Key Concepts:**
 
 - Each route has a **goal** (e.g., "book a flight", "answer FAQ", "collect feedback")
-- Routes contain **states** that represent conversation steps
+- Routes contain **steps** that represent conversation steps
 - Routes can extract and track **typed data** throughout the conversation
 - Routes have their own **rules**, **prohibitions**, and **guidelines**
 
@@ -70,7 +70,7 @@ const bookingRoute = agent.createRoute<FlightData>({
   conditions: ["User wants to book a flight"],
 
   // Define what data to extract
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       destination: {
@@ -117,9 +117,9 @@ const paymentRoute = agent.createRoute({
 
 ---
 
-## Initial State Configuration
+## Initial Step Configuration
 
-Every route starts with an initial state. You can now configure it in two ways:
+Every route starts with an initial step. You can now configure it in two ways:
 
 ### Option 1: Configure at Route Creation
 
@@ -127,16 +127,16 @@ Every route starts with an initial state. You can now configure it in two ways:
 const bookingRoute = agent.createRoute<FlightData>({
   title: "Book Flight",
 
-  // Configure the initial state
-  initialState: {
-    id: "welcome_state",
-    chatState:
+  // Configure the initial step
+  initialStep: {
+    id: "welcome_step",
+    instructions:
       "Welcome! I'll help you book a flight. Where would you like to go?",
-    gather: ["destination"],
-    skipIf: (extracted) => !!extracted.destination,
+    collect: ["destination"],
+    skipIf: (data) => !!data.destination,
   },
 
-  extractionSchema: {
+  schema: {
     // ... schema definition
   },
 });
@@ -150,160 +150,158 @@ const bookingRoute = agent.createRoute<FlightData>({
   // ... other options
 });
 
-// Configure initial state later
-bookingRoute.initialState.configure({
+// Configure initial step later
+bookingRoute.initialStep.configure({
   description: "Welcome! Let's book your flight",
-  gatherFields: ["destination"],
-  skipIf: (extracted) => !!extracted.destination,
+  collectFields: ["destination"],
+  skipIf: (data) => !!data.destination,
 });
 ```
 
-### Initial State Options
+### Initial Step Options
 
 ```typescript
-initialState: {
-  // Custom ID for the initial state
+initialStep: {
+  // Custom ID for the initial step
   id?: string;
 
-  // Description/prompt for the initial state
-  chatState?: string;
+  // Description/prompt for the initial step
+  instructions?: string;
 
-  // Fields to extract in this state
-  gather?: string[];
+  // Fields to extract in this step
+  collect?: string[];
 
-  // Skip this state if condition is met
-  skipIf?: (extracted: Partial<TExtracted>) => boolean;
+  // Skip this step if condition is met
+  skipIf?: (data: Partial<TData>) => boolean;
 
   // Prerequisites that must be metw
-  requiredData?: string[];
+  requires?: string[];
 }
 ```
 
 ---
 
-## End State Configuration
+## End Step Configuration
 
-Every route ends when it reaches `END_STATE`. You can configure what happens at route completion:
+Every route ends when it reaches `END_ROUTE`. You can configure what happens at route completion:
 
-### Configure End State at Route Creation
+### Configure End Step at Route Creation
 
 ```typescript
-import { END_STATE } from "@falai/agent";
+import { END_ROUTE } from "@falai/agent";
 
 const bookingRoute = agent.createRoute<FlightData>({
   title: "Book Flight",
 
   // Configure what happens when route completes
-  endState: {
+  endStep: {
     // Custom completion message
-    chatState: "Confirm the booking details and thank the user warmly!",
+    instructions: "Confirm the booking details and thank the user warmly!",
 
     // Optional: Execute final actions (like sending confirmation emails)
-    toolState: sendConfirmationEmail,
+    tool: sendConfirmationEmail,
 
-    // Optional: Gather final data before completing
-    gather: ["finalConfirmation"],
+    // Optional: Collect final data before completing
+    collect: ["finalConfirmation"],
 
     // Optional: Require certain data to be present
-    requiredData: ["destination", "departureDate"],
+    requires: ["destination", "departureDate"],
 
-    // Optional: Custom state ID
+    // Optional: Custom step ID
     id: "booking_complete",
   },
 
-  extractionSchema: {
+  schema: {
     // ... schema definition
   },
 });
 
-// Then just transition to END_STATE
-lastState.transitionTo({
-  state: END_STATE,
+// Then just transition to END_ROUTE
+lastStep.nextStep({
+  step: END_ROUTE,
 });
 ```
 
 ### Per-Transition Override
 
-You can also override the endState configuration for specific transitions:
+You can also override the endStep configuration for specific transitions:
 
 ```typescript
-// Use route-level endState
-lastState.transitionTo({
-  state: END_STATE,
+// Use route-level endStep
+lastStep.nextStep({
+  step: END_ROUTE,
 });
 
-// OR override with custom chatState for this specific transition
-lastState.transitionTo({
-  chatState: "Special completion message for this path!",
-  state: END_STATE,
+// OR override with custom instructions for this specific transition
+lastStep.nextStep({
+  instructions: "Special completion message for this path!",
+  step: END_ROUTE,
 });
 ```
 
-### End State Options
+### End Step Options
 
 ```typescript
-endState: {
+endStep: {
   // Completion message instruction (RECOMMENDED)
-  chatState?: string;
+  instructions?: string;
 
   // Execute final tools/actions before completion
-  toolState?: ToolRef;
+  tool?: ToolRef;
 
-  // Gather final data at completion
-  gather?: string[];
+  // Collect final data at completion
+  collect?: string[];
 
   // Require specific data to be present
-  requiredData?: string[];
+  requires?: string[];
 
-  // Custom state ID for debugging
+  // Custom step ID for debugging
   id?: string;
 }
 ```
 
 ### Default Behavior
 
-If you don't configure `endState`, a smart default is used:
+If you don't configure `endStep`, a smart default is used:
 
 ```typescript
-// Default endState behavior:
+// Default endStep behavior:
 {
-  chatState: "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
+  instructions: "Summarize what was accomplished and confirm completion based on the conversation history and collected data";
 }
 ```
 
-### End State with Tools
+### End Step with Tools
 
 Execute final actions when route completes:
 
 ```typescript
-import { defineTool, END_STATE } from "@falai/agent";
+import { defineTool, END_ROUTE } from "@falai/agent";
 
-const sendConfirmation = defineTool(
-  "send_confirmation",
-  async ({ extracted }) => {
-    await emailService.send({
-      to: extracted.email,
-      subject: "Booking Confirmed",
-      body: `Your flight to ${extracted.destination} is confirmed!`,
-    });
-    return { data: "Confirmation sent" };
-  }
-);
+const sendConfirmation = defineTool("send_confirmation", async ({ data }) => {
+  await emailService.send({
+    to: data.email,
+    subject: "Booking Confirmed",
+    body: `Your flight to ${data.destination} is confirmed!`,
+  });
+  return { data: "Confirmation sent" };
+});
 
 const bookingRoute = agent.createRoute({
   title: "Book Flight",
 
-  endState: {
-    toolState: sendConfirmation,  // Executes when route completes
-    chatState: "Your booking is complete! Confirmation email sent.",
+  endStep: {
+    tool: sendConfirmation, // Executes when route completes
+    instructions: "Your booking is complete! Confirmation email sent.",
   },
 });
 ```
 
 **Key Points:**
-- ✅ `endState` is configured once at the route level (DRY principle)
+
+- ✅ `endStep` is configured once at the route level (DRY principle)
 - ✅ Can be overridden per-transition if needed
-- ✅ Supports full state capabilities: `chatState`, `toolState`, `gather`, `requiredData`
+- ✅ Supports full step capabilities: `instructions`, `tool`, `collect`, `requires`
 - ✅ Falls back to smart default if not configured
 
 ---
@@ -318,7 +316,7 @@ The extraction schema defines what data your route will collect:
 const onboardingRoute = agent.createRoute<OnboardingData>({
   title: "User Onboarding",
 
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       firstName: { type: "string" },
@@ -335,17 +333,17 @@ const onboardingRoute = agent.createRoute<OnboardingData>({
 });
 ```
 
-### Getting Extracted Data
+### Getting Collected data
 
 ```typescript
-// Get extracted data from the route
-const extracted = bookingRoute.getExtractedData(session);
+// Get collected data from the route
+const data = bookingRoute.getData(session);
 
-console.log(extracted);
+console.log(data);
 // { destination: "Paris", departureDate: "2025-06-15", passengers: 2 }
 
 // Only returns data if session is in this route
-const otherRouteData = otherRoute.getExtractedData(session);
+const otherRouteData = otherRoute.getData(session);
 // {} - empty if session is in a different route
 ```
 
@@ -363,12 +361,12 @@ const bookingRoute = agent.createRoute<FlightData>({
     passengers: 1, // Default value
   },
 
-  extractionSchema: {
+  schema: {
     // ... schema
   },
 });
 
-// States with skipIf will automatically bypass if data exists
+// Steps with skipIf will automatically bypass if data exists
 ```
 
 ---
@@ -384,33 +382,33 @@ const feedbackRoute = agent.createRoute({
   steps: [
     {
       id: "ask_rating",
-      chatState: "How would you rate your experience? (1-5 stars)",
-      gather: ["rating"],
+      instructions: "How would you rate your experience? (1-5 stars)",
+      collect: ["rating"],
     },
     {
       id: "ask_liked",
-      chatState: "What did you like most?",
-      gather: ["likedMost"],
+      instructions: "What did you like most?",
+      collect: ["likedMost"],
     },
     {
       id: "ask_improve",
-      chatState: "What could we improve?",
-      gather: ["improvements"],
+      instructions: "What could we improve?",
+      collect: ["improvements"],
     },
     {
       id: "thank_you",
-      chatState: "Thank you for your feedback! 🙏",
+      instructions: "Thank you for your feedback! 🙏",
     },
   ],
 });
 
-// Automatically chains: initialState → ask_rating → ask_liked → ask_improve → thank_you → END_STATE
+// Automatically chains: initialStep → ask_rating → ask_liked → ask_improve → thank_you → END_ROUTE
 ```
 
 **When to use steps vs manual chaining:**
 
 - ✅ Use `steps` for: Linear flows, simple wizards, sequential data collection
-- ✅ Use manual chaining for: Branching logic, conditional flows, complex state machines
+- ✅ Use manual chaining for: Branching logic, conditional flows, complex step machines
 
 ---
 
@@ -445,18 +443,18 @@ const routeRef = route.getRef();
 console.log(routeRef); // { id: "route_book_flight_abc123" }
 
 // Use reference to jump to specific routes
-state.transitionTo({ state: routeRef });
+step.nextStep({ step: routeRef });
 ```
 
 ### Route Structure
 
 ```typescript
-// Get all states in the route
-const states = route.getAllStates();
-console.log(states); // [State, State, State, ...]
+// Get all steps in the route
+const steps = route.getAllSteps();
+console.log(steps); // [Step, Step, Step, ...]
 
-// Get specific state by ID
-const state = route.getState("ask_destination");
+// Get specific step by ID
+const step = route.getStep("ask_destination");
 
 // Describe route structure
 console.log(route.describe());
@@ -466,8 +464,8 @@ console.log(route.describe());
 // Description: Help user book a flight
 // Conditions: User wants to book a flight
 //
-// States:
-//   - initial_state: Initial state
+// Steps:
+//   - initial_step: Initial step
 //     -> ask_destination
 //   - ask_destination: Ask where they want to fly
 //     -> ask_dates
@@ -548,36 +546,36 @@ const supportRoute = agent.createRoute<SupportData>({
 });
 
 // Ask issue type
-const askIssueType = supportRoute.initialState.transitionTo({
-  chatState: "What type of issue are you experiencing?",
-  gather: ["issueType"],
+const askIssueType = supportRoute.initialStep.nextStep({
+  instructions: "What type of issue are you experiencing?",
+  collect: ["issueType"],
 });
 
 // Branch 1: Technical issues
-const technicalFlow = askIssueType.transitionTo({
-  chatState: "Let me help with your technical issue...",
+const technicalFlow = askIssueType.nextStep({
+  instructions: "Let me help with your technical issue...",
   condition: "Issue type is technical",
 });
 
 // Branch 2: Billing issues
-const billingFlow = askIssueType.transitionTo({
-  chatState: "Let me help with your billing issue...",
+const billingFlow = askIssueType.nextStep({
+  instructions: "Let me help with your billing issue...",
   condition: "Issue type is billing",
 });
 
 // Branch 3: General inquiries
-const generalFlow = askIssueType.transitionTo({
-  chatState: "Let me help with your inquiry...",
+const generalFlow = askIssueType.nextStep({
+  instructions: "Let me help with your inquiry...",
   condition: "Issue type is general",
 });
 ```
 
-### Pattern 2: Conditional Skip States
+### Pattern 2: Conditional Skip Steps
 
 ```typescript
 const checkoutRoute = agent.createRoute<CheckoutData>({
   title: "Checkout",
-  extractionSchema: {
+  schema: {
     properties: {
       hasAccount: { type: "boolean" },
       email: { type: "string" },
@@ -588,22 +586,22 @@ const checkoutRoute = agent.createRoute<CheckoutData>({
 });
 
 // Skip login if user already has account
-const login = checkoutRoute.initialState.transitionTo({
-  chatState: "Please log in or continue as guest",
-  gather: ["hasAccount", "email"],
-  skipIf: (extracted) => extracted.hasAccount === true,
+const login = checkoutRoute.initialStep.nextStep({
+  instructions: "Please log in or continue as guest",
+  collect: ["hasAccount", "email"],
+  skipIf: (data) => data.hasAccount === true,
 });
 
 // Skip billing address if same as shipping
-const shippingAddress = login.transitionTo({
-  chatState: "What's your shipping address?",
-  gather: ["shippingAddress"],
+const shippingAddress = login.nextStep({
+  instructions: "What's your shipping address?",
+  collect: ["shippingAddress"],
 });
 
-const billingAddress = shippingAddress.transitionTo({
-  chatState: "Is your billing address the same as shipping?",
-  gather: ["billingAddress"],
-  skipIf: (extracted) => extracted.billingAddress !== undefined,
+const billingAddress = shippingAddress.nextStep({
+  instructions: "Is your billing address the same as shipping?",
+  collect: ["billingAddress"],
+  skipIf: (data) => data.billingAddress !== undefined,
 });
 ```
 
@@ -635,10 +633,10 @@ import { defineTool } from "@falai/agent";
 
 const searchFlights = defineTool<MyContext, [], FlightResults>(
   "search_flights",
-  async ({ context, extracted }) => {
+  async ({ context, data }) => {
     const flights = await api.searchFlights({
-      destination: extracted.destination,
-      date: extracted.departureDate,
+      destination: data.destination,
+      date: data.departureDate,
     });
 
     return {
@@ -653,21 +651,21 @@ const bookingRoute = agent.createRoute<FlightData>({
   domains: ["booking"], // Ensure tool is in this domain
 });
 
-// Gather data
-const gatherDetails = bookingRoute.initialState.transitionTo({
-  chatState: "Where and when would you like to fly?",
-  gather: ["destination", "departureDate", "passengers"],
+// Collect data
+const collectDetails = bookingRoute.initialStep.nextStep({
+  instructions: "Where and when would you like to fly?",
+  collect: ["destination", "departureDate", "passengers"],
 });
 
 // Execute tool
-const searchState = gatherDetails.transitionTo({
-  toolState: searchFlights,
-  requiredData: ["destination", "departureDate", "passengers"],
+const searchStep = collectDetails.nextStep({
+  tool: searchFlights,
+  requires: ["destination", "departureDate", "passengers"],
 });
 
 // Present results
-const presentFlights = searchState.transitionTo({
-  chatState: "Here are available flights based on your search",
+const presentFlights = searchStep.nextStep({
+  instructions: "Here are available flights based on your search",
 });
 ```
 
@@ -675,36 +673,36 @@ const presentFlights = searchState.transitionTo({
 
 ## Route Completion
 
-When a route reaches its final state and transitions to `END_STATE`, the agent returns `isRouteComplete: true` to signal that all required data has been collected.
+When a route reaches its final step and transitions to `END_ROUTE`, the agent returns `isRouteComplete: true` to signal that all required data has been collected.
 
 ### Ending a Route
 
-Use the `END_STATE` symbol to mark the end of a route:
+Use the `END_ROUTE` symbol to mark the end of a route:
 
 ```typescript
-import { END_STATE } from "@falai/agent";
+import { END_ROUTE } from "@falai/agent";
 
 const onboardingRoute = agent.createRoute<OnboardingData>({
   title: "User Onboarding",
-  extractionSchema: ONBOARDING_SCHEMA,
+  schema: ONBOARDING_SCHEMA,
 });
 
-const askName = onboardingRoute.initialState.transitionTo({
-  chatState: "What's your name?",
-  gather: ["name"],
+const askName = onboardingRoute.initialStep.nextStep({
+  instructions: "What's your name?",
+  collect: ["name"],
 });
 
-const askEmail = askName.transitionTo({
-  chatState: "What's your email?",
-  gather: ["email"],
+const askEmail = askName.nextStep({
+  instructions: "What's your email?",
+  collect: ["email"],
 });
 
-const thankYou = askEmail.transitionTo({
-  chatState: "Thank you! Your profile is complete.",
+const thankYou = askEmail.nextStep({
+  instructions: "Thank you! Your profile is complete.",
 });
 
 // End the route
-thankYou.transitionTo({ state: END_STATE });
+thankYou.nextStep({ step: END_ROUTE });
 ```
 
 ### Handling Completion
@@ -723,7 +721,7 @@ if (response.isRouteComplete) {
   // ✅ Route is complete! All data has been collected
 
   // Get the collected data
-  const data = agent.getExtractedData(response.session!);
+  const data = agent.getData(response.session!);
   console.log("Collected data:", data);
 
   // Process the data
@@ -738,21 +736,21 @@ if (response.isRouteComplete) {
 }
 ```
 
-#### Method 2: Using `END_STATE_ID` Constant
+#### Method 2: Using `END_ROUTE_ID` Constant
 
 For users who prefer a symbol-based pattern consistent with building routes:
 
 ```typescript
-import { END_STATE_ID } from "@falai/agent";
+import { END_ROUTE_ID } from "@falai/agent";
 
 const response = await agent.respond({
   history,
   session,
 });
 
-if (response.session?.currentState?.id === END_STATE_ID) {
-  // ✅ Route completed - currentState is now END_STATE
-  const data = agent.getExtractedData(response.session!);
+if (response.session?.currentStep?.id === END_ROUTE_ID) {
+  // ✅ Route completed - currentStep is now END_ROUTE
+  const data = agent.getData(response.session!);
   await handleCompletion(data);
   return "Complete!";
 }
@@ -763,7 +761,7 @@ return response.message;
 **Which method should you use?**
 
 - ✅ **Use `isRouteComplete`** for simplicity and clarity
-- ✅ **Use `END_STATE_ID`** if you want consistency with how you build routes (`END_STATE` symbol)
+- ✅ **Use `END_ROUTE_ID`** if you want consistency with how you build routes (`END_ROUTE` symbol)
 
 ---
 
@@ -784,7 +782,7 @@ The simplest form - just specify the target route ID or title:
 const bookingRoute = agent.createRoute<BookingData>({
   title: "Book Hotel",
   conditions: ["User wants to book a hotel"],
-  extractionSchema: BOOKING_SCHEMA,
+  schema: BOOKING_SCHEMA,
   // Automatically transition to feedback when booking completes
   onComplete: "Collect Feedback",
 });
@@ -792,7 +790,7 @@ const bookingRoute = agent.createRoute<BookingData>({
 const feedbackRoute = agent.createRoute<FeedbackData>({
   title: "Collect Feedback",
   conditions: ["Collect user feedback"],
-  extractionSchema: FEEDBACK_SCHEMA,
+  schema: FEEDBACK_SCHEMA,
 });
 ```
 
@@ -803,9 +801,9 @@ Add an optional condition that the AI evaluates to determine if transition shoul
 ```typescript
 const bookingRoute = agent.createRoute<BookingData>({
   title: "Book Hotel",
-  extractionSchema: BOOKING_SCHEMA,
+  schema: BOOKING_SCHEMA,
   onComplete: {
-    transitionTo: "Collect Feedback",
+    nextStep: "Collect Feedback",
     condition: "if booking was successful", // AI evaluates this
   },
 });
@@ -813,19 +811,19 @@ const bookingRoute = agent.createRoute<BookingData>({
 
 ### Dynamic Function-Based Transition
 
-Use a function for complex logic based on extracted data or context:
+Use a function for complex logic based on collected data or context:
 
 ```typescript
 const bookingRoute = agent.createRoute<BookingData>({
   title: "Book Hotel",
-  extractionSchema: BOOKING_SCHEMA,
+  schema: BOOKING_SCHEMA,
   // Function receives session and context
   onComplete: (session, context) => {
-    // Conditional logic based on extracted data
-    if (session.extracted?.guests && session.extracted.guests > 5) {
+    // Conditional logic based on collected data
+    if (session.data?.guests && session.data.guests > 5) {
       return "VIP Feedback"; // Large groups get VIP treatment
     }
-    if (session.extracted?.bookingFailed) {
+    if (session.data?.bookingFailed) {
       return "Error Recovery"; // Handle failures gracefully
     }
     return "Collect Feedback"; // Standard feedback flow
@@ -837,16 +835,16 @@ Function can also return a config object:
 
 ```typescript
 onComplete: (session) => ({
-  transitionTo: "Collect Feedback",
-  condition: session.extracted?.vip ? "if user is satisfied" : undefined,
-})
+  nextStep: "Collect Feedback",
+  condition: session.data?.vip ? "if user is satisfied" : undefined,
+});
 ```
 
 ### How It Works
 
-1. **Route completes** → reaches `END_STATE`
+1. **Route completes** → reaches `END_ROUTE`
 2. **Agent evaluates** `onComplete` handler
-3. **Sets pending transition** in session state
+3. **Sets pending transition** in session step
 4. **Next `respond()` call** → automatically transitions to target route
 5. **User sees seamless flow** → no interruption in conversation
 
@@ -864,14 +862,14 @@ console.log(response2.session?.currentRoute?.title); // "Collect Feedback"
 
 ### Manual Transition Control
 
-For more control, use `agent.transitionToRoute()` to manually set the transition:
+For more control, use `agent.nextStepRoute()` to manually set the transition:
 
 ```typescript
 const response = await agent.respond({ history, session });
 
 if (response.isRouteComplete && shouldCollectFeedback) {
   // Manually trigger transition instead of onComplete
-  const updatedSession = agent.transitionToRoute(
+  const updatedSession = agent.nextStepRoute(
     "Collect Feedback",
     response.session
   );
@@ -902,7 +900,7 @@ interface FeedbackData {
 const bookingRoute = agent.createRoute<BookingData>({
   title: "Book Hotel",
   conditions: ["User wants to book a hotel"],
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       hotelName: { type: "string" },
@@ -914,34 +912,34 @@ const bookingRoute = agent.createRoute<BookingData>({
   onComplete: "Collect Feedback",
 });
 
-const askHotel = bookingRoute.initialState.transitionTo({
-  chatState: "Ask which hotel",
-  gather: ["hotelName"],
+const askHotel = bookingRoute.initialStep.nextStep({
+  instructions: "Ask which hotel",
+  collect: ["hotelName"],
   skipIf: (e) => !!e.hotelName,
 });
 
-const askDate = askHotel.transitionTo({
-  chatState: "Ask for date",
-  gather: ["date"],
+const askDate = askHotel.nextStep({
+  instructions: "Ask for date",
+  collect: ["date"],
   skipIf: (e) => !!e.date,
 });
 
-const askGuests = askDate.transitionTo({
-  chatState: "Ask for guests",
-  gather: ["guests"],
+const askGuests = askDate.nextStep({
+  instructions: "Ask for guests",
+  collect: ["guests"],
   skipIf: (e) => !!e.guests,
 });
 
-askGuests.transitionTo({
-  chatState: "Confirm booking",
-  state: END_STATE,
+askGuests.nextStep({
+  instructions: "Confirm booking",
+  step: END_ROUTE,
 });
 
 // Feedback route
 const feedbackRoute = agent.createRoute<FeedbackData>({
   title: "Collect Feedback",
   conditions: ["Collect user feedback"],
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       rating: { type: "number" },
@@ -951,14 +949,14 @@ const feedbackRoute = agent.createRoute<FeedbackData>({
   },
 });
 
-const askRating = feedbackRoute.initialState.transitionTo({
-  chatState: "Ask for rating 1-5",
-  gather: ["rating"],
+const askRating = feedbackRoute.initialStep.nextStep({
+  instructions: "Ask for rating 1-5",
+  collect: ["rating"],
 });
 
-askRating.transitionTo({
-  chatState: "Thank user",
-  state: END_STATE,
+askRating.nextStep({
+  instructions: "Thank user",
+  step: END_ROUTE,
 });
 
 // Usage - seamless transition from booking to feedback
@@ -976,14 +974,14 @@ const response2 = await agent.respond({ history, session: response1.session });
 ✅ **Seamless user experience** - No awkward pauses between flows
 ✅ **Predictable behavior** - Transitions defined at design time
 ✅ **Flexible** - Simple strings, conditions, or complex functions
-✅ **Type-safe** - Full TypeScript inference for extracted data
+✅ **Type-safe** - Full TypeScript inference for collected data
 ✅ **Non-breaking** - Existing routes without `onComplete` work as before
 
 See [examples/route-transitions.ts](../examples/route-transitions.ts) for a complete working example.
 
 ### Immediate Completion
 
-Routes can complete **immediately** if all states are skipped due to `skipIf` conditions. This is useful when:
+Routes can complete **immediately** if all steps are skipped due to `skipIf` conditions. This is useful when:
 
 - Resuming a partially completed route
 - Pre-filling data from an existing session
@@ -992,47 +990,47 @@ Routes can complete **immediately** if all states are skipped due to `skipIf` co
 ```typescript
 const onboardingRoute = agent.createRoute<OnboardingData>({
   title: "User Onboarding",
-  extractionSchema: ONBOARDING_SCHEMA,
+  schema: ONBOARDING_SCHEMA,
   initialData: existingUserData, // Pre-fill with existing data
 });
 
-const askName = onboardingRoute.initialState.transitionTo({
-  chatState: "What's your name?",
-  gather: ["name"],
+const askName = onboardingRoute.initialStep.nextStep({
+  instructions: "What's your name?",
+  collect: ["name"],
   skipIf: (data) => !!data.name, // Skip if name exists
 });
 
-const askEmail = askName.transitionTo({
-  chatState: "What's your email?",
-  gather: ["email"],
+const askEmail = askName.nextStep({
+  instructions: "What's your email?",
+  collect: ["email"],
   skipIf: (data) => !!data.email, // Skip if email exists
 });
 
-const complete = askEmail.transitionTo({
-  chatState: "All done!",
+const complete = askEmail.nextStep({
+  instructions: "All done!",
 });
 
-complete.transitionTo({ state: END_STATE });
+complete.nextStep({ step: END_ROUTE });
 
 // In your handler:
 const response = await agent.respond({ history, session });
 
 if (response.isRouteComplete) {
   // If existingUserData had all fields, route completes immediately!
-  // The routing engine recursively skips all states and reaches END_STATE
+  // The routing engine recursively skips all steps and reaches END_ROUTE
   console.log("Profile already complete!");
 }
 ```
 
 ### Important Notes
 
-- **`isRouteComplete: true`** indicates the route has reached `END_STATE`
-- **`currentState.id`** is set to `END_STATE_ID` when the route completes
+- **`isRouteComplete: true`** indicates the route has reached `END_ROUTE`
+- **`currentStep.id`** is set to `END_ROUTE_ID` when the route completes
 - **`response.message`** will be empty (`""`) when route is complete
-- **The routing engine** recursively traverses skipped states to detect completion
-- **You can check either** `isRouteComplete` or `currentState.id === END_STATE_ID`
-- **Session state** still contains all the collected data via `agent.getExtractedData()`
-- **The route** (`currentRoute.id`) remains the completed route (e.g., "onboarding"), not END_STATE
+- **The routing engine** recursively traverses skipped steps to detect completion
+- **You can check either** `isRouteComplete` or `currentStep.id === END_ROUTE_ID`
+- **Session step** still contains all the collected data via `agent.getData()`
+- **The route** (`currentRoute.id`) remains the completed route (e.g., "onboarding"), not END_ROUTE
 
 ### With Streaming
 
@@ -1044,7 +1042,7 @@ for await (const chunk of agent.respondStream({ history, session })) {
 
   if (chunk.done && chunk.isRouteComplete) {
     console.log("\n🎉 Route completed!");
-    const data = agent.getExtractedData(chunk.session!);
+    const data = agent.getData(chunk.session!);
     await processCompletedData(data);
   }
 }
@@ -1058,7 +1056,7 @@ for await (const chunk of agent.respondStream({ history, session })) {
 
 - **Use descriptive titles and descriptions** - Makes routing more accurate
 - **Define extraction schemas** - Type-safe data collection
-- **Configure initial state** - Set up proper entry point
+- **Configure initial step** - Set up proper entry point
 - **Use skipIf for known data** - Avoid redundant questions
 - **Scope domains** - Limit tool access per route
 - **Add route-specific guidelines** - Context-aware behavior
@@ -1069,15 +1067,15 @@ for await (const chunk of agent.respondStream({ history, session })) {
 - **Don't use vague conditions** - Be specific about when to activate
 - **Don't skip extraction schemas** - Loses type safety
 - **Don't create overly complex routes** - Split into multiple routes
-- **Don't forget requiredData** - Prevent states from executing too early
+- **Don't forget requires** - Prevent steps from executing too early
 - **Don't mix concerns** - One route = one goal
-- **Don't hardcode state IDs** - Let framework generate deterministic IDs
+- **Don't hardcode step IDs** - Let framework generate deterministic IDs
 
 ---
 
 ## See Also
 
-- [States Guide](./STATES.md) - Deep dive into state management
+- [Steps Guide](./STEPS.md) - Deep dive into step management
 - [API Reference - Route](./API_REFERENCE.md#route) - Complete API docs
 - [Examples](../examples/) - Real-world route implementations
 - [Architecture Guide](./ARCHITECTURE.md) - How routes fit in the system

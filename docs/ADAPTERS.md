@@ -2,7 +2,7 @@
 
 All adapters follow the **provider pattern** - no dependencies required in the package, users install only what they need.
 
-**NEW**: All adapters now support the new **Session State** pattern with automatic persistence of extracted data, current route/state, and conversation progress!
+**NEW**: All adapters now support the new **Session Step** pattern with automatic persistence of collected data, current route/step, and conversation progress!
 
 ### 🎯 Available Adapters
 
@@ -87,7 +87,7 @@ All adapters follow the **provider pattern** - no dependencies required in the p
 
 ## 🎯 Usage Pattern
 
-All adapters follow the same simple pattern with full session state support:
+All adapters follow the same simple pattern with full session step support:
 
 ```typescript
 import { Agent, [Adapter]Adapter } from "@falai/agent";
@@ -107,14 +107,14 @@ const agent = new Agent({
   persistence: {
     adapter,
     userId: "user_123",
-    autoSave: true, // ✨ Auto-saves session state!
+    autoSave: true, // ✨ Auto-saves session step!
   },
 });
 
 // Create a route with data extraction
 const route = agent.createRoute<YourDataType>({
   title: "My Route",
-  extractionSchema: {
+  schema: {
     type: "object",
     properties: {
       field1: { type: "string" },
@@ -124,28 +124,28 @@ const route = agent.createRoute<YourDataType>({
   },
 });
 
-// Define states
-route.initialState.transitionTo({
-  chatState: "Collect data",
-  gather: ["field1", "field2"],
+// Define steps
+route.initialStep.nextStep({
+  instructions: "Collect data",
+  collect: ["field1", "field2"],
 });
 
-// Use with session state
+// Use with session step
 const persistence = agent.getPersistenceManager();
-const { sessionData, sessionState } =
-  await persistence.createSessionWithState<YourDataType>({
+const { sessionData, sessionStep } =
+  await persistence.createSessionWithStep<YourDataType>({
     userId: "user_123",
     agentName: "My Agent",
   });
 
-// Chat with automatic session state persistence
+// Chat with automatic session step persistence
 const response = await agent.respond({
   history: [...],
-  session: sessionState, // Pass session state
+  session: sessionStep, // Pass session step
 });
 
-// Session state auto-saved! Includes extracted data
-console.log("Extracted:", response.session?.extracted);
+// Session step auto-saved! Includes collected data
+console.log("Data:", response.session?.data);
 ```
 
 ## 🔌 Optional Dependencies
@@ -206,18 +206,18 @@ export class MyCustomAdapter implements PersistenceAdapter {
 
 All adapters are fully typed with **zero `any` types** (except for Prisma's dynamic model access):
 
-- Generic client interfaces with `SessionState<TExtracted>` support
+- Generic client interfaces with `SessionStep<TData>` support
 - Typed repository methods
 - Full IDE autocomplete
 - Type-safe data extraction throughout
 
 ## 💾 What Gets Stored
 
-All adapters store session state in the `collectedData` JSON field:
+All adapters store session step in the `collectedData` JSON field:
 
 ```json
 {
-  "extracted": {
+  "data": {
     "destination": "Paris",
     "departureDate": "2025-06-15",
     "passengers": 2
@@ -230,7 +230,7 @@ All adapters store session state in the `collectedData` JSON field:
     }
   ],
   "currentRouteTitle": "Book a Flight",
-  "currentStateDescription": "Ask about travel dates",
+  "currentStepDescription": "Ask about travel dates",
   "metadata": {
     "sessionId": "session_123",
     "createdAt": "2025-10-15T10:00:00Z",
@@ -241,8 +241,8 @@ All adapters store session state in the `collectedData` JSON field:
 
 This allows:
 
-- ✅ Full session state recovery
-- ✅ Analytics on extracted data
+- ✅ Full session step recovery
+- ✅ Analytics on collected data
 - ✅ Conversation progress tracking
 - ✅ Multi-turn conversation support
 
