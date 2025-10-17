@@ -37,10 +37,8 @@ export class Transition<TContext = unknown, TData = unknown> {
    * Normalize tool - convert inline handler to ToolRef if needed
    */
   private normalizeTool<TContext, TData>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tool:
-      | ToolRef<TContext, any[], any, TData>
-      | InlineToolHandler<TContext, TData>,
+    tool: // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ToolRef<TContext, any[], any, TData> | InlineToolHandler<TContext, TData>,
     stepId: string
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): ToolRef<TContext, any[], any, TData> {
@@ -56,12 +54,13 @@ export class Transition<TContext = unknown, TData = unknown> {
     return {
       id: toolId,
       name: toolId,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       handler: async (
         context: ToolContext<TContext, TData>
-      ): Promise<ToolResult<any, TContext, TData>> => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ): Promise<ToolResult<any, TContext, TData>> => {
         const result = (await inlineHandler(context)) as ToolResult<
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           any,
           TContext,
           TData

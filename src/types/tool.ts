@@ -26,16 +26,16 @@ export interface ToolContext<TContext = unknown, TData = unknown> {
  * Result returned by a tool
  */
 export interface ToolResult<
-  TData = unknown,
+  TResultData = unknown,
   TContext = unknown,
-  TCollected = unknown
+  TData = unknown
 > {
   /** The result data */
-  data: TData;
+  data: TResultData;
   /** Optional context update to be merged with current context */
   contextUpdate?: Partial<TContext>;
   /** Optional collected data update to be merged with session step */
-  collectedUpdate?: Partial<TCollected>;
+  collectedUpdate?: Partial<TData>;
   /** Optional metadata about the execution */
   meta?: Record<string, unknown>;
 }
