@@ -8,7 +8,7 @@ import type { RouteOptions } from "../types/route";
 
 import type { SessionState } from "../types/session";
 import type { AgentStructuredResponse } from "../types/ai";
-import { createSession, enterState, mergeExtracted } from "../types/session";
+import { createSession, enterRoute, enterState, mergeExtracted } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
 import { logger, LoggerLevel } from "../utils/logger";
 
@@ -243,11 +243,10 @@ export class Agent<TContext = unknown> {
 
     // Trigger lifecycle hook if configured
     if (this.options.hooks?.onExtractedUpdate) {
-      const updatedExtracted = (await this.options.hooks.onExtractedUpdate(
+        newExtracted = (await this.options.hooks.onExtractedUpdate(
         newExtracted,
         previousExtracted
       )) as Partial<TExtracted>;
-      newExtracted = updatedExtracted;
     }
 
     // Return updated session
@@ -363,7 +362,43 @@ export class Agent<TContext = unknown> {
     let selectedState: State<TContext> | undefined;
     let isRouteComplete = false;
 
-    if (this.routes.length > 0) {
+    // Check for pending transition from previous route completion
+    if (session.pendingTransition) {
+      const targetRoute = this.routes.find(
+        (r) => r.id === session.pendingTransition?.targetRouteId
+      );
+
+      if (targetRoute) {
+        logger.debug(
+          `[Agent] Auto-transitioning from pending transition to route: ${targetRoute.title}`
+        );
+        // Clear pending transition and enter new route
+        session = {
+          ...session,
+          pendingTransition: undefined,
+        };
+        session = enterRoute(session, targetRoute.id, targetRoute.title);
+
+        // Merge initial data if available
+        if (targetRoute.initialData) {
+          session = mergeExtracted(session, targetRoute.initialData);
+        }
+
+        selectedRoute = targetRoute;
+      } else {
+        logger.warn(
+          `[Agent] Pending transition target route not found: ${session.pendingTransition.targetRouteId}`
+        );
+        // Clear invalid transition
+        session = {
+          ...session,
+          pendingTransition: undefined,
+        };
+      }
+    }
+
+    // If no pending transition or transition handled, do normal routing
+    if (this.routes.length > 0 && !selectedRoute) {
       const orchestration = await this.routingEngine.decideRouteAndState({
         routes: this.routes,
         session,
@@ -531,19 +566,118 @@ export class Agent<TContext = unknown> {
         };
       }
     } else if (isRouteComplete && selectedRoute) {
-      // Route is complete - set state to END_STATE marker and yield completion signal
+      // Route is complete - generate completion message then check for onComplete transition
+      const lastUserMessage = getLastMessageFromHistory(history);
+
+      // Get endState spec from route
+      const endStateSpec = selectedRoute.endStateSpec;
+
+      // Create a temporary state for completion message generation using endState configuration
+      const completionState = new State<TContext>(
+        selectedRoute.id,
+        endStateSpec.chatState || "Summarize what was accomplished and confirm completion",
+        endStateSpec.id || END_STATE_ID,
+        endStateSpec.gather,
+        undefined,
+        endStateSpec.requiredData,
+        endStateSpec.chatState || "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
+      );
+
+      // Build response schema for completion
+      const responseSchema = this.responseEngine.responseSchemaForRoute(
+        selectedRoute,
+        completionState
+      );
+
+      // Build completion response prompt
+      const completionPrompt = this.responseEngine.buildResponsePrompt(
+        selectedRoute,
+        completionState,
+        selectedRoute.getRules(),
+        selectedRoute.getProhibitions(),
+        undefined, // No directives for completion
+        history,
+        lastUserMessage,
+        {
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+          personality: this.options.personality,
+        }
+      );
+
+      // Stream completion message using AI provider
+      const stream = this.options.ai.generateMessageStream({
+        prompt: completionPrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: responseSchema,
+          schemaName: "completion_message_stream",
+        },
+      });
+
+      logger.debug(
+        `[Agent] Streaming completion message for route: ${selectedRoute.title}`
+      );
+
+      // Check for onComplete transition
+      const transitionConfig = await selectedRoute.evaluateOnComplete(
+        { extracted: session.extracted },
+        effectiveContext
+      );
+
+      if (transitionConfig) {
+        // Find target route by ID or title
+        const targetRoute = this.routes.find(
+          (r) =>
+            r.id === transitionConfig.transitionTo ||
+            r.title === transitionConfig.transitionTo
+        );
+
+        if (targetRoute) {
+          // Set pending transition in session
+          session = {
+            ...session,
+            pendingTransition: {
+              targetRouteId: targetRoute.id,
+              condition: transitionConfig.condition,
+              reason: "route_complete",
+            },
+          };
+          logger.debug(
+            `[Agent] Route ${selectedRoute.title} completed with pending transition to: ${targetRoute.title}`
+          );
+        } else {
+          logger.warn(
+            `[Agent] Route ${selectedRoute.title} completed but target route not found: ${transitionConfig.transitionTo}`
+          );
+        }
+      }
+
+      // Set state to END_STATE marker
       session = enterState(session, END_STATE_ID, "Route completed");
       logger.debug(
         `[Agent] Route ${selectedRoute.title} completed. Entered END_STATE state.`
       );
-      yield {
-        delta: "",
-        accumulated: "",
-        done: true,
-        session,
-        toolCalls: undefined,
-        isRouteComplete: true,
-      };
+
+      // Stream completion chunks
+      for await (const chunk of stream) {
+        // Update current session if we have one
+        if (chunk.done && this.currentSession) {
+          this.currentSession = session;
+        }
+
+        yield {
+          delta: chunk.delta,
+          accumulated: chunk.accumulated,
+          done: chunk.done,
+          session,
+          toolCalls: undefined,
+          isRouteComplete: true,
+        };
+      }
     } else {
       // Fallback: No routes defined, stream a simple response
       const fallbackPrompt = new PromptComposer<TContext>()
@@ -689,7 +823,43 @@ export class Agent<TContext = unknown> {
     let selectedState: State<TContext> | undefined;
     let isRouteComplete = false;
 
-    if (this.routes.length > 0) {
+    // Check for pending transition from previous route completion
+    if (session.pendingTransition) {
+      const targetRoute = this.routes.find(
+        (r) => r.id === session.pendingTransition?.targetRouteId
+      );
+
+      if (targetRoute) {
+        logger.debug(
+          `[Agent] Auto-transitioning from pending transition to route: ${targetRoute.title}`
+        );
+        // Clear pending transition and enter new route
+        session = {
+          ...session,
+          pendingTransition: undefined,
+        };
+        session = enterRoute(session, targetRoute.id, targetRoute.title);
+
+        // Merge initial data if available
+        if (targetRoute.initialData) {
+          session = mergeExtracted(session, targetRoute.initialData);
+        }
+
+        selectedRoute = targetRoute;
+      } else {
+        logger.warn(
+          `[Agent] Pending transition target route not found: ${session.pendingTransition.targetRouteId}`
+        );
+        // Clear invalid transition
+        session = {
+          ...session,
+          pendingTransition: undefined,
+        };
+      }
+    }
+
+    // If no pending transition or transition handled, do normal routing
+    if (this.routes.length > 0 && !selectedRoute) {
       const orchestration = await this.routingEngine.decideRouteAndState({
         routes: this.routes,
         session,
@@ -829,9 +999,99 @@ export class Agent<TContext = unknown> {
         );
       }
     } else if (isRouteComplete && selectedRoute) {
-      // Route is complete - set state to END_STATE marker and return completion signal
+      // Route is complete - generate completion message then check for onComplete transition
+      const lastUserMessage = getLastMessageFromHistory(history);
+
+      // Get endState spec from route
+      const endStateSpec = selectedRoute.endStateSpec;
+
+      // Create a temporary state for completion message generation using endState configuration
+      const completionState = new State<TContext>(
+        selectedRoute.id,
+        endStateSpec.chatState || "Summarize what was accomplished and confirm completion",
+        endStateSpec.id || END_STATE_ID,
+        endStateSpec.gather,
+        undefined,
+        endStateSpec.requiredData,
+        endStateSpec.chatState || "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
+      );
+
+      // Build response schema for completion
+      const responseSchema = this.responseEngine.responseSchemaForRoute(
+        selectedRoute,
+        completionState
+      );
+
+      // Build completion response prompt
+      const completionPrompt = this.responseEngine.buildResponsePrompt(
+        selectedRoute,
+        completionState,
+        selectedRoute.getRules(),
+        selectedRoute.getProhibitions(),
+        undefined, // No directives for completion
+        history,
+        lastUserMessage,
+        {
+          name: this.options.name,
+          goal: this.options.goal,
+          description: this.options.description,
+          personality: this.options.personality,
+        }
+      );
+
+      // Generate completion message using AI provider
+      const completionResult = await this.options.ai.generateMessage({
+        prompt: completionPrompt,
+        history,
+        context: effectiveContext,
+        signal,
+        parameters: {
+          jsonSchema: responseSchema,
+          schemaName: "completion_message",
+        },
+      });
+
+      message = completionResult.structured?.message || completionResult.message;
+      logger.debug(
+        `[Agent] Generated completion message for route: ${selectedRoute.title}`
+      );
+
+      // Check for onComplete transition
+      const transitionConfig = await selectedRoute.evaluateOnComplete(
+        { extracted: session.extracted },
+        effectiveContext
+      );
+
+      if (transitionConfig) {
+        // Find target route by ID or title
+        const targetRoute = this.routes.find(
+          (r) =>
+            r.id === transitionConfig.transitionTo ||
+            r.title === transitionConfig.transitionTo
+        );
+
+        if (targetRoute) {
+          // Set pending transition in session
+          session = {
+            ...session,
+            pendingTransition: {
+              targetRouteId: targetRoute.id,
+              condition: transitionConfig.condition,
+              reason: "route_complete",
+            },
+          };
+          logger.debug(
+            `[Agent] Route ${selectedRoute.title} completed with pending transition to: ${targetRoute.title}`
+          );
+        } else {
+          logger.warn(
+            `[Agent] Route ${selectedRoute.title} completed but target route not found: ${transitionConfig.transitionTo}`
+          );
+        }
+      }
+
+      // Set state to END_STATE marker
       session = enterState(session, END_STATE_ID, "Route completed");
-      message = "";
       logger.debug(
         `[Agent] Route ${selectedRoute.title} completed. Entered END_STATE state.`
       );
@@ -1022,5 +1282,67 @@ export class Agent<TContext = unknown> {
       );
     }
     return (this.currentSession.extracted as Partial<TExtracted>) || {};
+  }
+
+  /**
+   * Manually transition to a different route
+   * Sets a pending transition that will be executed on the next respond() call
+   *
+   * @param routeIdOrTitle - Route ID or title to transition to
+   * @param session - Session state to update (uses current session if not provided)
+   * @param condition - Optional AI-evaluated condition for the transition
+   * @returns Updated session with pending transition
+   *
+   * @example
+   * // After route completes
+   * if (response.isRouteComplete && response.session) {
+   *   const updatedSession = agent.transitionToRoute("feedback-collection", response.session);
+   *   // Next respond() call will automatically transition to feedback route
+   *   const nextResponse = await agent.respond({ history, session: updatedSession });
+   * }
+   */
+  transitionToRoute(
+    routeIdOrTitle: string,
+    session?: SessionState,
+    condition?: string
+  ): SessionState {
+    const targetSession = session || this.currentSession;
+
+    if (!targetSession) {
+      throw new Error(
+        "No session provided and no current session available. Please provide a session to transition."
+      );
+    }
+
+    // Find target route by ID or title
+    const targetRoute = this.routes.find(
+      (r) => r.id === routeIdOrTitle || r.title === routeIdOrTitle
+    );
+
+    if (!targetRoute) {
+      throw new Error(
+        `Route not found: ${routeIdOrTitle}. Available routes: ${this.routes.map((r) => r.title).join(", ")}`
+      );
+    }
+
+    const updatedSession: SessionState = {
+      ...targetSession,
+      pendingTransition: {
+        targetRouteId: targetRoute.id,
+        condition,
+        reason: "manual",
+      },
+    };
+
+    // Update current session if using it
+    if (!session && this.currentSession) {
+      this.currentSession = updatedSession;
+    }
+
+    logger.debug(
+      `[Agent] Set pending manual transition to route: ${targetRoute.title}`
+    );
+
+    return updatedSession;
   }
 }

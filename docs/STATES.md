@@ -503,21 +503,111 @@ route.initialState.configure({
 - Set expectations
 - Pre-populate data
 
-### 4. Terminal State
+### 4. End State (Terminal State)
 
-End of a route:
+Every route ends when it reaches `END_STATE`. You can configure what happens at completion:
+
+#### Option A: Route-Level Configuration (Recommended)
 
 ```typescript
-const end = finalStep.transitionTo({
+import { END_STATE } from "@falai/agent";
+
+const bookingRoute = agent.createRoute({
+  title: "Book Flight",
+
+  // Configure end state behavior
+  endState: {
+    chatState: "Confirm booking and thank the user!",
+    toolState: sendConfirmationEmail,  // Execute final actions
+    gather: ["finalConfirmation"],     // Gather last data
+  },
+});
+
+// Later, just transition to END_STATE
+finalStep.transitionTo({
   state: END_STATE,
 });
 ```
 
-**When to use:**
+#### Option B: Per-Transition Override
 
-- Route completion
-- Success/failure outcomes
-- Handoff to another route
+```typescript
+// Override endState for this specific path
+finalStep.transitionTo({
+  chatState: "Special completion message for VIP users!",
+  state: END_STATE,
+});
+```
+
+#### Option C: Default Behavior
+
+If you don't configure `endState`, a smart default completion message is generated:
+
+```typescript
+finalStep.transitionTo({
+  state: END_STATE,
+});
+// Uses default: "Summarize what was accomplished and confirm completion..."
+```
+
+**End State Capabilities:**
+
+```typescript
+endState: {
+  // Completion message instruction
+  chatState?: string;
+
+  // Execute final actions (emails, database updates, etc.)
+  toolState?: ToolRef;
+
+  // Gather final data before completion
+  gather?: string[];
+
+  // Require certain data to be present
+  requiredData?: string[];
+
+  // Custom state ID for debugging
+  id?: string;
+}
+```
+
+**When to use END_STATE:**
+
+- ✅ Route completion - all required data collected
+- ✅ Success outcomes - action completed successfully
+- ✅ Failure outcomes - error handling completed
+- ✅ Before transition - handoff to another route via `onComplete`
+
+**End State with Tools:**
+
+Execute final actions when route completes:
+
+```typescript
+import { defineTool, END_STATE } from "@falai/agent";
+
+const notifyTeam = defineTool("notify_team", async ({ extracted }) => {
+  await slack.send({
+    channel: "#bookings",
+    message: `New booking: ${extracted.hotelName} for ${extracted.guests} guests`,
+  });
+  return { data: "Team notified" };
+});
+
+const bookingRoute = agent.createRoute({
+  endState: {
+    toolState: notifyTeam,  // Runs when route completes
+    chatState: "Booking complete! Our team has been notified.",
+  },
+});
+```
+
+**Key Points:**
+
+- ✅ Configure once at route level (DRY principle)
+- ✅ Can be overridden per-transition if needed
+- ✅ Supports full state capabilities: `chatState`, `toolState`, `gather`, `requiredData`
+- ✅ Automatically generates message if not configured
+- ✅ Executes before `onComplete` route transitions
 
 ---
 

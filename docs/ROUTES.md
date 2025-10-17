@@ -9,6 +9,7 @@ A complete guide to creating and managing conversational routes in `@falai/agent
 - [What is a Route?](#what-is-a-route)
 - [Creating Routes](#creating-routes)
 - [Initial State Configuration](#initial-state-configuration)
+- [End State Configuration](#end-state-configuration)
 - [Data Extraction](#data-extraction)
 - [Sequential Steps](#sequential-steps)
 - [Route Properties](#route-properties)
@@ -173,10 +174,137 @@ initialState: {
   // Skip this state if condition is met
   skipIf?: (extracted: Partial<TExtracted>) => boolean;
 
-  // Prerequisites that must be met
+  // Prerequisites that must be metw
   requiredData?: string[];
 }
 ```
+
+---
+
+## End State Configuration
+
+Every route ends when it reaches `END_STATE`. You can configure what happens at route completion:
+
+### Configure End State at Route Creation
+
+```typescript
+import { END_STATE } from "@falai/agent";
+
+const bookingRoute = agent.createRoute<FlightData>({
+  title: "Book Flight",
+
+  // Configure what happens when route completes
+  endState: {
+    // Custom completion message
+    chatState: "Confirm the booking details and thank the user warmly!",
+
+    // Optional: Execute final actions (like sending confirmation emails)
+    toolState: sendConfirmationEmail,
+
+    // Optional: Gather final data before completing
+    gather: ["finalConfirmation"],
+
+    // Optional: Require certain data to be present
+    requiredData: ["destination", "departureDate"],
+
+    // Optional: Custom state ID
+    id: "booking_complete",
+  },
+
+  extractionSchema: {
+    // ... schema definition
+  },
+});
+
+// Then just transition to END_STATE
+lastState.transitionTo({
+  state: END_STATE,
+});
+```
+
+### Per-Transition Override
+
+You can also override the endState configuration for specific transitions:
+
+```typescript
+// Use route-level endState
+lastState.transitionTo({
+  state: END_STATE,
+});
+
+// OR override with custom chatState for this specific transition
+lastState.transitionTo({
+  chatState: "Special completion message for this path!",
+  state: END_STATE,
+});
+```
+
+### End State Options
+
+```typescript
+endState: {
+  // Completion message instruction (RECOMMENDED)
+  chatState?: string;
+
+  // Execute final tools/actions before completion
+  toolState?: ToolRef;
+
+  // Gather final data at completion
+  gather?: string[];
+
+  // Require specific data to be present
+  requiredData?: string[];
+
+  // Custom state ID for debugging
+  id?: string;
+}
+```
+
+### Default Behavior
+
+If you don't configure `endState`, a smart default is used:
+
+```typescript
+// Default endState behavior:
+{
+  chatState: "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
+}
+```
+
+### End State with Tools
+
+Execute final actions when route completes:
+
+```typescript
+import { defineTool, END_STATE } from "@falai/agent";
+
+const sendConfirmation = defineTool(
+  "send_confirmation",
+  async ({ extracted }) => {
+    await emailService.send({
+      to: extracted.email,
+      subject: "Booking Confirmed",
+      body: `Your flight to ${extracted.destination} is confirmed!`,
+    });
+    return { data: "Confirmation sent" };
+  }
+);
+
+const bookingRoute = agent.createRoute({
+  title: "Book Flight",
+
+  endState: {
+    toolState: sendConfirmation,  // Executes when route completes
+    chatState: "Your booking is complete! Confirmation email sent.",
+  },
+});
+```
+
+**Key Points:**
+- ✅ `endState` is configured once at the route level (DRY principle)
+- ✅ Can be overridden per-transition if needed
+- ✅ Supports full state capabilities: `chatState`, `toolState`, `gather`, `requiredData`
+- ✅ Falls back to smart default if not configured
 
 ---
 
@@ -636,6 +764,222 @@ return response.message;
 
 - ✅ **Use `isRouteComplete`** for simplicity and clarity
 - ✅ **Use `END_STATE_ID`** if you want consistency with how you build routes (`END_STATE` symbol)
+
+---
+
+## Route Transitions with `onComplete`
+
+**NEW:** You can now automatically transition to another route when a route completes using the `onComplete` option. This is perfect for chaining workflows like:
+
+- 📋 Post-booking feedback collection
+- 🎁 Upsell offers after purchase
+- 📊 Satisfaction surveys after support
+- ↩️ Error recovery flows
+
+### Simple String Transition
+
+The simplest form - just specify the target route ID or title:
+
+```typescript
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Hotel",
+  conditions: ["User wants to book a hotel"],
+  extractionSchema: BOOKING_SCHEMA,
+  // Automatically transition to feedback when booking completes
+  onComplete: "Collect Feedback",
+});
+
+const feedbackRoute = agent.createRoute<FeedbackData>({
+  title: "Collect Feedback",
+  conditions: ["Collect user feedback"],
+  extractionSchema: FEEDBACK_SCHEMA,
+});
+```
+
+### With AI-Evaluated Condition
+
+Add an optional condition that the AI evaluates to determine if transition should happen:
+
+```typescript
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Hotel",
+  extractionSchema: BOOKING_SCHEMA,
+  onComplete: {
+    transitionTo: "Collect Feedback",
+    condition: "if booking was successful", // AI evaluates this
+  },
+});
+```
+
+### Dynamic Function-Based Transition
+
+Use a function for complex logic based on extracted data or context:
+
+```typescript
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Hotel",
+  extractionSchema: BOOKING_SCHEMA,
+  // Function receives session and context
+  onComplete: (session, context) => {
+    // Conditional logic based on extracted data
+    if (session.extracted?.guests && session.extracted.guests > 5) {
+      return "VIP Feedback"; // Large groups get VIP treatment
+    }
+    if (session.extracted?.bookingFailed) {
+      return "Error Recovery"; // Handle failures gracefully
+    }
+    return "Collect Feedback"; // Standard feedback flow
+  },
+});
+```
+
+Function can also return a config object:
+
+```typescript
+onComplete: (session) => ({
+  transitionTo: "Collect Feedback",
+  condition: session.extracted?.vip ? "if user is satisfied" : undefined,
+})
+```
+
+### How It Works
+
+1. **Route completes** → reaches `END_STATE`
+2. **Agent evaluates** `onComplete` handler
+3. **Sets pending transition** in session state
+4. **Next `respond()` call** → automatically transitions to target route
+5. **User sees seamless flow** → no interruption in conversation
+
+```typescript
+// User books hotel
+const response1 = await agent.respond({ history, session });
+console.log(response1.isRouteComplete); // true
+console.log(response1.session?.pendingTransition); // { targetRouteId: "...", reason: "route_complete" }
+
+// Next message automatically transitions to feedback route
+history.push(createMessageEvent(EventSource.CUSTOMER, "User", "Yes!"));
+const response2 = await agent.respond({ history, session: response1.session });
+console.log(response2.session?.currentRoute?.title); // "Collect Feedback"
+```
+
+### Manual Transition Control
+
+For more control, use `agent.transitionToRoute()` to manually set the transition:
+
+```typescript
+const response = await agent.respond({ history, session });
+
+if (response.isRouteComplete && shouldCollectFeedback) {
+  // Manually trigger transition instead of onComplete
+  const updatedSession = agent.transitionToRoute(
+    "Collect Feedback",
+    response.session
+  );
+
+  // Next respond() will transition automatically
+  const nextResponse = await agent.respond({
+    history,
+    session: updatedSession,
+  });
+}
+```
+
+### Complete Example
+
+```typescript
+interface BookingData {
+  hotelName: string;
+  date: string;
+  guests: number;
+}
+
+interface FeedbackData {
+  rating: number;
+  comments?: string;
+}
+
+// Booking route with automatic transition to feedback
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Hotel",
+  conditions: ["User wants to book a hotel"],
+  extractionSchema: {
+    type: "object",
+    properties: {
+      hotelName: { type: "string" },
+      date: { type: "string" },
+      guests: { type: "number" },
+    },
+    required: ["hotelName", "date", "guests"],
+  },
+  onComplete: "Collect Feedback",
+});
+
+const askHotel = bookingRoute.initialState.transitionTo({
+  chatState: "Ask which hotel",
+  gather: ["hotelName"],
+  skipIf: (e) => !!e.hotelName,
+});
+
+const askDate = askHotel.transitionTo({
+  chatState: "Ask for date",
+  gather: ["date"],
+  skipIf: (e) => !!e.date,
+});
+
+const askGuests = askDate.transitionTo({
+  chatState: "Ask for guests",
+  gather: ["guests"],
+  skipIf: (e) => !!e.guests,
+});
+
+askGuests.transitionTo({
+  chatState: "Confirm booking",
+  state: END_STATE,
+});
+
+// Feedback route
+const feedbackRoute = agent.createRoute<FeedbackData>({
+  title: "Collect Feedback",
+  conditions: ["Collect user feedback"],
+  extractionSchema: {
+    type: "object",
+    properties: {
+      rating: { type: "number" },
+      comments: { type: "string" },
+    },
+    required: ["rating"],
+  },
+});
+
+const askRating = feedbackRoute.initialState.transitionTo({
+  chatState: "Ask for rating 1-5",
+  gather: ["rating"],
+});
+
+askRating.transitionTo({
+  chatState: "Thank user",
+  state: END_STATE,
+});
+
+// Usage - seamless transition from booking to feedback
+let session;
+const response1 = await agent.respond({ history, session });
+// Booking complete, pending transition set
+
+history.push(createMessageEvent(EventSource.CUSTOMER, "User", "Yes!"));
+const response2 = await agent.respond({ history, session: response1.session });
+// Now in feedback route automatically
+```
+
+### Benefits
+
+✅ **Seamless user experience** - No awkward pauses between flows
+✅ **Predictable behavior** - Transitions defined at design time
+✅ **Flexible** - Simple strings, conditions, or complex functions
+✅ **Type-safe** - Full TypeScript inference for extracted data
+✅ **Non-breaking** - Existing routes without `onComplete` work as before
+
+See [examples/route-transitions.ts](../examples/route-transitions.ts) for a complete working example.
 
 ### Immediate Completion
 

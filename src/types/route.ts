@@ -29,6 +29,27 @@ export interface StateRef {
 import type { Guideline } from "./agent";
 
 /**
+ * Route transition configuration when route completes
+ */
+export interface RouteTransitionConfig {
+  /** Target route ID or title to transition to */
+  transitionTo: string;
+  /** Optional AI-evaluated condition for the transition */
+  condition?: string;
+}
+
+/**
+ * Function type for dynamic route completion transitions
+ * @param session - Current session state with extracted data
+ * @param context - Agent context
+ * @returns Route ID/title to transition to, or transition config, or undefined to end
+ */
+export type RouteCompletionHandler<TContext = unknown, TExtracted = unknown> = (
+  session: { extracted?: Partial<TExtracted> },
+  context?: TContext
+) => string | RouteTransitionConfig | undefined | Promise<string | RouteTransitionConfig | undefined>;
+
+/**
  * Options for creating a route
  * @template TExtracted - Type of data extracted throughout the route (inferred from extractionSchema)
  */
@@ -79,6 +100,42 @@ export interface RouteOptions<TExtracted = unknown> {
     TransitionSpec<unknown, TExtracted>,
     "toolState" | "state" | "condition"
   >;
+  /**
+   * Configure the end state (optional)
+   * Defines what happens when the route completes (reaches END_STATE)
+   * Can include chatState for completion message, toolState for final actions, etc.
+   * Note: state, condition, skipIf properties are ignored for end state
+   */
+  endState?: Omit<
+    TransitionSpec<unknown, TExtracted>,
+    "state" | "condition" | "skipIf"
+  >;
+  /**
+   * Optional transition when route completes (reaches END_STATE)
+   * Can be:
+   * - String: Route ID or title to transition to
+   * - Object: Transition config with optional AI-evaluated condition
+   * - Function: Dynamic logic that returns route ID, config, or undefined
+   *
+   * @example
+   * // Simple string
+   * onComplete: "feedback-collection"
+   *
+   * @example
+   * // With condition
+   * onComplete: {
+   *   transitionTo: "feedback-collection",
+   *   condition: "if booking succeeded"
+   * }
+   *
+   * @example
+   * // Dynamic function
+   * onComplete: (session) => {
+   *   if (session.extracted?.success) return "feedback";
+   *   return "error-recovery";
+   * }
+   */
+  onComplete?: string | RouteTransitionConfig | RouteCompletionHandler<unknown, TExtracted>;
 }
 
 /**

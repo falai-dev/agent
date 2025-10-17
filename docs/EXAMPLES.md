@@ -4,6 +4,53 @@ This directory contains production-ready examples demonstrating all features of 
 
 ## 🚀 Getting Started Examples
 
+### 🔄 [Route Transitions](../examples/route-transitions.ts) **NEW!**
+
+**Perfect for:** Learning automatic workflow chaining
+
+Complete example demonstrating the new `onComplete` feature for seamless route transitions:
+
+- ✅ Hotel booking flow transitioning to feedback collection
+- ✅ Three ways to define transitions (string, config, function)
+- ✅ Automatic transition after route completion
+- ✅ Manual transition control with `agent.transitionToRoute()`
+- ✅ Dynamic logic based on extracted data
+- ✅ Pending transition tracking in session state
+
+**Key concepts:** Route transitions, workflow chaining, feedback collection, onComplete handlers
+
+```typescript
+// Automatic transition after booking completes
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Hotel",
+  onComplete: "Collect Feedback", // Simple string
+
+  // Or with AI condition:
+  // onComplete: {
+  //   transitionTo: "Collect Feedback",
+  //   condition: "if booking was successful"
+  // },
+
+  // Or with function logic:
+  // onComplete: (session) => {
+  //   if (session.extracted?.guests > 5) {
+  //     return "VIP Feedback";
+  //   }
+  //   return "Collect Feedback";
+  // },
+});
+
+// Feedback route automatically triggered after booking
+const feedbackRoute = agent.createRoute<FeedbackData>({
+  title: "Collect Feedback",
+  // ... states for collecting rating and comments
+});
+```
+
+**Use cases:** Post-booking feedback, upsell flows, satisfaction surveys, error recovery
+
+---
+
 ### 📋 [Declarative Agent](../examples/declarative-agent.ts)
 
 **Perfect for:** Learning the full configuration API
@@ -74,8 +121,9 @@ Complete travel booking system featuring:
 - ✅ Tools with data access via `extracted` context
 - ✅ Alternative flow handling (booking vs status check)
 - ✅ Route-specific guidelines
+- ✅ **NEW:** Automatic feedback collection after booking with `onComplete`
 
-**Key concepts:** Session state, data extraction, multiple routes, tool data access
+**Key concepts:** Session state, data extraction, multiple routes, tool data access, route transitions
 
 ```typescript
 const searchFlights = defineTool(
@@ -104,8 +152,9 @@ Healthcare-focused agent demonstrating:
 - ✅ Sensitive data handling best practices
 - ✅ Urgent case prioritization
 - ✅ HIPAA-style security patterns
+- ✅ **NEW:** Satisfaction survey after appointment with `onComplete`
 
-**Key concepts:** Data security, route disambiguation, validation, compliance
+**Key concepts:** Data security, route disambiguation, validation, compliance, route transitions
 
 ---
 

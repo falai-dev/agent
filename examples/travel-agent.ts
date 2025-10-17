@@ -37,6 +37,12 @@ interface BookingStatusData {
   email?: string;
 }
 
+interface TravelFeedbackData {
+  rating: number;
+  bookingExperience?: string;
+  recommendToFriend?: boolean;
+}
+
 // Tools with data access
 const getAvailableDestinations = defineTool(
   "get_available_destinations",
@@ -219,11 +225,20 @@ async function createTravelAgent() {
   });
 
   // Create flight booking route with data extraction
+  // NEW: Added onComplete to automatically collect feedback after booking
   const flightBookingRoute = agent.createRoute<FlightBookingData>({
     title: "Book a Flight",
     description:
       "Helps the customer find and book a flight to their desired destination.",
     conditions: ["The customer wants to book a flight"],
+    // NEW: Transition to feedback collection after successful booking
+    onComplete: (session) => {
+      // Dynamic logic: only collect feedback if destination is known
+      if (session.extracted?.destination) {
+        return "Travel Feedback";
+      }
+      return undefined; // No transition
+    },
     extractionSchema: {
       type: "object",
       properties: {
@@ -392,6 +407,51 @@ async function createTravelAgent() {
     state: END_STATE,
     condition: "Booking information provided to customer",
   });
+
+  // NEW: Travel Feedback route - collects feedback after booking
+  const feedbackRoute = agent.createRoute<TravelFeedbackData>({
+    title: "Travel Feedback",
+    description: "Collects customer feedback after flight booking",
+    conditions: ["Collect travel booking feedback"],
+    extractionSchema: {
+      type: "object",
+      properties: {
+        rating: {
+          type: "number",
+          description: "Overall booking experience rating 1-5",
+        },
+        bookingExperience: {
+          type: "string",
+          description: "Description of booking experience",
+        },
+        recommendToFriend: {
+          type: "boolean",
+          description: "Would they recommend us to a friend",
+        },
+      },
+      required: ["rating"],
+    },
+  });
+
+  const askFeedbackRating = feedbackRoute.initialState.transitionTo({
+    chatState:
+      "Ask for overall rating from 1 to 5 for the booking experience",
+    gather: ["rating"],
+    skipIf: (extracted) => !!extracted.rating,
+  });
+
+  const askRecommendation = askFeedbackRating.transitionTo({
+    chatState:
+      "Ask if they would recommend our service to a friend (yes/no)",
+    gather: ["recommendToFriend"],
+  });
+
+  const thankForFeedback = askRecommendation.transitionTo({
+    chatState:
+      "Thank them for their feedback and wish them a great trip!",
+  });
+
+  thankForFeedback.transitionTo({ state: END_STATE });
 
   // Global guidelines
   agent.createGuideline({

@@ -3,6 +3,18 @@
  */
 
 /**
+ * Pending route transition information
+ */
+export interface PendingTransition {
+  /** Target route ID to transition to */
+  targetRouteId: string;
+  /** Optional AI-evaluated condition for the transition */
+  condition?: string;
+  /** Reason for the transition */
+  reason: "route_complete" | "manual";
+}
+
+/**
  * Session state tracks the current position in the conversation flow
  * and data extracted during the route progression
  */
@@ -44,6 +56,12 @@ export interface SessionState<TExtracted = Record<string, unknown>> {
     exitedAt?: Date;
     completed: boolean;
   }>;
+
+  /**
+   * Pending route transition after completion
+   * Set when a route completes with onComplete handler
+   */
+  pendingTransition?: PendingTransition;
 
   /** Session metadata */
   metadata?: {
@@ -163,12 +181,12 @@ export function enterState<TExtracted = Record<string, unknown>>(
  */
 export function mergeExtracted<TExtracted = Record<string, unknown>>(
   session: SessionState<TExtracted>,
-  extracted: Partial<TExtracted>
+  extracted: Partial<unknown>
 ): SessionState<TExtracted> {
   const newExtracted = {
     ...session.extracted,
     ...extracted,
-  };
+  } as Partial<TExtracted>;
 
   // Also update the extractedByRoute map for the current route
   const extractedByRoute = { ...session.extractedByRoute };

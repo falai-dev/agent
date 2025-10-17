@@ -88,7 +88,7 @@ export class State<TContext = unknown, TExtracted = unknown> {
     ) {
       const endTransition = new Transition<TContext, TExtracted>(
         this.getRef(),
-        { state: END_STATE, condition: spec.condition }
+        { state: END_STATE, condition: spec.condition, chatState: spec.chatState }
       );
       this.transitions.push(endTransition);
 

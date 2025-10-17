@@ -358,6 +358,9 @@ const feedbackRoute = agent.createRoute<FeedbackData>({
     },
     required: ["rating", "comments"],
   },
+  endState: {
+    chatState: "Thank the user warmly for their valuable feedback and let them know we appreciate their time",
+  },
 });
 
 feedbackRoute.initialState
@@ -381,11 +384,7 @@ feedbackRoute.initialState
     gather: ["contactPermission"],
     requiredData: ["comments"],
   })
-  .transitionTo({
-    id: "thank_you",
-    chatState: "Thank you for your valuable feedback!",
-  })
-  .transitionTo({ state: END_STATE });
+  .transitionTo({ state: END_STATE }); // Uses route-level endState configuration
 
 // ==============================================================================
 // USAGE EXAMPLES: Three-Phase Pipeline Demonstration

@@ -8,7 +8,6 @@ import {
   defineTool,
   GeminiProvider,
   END_STATE,
-  END_STATE_ID,
   EventSource,
   createMessageEvent,
   createSession,
@@ -102,7 +101,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
   // Define lifecycle hooks for automatic persistence
   const hooks = {
     // Called after data extraction - validate and enrich extracted data
-    onExtractedUpdate: async (extracted, previousExtracted) => {
+    onExtractedUpdate: async (extracted: Partial<OnboardingData>) => {
       console.log("🔄 Processing extracted data...");
 
       // Update completed steps based on what's been extracted
@@ -267,6 +266,9 @@ async function createPersistentOnboardingAgent(sessionId: string) {
       },
       required: ["businessName", "businessDescription"],
     },
+    endState: {
+      chatState: "Summarize all collected information warmly and confirm onboarding is complete",
+    },
   });
 
   // State 1: Gather business name and description
@@ -311,12 +313,8 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     requiredData: ["contactEmail"],
   });
 
-  // State 7: Confirmation
-  const confirm = saveContact.transitionTo({
-    chatState: "Summarize all collected information and ask for confirmation",
-  });
-
-  confirm.transitionTo({ state: END_STATE });
+  // State 7: Confirmation - uses route-level endState
+  saveContact.transitionTo({ state: END_STATE });
 
   // Guidelines
   onboardingRoute.createGuideline({

@@ -7,6 +7,8 @@ import type {
   RouteRef,
   TransitionSpec,
   TransitionResult,
+  RouteTransitionConfig,
+  RouteCompletionHandler,
 } from "../types/route";
 import type { StructuredSchema } from "../types/schema";
 import type { Guideline } from "../types/agent";
@@ -26,9 +28,11 @@ export class Route<TContext = unknown, TExtracted = unknown> {
   public readonly rules: string[];
   public readonly prohibitions: string[];
   public readonly initialState: State<TContext, TExtracted>;
+  public readonly endStateSpec: Omit<TransitionSpec<TContext, TExtracted>, "state" | "condition" | "skipIf">;
   public readonly responseOutputSchema?: StructuredSchema;
   public readonly extractionSchema?: StructuredSchema;
   public readonly initialData?: Partial<TExtracted>;
+  public readonly onComplete?: string | RouteTransitionConfig | RouteCompletionHandler<TContext, TExtracted>;
   private routingExtrasSchema?: StructuredSchema;
   private guidelines: Guideline[] = [];
 
@@ -47,12 +51,18 @@ export class Route<TContext = unknown, TExtracted = unknown> {
       options.initialState?.id,
       options.initialState?.gather,
       options.initialState?.skipIf,
-      options.initialState?.requiredData
+      options.initialState?.requiredData,
+      options.initialState?.chatState
     );
+    // Store endState spec (will be used when route completes)
+    this.endStateSpec = options.endState || {
+      chatState: "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
+    };
     this.routingExtrasSchema = options.routingExtrasSchema;
     this.responseOutputSchema = options.responseOutputSchema;
     this.extractionSchema = options.extractionSchema;
     this.initialData = options.initialData;
+    this.onComplete = options.onComplete;
 
     // Initialize guidelines from options
     if (options.guidelines) {
@@ -218,5 +228,47 @@ export class Route<TContext = unknown, TExtracted = unknown> {
     }
 
     return lines.join("\n");
+  }
+
+  /**
+   * Evaluate the onComplete handler and return transition config
+   * @param session - Current session state
+   * @param context - Agent context
+   * @returns Transition config or undefined if no transition
+   */
+  async evaluateOnComplete(
+    session: { extracted?: Partial<TExtracted> },
+    context?: TContext
+  ): Promise<RouteTransitionConfig | undefined> {
+    if (!this.onComplete) {
+      return undefined;
+    }
+
+    // String form: just route ID/title
+    if (typeof this.onComplete === "string") {
+      return {
+        transitionTo: this.onComplete,
+      };
+    }
+
+    // Function form: execute and normalize result
+    if (typeof this.onComplete === "function") {
+      const result = await this.onComplete(session, context);
+
+      if (!result) {
+        return undefined;
+      }
+
+      if (typeof result === "string") {
+        return {
+          transitionTo: result,
+        };
+      }
+
+      return result;
+    }
+
+    // Object form: return as-is
+    return this.onComplete;
   }
 }

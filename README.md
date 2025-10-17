@@ -2,9 +2,9 @@
 
 # 🤖 @falai/agent
 
-### Build intelligent, conversational AI agents with TypeScript
+### Type-Safe AI Conversational Agents That Actually Work in Production
 
-**Standalone • Strongly-Typed • Production-Ready**
+**Schema-driven data extraction • Predictable conversations • Enterprise-ready**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
@@ -14,6 +14,46 @@
 [🌐 Website](https://falai.dev) • [Features](#-features) • [Installation](#-installation) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Examples](#-examples)
 
 </div>
+
+---
+
+## ⚡ The @falai/agent Difference
+
+### Traditional AI Chat:
+```typescript
+// User: "I want to book the Grand Hotel for 2 people"
+// AI: "Sure! Which hotel would you like?" // 😠 Asked already!
+// User: "Grand Hotel"
+// AI: "How many guests?"                 // 😠 You just told me!
+// User: "2 people"
+// AI: "What date?"                        // Finally...
+```
+
+### With @falai/agent:
+```typescript
+// User: "I want to book the Grand Hotel for 2 people"
+// AI: "Sure! For what date would you like to book?"  // ✅ Skips known info
+// User: "Next Friday"
+// AI: "Booking confirmed for 2 guests at Grand Hotel on Friday!" // ✅ All data extracted
+```
+
+**No more repetitive questions. No more guessing what the AI will ask next.**
+
+Schema-first extraction means the AI automatically captures what you've already said, and only asks for what's missing.
+
+---
+
+## 🤔 Why @falai/agent?
+
+After building production AI applications, we found existing solutions either:
+
+- **Too unpredictable** - AI decides everything, including which tools to call (unreliable in production)
+- **Too complex** - Heavy Python frameworks with massive dependencies
+- **Too basic** - No structured data extraction or state management
+
+@falai/agent gives you **predictable AI** - the creativity of LLMs with the reliability of code.
+
+**The key insight:** Let AI do what it's good at (understanding intent, generating responses, extracting data), and let TypeScript handle the rest (state logic, tool execution, validation).
 
 ---
 
@@ -51,6 +91,7 @@
 - **Text-Based Conditions** - Human-readable transition conditions for the AI to evaluate
 - **Code-Based Logic** - Deterministic state progression with `skipIf` and `requiredData`
 - **Always-On Routing** - Context-aware routing respects user intent changes
+- **Route Transitions** - Automatic transitions between routes with `onComplete` for seamless workflows
 
 </td>
 <td width="50%">
@@ -112,7 +153,50 @@ yarn add @falai/agent
 
 ## 🚀 Quick Start
 
-Build a data-driven conversational AI agent in minutes. This example shows how to intelligently gather structured data over multiple turns.
+### Level 1: Your First Agent (30 seconds)
+
+Create a minimal conversational agent:
+
+```typescript
+import { Agent, GeminiProvider } from "@falai/agent";
+
+// Create your agent
+const agent = new Agent({
+  name: "Assistant",
+  description: "A helpful assistant",
+  ai: new GeminiProvider({
+    apiKey: process.env.GEMINI_API_KEY!,
+    model: "models/gemini-2.0-flash-exp",
+  }),
+});
+
+// Create a simple route
+agent.createRoute({
+  title: "General Help",
+  description: "Answers user questions",
+  conditions: ["User needs help or asks a question"],
+  initialState: {
+    chatState: "Answer the user's question helpfully",
+  },
+});
+
+// Start chatting
+const response = await agent.respond({
+  history: [
+    { source: "customer", name: "Alice", content: "What can you do?" },
+  ],
+});
+
+console.log(response.message);
+```
+
+**That's it!** You now have a working conversational AI agent.
+
+---
+
+### Level 2: Data Extraction (The Real Power)
+
+Now let's build an agent that intelligently gathers structured data:
 
 ```typescript
 import {
@@ -167,6 +251,9 @@ const bookingRoute = agent.createRoute<HotelBookingData>({
       guests: { type: "number", description: "The number of guests." },
     },
     required: ["hotelName", "date", "guests"],
+  },
+  endState: {
+    chatState: "Confirm the booking details warmly and thank the user",
   },
 });
 
@@ -243,7 +330,7 @@ for await (const chunk of agent.respondStream({ history })) {
 ```typescript
 let session = createSession<MyData>();
 const response = await agent.respond({ history, session });
-session = response.session!; // Tracks progress across turns
+session = response.session!; // Tracks progress across turns, you can use it to save the current state in your database
 ```
 
 **Database persistence** with any adapter:
@@ -282,45 +369,78 @@ const agent = new Agent({
 
 ---
 
-## 🎯 Examples
+## 🎯 Examples - Pick Your Use Case
 
-**Core Examples:**
+### 🤖 Conversational Flows
+Build intelligent data-gathering conversations:
 
-- 🏢 **[Business Onboarding](./examples/business-onboarding.ts)** - Complex multi-step flow with branching
-- ✈️ **[Travel Agent](./examples/travel-agent.ts)** - Multi-route booking system with session state
-- 🏥 **[Healthcare Assistant](./examples/healthcare-agent.ts)** - Appointment scheduling & lab results
+- 🏢 **[Business Onboarding](./examples/business-onboarding.ts)** - Multi-step company setup with conditional branching
+- ✈️ **[Travel Agent](./examples/travel-agent.ts)** - Flight & hotel booking with session state
+- 🏥 **[Healthcare Assistant](./examples/healthcare-agent.ts)** - Appointment scheduling & lab result delivery
+
+### 🏢 Production Patterns
+Enterprise-ready features:
+
+- 💾 **[Prisma Persistence](./examples/prisma-persistence.ts)** - Auto-save sessions with Prisma ORM
+- ⚡ **[Redis Persistence](./examples/redis-persistence.ts)** - High-performance in-memory sessions
+- 🔐 **[Domain Scoping](./examples/domain-scoping.ts)** - Tool security & access control
+
+### ⚡ Advanced Techniques
+Power-user features:
+
 - 📋 **[Declarative Agent](./examples/declarative-agent.ts)** - Full constructor-based configuration
 - ⚡ **[Streaming Responses](./examples/streaming-agent.ts)** - Real-time response streaming
-
-**Persistence & Advanced:**
-
-- 💾 **[Prisma Persistence](./examples/prisma-persistence.ts)** - Auto-save with Prisma ORM
-- ⚡ **[Redis Persistence](./examples/redis-persistence.ts)** - Fast in-memory sessions
-- 🔐 **[Domain Scoping](./examples/domain-scoping.ts)** - Tool security per route
 - 📜 **[Rules & Prohibitions](./examples/rules-prohibitions.ts)** - Fine-grained behavior control
 
-📖 **[See all examples with descriptions →](./docs/EXAMPLES.md)**
+📖 **[See all examples with detailed explanations →](./docs/EXAMPLES.md)**
 
 ---
 
 ## 🏗️ How It Works
 
-`@falai/agent` uses a **state machine-driven architecture** where conversations flow through explicit states:
+`@falai/agent` uses a **schema-first, state machine-driven architecture**:
 
-1. **Router** - AI selects the best route based on conversation context
-2. **State Machine** - Routes define explicit states and transitions
-3. **Data Extraction** - JSON Schema defines data to extract during conversation
-4. **Tool Execution** - Tools run automatically when state conditions match
-5. **Message Generation** - AI generates natural responses based on current state
+```
+User Message
+    ↓
+┌─────────────────────────────────────────┐
+│ 1. PREPARATION (Tools)                  │
+│    • Execute tools for current state    │
+│    • Update context with results        │
+│    • Enrich extracted data              │
+└─────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────┐
+│ 2. ROUTING (AI-Driven)                  │
+│    • Evaluate all routes                │
+│    • Consider session context           │
+│    • Select best route (0-100 score)    │
+└─────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────┐
+│ 3. STATE SELECTION (Code + AI)          │
+│    • Filter states with skipIf (code)   │
+│    • AI picks best from valid states    │
+│    • Update session state               │
+└─────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────┐
+│ 4. RESPONSE (AI + Schema)               │
+│    • Extract data via JSON Schema       │
+│    • Generate natural message           │
+│    • Update session with new data       │
+└─────────────────────────────────────────┘
+    ↓
+Response with Structured Data
+```
 
-**Behind the scenes:**
+### Key Principles:
 
-- The AI only generates messages and extracts data - it never decides which tools to call
-- Tools execute deterministically based on state transitions and code-based conditions
-- Session state tracks progress and extracted data across conversation turns
-- Always-on routing lets users change direction mid-conversation
+✅ **AI decides:** Route selection, state selection (from valid options), message generation, data extraction
+✅ **Code decides:** Tool execution, state filtering (`skipIf`), data validation, flow control
+✅ **Result:** Predictable, testable agents with natural conversations
 
-This creates **predictable, testable agents** perfect for production use cases.
+**This architecture delivers 1-2 LLM calls per turn** (vs 3-5 in traditional approaches) while maintaining complete type safety.
 
 📖 **[Read the full architecture guide →](./docs/ARCHITECTURE.md)**
 
@@ -349,10 +469,22 @@ MIT © 2025
 
 <div align="center">
 
-**Made with ❤️ for the community**
+## 🚀 Ready to Build?
+
+**Choose your path:**
+
+👶 **New to AI agents?** → [5-minute tutorial](./docs/GETTING_STARTED.md)
+🏗️ **Building production app?** → [Architecture guide](./docs/ARCHITECTURE.md)
+💡 **Have questions?** → [Open a discussion](https://github.com/falai-dev/agent/discussions)
+
+---
+
+### ⭐ Star us on [GitHub](https://github.com/falai-dev/agent)
+
+**Help us reach more developers building production AI!**
 
 [Report Bug](https://github.com/falai-dev/agent/issues) • [Request Feature](https://github.com/falai-dev/agent/issues) • [Contribute](https://github.com/falai-dev/agent/pulls)
 
-⭐ Star us on [GitHub](https://github.com/falai-dev/agent) if this helped you build amazing agents!
+**Made with ❤️ for the community**
 
 </div>

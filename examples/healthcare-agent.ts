@@ -34,6 +34,12 @@ interface LabResultsData {
   resultsNeeded?: boolean;
 }
 
+interface SatisfactionData {
+  rating?: number;
+  easeOfScheduling?: number;
+  comments?: string;
+}
+
 // Tools
 const getInsuranceProviders = defineTool<HealthcareContext, [], string[]>(
   "get_insurance_providers",
@@ -126,6 +132,7 @@ async function createHealthcareAgent() {
   });
 
   // Create scheduling route with data extraction schema
+  // NEW: Added onComplete to automatically transition to satisfaction survey after booking
   const schedulingRoute = agent.createRoute<AppointmentData>({
     title: "Schedule an Appointment",
     description: "Helps the patient find a time for their appointment.",
@@ -158,6 +165,8 @@ async function createHealthcareAgent() {
       },
       required: ["appointmentReason"],
     },
+    // NEW: Automatically collect feedback after successful scheduling
+    onComplete: "Satisfaction Survey",
   });
 
   // State 1: Gather appointment reason
@@ -300,6 +309,50 @@ async function createHealthcareAgent() {
       "Assertively tell them that you cannot help and they should call the office",
   });
 
+  // NEW: Satisfaction Survey route - collects feedback after appointment scheduling
+  const satisfactionRoute = agent.createRoute<SatisfactionData>({
+    title: "Satisfaction Survey",
+    description: "Quick satisfaction survey after scheduling",
+    conditions: ["Collect patient satisfaction feedback"],
+    extractionSchema: {
+      type: "object",
+      properties: {
+        rating: {
+          type: "number",
+          description: "Overall satisfaction rating 1-5",
+        },
+        easeOfScheduling: {
+          type: "number",
+          description: "Ease of scheduling process 1-5",
+        },
+        comments: {
+          type: "string",
+          description: "Optional feedback comments",
+        },
+      },
+      required: ["rating"],
+    },
+  });
+
+  const askRating = satisfactionRoute.initialState.transitionTo({
+    chatState:
+      "Ask for overall satisfaction rating from 1 to 5 with the scheduling experience",
+    gather: ["rating"],
+    skipIf: (extracted) => !!extracted.rating,
+  });
+
+  const askComments = askRating.transitionTo({
+    chatState: "Ask if they have any additional comments or feedback (optional)",
+    gather: ["comments"],
+  });
+
+  const thankYou = askComments.transitionTo({
+    chatState:
+      "Thank them for their feedback and confirm their appointment details one more time",
+  });
+
+  thankYou.transitionTo({ state: END_STATE });
+
   // Global guidelines
   agent.createGuideline({
     condition: "The patient asks about insurance",
@@ -383,6 +436,16 @@ async function main() {
 
     // Update session again
     session = response2.session!;
+
+    // NEW: Check if route is complete - will auto-transition to satisfaction survey
+    if (response2.isRouteComplete) {
+      console.log("\n✓ Appointment scheduling complete!");
+      console.log("Pending transition:", response2.session?.pendingTransition);
+      console.log(
+        "Next respond() will auto-transition to:",
+        response2.session?.pendingTransition?.targetRouteId
+      );
+    }
 
     // Turn 3: Patient provides final details
     const history3 = [

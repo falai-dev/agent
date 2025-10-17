@@ -95,9 +95,11 @@ export type {
   RouteOptions,
   TransitionSpec,
   TransitionResult,
+  RouteTransitionConfig,
+  RouteCompletionHandler,
 } from "./types/route";
 
-export type { SessionState } from "./types/session";
+export type { SessionState, PendingTransition } from "./types/session";
 export {
   createSession,
   enterRoute,

@@ -213,7 +213,9 @@ export class RoutingEngine<TContext = unknown> {
         typeof transition.spec.state === "symbol"
       ) {
         // Found END_STATE - route is complete
-        return { isRouteComplete: true };
+        return {
+          isRouteComplete: true
+        };
       }
 
       if (!target) continue;

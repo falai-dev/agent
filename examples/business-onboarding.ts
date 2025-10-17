@@ -417,6 +417,9 @@ async function createBusinessOnboardingAgent(
     title: "Business Onboarding",
     description: "Complete onboarding process to configure personalized routes",
     conditions: ["User is starting the onboarding process"],
+    endState: {
+      chatState: "🎉 Perfect! Setup complete! Your WhatsApp assistant is ready and will use all this information to automatically serve your customers. If you have any questions or need adjustments, just let me know!",
+    },
   });
 
   // ==================== Build the Flow ====================
@@ -556,14 +559,11 @@ async function createBusinessOnboardingAgent(
   // Loop back to summary after adding custom route
   saveCustomRoute.transitionTo({ state: summary });
 
-  // Step 9b: Final confirmation
-  const completion = summary.transitionTo({
-    chatState:
-      "🎉 Perfect! Setup complete! Your WhatsApp assistant is ready and will use all this information to automatically serve your customers. If you have any questions or need adjustments, just let me know!",
+  // Step 9b: Final confirmation - transition to END_STATE (uses route-level endState)
+  summary.transitionTo({
+    state: END_STATE,
     condition: "User confirmed everything is okay",
   });
-
-  completion.transitionTo({ state: END_STATE });
 
   // ==================== Alternative: Sequential Steps ====================
   // For simpler linear flows, you can use the new sequential steps approach:
@@ -598,6 +598,9 @@ async function createBusinessOnboardingAgent(
     title: "Manual Feedback Route",
     description: "Same flow using traditional chaining",
     conditions: ["User wants manual feedback flow"],
+    endState: {
+      chatState: "Thank you for your feedback! It helps us improve. 🙏",
+    },
   });
 
   manualFeedbackRoute.initialState
@@ -614,12 +617,7 @@ async function createBusinessOnboardingAgent(
       chatState: "Is there anything we could improve?",
       condition: "User wants to provide feedback",
     })
-    .transitionTo({
-      id: "thank_you",
-      chatState: "Thank you for your feedback! It helps us improve. 🙏",
-      condition: "User provided feedback",
-    })
-    .transitionTo({ state: END_STATE });
+    .transitionTo({ state: END_STATE }); // Uses route-level endState
 
   // ==================== Global Guidelines ====================
 
