@@ -189,7 +189,7 @@ async function createTravelAgent() {
     description:
       "A knowledgeable travel agent who helps book flights, answer travel questions, and manage reservations.",
     goal: "Help customers book travel and manage their reservations",
-    ai: provider,
+    provider: provider,
     context: {
       customerId: "test-123",
       customerName: "Test Customer",

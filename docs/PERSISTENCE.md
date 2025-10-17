@@ -98,7 +98,7 @@ interface BookingData {
 
 const agent = new Agent({
   name: "My Agent",
-  ai: new GeminiProvider({ apiKey: "..." }),
+  provider: new GeminiProvider({ apiKey: "..." }),
   // ✨ Just add this!
   persistence: {
     adapter: new PrismaAdapter({ prisma }),
@@ -219,7 +219,7 @@ Enable automatic message persistence:
 ```typescript
 const agent = new Agent({
   name: "My Agent",
-  ai: provider,
+  provider: provider,
   persistence: {
     adapter: new PrismaAdapter({ prisma }),
     autoSave: true, // Default: true
@@ -235,7 +235,7 @@ The most powerful pattern - auto-sync context with database:
 ```typescript
 const agent = new Agent({
   name: "Smart Assistant",
-  ai: provider,
+  provider: provider,
   context: {
     userId: "user_123",
     sessionId: session.id,
@@ -478,7 +478,7 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const agent = new Agent({
   name: "Assistant",
-  ai: provider,
+  provider: provider,
   persistence: {
     adapter: new PrismaAdapter({ prisma }),
   },

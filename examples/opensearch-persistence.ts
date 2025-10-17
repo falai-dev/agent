@@ -81,7 +81,7 @@ async function example() {
     name: "Customer Service Agent",
     description: "Handle customer complaints with full-text search",
     goal: "Resolve customer issues efficiently",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
@@ -331,7 +331,7 @@ async function analyticsExample() {
 
   const agent = new Agent({
     name: "Support Analyzer",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
@@ -442,7 +442,7 @@ async function timeSeriesExample() {
 
   const agent = new Agent({
     name: "Metrics Agent",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),

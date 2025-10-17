@@ -60,7 +60,7 @@ export interface SQLiteAdapterOptions {
  *
  * const agent = new Agent({
  *   name: "My Agent",
- *   ai: provider,
+ *   provider: provider,
  *   persistence: {
  *     adapter: new SQLiteAdapter({ db }),
  *     userId: "user_123",

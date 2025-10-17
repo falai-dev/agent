@@ -87,7 +87,7 @@ export interface MongoAdapterOptions {
  *
  * const agent = new Agent({
  *   name: "My Agent",
- *   ai: provider,
+ *   provider: provider,
  *   persistence: {
  *     adapter: new MongoAdapter({
  *       client,

@@ -133,7 +133,7 @@ async function example() {
     name: "Onboarding Assistant",
     description: "Help new customers get started",
     goal: "Collect customer information efficiently",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
@@ -479,7 +479,7 @@ async function advancedExample() {
 
   const agent = new Agent({
     name: "Smart Onboarding",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),

@@ -68,7 +68,7 @@ Comprehensive example showing declarative agent configuration:
 ```typescript
 const agent = new Agent({
   name: "HealthBot",
-  ai: provider,
+  provider: provider,
   terms: [...],
   guidelines: [...],
   routes: [{

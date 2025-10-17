@@ -32,7 +32,7 @@ Domains provide **optional** security and organization for your tools. If you ne
 ```typescript
 const agent = new Agent({
   name: "Simple Agent",
-  ai: provider,
+  provider: provider,
 });
 
 // Define tools however you want
@@ -57,7 +57,7 @@ route.initialStep
 ```typescript
 const agent = new Agent({
   name: "Production Agent",
-  ai: provider,
+  provider: provider,
 });
 
 // 1️⃣ Organize tools into domains

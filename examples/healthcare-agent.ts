@@ -106,7 +106,7 @@ async function createHealthcareAgent() {
   const agent = new Agent<HealthcareContext>({
     name: "Healthcare Agent",
     description: "Is empathetic and calming to the patient.",
-    ai: provider,
+    provider: provider,
     context: {
       patientId: "patient-123",
       patientName: "Test Patient",

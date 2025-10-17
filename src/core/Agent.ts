@@ -412,7 +412,7 @@ export class Agent<TContext = unknown> {
           description: this.options.description,
           personality: this.options.personality,
         },
-        ai: this.options.ai,
+        provider: this.options.provider,
         context: effectiveContext,
         signal,
       });
@@ -491,7 +491,7 @@ export class Agent<TContext = unknown> {
       );
 
       // Generate message stream using AI provider
-      const stream = this.options.ai.generateMessageStream({
+      const stream = this.options.provider.generateMessageStream({
         prompt: responsePrompt,
         history,
         context: effectiveContext,
@@ -612,7 +612,7 @@ export class Agent<TContext = unknown> {
       );
 
       // Stream completion message using AI provider
-      const stream = this.options.ai.generateMessageStream({
+      const stream = this.options.provider.generateMessageStream({
         prompt: completionPrompt,
         history,
         context: effectiveContext,
@@ -698,7 +698,7 @@ export class Agent<TContext = unknown> {
         .addCapabilities(this.capabilities)
         .build();
 
-      const stream = this.options.ai.generateMessageStream({
+      const stream = this.options.provider.generateMessageStream({
         prompt: fallbackPrompt,
         history,
         context: effectiveContext,
@@ -872,7 +872,7 @@ export class Agent<TContext = unknown> {
           description: this.options.description,
           personality: this.options.personality,
         },
-        ai: this.options.ai,
+        provider: this.options.provider,
         context: effectiveContext,
         signal,
       });
@@ -956,7 +956,7 @@ export class Agent<TContext = unknown> {
       );
 
       // Generate message using AI provider
-      const result = await this.options.ai.generateMessage({
+      const result = await this.options.provider.generateMessage({
         prompt: responsePrompt,
         history,
         context: effectiveContext,
@@ -1044,7 +1044,7 @@ export class Agent<TContext = unknown> {
       );
 
       // Generate completion message using AI provider
-      const completionResult = await this.options.ai.generateMessage({
+      const completionResult = await this.options.provider.generateMessage({
         prompt: completionPrompt,
         history,
         context: effectiveContext,
@@ -1115,7 +1115,7 @@ export class Agent<TContext = unknown> {
         .addCapabilities(this.capabilities)
         .build();
 
-      const result = await this.options.ai.generateMessage({
+      const result = await this.options.provider.generateMessage({
         prompt: fallbackPrompt,
         history,
         context: effectiveContext,

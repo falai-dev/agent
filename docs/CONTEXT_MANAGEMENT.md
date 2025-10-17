@@ -348,7 +348,7 @@ const hooks: ContextLifecycleHooks<MyContext> = {
 // Create agent with hooks
 const agent = new Agent({
   name: "Bot",
-  ai: provider,
+  provider: provider,
   context: initialContext,
   hooks, // 🔑 Enable persistence
 });
@@ -423,7 +423,7 @@ For scenarios where context is **always loaded from an external source**, use th
 ```typescript
 const agent = new Agent({
   name: "Bot",
-  ai: provider,
+  provider: provider,
 
   // Instead of static context:
   contextProvider: async () => {
@@ -482,7 +482,7 @@ async function createOnboardingAgent(sessionId: string) {
 
   const agent = new Agent<OnboardingContext>({
     name: "OnboardingBot",
-    ai: provider,
+    provider: provider,
     context: {
       sessionId,
       userId: session.userId,

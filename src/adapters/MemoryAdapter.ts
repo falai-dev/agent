@@ -27,7 +27,7 @@ import type {
  *
  * const agent = new Agent({
  *   name: "My Agent",
- *   ai: provider,
+ *   provider: provider,
  *   persistence: {
  *     adapter: new MemoryAdapter(),
  *     userId: "user_123",

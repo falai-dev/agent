@@ -68,7 +68,7 @@ export interface PostgreSQLAdapterOptions {
  *
  * const agent = new Agent({
  *   name: "My Agent",
- *   ai: provider,
+ *   provider: provider,
  *   persistence: {
  *     adapter: new PostgreSQLAdapter({ client }),
  *     userId: "user_123",

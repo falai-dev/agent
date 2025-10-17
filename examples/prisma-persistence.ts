@@ -85,7 +85,7 @@ async function example() {
     name: "Travel Assistant",
     description: "A helpful travel booking assistant",
     goal: "Help users book flights with ease",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
@@ -383,7 +383,7 @@ async function advancedExample() {
   const agent = new Agent<UserContext>({
     name: "Onboarding Assistant",
     description: "Help new users get started",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
@@ -517,7 +517,7 @@ async function quickStart() {
 
   const agent = new Agent({
     name: "Support Agent",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),

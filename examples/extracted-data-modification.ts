@@ -252,7 +252,7 @@ const agent = new Agent<FlightBookingContext>({
   name: "Flight Booking Agent",
   goal: "Help users book flights efficiently",
   description: "I help you find and book flights",
-  ai: new OpenAIProvider({
+  provider: new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY || "your-api-key-here",
     model: "gpt-5o-mini",
   }),

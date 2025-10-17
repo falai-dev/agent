@@ -17,7 +17,7 @@ You can **mix both patterns** - initialize with agent, then add more dynamically
 interface AgentOptions<TContext = unknown> {
   // Required
   name: string;
-  ai: AiProvider;
+  provider: AiProvider;
 
   // Optional metadata
   description?: string;
@@ -69,7 +69,7 @@ const agent = new Agent<FlightBookingContext>({
   name: "FlightBot",
   description: "Helpful flight booking assistant",
   goal: "Book flights efficiently",
-  ai: new GeminiProvider({ apiKey: "...", model: "..." }),
+  provider: new GeminiProvider({ apiKey: "...", model: "..." }),
 
   // Static context
   context: {
@@ -188,7 +188,7 @@ Set an initial session in the constructor for convenience:
 ```typescript
 const agent = new Agent({
   name: 'Bot',
-  ai: provider,
+  provider: provider,
   session: createSession<MyData>({
     data: { name: 'John' }, // Pre-populate data
   }),
@@ -279,7 +279,7 @@ interface RouteOptions<TData = unknown> {
 ```typescript
 const agent = new Agent({
   name: "Bot",
-  ai: provider,
+  provider: provider,
   routes: [
     {
       title: "Onboarding",
@@ -435,7 +435,7 @@ agent.createRoute({
 ```typescript
 const agent = new Agent({
   name: "HealthBot",
-  ai: provider,
+  provider: provider,
   routes: [
     { title: "Schedule Appointment", conditions: [...] },
     { title: "Cancel Appointment", conditions: [...] },
@@ -484,7 +484,7 @@ route.createGuideline({ condition: "...", action: "..." });
 // Start with static config
 const agent = new Agent({
   name: "Bot",
-  ai: provider,
+  provider: provider,
   terms: loadTermsFromFile(),
   guidelines: loadGuidelinesFromDB(),
 });
@@ -520,7 +520,7 @@ const agent = new Agent<MyContext>({
   name: string,
   description?: string,
   goal?: string,
-  ai: AiProvider,
+  provider: AiProvider,
   context?: MyContext,
   session?: SessionStep,        // Optional current session
   maxEngineIterations?: number,

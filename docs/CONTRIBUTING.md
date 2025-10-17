@@ -290,7 +290,7 @@ interface UserContext {
 
 const agent = new Agent<UserContext>({
   name: "SupportBot",
-  ai: provider,
+  provider: provider,
 });
 
 // ❌ Bad
@@ -301,7 +301,7 @@ interface user_context {
 
 const agent = new Agent<any>({
   name: "SupportBot",
-  ai: provider,
+  provider: provider,
 });
 ```
 
@@ -351,7 +351,7 @@ export class MyClass {
  * ```typescript
  * const agent = new Agent({
  *   name: "MyBot",
- *   ai: provider,
+ *   provider: provider,
  * });
  * ```
  *

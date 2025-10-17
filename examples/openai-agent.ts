@@ -84,7 +84,7 @@ async function main() {
       name: "Alice",
       preferences: ["concise answers", "weather updates"],
     },
-    ai: openaiProvider,
+    provider: openaiProvider,
   });
 
   // Add domain knowledge

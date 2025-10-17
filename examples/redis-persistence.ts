@@ -69,7 +69,7 @@ async function example() {
     name: "Support Assistant",
     description: "Fast, real-time support assistant",
     goal: "Help users resolve issues quickly",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
@@ -281,7 +281,7 @@ async function highThroughputExample() {
   const agent = new Agent({
     name: "Chat Bot",
     description: "Fast chat responses",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),
@@ -366,7 +366,7 @@ async function sessionRecoveryExample() {
 
   const agent = new Agent({
     name: "Order Assistant",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),

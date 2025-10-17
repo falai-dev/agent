@@ -130,7 +130,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     name: "OnboardingBot",
     description: "A friendly assistant that helps businesses get started",
     goal: "Collect business information efficiently while being conversational",
-    ai: provider,
+    provider: provider,
     // Context is loaded fresh from database on each respond() call
     contextProvider: async () => {
       console.log("🔄 Loading fresh context from database...");
@@ -359,7 +359,7 @@ async function createOnboardingAgentWithProvider(sessionId: string) {
   const agent = new Agent<OnboardingContext>({
     name: "OnboardingBot",
     description: "A friendly assistant that helps businesses get started",
-    ai: provider,
+    provider: provider,
 
     // Context is always fetched fresh from database
     contextProvider: async () => {

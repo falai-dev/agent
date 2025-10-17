@@ -385,7 +385,7 @@ import {
 // Use Anthropic (Claude)
 const claudeAgent = new Agent({
   name: "Claude Assistant",
-  ai: new AnthropicProvider({
+  provider: new AnthropicProvider({
     apiKey: process.env.ANTHROPIC_API_KEY!,
     model: "claude-sonnet-4-5",
   }),
@@ -394,7 +394,7 @@ const claudeAgent = new Agent({
 // Use Gemini
 const geminiAgent = new Agent({
   name: "Gemini Assistant",
-  ai: new GeminiProvider({
+  provider: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
     model: "models/gemini-2.5-flash",
   }),
@@ -403,7 +403,7 @@ const geminiAgent = new Agent({
 // Use OpenAI
 const openaiAgent = new Agent({
   name: "OpenAI Assistant",
-  ai: new OpenAIProvider({
+  provider: new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY!,
     model: "gpt-5",
   }),
@@ -412,7 +412,7 @@ const openaiAgent = new Agent({
 // Use OpenRouter (access to 200+ models)
 const openrouterAgent = new Agent({
   name: "OpenRouter Assistant",
-  ai: new OpenRouterProvider({
+  provider: new OpenRouterProvider({
     apiKey: process.env.OPENROUTER_API_KEY!,
     model: "anthropic/claude-sonnet-4-5",
   }),

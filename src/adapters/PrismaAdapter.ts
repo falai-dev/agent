@@ -107,7 +107,7 @@ export interface PrismaAdapterOptions {
  *
  * const agent = new Agent({
  *   name: "My Agent",
- *   ai: provider,
+ *   provider: provider,
  *   persistence: {
  *     adapter: new PrismaAdapter({ prisma }),
  *     userId: "user_123",

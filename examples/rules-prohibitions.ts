@@ -19,7 +19,7 @@ import { OpenAIProvider } from "../src/providers/OpenAIProvider";
 /**
  * Configuration for the AI provider
  */
-const ai = new OpenAIProvider({
+const provider = new OpenAIProvider({
   apiKey: process.env.OPENAI_API_KEY || "your-api-key-here",
   model: "gpt-5",
 });
@@ -32,7 +32,7 @@ const agent = new Agent({
   description:
     "A versatile customer service agent that adapts its behavior based on the conversation's context.",
   goal: "Provide excellent customer service by following route-specific rules and prohibitions.",
-  ai,
+  provider,
   debug: true,
 });
 
@@ -166,7 +166,7 @@ async function demonstrateRulesAndProhibitions() {
     description:
       "A versatile customer service agent that adapts its behavior based on the conversation's context.",
     goal: "Provide excellent customer service by following route-specific rules and prohibitions.",
-    ai,
+    provider,
     debug: true,
   });
 

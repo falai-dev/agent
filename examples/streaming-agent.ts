@@ -51,7 +51,7 @@ async function streamingWithAnthropic() {
         streamingEnabled: true,
       },
     },
-    ai: provider,
+    provider: provider,
   });
 
   // Add guidelines
@@ -127,7 +127,7 @@ async function streamingWithOpenAI() {
         streamingEnabled: true,
       },
     },
-    ai: provider,
+    provider: provider,
   });
 
   const history = [
@@ -187,7 +187,7 @@ async function streamingWithGemini() {
         streamingEnabled: true,
       },
     },
-    ai: provider,
+    provider: provider,
   });
 
   const history = [
@@ -244,7 +244,7 @@ async function streamingWithRoutes() {
         streamingEnabled: true,
       },
     },
-    ai: provider,
+    provider: provider,
   });
 
   // Create a route
@@ -357,7 +357,7 @@ async function streamingWithAbortSignal() {
         streamingEnabled: true,
       },
     },
-    ai: provider,
+    provider: provider,
   });
 
   const history = [

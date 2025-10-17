@@ -146,7 +146,7 @@ const agent = new Agent<CompanyContext>({
     "I'm here to help you learn about Acme Corp, our products, and policies",
   personality:
     "Friendly, helpful, and knowledgeable. Always professional but approachable.",
-  ai: new OpenAIProvider({
+  provider: new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY || "test-key",
     model: "gpt-5o-mini",
   }),

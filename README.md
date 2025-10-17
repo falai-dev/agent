@@ -88,12 +88,9 @@ After building production AI applications, we found existing solutions either:
 ### 🛤️ **Data-Driven Conversations**
 
 - **Schema-First Extraction** - Define data contracts with JSON Schema
-- **Session Step Management** - Track conversation progress across turns
-- **AI-Driven Step Transitions** - Smart step selection based on conversation context
-- **Text-Based Conditions** - Human-readable transition conditions for the AI to evaluate
-- **Code-Based Logic** - Deterministic step progression with `skipIf` and `requires`
-- **Always-On Routing** - Context-aware routing respects user intent changes
-- **Route Transitions** - Automatic transitions between routes with `onComplete` for seamless workflows
+- **Session Step Management** - Track progress across conversation turns
+- **Flexible Step Transitions** - Use AI, text, or code (`skipIf`) for flow control
+- **Always-On Routing** - Context-aware routing between different flows
 
 </td>
 <td width="50%">
@@ -103,7 +100,6 @@ After building production AI applications, we found existing solutions either:
 - **Data-Aware Tools** - Tools access collected data directly via `data` context
 - **Enrichment Hooks** - Tools can modify collected data with `dataUpdate`
 - **Action Flags** - Tools set flags for conditional execution
-- **Type-Safe Tools** - Define tools with full type inference
 
 </td>
 </tr>
@@ -112,13 +108,9 @@ After building production AI applications, we found existing solutions either:
 
 ### 💾 **Optional Persistence**
 
-- **Session Step Integration** - Automatic saving of collected data & conversation progress
-- **Provider Pattern** - Simple API like AI providers
-- **Multiple Adapters** - Prisma, Redis, MongoDB, PostgreSQL, SQLite, OpenSearch, Memory
-- **Custom Database Support** - Manual session step management for existing schemas
-- **Auto-save** - Automatic session step & message persistence
-- **Type-Safe** - Full TypeScript support with generics
-- **Extensible** - Create adapters for any database
+- **Auto-Save** - Automatically persist conversation data and progress
+- **Extensible Adapters** - Use built-in (Prisma, Redis, etc.) or create your own
+- **Custom DB Support** - Integrate with your existing database schemas
 
 </td>
 <td width="50%">
@@ -128,7 +120,6 @@ After building production AI applications, we found existing solutions either:
 - **Always-On Routing** - Users can change their mind mid-conversation
 - **Context Awareness** - Router sees current progress and collected data
 - **Session Step** - Track conversation progress across turns
-- **Deterministic IDs** - Consistent identifiers across restarts
 
 </td>
 </tr>
@@ -166,8 +157,8 @@ import { Agent, GeminiProvider } from "@falai/agent";
 const agent = new Agent({
   name: "Assistant",
   description: "A helpful assistant",
-  ai: new GeminiProvider({
-    apiKey: process.env.GEMINI_API_KEY!,
+  provider: new GeminiProvider({
+    apiKey: process.env.GEMINI_API_KEY,
     model: "models/gemini-2.0-flash-exp",
   }),
 });
@@ -201,7 +192,7 @@ Now let's build an agent that intelligently collects structured data:
 ```typescript
 import {
   Agent,
-  GeminiProvider,
+  OpenAIProvider,
   defineTool,
   createMessageEvent,
   EventSource,
@@ -220,9 +211,9 @@ interface HotelBookingData {
 const agent = new Agent({
   name: "BookingBot",
   description: "A hotel booking assistant that collects information.",
-  ai: new GeminiProvider({
-    apiKey: process.env.GEMINI_API_KEY!,
-    model: "models/gemini-2.5-flash", // or your preferred model
+  provider: new OpenAIProvider({
+    apiKey: process.env.OPENAI_API_KEY,
+    model: "gpt-5", // or your preferred model
   }),
 });
 
@@ -238,20 +229,22 @@ const bookHotel = defineTool(
   { description: "Books a hotel once all information is collected." }
 );
 
+const schema = {
+  type: "object",
+  properties: {
+    hotelName: { type: "string", description: "The name of the hotel." },
+    date: { type: "string", description: "The desired booking date." },
+    guests: { type: "number", description: "The number of guests." },
+  },
+  required: ["hotelName", "date", "guests"],
+};
+
 // 4️⃣ Create a data-driven route
 const bookingRoute = agent.createRoute<HotelBookingData>({
   title: "Book Hotel",
   description: "Guides the user through the hotel booking process.",
   conditions: ["User wants to book a hotel"],
-  schema: {
-    type: "object",
-    properties: {
-      hotelName: { type: "string", description: "The name of the hotel." },
-      date: { type: "string", description: "The desired booking date." },
-      guests: { type: "number", description: "The number of guests." },
-    },
-    required: ["hotelName", "date", "guests"],
-  },
+  schema,
   endStep: {
     instructions: "Confirm the booking details warmly and thank the user",
   },

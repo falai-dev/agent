@@ -23,7 +23,7 @@ import {
 import { OpenRouterProvider } from "../src/providers";
 
 // Initialize AI provider
-const ai = new OpenRouterProvider({
+const provider = new OpenRouterProvider({
   apiKey: process.env.OPENROUTER_API_KEY || "your-api-key-here",
   model: "google/gemini-2.0-flash-exp",
   backupModels: ["anthropic/claude-sonnet-4-5"],
@@ -34,7 +34,7 @@ const agent = new Agent({
   name: "Multi-Domain Assistant",
   description:
     "An assistant that handles different tasks with domain-scoped tools",
-  ai,
+  provider,
 });
 
 // Register different domains with their tools

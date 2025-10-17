@@ -296,7 +296,7 @@ const agent = new Agent<HealthcareContext>({
     patientId: "p_12345",
     patientName: "Alice Johnson",
   },
-  ai: new GeminiProvider({
+  provider: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY || "demo-key",
     model: "models/gemini-2.5-flash",
   }),

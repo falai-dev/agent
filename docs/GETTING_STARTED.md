@@ -65,7 +65,7 @@ interface MyContext {
 }
 
 // Create AI provider
-const ai = new GeminiProvider({
+const provider = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
   model: "models/gemini-2.5-pro",
 });
@@ -74,7 +74,7 @@ const ai = new GeminiProvider({
 const agent = new Agent<MyContext>({
   name: "FlightBot",
   description: "A helpful flight booking assistant",
-  ai,
+  provider,
   context: {
     userId: "user_123",
     userName: "Alice",
@@ -252,7 +252,7 @@ Load everything from config:
 ```typescript
 const agent = new Agent({
   name: "ConfiguredBot",
-  ai: provider,
+  provider: provider,
   terms: loadTermsFromFile(),
   guidelines: loadGuidelinesFromDB(),
   routes: [

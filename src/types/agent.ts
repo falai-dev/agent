@@ -86,7 +86,7 @@ export interface AgentOptions<TContext = unknown> {
   /** Lifecycle hooks for context management */
   hooks?: ContextLifecycleHooks<TContext>;
   /** AI provider strategy for generating responses */
-  ai: AiProvider;
+  provider: AiProvider;
   /** Composition mode for response generation */
   compositionMode?: CompositionMode;
   /** Initial terms for domain glossary */

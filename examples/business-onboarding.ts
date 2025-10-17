@@ -379,7 +379,7 @@ async function createBusinessOnboardingAgent(
     description:
       "A specialized assistant that helps businesses set up intelligent conversation routes for their customers.",
     goal: "Collect comprehensive business information and create personalized conversation routes",
-    ai: provider,
+    provider: provider,
     context: {
       userId,
       userName,

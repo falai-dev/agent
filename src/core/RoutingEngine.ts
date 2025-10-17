@@ -50,7 +50,7 @@ export class RoutingEngine<TContext = unknown> {
       description?: string;
       personality?: string;
     };
-    ai: AiProvider;
+    provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
   }): Promise<{
@@ -60,7 +60,8 @@ export class RoutingEngine<TContext = unknown> {
     session: SessionStep;
     isRouteComplete?: boolean;
   }> {
-    const { route, session, history, agentMeta, ai, context, signal } = params;
+    const { route, session, history, agentMeta, provider, context, signal } =
+      params;
 
     let updatedSession = session;
     const selectedRoute = route;
@@ -138,7 +139,7 @@ export class RoutingEngine<TContext = unknown> {
       candidates.map((c) => c.step.id)
     );
 
-    const stepResult = await ai.generateMessage<
+    const stepResult = await provider.generateMessage<
       TContext,
       {
         reasoning: string;
@@ -411,7 +412,7 @@ export class RoutingEngine<TContext = unknown> {
       description?: string;
       personality?: string;
     };
-    ai: AiProvider;
+    provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
   }): Promise<{
@@ -421,7 +422,8 @@ export class RoutingEngine<TContext = unknown> {
     session: SessionStep;
     isRouteComplete?: boolean;
   }> {
-    const { routes, session, history, agentMeta, ai, context, signal } = params;
+    const { routes, session, history, agentMeta, provider, context, signal } =
+      params;
 
     if (routes.length === 0) {
       return { session };
@@ -434,7 +436,7 @@ export class RoutingEngine<TContext = unknown> {
         session,
         history,
         agentMeta,
-        ai,
+        provider,
         context,
         signal,
       });
@@ -504,7 +506,7 @@ export class RoutingEngine<TContext = unknown> {
       activeRouteSteps
     );
 
-    const routingResult = await ai.generateMessage<
+    const routingResult = await provider.generateMessage<
       TContext,
       RoutingDecisionOutput
     >({

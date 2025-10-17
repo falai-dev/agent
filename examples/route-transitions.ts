@@ -34,7 +34,7 @@ async function main() {
   const agent = new Agent({
     name: "HotelBot",
     description: "A hotel booking assistant with feedback collection",
-    ai: new GeminiProvider({
+    provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.0-flash-exp",
     }),

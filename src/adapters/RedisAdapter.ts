@@ -64,7 +64,7 @@ export interface RedisAdapterOptions {
  *
  * const agent = new Agent({
  *   name: "My Agent",
- *   ai: provider,
+ *   provider: provider,
  *   persistence: {
  *     adapter: new RedisAdapter({ redis }),
  *     userId: "user_123",
