@@ -148,7 +148,7 @@ export interface TransitionSpec<TContext = unknown, TExtracted = unknown> {
   chatState?: string;
   /** Transition to execute a tool */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  toolState?: ToolRef<TContext, any[], any>;
+  toolState?: ToolRef<TContext, any[], any, TExtracted>;
   /** Transition to a specific state or end marker */
   state?: StateRef | symbol;
   /**
