@@ -15,7 +15,7 @@ Session step tracks three key aspects of a conversation:
 3. **Collected data** - Structured data collected so far
 
 ```typescript
-import { createSession, SessionStep } from "@falai/agent";
+import { createSession, SessionState } from "@falai/agent";
 
 // Define your data extraction type
 interface FlightData {
@@ -61,7 +61,7 @@ import {
   enterRoute,
   enterStep,
   mergeData,
-  type SessionStep,
+  type SessionState,
 } from "@falai/agent";
 
 // Create a new session
@@ -84,7 +84,7 @@ session = mergeData(session, {
 ### Session Step Structure
 
 ```typescript
-interface SessionStep<TData = unknown> {
+interface SessionState<TData = unknown> {
   currentRoute?: {
     id: string;
     title: string;

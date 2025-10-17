@@ -14,7 +14,7 @@ import {
   createMessageEvent,
   EventSource,
   END_ROUTE,
-  type SessionStep,
+  type SessionState,
 } from "../src/index";
 
 // Type definitions for our booking data
@@ -138,7 +138,7 @@ async function main() {
   console.log("\n=== Route Transitions Example ===\n");
 
   // Conversation 1: User provides all booking info at once
-  let session: SessionStep | undefined;
+  let session: SessionState | undefined;
   let history = [
     createMessageEvent(
       EventSource.CUSTOMER,
@@ -209,7 +209,7 @@ async function main() {
   console.log("\n=== Manual Transition Example ===\n");
 
   // Demonstrate manual transition using agent.nextStepRoute()
-  let session2: SessionStep | undefined;
+  let session2: SessionState | undefined;
   let history2 = [
     createMessageEvent(
       EventSource.CUSTOMER,

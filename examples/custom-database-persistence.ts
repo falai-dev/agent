@@ -16,7 +16,7 @@ import {
   createMessageEvent,
   EventSource,
   createSession,
-  SessionStep,
+  SessionState,
   MessageEventData,
   Event,
   END_ROUTE,
@@ -218,9 +218,9 @@ async function example() {
   }
 
   /**
-   * Convert database session to agent SessionStep
+   * Convert database session to agent SessionState
    */
-  let agentSession: SessionStep<OnboardingData>;
+  let agentSession: SessionState<OnboardingData>;
 
   if (dbSession.currentRoute && dbSession.collectedData) {
     // Restore existing session from database
@@ -248,7 +248,7 @@ async function example() {
         >) || {},
       routeHistory:
         (dbSession.collectedData
-          ?.routeHistory as SessionStep<OnboardingData>["routeHistory"]) || [],
+          ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
       metadata: {
         sessionId: dbSession.id,
         userId,
@@ -404,7 +404,7 @@ async function example() {
   if (!reloadedDbSession) throw new Error("Session not found");
 
   // Reconstruct session step
-  const recoveredSession: SessionStep<OnboardingData> = {
+  const recoveredSession: SessionState<OnboardingData> = {
     currentRoute: reloadedDbSession.currentRoute
       ? {
           id: reloadedDbSession.currentRoute,
@@ -430,7 +430,7 @@ async function example() {
       >) || {},
     routeHistory:
       (reloadedDbSession.collectedData
-        ?.routeHistory as SessionStep<OnboardingData>["routeHistory"]) || [],
+        ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
     metadata: {
       sessionId: reloadedDbSession.id,
       userId,

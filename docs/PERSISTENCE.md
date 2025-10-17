@@ -270,7 +270,7 @@ await agent.updateContext({ preferences: { theme: "dark" } });
 
 ## Session Step Integration
 
-The new architecture automatically saves and loads `SessionStep<TData>` which includes:
+The new architecture automatically saves and loads `SessionState<TData>` which includes:
 
 - **Current route and step** - Track conversation progress
 - **Collected data** - All data collected via `schema` and `collect` fields
@@ -280,7 +280,7 @@ The new architecture automatically saves and loads `SessionStep<TData>` which in
 ### How It Works
 
 1. **Auto-Save**: When `autoSave: true`, session step is automatically persisted after each `respond()` call
-2. **Conversion**: `SessionStep` is automatically converted to `SessionData` for storage
+2. **Conversion**: `SessionState` is automatically converted to `SessionData` for storage
 3. **Recovery**: Load session step from database to resume conversations
 
 ### Create Session with Step
@@ -303,14 +303,14 @@ const { sessionData, sessionStep } =
 
 ```typescript
 // Manual save (not needed if autoSave: true)
-await persistence.saveSessionStep(sessionId, sessionStep);
+await persistence.saveSessionState(sessionId, sessionStep);
 ```
 
 ### Load Session Step
 
 ```typescript
 // Load session step from database
-const sessionStep = await persistence.loadSessionStep<YourDataType>(sessionId);
+const sessionStep = await persistence.loadSessionState<YourDataType>(sessionId);
 
 // Load message history
 const history = await persistence.loadSessionHistory(sessionId);
@@ -374,10 +374,10 @@ const { sessionData, sessionStep } =
   });
 
 // Save session step (NEW!)
-await persistence.saveSessionStep(sessionId, sessionStep);
+await persistence.saveSessionState(sessionId, sessionStep);
 
 // Load session step (NEW!)
-const sessionStep = await persistence.loadSessionStep<YourDataType>(sessionId);
+const sessionStep = await persistence.loadSessionState<YourDataType>(sessionId);
 
 // Create session (legacy)
 await persistence.createSession({
@@ -531,7 +531,7 @@ await persistence.saveMessage({
 2. ✅ **Enable `autoSave: true`** - Automatically persist session step after each response
 3. ✅ **Define extraction schemas** - Use `schema` in routes for structured data collection
 4. ✅ **Pass session step** - Always pass `session` parameter to `agent.respond()`
-5. ✅ **Load session step** - Use `loadSessionStep()` to resume conversations
+5. ✅ **Load session step** - Use `loadSessionState()` to resume conversations
 6. ✅ **Store collected data** - Leverage `collectedData.data` for user input tracking
 7. ✅ **Index frequently queried fields** - Add database indexes on `userId`, `status`, etc.
 8. ✅ **Use cascading deletes** - Clean up messages automatically when deleting sessions

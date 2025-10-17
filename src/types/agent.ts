@@ -6,7 +6,7 @@ import type { AiProvider } from "./ai";
 import type { ToolRef } from "./tool";
 import type { RouteOptions } from "./route";
 import type { PersistenceConfig } from "./persistence";
-import type { SessionStep } from "./session";
+import type { SessionState } from "./session";
 
 /**
  * Composition mode determines how the agent processes and structures responses
@@ -80,7 +80,7 @@ export interface AgentOptions<TContext = unknown> {
   /** Default context data available to the agent */
   context?: TContext;
   /** Optional current session for convenience methods */
-  session?: SessionStep;
+  session?: SessionState;
   /** Context provider function for always-fresh context (alternative to static context) */
   contextProvider?: ContextProvider<TContext>;
   /** Lifecycle hooks for context management */

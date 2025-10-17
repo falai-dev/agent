@@ -248,7 +248,7 @@ async function example() {
 
   // Load session from OpenSearch
   console.log("\n--- Loading Session from OpenSearch ---");
-  const loadedSession = await persistence.loadSessionStep<ComplaintData>(
+  const loadedSession = await persistence.loadSessionState<ComplaintData>(
     sessionData.id
   );
 

@@ -91,7 +91,7 @@ const routeData = agent.getData("onboarding");
 
 - `session`: Session step to use as current session
 
-##### `getCurrentSession(): SessionStep | undefined`
+##### `getCurrentSession(): SessionState | undefined`
 
 Gets the currently set session.
 
@@ -119,7 +119,7 @@ Generates an AI response with session step management, data extraction, and inte
 ```typescript
 interface RespondInput<TContext> {
   history: Event[];
-  session?: SessionStep; // NEW: Session step for conversation tracking
+  session?: SessionState; // NEW: Session step for conversation tracking
   contextOverride?: Partial<TContext>;
   signal?: AbortSignal;
 }
@@ -128,7 +128,7 @@ interface RespondOutput {
   /** The message to send to the user */
   message: string;
   /** Updated session step (includes collected data, current route/step) */
-  session?: SessionStep;
+  session?: SessionState;
   /** Tool calls executed during response (for debugging) */
   toolCalls?: Array<{
     toolName: string;
@@ -192,13 +192,13 @@ const response2 = await agent.respond({
 **Example with Custom Database (Manual):**
 
 ```typescript
-import { createSession, SessionStep } from "@falai/agent";
+import { createSession, SessionState } from "@falai/agent";
 
 // Load from your custom database
 const dbSession = await yourDb.sessions.findOne({ id: sessionId });
 
 // Restore or create session step
-let agentSession: SessionStep<YourDataType>;
+let agentSession: SessionState<YourDataType>;
 
 if (dbSession && dbSession.currentRoute && dbSession.collectedData) {
   // Restore existing session from database
@@ -372,7 +372,7 @@ interface StreamChunk {
   /** Whether this is the final chunk */
   done: boolean;
   /** Updated session step (includes collected data, current route/step) */
-  session?: SessionStep;
+  session?: SessionState;
   /** Tool calls requested by the agent (only in final chunk) */
   toolCalls?: Array<{
     toolName: string;
@@ -1745,12 +1745,12 @@ interface ToolResult<TReturn> {
 
 ## Types
 
-### `SessionStep<TData>`
+### `SessionState<TData>`
 
 Tracks the current position in the conversation flow and data collected during route progression.
 
 ```typescript
-interface SessionStep<TData = Record<string, unknown>> {
+interface SessionState<TData = Record<string, unknown>> {
   /** Unique session identifier (useful for persistence) */
   id?: string;
 
@@ -1843,7 +1843,7 @@ console.log(response.session?.data.destination); // Type-safe!
 
 ### Session Helper Functions
 
-#### `createSession<TData>(sessionId?, metadata?): SessionStep<TData>`
+#### `createSession<TData>(sessionId?, metadata?): SessionState<TData>`
 
 Creates a new session step object.
 
@@ -1868,7 +1868,7 @@ const session = createSession<OnboardingData>("session_123", {
 });
 ```
 
-#### `enterRoute<TData>(session, routeId, routeTitle): SessionStep<TData>`
+#### `enterRoute<TData>(session, routeId, routeTitle): SessionState<TData>`
 
 Updates session when entering a new route. Automatically:
 
@@ -1889,7 +1889,7 @@ console.log(session.currentRoute?.title); // "Book a Flight"
 console.log(session.data); // {} (reset for new route)
 ```
 
-#### `enterStep<TData>(session, stepId, description?): SessionStep<TData>`
+#### `enterStep<TData>(session, stepId, description?): SessionState<TData>`
 
 Updates session when entering a new step within a route.
 
@@ -1902,7 +1902,7 @@ console.log(session.currentStep?.id); // "ask_destination"
 console.log(session.currentStep?.description); // "Ask where to fly"
 ```
 
-#### `mergeData<TData>(session, data): SessionStep<TData>`
+#### `mergeData<TData>(session, data): SessionState<TData>`
 
 Merges new collected data into session. Updates timestamps automatically.
 
@@ -1919,7 +1919,7 @@ console.log(session.data); // { destination: "Paris", departureDate: "2025-06-15
 
 #### `sessionStepToData<TData>(session): object`
 
-Converts SessionStep to persistence-friendly format for database storage.
+Converts SessionState to persistence-friendly format for database storage.
 
 **Returns:**
 
@@ -1952,9 +1952,9 @@ await db.sessions.update(session.id!, {
 });
 ```
 
-#### `sessionDataToStep<TData>(sessionId, data): SessionStep<TData>`
+#### `sessionDataToStep<TData>(sessionId, data): SessionState<TData>`
 
-Converts database data back to SessionStep for resuming conversations.
+Converts database data back to SessionState for resuming conversations.
 
 **Parameters:**
 

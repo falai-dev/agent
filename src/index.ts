@@ -99,7 +99,7 @@ export type {
   RouteCompletionHandler,
 } from "./types/route";
 
-export type { SessionStep, PendingTransition } from "./types/session";
+export type { SessionState, PendingTransition } from "./types/session";
 export {
   createSession,
   enterRoute,

@@ -251,7 +251,7 @@ async function example() {
 
   // Load session step from Redis (demonstrates persistence)
   console.log("\n--- Loading Session from Redis ---");
-  const loadedSession = await persistence.loadSessionStep<SupportTicketData>(
+  const loadedSession = await persistence.loadSessionState<SupportTicketData>(
     sessionData.id
   );
 
@@ -433,7 +433,7 @@ async function sessionRecoveryExample() {
   console.log("\n--- User Reconnects ---");
 
   // Load session from Redis
-  const recoveredSession = await persistence.loadSessionStep<OrderData>(
+  const recoveredSession = await persistence.loadSessionState<OrderData>(
     sessionId
   );
 

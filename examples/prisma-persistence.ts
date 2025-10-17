@@ -333,7 +333,7 @@ async function example() {
    * Load session step from database (demonstrates persistence)
    */
   console.log("\n--- Loading Session from Database ---");
-  const loadedSession = await persistence.loadSessionStep<FlightBookingData>(
+  const loadedSession = await persistence.loadSessionState<FlightBookingData>(
     dbSessionId
   );
 

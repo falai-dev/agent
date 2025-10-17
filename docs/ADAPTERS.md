@@ -206,7 +206,7 @@ export class MyCustomAdapter implements PersistenceAdapter {
 
 All adapters are fully typed with **zero `any` types** (except for Prisma's dynamic model access):
 
-- Generic client interfaces with `SessionStep<TData>` support
+- Generic client interfaces with `SessionState<TData>` support
 - Typed repository methods
 - Full IDE autocomplete
 - Type-safe data extraction throughout

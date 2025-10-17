@@ -6,7 +6,7 @@ import type { AgentOptions, Term, Guideline, Capability } from "../types/agent";
 import type { Event, StepRef } from "../types/index";
 import type { RouteOptions } from "../types/route";
 
-import type { SessionStep } from "../types/session";
+import type { SessionState } from "../types/session";
 import type { AgentStructuredResponse } from "../types/ai";
 import {
   createSession,
@@ -42,7 +42,7 @@ export class Agent<TContext = unknown> {
   private persistenceManager: PersistenceManager | undefined;
   private routingEngine: RoutingEngine<TContext>;
   private responseEngine: ResponseEngine<TContext>;
-  private currentSession?: SessionStep;
+  private currentSession?: SessionState;
 
   /**
    * Dynamic domain property - populated via addDomain
@@ -236,9 +236,9 @@ export class Agent<TContext = unknown> {
    * @internal
    */
   private async updateData<TData = unknown>(
-    session: SessionStep<TData>,
+    session: SessionState<TData>,
     collectedUpdate: Partial<TData>
-  ): Promise<SessionStep<TData>> {
+  ): Promise<SessionState<TData>> {
     const previousCollected = { ...session.data };
 
     // Merge new collected data
@@ -279,14 +279,14 @@ export class Agent<TContext = unknown> {
   async *respondStream(params: {
     history: Event[];
     step?: StepRef;
-    session?: SessionStep;
+    session?: SessionState;
     contextOverride?: Partial<TContext>;
     signal?: AbortSignal;
   }): AsyncGenerator<{
     delta: string;
     accumulated: string;
     done: boolean;
-    session?: SessionStep;
+    session?: SessionState;
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
     isRouteComplete?: boolean;
   }> {
@@ -548,7 +548,7 @@ export class Agent<TContext = unknown> {
           session.id &&
           this.options.persistence?.autoSave !== false
         ) {
-          await this.persistenceManager.saveSessionStep(session.id, session);
+          await this.persistenceManager.saveSessionState(session.id, session);
           logger.debug(
             `[Agent] Auto-saved session step to persistence: ${session.id}`
           );
@@ -740,12 +740,12 @@ export class Agent<TContext = unknown> {
   async respond(params: {
     history: Event[];
     step?: StepRef;
-    session?: SessionStep;
+    session?: SessionState;
     contextOverride?: Partial<TContext>;
     signal?: AbortSignal;
   }): Promise<{
     message: string;
-    session?: SessionStep;
+    session?: SessionState;
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
     isRouteComplete?: boolean;
   }> {
@@ -1142,7 +1142,7 @@ export class Agent<TContext = unknown> {
       session.id &&
       this.options.persistence?.autoSave !== false
     ) {
-      await this.persistenceManager.saveSessionStep(session.id, session);
+      await this.persistenceManager.saveSessionState(session.id, session);
       logger.debug(
         `[Agent] Auto-saved session step to persistence: ${session.id}`
       );
@@ -1250,14 +1250,14 @@ export class Agent<TContext = unknown> {
    * Set the current session for convenience methods
    * @param session - Session step to use for subsequent calls
    */
-  setCurrentSession(session: SessionStep): void {
+  setCurrentSession(session: SessionState): void {
     this.currentSession = session;
   }
 
   /**
    * Get the current session (if set)
    */
-  getCurrentSession(): SessionStep | undefined {
+  getCurrentSession(): SessionState | undefined {
     return this.currentSession;
   }
 
@@ -1305,9 +1305,9 @@ export class Agent<TContext = unknown> {
    */
   nextStepRoute(
     routeIdOrTitle: string,
-    session?: SessionStep,
+    session?: SessionState,
     condition?: string
-  ): SessionStep {
+  ): SessionState {
     const targetSession = session || this.currentSession;
 
     if (!targetSession) {
@@ -1329,7 +1329,7 @@ export class Agent<TContext = unknown> {
       );
     }
 
-    const updatedSession: SessionStep = {
+    const updatedSession: SessionState = {
       ...targetSession,
       pendingTransition: {
         targetRouteId: targetRoute.id,

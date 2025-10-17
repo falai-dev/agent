@@ -18,7 +18,7 @@ export interface PendingTransition {
  * Session step tracks the current position in the conversation flow
  * and data collected during the route progression
  */
-export interface SessionStep<TData = Record<string, unknown>> {
+export interface SessionState<TData = Record<string, unknown>> {
   /** Unique session identifier (useful for persistence) */
   id?: string;
 
@@ -78,8 +78,8 @@ export interface SessionStep<TData = Record<string, unknown>> {
  */
 export function createSession<TData = Record<string, unknown>>(
   sessionId?: string,
-  metadata?: SessionStep<TData>["metadata"]
-): SessionStep<TData> {
+  metadata?: SessionState<TData>["metadata"]
+): SessionState<TData> {
   return {
     id: sessionId,
     data: {},
@@ -98,10 +98,10 @@ export function createSession<TData = Record<string, unknown>>(
  * Preserves collected data per route in dataByRoute map
  */
 export function enterRoute<TData = Record<string, unknown>>(
-  session: SessionStep<TData>,
+  session: SessionState<TData>,
   routeId: string,
   routeTitle: string
-): SessionStep<TData> {
+): SessionState<TData> {
   // Save current route's collected data before switching
   const dataByRoute = { ...session.dataByRoute };
   if (
@@ -157,10 +157,10 @@ export function enterRoute<TData = Record<string, unknown>>(
  * Helper to update session with new step
  */
 export function enterStep<TData = Record<string, unknown>>(
-  session: SessionStep<TData>,
+  session: SessionState<TData>,
   stepId: string,
   stepDescription?: string
-): SessionStep<TData> {
+): SessionState<TData> {
   return {
     ...session,
     currentStep: {
@@ -180,9 +180,9 @@ export function enterStep<TData = Record<string, unknown>>(
  * Updates both the data field and the dataByRoute map
  */
 export function mergeCollected<TData = Record<string, unknown>>(
-  session: SessionStep<TData>,
+  session: SessionState<TData>,
   data: Partial<unknown>
-): SessionStep<TData> {
+): SessionState<TData> {
   const newCollected = {
     ...session.data,
     ...data,
@@ -206,11 +206,11 @@ export function mergeCollected<TData = Record<string, unknown>>(
 }
 
 /**
- * Helper to convert SessionStep to persistence-friendly format
+ * Helper to convert SessionState to persistence-friendly format
  * Used when saving to database
  */
 export function sessionStepToData<TData = Record<string, unknown>>(
-  session: SessionStep<TData>
+  session: SessionState<TData>
 ): {
   currentRoute?: string;
   currentStep?: string;
@@ -231,7 +231,7 @@ export function sessionStepToData<TData = Record<string, unknown>>(
 }
 
 /**
- * Helper to convert database SessionData back to SessionStep
+ * Helper to convert database SessionData back to SessionState
  * Used when loading from database
  * @param sessionId - The database session ID
  * @param data - The database session data
@@ -243,7 +243,7 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
     currentStep?: string;
     collectedData?: Record<string, unknown>;
   }
-): SessionStep<TData> {
+): SessionState<TData> {
   const collectedData = data.collectedData || {};
 
   return {
@@ -268,7 +268,7 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
     dataByRoute:
       (collectedData.dataByRoute as Record<string, Partial<unknown>>) || {}, // Restore per-route data
     routeHistory:
-      (collectedData.routeHistory as SessionStep<TData>["routeHistory"]) || [],
-    metadata: (collectedData.metadata as SessionStep<TData>["metadata"]) || {},
+      (collectedData.routeHistory as SessionState<TData>["routeHistory"]) || [],
+    metadata: (collectedData.metadata as SessionState<TData>["metadata"]) || {},
   };
 }

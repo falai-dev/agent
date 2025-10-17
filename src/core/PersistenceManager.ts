@@ -14,7 +14,7 @@ import type {
   MessageRepository,
 } from "../types/persistence";
 import type { Event } from "../types/history";
-import type { SessionStep } from "../types/session";
+import type { SessionState } from "../types/session";
 import {
   createSession,
   sessionStepToData,
@@ -223,12 +223,12 @@ export class PersistenceManager {
   }
 
   /**
-   * Save SessionStep to database
-   * Converts SessionStep to SessionData and persists it
+   * Save SessionState to database
+   * Converts SessionState to SessionData and persists it
    */
-  async saveSessionStep<TData = Record<string, unknown>>(
+  async saveSessionState<TData = Record<string, unknown>>(
     sessionId: string,
-    sessionStep: SessionStep<TData>
+    sessionStep: SessionState<TData>
   ): Promise<SessionData | null> {
     const persistenceData = sessionStepToData(sessionStep);
 
@@ -241,12 +241,12 @@ export class PersistenceManager {
   }
 
   /**
-   * Load SessionStep from database
-   * Converts SessionData to SessionStep
+   * Load SessionState from database
+   * Converts SessionData to SessionState
    */
-  async loadSessionStep<TData = Record<string, unknown>>(
+  async loadSessionState<TData = Record<string, unknown>>(
     sessionId: string
-  ): Promise<SessionStep<TData> | null> {
+  ): Promise<SessionState<TData> | null> {
     const sessionData = await this.sessionRepository.findById(sessionId);
 
     if (!sessionData) {
@@ -272,18 +272,18 @@ export class PersistenceManager {
   }
 
   /**
-   * Create session with SessionStep support
-   * Returns both SessionData and initialized SessionStep
+   * Create session with SessionState support
+   * Returns both SessionData and initialized SessionState
    */
   async createSessionWithStep<TData = Record<string, unknown>>(
     options: CreateSessionOptions
   ): Promise<{
     sessionData: SessionData;
-    sessionStep: SessionStep<TData>;
+    sessionStep: SessionState<TData>;
   }> {
     const sessionData = await this.createSession(options);
 
-    // Create SessionStep with database session ID
+    // Create SessionState with database session ID
     const sessionStep = createSession<TData>(sessionData.id, {
       createdAt: sessionData.createdAt,
       lastUpdatedAt: sessionData.updatedAt,

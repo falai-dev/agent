@@ -3,7 +3,7 @@ import type { Route } from "./Route";
 import type { Step } from "./Step";
 import type { StructuredSchema } from "../types/schema";
 import type { RoutingDecision } from "../types/routing";
-import type { SessionStep } from "../types/session";
+import type { SessionState } from "../types/session";
 import type { AiProvider } from "../types/ai";
 import { enterRoute, mergeCollected } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
@@ -42,7 +42,7 @@ export class RoutingEngine<TContext = unknown> {
    */
   private async decideSingleRouteStep(params: {
     route: Route<TContext, unknown>;
-    session: SessionStep;
+    session: SessionState;
     history: Event[];
     agentMeta?: {
       name?: string;
@@ -57,7 +57,7 @@ export class RoutingEngine<TContext = unknown> {
     selectedRoute?: Route<TContext>;
     selectedStep?: Step<TContext>;
     responseDirectives?: string[];
-    session: SessionStep;
+    session: SessionState;
     isRouteComplete?: boolean;
   }> {
     const { route, session, history, agentMeta, provider, context, signal } =
@@ -404,7 +404,7 @@ export class RoutingEngine<TContext = unknown> {
    */
   async decideRouteAndStep(params: {
     routes: Route<TContext, unknown>[];
-    session: SessionStep;
+    session: SessionState;
     history: Event[];
     agentMeta?: {
       name?: string;
@@ -419,7 +419,7 @@ export class RoutingEngine<TContext = unknown> {
     selectedRoute?: Route<TContext>;
     selectedStep?: Step<TContext>;
     responseDirectives?: string[];
-    session: SessionStep;
+    session: SessionState;
     isRouteComplete?: boolean;
   }> {
     const { routes, session, history, agentMeta, provider, context, signal } =
@@ -821,7 +821,7 @@ export class RoutingEngine<TContext = unknown> {
       description?: string;
       personality?: string;
     },
-    session?: SessionStep,
+    session?: SessionState,
     activeRouteSteps?: Array<{
       stepId: string;
       description: string;

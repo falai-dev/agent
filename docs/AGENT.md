@@ -25,7 +25,7 @@ interface AgentOptions<TContext = unknown> {
   context?: TContext;
 
   // Optional current session for convenience methods
-  session?: SessionStep;
+  session?: SessionState;
 
   // Context provider for always-fresh context
   contextProvider?: () => Promise<TContext> | TContext;
@@ -522,7 +522,7 @@ const agent = new Agent<MyContext>({
   goal?: string,
   provider: AiProvider,
   context?: MyContext,
-  session?: SessionStep,        // Optional current session
+  session?: SessionState,        // Optional current session
   maxEngineIterations?: number,
   compositionMode?: CompositionMode,
   terms?: Term[],
