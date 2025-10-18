@@ -133,7 +133,8 @@ export class RoutingEngine<TContext = unknown> {
       updatedSession.data || {},
       history,
       lastUserMessage,
-      agentMeta
+      agentMeta,
+      params.context as Record<string, unknown>
     );
 
     const stepSchema = this.buildStepSelectionSchema(
@@ -505,7 +506,8 @@ export class RoutingEngine<TContext = unknown> {
       lastUserMessage,
       agentMeta,
       session,
-      activeRouteSteps
+      activeRouteSteps,
+      params.context as Record<string, unknown>
     );
 
     const routingResult = await provider.generateMessage<
@@ -611,9 +613,10 @@ export class RoutingEngine<TContext = unknown> {
       description?: string;
       personality?: string;
       identity?: string;
-    }
+    },
+    context?: Record<string, unknown>
   ): string {
-    const pc = new PromptComposer();
+    const pc = new PromptComposer(context);
 
     // Add agent metadata
     if (agentMeta?.name || agentMeta?.goal || agentMeta?.description) {
@@ -835,9 +838,10 @@ export class RoutingEngine<TContext = unknown> {
       condition?: string;
       requires?: string[];
       collectFields?: string[];
-    }>
+    }>,
+    context?: Record<string, unknown>
   ): string {
-    const pc = new PromptComposer();
+    const pc = new PromptComposer(context);
     if (agentMeta?.name || agentMeta?.goal || agentMeta?.description) {
       pc.addAgentMeta({
         name: agentMeta?.name || "Agent",

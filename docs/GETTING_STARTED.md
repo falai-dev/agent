@@ -228,6 +228,41 @@ const presentFlights = askPassengers.nextStep({
 });
 ```
 
+### Use Template Variables in Prompts
+
+Use `{{variable}}` syntax to dynamically insert context values into selected parts of your agent configuration. Templates enable personalized interactions while keeping structural elements predictable for AI consistency.
+
+```typescript
+const agent = new Agent({
+  name: "Personal Assistant", // Static - AI knows its identity
+  identity:
+    "I am your personal assistant, here to help you, {{user.firstName}} {{user.lastName}}, with anything you need.", // Dynamic - personalized greeting
+  provider: provider,
+  context: {
+    user: { firstName: "Alice", lastName: "Smith", age: 30 },
+    preferences: ["tech support", "account help"],
+  },
+});
+
+// Templates work in guidelines and route conditions
+agent.createGuideline({
+  condition: "User is {{user.age}} years old", // Dynamic - context-aware condition
+  action:
+    "Be helpful and friendly to {{user.firstName}}. They prefer {{preferences}}.", // Dynamic - personalized action
+});
+
+// And in step prompts (but not route/step titles or descriptions)
+const route = agent.createRoute({
+  title: "User Onboarding", // Static - predictable route identifier
+  description: "Standard onboarding process", // Static - consistent AI understanding
+  conditions: ["If {{user.needsOnboarding}} is true, we shoud use this route"], // Dynamic - context-aware activation
+  initialStep: {
+    prompt:
+      "Welcome {{user.firstName}}! Based on your age of {{user.age}} and preferences for {{preferences}}, let's get you set up.", // Dynamic - personalized message
+  },
+});
+```
+
 ### Handle Context Dynamically
 
 Override context per request:

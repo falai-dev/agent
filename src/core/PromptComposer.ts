@@ -1,9 +1,15 @@
 import type { Event } from "../types/history";
 import type { Term, Guideline, Capability } from "../types/agent";
 import type { Route } from "./Route";
+import { renderTemplate, renderTemplateArray } from "../utils/template";
 
 export class PromptComposer<TContext = unknown> {
   private parts: string[] = [];
+  private context?: Record<string, unknown>;
+
+  constructor(context?: Record<string, unknown>) {
+    this.context = context;
+  }
 
   // Specific, typed sections tailored to the framework
 
@@ -38,7 +44,9 @@ export class PromptComposer<TContext = unknown> {
 
   addIdentity(identity?: string): this {
     if (identity && identity.trim().length) {
-      this.parts.push(`## Identity\n\n${identity.trim()}`);
+      this.parts.push(
+        `## Identity\n\n${renderTemplate(identity.trim(), this.context)}`
+      );
     }
     return this;
   }
@@ -103,8 +111,11 @@ export class PromptComposer<TContext = unknown> {
     const text = enabled
       .map((g, i) => {
         const cond = g.condition
-          ? `When ${g.condition}, then ${g.action}`
-          : g.action;
+          ? `When ${renderTemplate(
+              g.condition,
+              this.context
+            )}, then ${renderTemplate(g.action, this.context)}`
+          : renderTemplate(g.action, this.context);
         return `- Guideline #${i + 1}: ${cond}`;
       })
       .join("\n");
@@ -126,7 +137,10 @@ export class PromptComposer<TContext = unknown> {
     const text = routes
       .map((r, i) => {
         const conditions = r.conditions.length
-          ? `\n\n  **Triggered when:** ${r.conditions.join(" OR ")}`
+          ? `\n\n  **Triggered when:** ${renderTemplateArray(
+              r.conditions,
+              this.context
+            ).join(" OR ")}`
           : "";
         const desc = r.description
           ? `\n\n  **Description:** ${r.description}`

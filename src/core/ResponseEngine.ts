@@ -3,6 +3,7 @@ import type { Route } from "./Route";
 import type { Step } from "./Step";
 import type { StructuredSchema } from "../types/schema";
 import { PromptComposer } from "./PromptComposer";
+import { renderTemplate } from "../utils/template";
 
 export class ResponseEngine<TContext = unknown> {
   responseSchemaForRoute<TData = unknown>(
@@ -50,9 +51,10 @@ export class ResponseEngine<TContext = unknown> {
       description?: string;
       personality?: string;
       identity?: string;
-    }
+    },
+    context?: Record<string, unknown>
   ): string {
-    const pc = new PromptComposer();
+    const pc = new PromptComposer(context);
     if (agentMeta?.name || agentMeta?.goal || agentMeta?.description)
       pc.addAgentMeta({
         name: agentMeta?.name || "Agent",
@@ -73,7 +75,10 @@ export class ResponseEngine<TContext = unknown> {
     );
     if (currentStep.prompt) {
       pc.addInstruction(
-        `Guideline for your response (adapt to the conversation):\n${currentStep.prompt}`
+        `Guideline for your response (adapt to the conversation):\n${renderTemplate(
+          currentStep.prompt,
+          context
+        )}`
       );
     }
     if (rules.length) pc.addInstruction(`Rules:\n- ${rules.join("\n- ")}`);

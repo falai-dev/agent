@@ -2186,4 +2186,96 @@ agent.addDomain("payment", paymentDomain);
 
 ---
 
+## Template Utilities
+
+### Template Variable Support
+
+The framework supports template variables using `{{variable}}` syntax in selected parts of the agent configuration. Templates are replaced with values from the agent's context at runtime to enable dynamic, personalized interactions while keeping structural elements predictable for AI consistency.
+
+#### `renderTemplate(template: string, context?: Record<string, unknown>): string`
+
+Renders template variables in a string using the provided context. Supports nested property access with dot notation.
+
+```typescript
+import { renderTemplate } from "@falai/agent";
+
+// Basic usage
+const template1 = "Hello {{name}}, welcome to {{company}}!";
+const context1 = { name: "Alice", company: "Acme Corp" };
+const result1 = renderTemplate(template1, context1);
+// Result: "Hello Alice, welcome to Acme Corp!"
+
+// Nested properties
+const template2 = "Hello {{user.name}}, you are {{user.age}} years old!";
+const context2 = { user: { name: "Alice", age: 30 } };
+const result2 = renderTemplate(template2, context2);
+// Result: "Hello Alice, you are 30 years old!"
+
+// Arrays (joined with commas)
+const template3 = "Items: {{items}}";
+const context3 = { items: ["apple", "banana", "cherry"] };
+const result3 = renderTemplate(template3, context3);
+// Result: "Items: apple, banana, cherry"
+
+// Objects (converted to JSON)
+const template4 = "User data: {{user}}";
+const context4 = { user: { name: "Alice", age: 30 } };
+const result4 = renderTemplate(template4, context4);
+// Result: "User data: {"name":"Alice","age":30}"
+```
+
+#### `renderTemplateArray(templates: string[], context?: Record<string, unknown>): string[]`
+
+Renders template variables in an array of strings.
+
+#### `renderTemplateObject(obj: unknown, context?: Record<string, unknown>): unknown`
+
+Recursively renders template variables in objects and arrays.
+
+**Supported in (Dynamic/Personalized):**
+
+- Agent identity and personality (for customized AI persona)
+- Route conditions (for context-aware routing logic)
+- Step prompts (for personalized user messages)
+- Guideline conditions and actions (for dynamic behavioral rules)
+- Term names, descriptions, and synonyms (for domain-specific customization)
+
+**Not supported in (Static/Predictable):**
+
+- Route titles and descriptions (kept literal for consistent AI routing decisions)
+- Step descriptions (kept literal for predictable step selection)
+- Capability titles and descriptions (kept literal for stable AI tool understanding)
+- Agent name, goal, description (kept literal for consistent agent metadata)
+
+**Example:**
+
+```typescript
+const agent = new Agent({
+  name: "Assistant", // Static - AI knows its identity
+  identity:
+    "I am {{name}}, here to help you, {{user.firstName}} {{user.lastName}}.", // Dynamic - personalized greeting
+  context: {
+    name: "HelperBot",
+    user: { firstName: "Alice", lastName: "Smith", age: 30 },
+  },
+});
+
+agent.createGuideline({
+  condition: "User is {{user.age}} years old", // Dynamic - context-aware condition
+  action:
+    "Be helpful to {{user.firstName}} and consider their age in responses", // Dynamic - personalized action
+});
+
+const route = agent.createRoute({
+  title: "User Onboarding", // Static - predictable route identifier
+  description: "Standard onboarding process", // Static - consistent AI understanding
+  conditions: ["{{user.needsOnboarding}}"], // Dynamic - context-aware activation
+  initialStep: {
+    prompt: "Welcome {{user.firstName}}! Let's get you set up.", // Dynamic - personalized message
+  },
+});
+```
+
+---
+
 **Made with ❤️ for the community**
