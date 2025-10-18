@@ -17,19 +17,34 @@ export interface ToolExecutionResult {
   error?: string;
 }
 
+export interface ExecuteToolParams<TContext = unknown, TData = unknown> {
+  tool: ToolRef<TContext, unknown[], unknown>;
+  context: TContext;
+  updateContext: (updates: Partial<TContext>) => Promise<void>;
+  history: Event[];
+  data?: Partial<TData>;
+  allowedDomains?: string[];
+}
+
+export interface ExecuteToolsParams<TContext = unknown, TData = unknown> {
+  tools: Array<ToolRef<TContext, unknown[], unknown>>;
+  context: TContext;
+  updateContext: (updates: Partial<TContext>) => Promise<void>;
+  history: Event[];
+  data?: Partial<TData>;
+  allowedDomains?: string[];
+}
+
 export class ToolExecutor<TContext = unknown, TData = unknown> {
   /**
    * Execute a single tool with context and collected data
-   * @param allowedDomains - Array of domain names allowed for this execution context (undefined = all domains allowed)
+   * @param params - Execution parameters
    */
   async executeTool(
-    tool: ToolRef<TContext, unknown[], unknown>,
-    context: TContext,
-    updateContext: (updates: Partial<TContext>) => Promise<void>,
-    history: Event[],
-    data?: Partial<TData>,
-    allowedDomains?: string[]
+    params: ExecuteToolParams<TContext, TData>
   ): Promise<ToolExecutionResult> {
+    const { tool, context, updateContext, history, data, allowedDomains } =
+      params;
     try {
       // Domain enforcement: Check if tool's domain is allowed
       if (allowedDomains !== undefined && tool.domainName) {
@@ -77,27 +92,24 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
 
   /**
    * Execute multiple tools in sequence
-   * @param allowedDomains - Array of domain names allowed for this execution context (undefined = all domains allowed)
+   * @param params - Execution parameters
    */
   async executeTools(
-    tools: Array<ToolRef<TContext, unknown[], unknown>>,
-    context: TContext,
-    updateContext: (updates: Partial<TContext>) => Promise<void>,
-    history: Event[],
-    data?: Partial<TData>,
-    allowedDomains?: string[]
+    params: ExecuteToolsParams<TContext, TData>
   ): Promise<ToolExecutionResult[]> {
+    const { tools, context, updateContext, history, data, allowedDomains } =
+      params;
     const results: ToolExecutionResult[] = [];
 
     for (const tool of tools) {
-      const result = await this.executeTool(
+      const result = await this.executeTool({
         tool,
         context,
         updateContext,
         history,
         data,
-        allowedDomains
-      );
+        allowedDomains,
+      });
       results.push(result);
 
       // If tool failed, stop execution chain

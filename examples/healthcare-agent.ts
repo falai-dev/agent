@@ -109,6 +109,47 @@ async function createHealthcareAgent() {
     identity:
       "I am the Healthcare Agent, a compassionate AI assistant dedicated to providing excellent patient care. With deep knowledge of medical procedures and a focus on patient comfort, I'm here to help you navigate your healthcare journey with empathy and expertise.",
     provider: provider,
+
+    // Knowledge base with healthcare-specific information
+    knowledgeBase: {
+      medicalProcedures: {
+        checkup: {
+          duration: "30 minutes",
+          preparation: "No special preparation needed",
+          frequency: "Annual or as recommended by doctor",
+        },
+        consultation: {
+          duration: "45-60 minutes",
+          preparation: "Bring medical history and current medications",
+          frequency: "As needed",
+        },
+        followup: {
+          duration: "15-30 minutes",
+          preparation: "Review previous visit notes",
+          frequency: "2-4 weeks after initial treatment",
+        },
+      },
+      insurancePolicies: {
+        acceptedProviders: ["Mega Insurance", "Acme Insurance", "Blue Cross"],
+        coverageTypes: ["HMO", "PPO", "Medicare"],
+        requirements: {
+          referral: "Required for specialist visits",
+          copay: "$25 per visit",
+          deductible: "$500 annual",
+        },
+      },
+      emergencyGuidelines: [
+        "Call 911 for life-threatening emergencies",
+        "Go to nearest ER for severe symptoms",
+        "Contact office for urgent but non-life-threatening issues",
+        "Use telemedicine for minor concerns during office hours",
+      ],
+      patientResources: {
+        patientPortal: "Available 24/7 for appointments and records",
+        educationalMaterials: "Available in English, Spanish, and Portuguese",
+        supportGroups: "Weekly sessions for chronic conditions",
+      },
+    },
     context: {
       patientId: "patient-123",
       patientName: "Test Patient",
@@ -314,6 +355,33 @@ async function createHealthcareAgent() {
     title: "Satisfaction Survey",
     description: "Quick satisfaction survey after scheduling",
     conditions: ["Collect patient satisfaction feedback"],
+
+    // Route-specific knowledge base for patient feedback
+    knowledgeBase: {
+      surveyBestPractices: [
+        "Keep surveys short (3-5 questions maximum)",
+        "Use clear rating scales (1-5 stars)",
+        "Ask specific questions about what can be improved",
+        "Always thank patients for their feedback",
+        "Follow up on critical feedback within 24 hours",
+      ],
+      commonFeedbackThemes: {
+        positive: ["Friendly staff", "Quick response", "Easy scheduling"],
+        improvement: ["Wait times", "Communication", "Facility cleanliness"],
+        urgent: ["Medical errors", "Billing issues", "Privacy concerns"],
+      },
+      npsCalculation: {
+        promoters: "9-10 rating",
+        passives: "7-8 rating",
+        detractors: "0-6 rating",
+        formula: "(Promoters - Detractors) / Total Responses * 100",
+      },
+      followUpActions: {
+        critical: "Immediate review by practice manager",
+        improvement: "Add to quarterly improvement plan",
+        positive: "Share with staff as recognition",
+      },
+    },
     schema: {
       type: "object",
       properties: {

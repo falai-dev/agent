@@ -382,6 +382,43 @@ async function createBusinessOnboardingAgent(
     identity:
       "I am the Business Onboarding Assistant, your expert guide to setting up intelligent customer conversation systems. With years of experience helping businesses automate their customer interactions, I'm here to make your setup process smooth and effective.",
     provider: provider,
+
+    // Knowledge base with business onboarding best practices
+    knowledgeBase: {
+      onboardingProcess: {
+        steps: [
+          "Business basics (name, sector, description)",
+          "Products and services identification",
+          "Location and contact information",
+          "Payment methods and policies",
+          "Automatic route creation",
+          "Custom route configuration",
+        ],
+        duration: "5-10 minutes",
+        completionRate: "95%",
+      },
+      businessTypes: {
+        retail: {
+          essentialInfo: ["address", "hours", "payment methods"],
+          commonRoutes: ["store hours", "location", "inventory"],
+        },
+        services: {
+          essentialInfo: ["service area", "availability", "pricing"],
+          commonRoutes: ["booking", "pricing", "service details"],
+        },
+        online: {
+          essentialInfo: ["website", "support hours", "digital payment"],
+          commonRoutes: ["website", "shipping", "returns"],
+        },
+      },
+      bestPractices: [
+        "Be specific about products and services",
+        "Include all payment methods accepted",
+        "Provide complete address for physical locations",
+        "Set realistic customer expectations",
+        "Test the assistant with sample questions",
+      ],
+    },
     context: {
       userId,
       userName,
@@ -576,6 +613,29 @@ async function createBusinessOnboardingAgent(
     title: "Collect Feedback",
     description: "Quick feedback collection from completed onboarding",
     conditions: ["User wants to provide feedback"],
+
+    // Route-specific knowledge base for feedback collection
+    knowledgeBase: {
+      feedbackTypes: {
+        rating: "1-5 star scale for overall satisfaction",
+        qualitative: "Open-ended questions about likes and improvements",
+        nps: "Net Promoter Score calculation",
+        suggestions: "Specific improvement recommendations",
+      },
+      bestPractices: [
+        "Keep feedback forms short (3-5 questions max)",
+        "Use a mix of quantitative and qualitative questions",
+        "Ask about specific improvements, not general satisfaction",
+        "Follow up on critical feedback within 24 hours",
+      ],
+      responseTemplates: {
+        thankYou:
+          "Thank you for your valuable feedback! We appreciate your input.",
+        followUp:
+          "We'll review your suggestions and may follow up if we need clarification.",
+      },
+    },
+
     steps: [
       {
         id: "ask_rating",

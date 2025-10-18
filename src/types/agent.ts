@@ -102,6 +102,8 @@ export interface AgentOptions<TContext = unknown> {
   routes?: RouteOptions<TContext, unknown>[];
   /** Optional persistence configuration for auto-saving sessions and messages */
   persistence?: PersistenceConfig;
+  /** Knowledge base containing any JSON structure the AI should know */
+  knowledgeBase?: Record<string, unknown>;
 }
 
 /**

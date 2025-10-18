@@ -115,6 +115,48 @@ const paymentRoute = agent.createRoute({
 });
 ```
 
+### Route with Knowledge Base
+
+Routes can have their own knowledge base containing any JSON structure the AI should know when following that route. Route knowledge bases are merged with agent knowledge bases (route takes precedence for conflicts).
+
+```typescript
+const bookingRoute = agent.createRoute<FlightData>({
+  title: "Book Flight",
+  conditions: ["User wants to book a flight"],
+
+  // Route-specific knowledge base
+  knowledgeBase: {
+    bookingProcess: {
+      steps: [
+        "Collect travel details",
+        "Check availability",
+        "Present options",
+        "Collect payment",
+        "Send confirmation",
+      ],
+      cancellationPolicy: "Free cancellation up to 24 hours before departure",
+      changeFee: "$50 for date changes",
+    },
+    airlinePartners: ["Delta", "American", "United"],
+    peakSeason: {
+      months: ["June", "July", "August", "December"],
+      surcharge: "$50 extra for peak season flights",
+    },
+  },
+
+  schema: {
+    // ... schema definition
+  },
+});
+```
+
+**Knowledge Base Merging:**
+
+- ✅ **Agent knowledge base** - Available to all routes
+- ✅ **Route knowledge base** - Specific to this route only
+- ✅ **Merged automatically** - Route knowledge takes precedence over agent knowledge for conflicts
+- ✅ **Auto-formatted to markdown** - Readable for AI consumption
+
 ---
 
 ## Initial Step Configuration
@@ -433,6 +475,9 @@ console.log(route.getGuidelines());   // [{ condition: "...", action: "..." }]
 
 // Domain restrictions
 console.log(route.getDomains());      // ["payment", "booking"] or undefined
+
+// Knowledge base
+console.log(route.getKnowledgeBase()); // Route-specific knowledge base
 ```
 
 ### Route Reference

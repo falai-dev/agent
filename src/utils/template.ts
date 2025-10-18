@@ -203,3 +203,133 @@ export function renderTemplateObject(
 
   return obj;
 }
+
+/**
+ * Formats a JSON structure into readable markdown format.
+ * Handles nested objects, arrays, and primitive values.
+ *
+ * @param data - The JSON data to format
+ * @param title - Optional title for the knowledge base section
+ * @param maxDepth - Maximum nesting depth (default: 3)
+ * @returns Formatted markdown string
+ *
+ * @example
+ * ```typescript
+ * const knowledge = {
+ *   company: {
+ *     name: "Acme Corp",
+ *     products: ["Widget A", "Widget B"],
+ *     locations: {
+ *       headquarters: "NYC",
+ *       branches: ["LA", "Chicago"]
+ *     }
+ *   }
+ * };
+ *
+ * const markdown = formatKnowledgeBase(knowledge, "Company Information");
+ * // Output:
+ * // ## Company Information
+ * //
+ * // ### company
+ * // - **name**: Acme Corp
+ * // - **products**:
+ * //   - Widget A
+ * //   - Widget B
+ * // - **locations**:
+ * //   - **headquarters**: NYC
+ * //   - **branches**:
+ * //     - LA
+ * //     - Chicago
+ * ```
+ */
+export function formatKnowledgeBase(
+  data: Record<string, unknown>,
+  title?: string,
+  maxDepth: number = 3
+): string {
+  const lines: string[] = [];
+
+  if (title) {
+    lines.push(`## ${title}`);
+    lines.push("");
+  }
+
+  if (!data || typeof data !== "object") {
+    lines.push("*No knowledge base data available*");
+    return lines.join("\n");
+  }
+
+  formatObject(data, lines, 0, maxDepth);
+
+  return lines.join("\n");
+}
+
+/**
+ * Recursively formats an object into markdown format
+ */
+function formatObject(
+  obj: Record<string, unknown>,
+  lines: string[],
+  depth: number,
+  maxDepth: number,
+  prefix: string = ""
+): void {
+  const entries = Object.entries(obj);
+
+  if (entries.length === 0) {
+    lines.push(`${prefix}*Empty*`);
+    return;
+  }
+
+  for (const [key, value] of entries) {
+    const currentPrefix = prefix ? `${prefix}  ` : "";
+
+    if (value === null || value === undefined) {
+      lines.push(`${currentPrefix}- **${key}**: *Not specified*`);
+    } else if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      lines.push(`${currentPrefix}- **${key}**: ${value}`);
+    } else if (Array.isArray(value)) {
+      if (value.length === 0) {
+        lines.push(`${currentPrefix}- **${key}**: *Empty list*`);
+      } else {
+        lines.push(`${currentPrefix}- **${key}**:`);
+        for (const item of value) {
+          if (
+            typeof item === "string" ||
+            typeof item === "number" ||
+            typeof item === "boolean"
+          ) {
+            lines.push(`${currentPrefix}  - ${item}`);
+          } else if (
+            depth < maxDepth &&
+            typeof item === "object" &&
+            item !== null
+          ) {
+            lines.push(`${currentPrefix}  - ${JSON.stringify(item)}`);
+          } else {
+            lines.push(`${currentPrefix}  - ${JSON.stringify(item)}`);
+          }
+        }
+      }
+    } else if (typeof value === "object") {
+      if (depth < maxDepth) {
+        lines.push(`${currentPrefix}- **${key}**:`);
+        formatObject(
+          value as Record<string, unknown>,
+          lines,
+          depth + 1,
+          maxDepth,
+          currentPrefix
+        );
+      } else {
+        lines.push(`${currentPrefix}- **${key}**: ${JSON.stringify(value)}`);
+      }
+    } else {
+      lines.push(`${currentPrefix}- **${key}**: ${JSON.stringify(value)}`);
+    }
+  }
+}

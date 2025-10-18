@@ -44,6 +44,7 @@ export class Agent<TContext = unknown> {
   private routingEngine: RoutingEngine<TContext>;
   private responseEngine: ResponseEngine<TContext>;
   private currentSession?: SessionState;
+  private knowledgeBase: Record<string, unknown> = {};
 
   /**
    * Dynamic domain property - populated via addDomain
@@ -113,6 +114,11 @@ export class Agent<TContext = unknown> {
       options.routes.forEach((routeOptions) => {
         this.createRoute<unknown>(routeOptions);
       });
+    }
+
+    // Initialize knowledge base
+    if (options.knowledgeBase) {
+      this.knowledgeBase = { ...options.knowledgeBase };
     }
   }
 
@@ -334,14 +340,14 @@ export class Agent<TContext = unknown> {
             const toolExecutor = new ToolExecutor<TContext, unknown>();
             // Get allowed domains from current route for security enforcement
             const allowedDomains = currentRoute.getDomains();
-            const result = await toolExecutor.executeTool(
-              toolStep.tool as ToolRef<TContext, unknown[], unknown>,
-              effectiveContext,
-              this.updateContext.bind(this),
+            const result = await toolExecutor.executeTool({
+              tool: toolStep.tool as ToolRef<TContext, unknown[], unknown>,
+              context: effectiveContext,
+              updateContext: this.updateContext.bind(this),
               history,
-              session.data,
-              allowedDomains
-            );
+              data: session.data,
+              allowedDomains,
+            });
 
             // Update context with tool results
             if (result.contextUpdate) {
@@ -477,18 +483,18 @@ export class Agent<TContext = unknown> {
       );
 
       // Build response prompt
-      const responsePrompt = await this.responseEngine.buildResponsePrompt(
-        selectedRoute,
-        nextStep,
-        selectedRoute.getRules(),
-        selectedRoute.getProhibitions(),
-        responseDirectives,
+      const responsePrompt = await this.responseEngine.buildResponsePrompt({
+        route: selectedRoute,
+        currentStep: nextStep,
+        rules: selectedRoute.getRules(),
+        prohibitions: selectedRoute.getProhibitions(),
+        directives: responseDirectives,
         history,
-        lastUserMessage,
-        this.options,
-        effectiveContext,
-        session
-      );
+        lastMessage: lastUserMessage,
+        agentMeta: this.options,
+        context: effectiveContext,
+        session,
+      });
 
       // Generate message stream using AI provider
       const stream = this.options.provider.generateMessageStream({
@@ -598,18 +604,18 @@ export class Agent<TContext = unknown> {
       };
 
       // Build completion response prompt
-      const completionPrompt = await this.responseEngine.buildResponsePrompt(
-        selectedRoute,
-        completionStep,
-        selectedRoute.getRules(),
-        selectedRoute.getProhibitions(),
-        undefined, // No directives for completion
+      const completionPrompt = await this.responseEngine.buildResponsePrompt({
+        route: selectedRoute,
+        currentStep: completionStep,
+        rules: selectedRoute.getRules(),
+        prohibitions: selectedRoute.getProhibitions(),
+        directives: undefined, // No directives for completion
         history,
-        lastUserMessage,
-        this.options,
-        effectiveContext,
-        session
-      );
+        lastMessage: lastUserMessage,
+        agentMeta: this.options,
+        context: effectiveContext,
+        session,
+      });
 
       // Stream completion message using AI provider
       const stream = this.options.provider.generateMessageStream({
@@ -689,15 +695,15 @@ export class Agent<TContext = unknown> {
       }
     } else {
       // Fallback: No routes defined, stream a simple response
-      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt(
+      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
         history,
-        this.options,
-        this.terms,
-        this.guidelines,
-        this.capabilities,
-        effectiveContext,
-        session
-      );
+        agentMeta: this.options,
+        terms: this.terms,
+        guidelines: this.guidelines,
+        capabilities: this.capabilities,
+        context: effectiveContext,
+        session,
+      });
 
       const stream = this.options.provider.generateMessageStream({
         prompt: fallbackPrompt,
@@ -787,14 +793,14 @@ export class Agent<TContext = unknown> {
             const toolExecutor = new ToolExecutor<TContext, unknown>();
             // Get allowed domains from current route for security enforcement
             const allowedDomains = currentRoute.getDomains();
-            const result = await toolExecutor.executeTool(
-              toolStep.tool as ToolRef<TContext, unknown[], unknown>,
-              effectiveContext,
-              this.updateContext.bind(this),
+            const result = await toolExecutor.executeTool({
+              tool: toolStep.tool as ToolRef<TContext, unknown[], unknown>,
+              context: effectiveContext,
+              updateContext: this.updateContext.bind(this),
               history,
-              session.data,
-              allowedDomains
-            );
+              data: session.data,
+              allowedDomains,
+            });
 
             // Update context with tool results
             if (result.contextUpdate) {
@@ -935,18 +941,18 @@ export class Agent<TContext = unknown> {
       );
 
       // Build response prompt
-      const responsePrompt = await this.responseEngine.buildResponsePrompt(
-        selectedRoute,
-        nextStep,
-        selectedRoute.getRules(),
-        selectedRoute.getProhibitions(),
-        responseDirectives,
+      const responsePrompt = await this.responseEngine.buildResponsePrompt({
+        route: selectedRoute,
+        currentStep: nextStep,
+        rules: selectedRoute.getRules(),
+        prohibitions: selectedRoute.getProhibitions(),
+        directives: responseDirectives,
         history,
-        lastUserMessage,
-        this.options,
-        effectiveContext,
-        session
-      );
+        lastMessage: lastUserMessage,
+        agentMeta: this.options,
+        context: effectiveContext,
+        session,
+      });
 
       // Generate message using AI provider
       const result = await this.options.provider.generateMessage({
@@ -1023,18 +1029,18 @@ export class Agent<TContext = unknown> {
       };
 
       // Build completion response prompt
-      const completionPrompt = await this.responseEngine.buildResponsePrompt(
-        selectedRoute,
-        completionStep,
-        selectedRoute.getRules(),
-        selectedRoute.getProhibitions(),
-        undefined, // No directives for completion
+      const completionPrompt = await this.responseEngine.buildResponsePrompt({
+        route: selectedRoute,
+        currentStep: completionStep,
+        rules: selectedRoute.getRules(),
+        prohibitions: selectedRoute.getProhibitions(),
+        directives: undefined, // No directives for completion
         history,
-        lastUserMessage,
-        this.options,
-        effectiveContext,
-        session
-      );
+        lastMessage: lastUserMessage,
+        agentMeta: this.options,
+        context: effectiveContext,
+        session,
+      });
 
       // Generate completion message using AI provider
       const completionResult = await this.options.provider.generateMessage({
@@ -1099,15 +1105,15 @@ export class Agent<TContext = unknown> {
       );
     } else {
       // Fallback: No routes defined, generate a simple response
-      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt(
+      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
         history,
-        this.options,
-        this.terms,
-        this.guidelines,
-        this.capabilities,
-        effectiveContext,
-        session
-      );
+        agentMeta: this.options,
+        terms: this.terms,
+        guidelines: this.guidelines,
+        capabilities: this.capabilities,
+        context: effectiveContext,
+        session,
+      });
 
       const result = await this.options.provider.generateMessage({
         prompt: fallbackPrompt,
@@ -1181,6 +1187,13 @@ export class Agent<TContext = unknown> {
    */
   getCapabilities(): Capability[] {
     return [...this.capabilities];
+  }
+
+  /**
+   * Get the agent's knowledge base
+   */
+  getKnowledgeBase(): Record<string, unknown> {
+    return { ...this.knowledgeBase };
   }
 
   /**

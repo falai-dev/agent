@@ -1,7 +1,7 @@
 import type { Event } from "../types/history";
 import type { Term, Guideline, Capability, AgentOptions } from "../types/agent";
 import type { Route } from "./Route";
-import { render, renderMany } from "../utils/template";
+import { render, renderMany, formatKnowledgeBase } from "../utils/template";
 import { TemplateContext } from "../types/template";
 
 export class PromptComposer<TContext = unknown, TData = unknown> {
@@ -121,6 +121,25 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
       .map((c, i) => `### Capability ${i + 1}: ${c.title}\n\n${c.description}`)
       .join("\n\n");
     this.parts.push(`## Capabilities\n\n${text}`);
+    return Promise.resolve(this);
+  }
+
+  async addKnowledgeBase(
+    agentKnowledgeBase?: Record<string, unknown>,
+    routeKnowledgeBase?: Record<string, unknown>
+  ): Promise<this> {
+    // Merge agent and route knowledge bases (route takes precedence for conflicts)
+    const mergedKnowledge = {
+      ...(agentKnowledgeBase || {}),
+      ...(routeKnowledgeBase || {}),
+    };
+
+    // Only add section if there's knowledge data
+    if (Object.keys(mergedKnowledge).length > 0) {
+      const formatted = formatKnowledgeBase(mergedKnowledge, "Knowledge Base");
+      this.parts.push(formatted);
+    }
+
     return Promise.resolve(this);
   }
 

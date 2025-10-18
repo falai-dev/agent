@@ -34,6 +34,60 @@ const agent = new Agent({
   goal: "Provide excellent customer service by following route-specific rules and prohibitions.",
   provider,
   debug: true,
+
+  // Knowledge base with customer service best practices
+  knowledgeBase: {
+    communicationGuidelines: {
+      channels: {
+        whatsapp: {
+          maxMessageLength: "1000 characters",
+          supports: ["text", "images", "documents"],
+          bestFor: [
+            "Quick questions",
+            "Personal communication",
+            "Mobile users",
+          ],
+        },
+        email: {
+          maxMessageLength: "No limit",
+          supports: ["text", "attachments", "formatting"],
+          bestFor: [
+            "Detailed inquiries",
+            "Documentation",
+            "Formal communication",
+          ],
+        },
+        chat: {
+          maxMessageLength: "Real-time",
+          supports: ["text", "quick responses"],
+          bestFor: ["Immediate help", "Simple questions", "Live support"],
+        },
+      },
+      toneGuidelines: {
+        professional: "Formal language, complete sentences, proper grammar",
+        casual: "Friendly language, contractions, emojis allowed",
+        urgent: "Direct, clear, action-oriented language",
+      },
+    },
+    escalationPaths: {
+      technical: "Route to technical support team",
+      billing: "Route to billing department",
+      complaint: "Route to customer success manager",
+      legal: "Route to legal/compliance team",
+    },
+    responseTimeTargets: {
+      whatsapp: "Within 5 minutes during business hours",
+      email: "Within 24 hours",
+      chat: "Immediate response",
+      emergency: "Immediate escalation",
+    },
+    customerSegments: {
+      new: "Welcome warmly, provide overview, offer help",
+      returning: "Personalize greeting, reference history, anticipate needs",
+      vip: "Priority service, direct manager access, special offers",
+      enterprise: "Dedicated account manager, SLA guarantees, custom solutions",
+    },
+  },
 });
 
 /**

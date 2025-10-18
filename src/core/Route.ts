@@ -42,6 +42,7 @@ export class Route<TContext = unknown, TData = unknown> {
     | RouteCompletionHandler<TContext, TData>;
   private routingExtrasSchema?: StructuredSchema;
   private guidelines: Guideline<TContext>[] = [];
+  private knowledgeBase: Record<string, unknown> = {};
 
   constructor(options: RouteOptions<TContext, TData>) {
     // Use provided ID or generate a deterministic one from the title
@@ -63,6 +64,11 @@ export class Route<TContext = unknown, TData = unknown> {
     this.schema = options.schema;
     this.initialData = options.initialData;
     this.onComplete = options.onComplete;
+
+    // Initialize knowledge base
+    if (options.knowledgeBase) {
+      this.knowledgeBase = { ...options.knowledgeBase };
+    }
 
     // Initialize guidelines from options
     if (options.guidelines) {
@@ -115,6 +121,13 @@ export class Route<TContext = unknown, TData = unknown> {
    */
   getGuidelines(): Guideline<TContext>[] {
     return [...this.guidelines];
+  }
+
+  /**
+   * Get the route's knowledge base
+   */
+  getKnowledgeBase(): Record<string, unknown> {
+    return { ...this.knowledgeBase };
   }
 
   /**

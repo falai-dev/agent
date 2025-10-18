@@ -65,6 +65,7 @@ export { END_ROUTE, END_ROUTE_ID } from "./constants";
 
 // Utils
 export { generateRouteId, generateStepId, generateToolId } from "./utils/id";
+export { formatKnowledgeBase } from "./utils/template";
 
 // Types
 export type {

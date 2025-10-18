@@ -51,6 +51,8 @@ interface AgentOptions<TContext = unknown> {
   guidelines?: Guideline[];
   capabilities?: Capability[];
   routes?: RouteOptions[];
+  /** Knowledge base containing any JSON structure the AI should know */
+  knowledgeBase?: Record<string, unknown>;
 }
 ```
 
@@ -172,6 +174,74 @@ const customSession = createSession<FlightData>({
 const response3 = await agent.respond({ history, session: customSession });
 console.log(response3.session?.data); // Uses custom session
 ```
+
+### Example: Agent with Knowledge Base
+
+```typescript
+const agent = new Agent({
+  name: "TravelBot",
+  description: "AI travel assistant with company knowledge",
+  provider: new GeminiProvider({ apiKey: "...", model: "..." }),
+
+  // Knowledge base - any JSON structure the AI should know
+  knowledgeBase: {
+    company: {
+      name: "Acme Travel",
+      policies: {
+        cancellation: "Free cancellation up to 24 hours before departure",
+        refund: "Refunds processed within 5-7 business days",
+        baggage: "First checked bag free, additional bags $30 each",
+      },
+      destinations: ["Paris", "Tokyo", "New York", "London"],
+      peakSeasons: ["June-August", "December-January"],
+    },
+    pricing: {
+      baseFare: "$299",
+      taxes: "Included in displayed price",
+      fees: {
+        booking: "$15",
+        service: "$5 per passenger",
+      },
+    },
+    faq: [
+      "How do I cancel my booking?",
+      "What's included in the price?",
+      "Can I change my flight date?",
+    ],
+  },
+
+  // Routes can have their own knowledge bases too
+  routes: [
+    {
+      title: "Book Flight",
+      conditions: ["User wants to book a flight"],
+      knowledgeBase: {
+        bookingSteps: [
+          "Collect passenger information",
+          "Select flight options",
+          "Enter payment details",
+          "Confirm booking",
+        ],
+        requirements: {
+          passport: "Valid for 6 months beyond return date",
+          visa: "Check requirements for destination country",
+        },
+      },
+    },
+  ],
+});
+
+// The AI will automatically know about Acme Travel's policies, pricing, and FAQs
+const response = await agent.respond({ history });
+```
+
+**Knowledge Base Features:**
+
+- ✅ **Any JSON structure** - Objects, arrays, nested data, primitives
+- ✅ **Agent-level knowledge** - Available to all routes
+- ✅ **Route-specific knowledge** - Merged with agent knowledge (route takes precedence)
+- ✅ **Auto-formatted to markdown** - Readable for AI consumption
+- ✅ **Type-safe** - `Record<string, unknown>` for flexible structure
 
 ````
 

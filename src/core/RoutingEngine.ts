@@ -40,6 +40,31 @@ export interface RoutingEngineOptions {
   maxCandidates?: number;
 }
 
+export interface BuildStepSelectionPromptParams<
+  TContext = unknown,
+  TData = unknown
+> {
+  route: Route<TContext, TData>;
+  currentStep: Step<TContext, TData> | undefined;
+  candidates: CandidateStep<TContext, TData>[];
+  data: Partial<TData>;
+  history: Event[];
+  lastMessage: string;
+  agentMeta?: AgentOptions<TContext>;
+  context?: TContext;
+  session?: SessionState<TData>;
+}
+
+export interface BuildRoutingPromptParams<TContext = unknown, TData = unknown> {
+  history: Event[];
+  routes: Route<TContext, TData>[];
+  lastMessage: string;
+  agentMeta?: AgentOptions<TContext>;
+  session?: SessionState<TData>;
+  activeRouteSteps?: Step<TContext, TData>[];
+  context?: TContext;
+}
+
 export class RoutingEngine<TContext = unknown, TData = unknown> {
   constructor(private readonly options?: RoutingEngineOptions) {}
 
@@ -128,17 +153,17 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
     // Multiple candidates - use AI to select best step
     const lastUserMessage = getLastMessageFromHistory(history);
-    const stepPrompt = await this.buildStepSelectionPrompt(
+    const stepPrompt = await this.buildStepSelectionPrompt({
       route,
       currentStep,
       candidates,
-      updatedSession.data || {},
+      data: updatedSession.data || {},
       history,
-      lastUserMessage,
+      lastMessage: lastUserMessage,
       agentMeta,
       context,
-      updatedSession
-    );
+      session: updatedSession,
+    });
 
     const stepSchema = this.buildStepSelectionSchema(
       candidates.map((c) => c.step)
@@ -448,15 +473,15 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       activeRouteSteps
     );
 
-    const routingPrompt = await this.buildRoutingPrompt(
+    const routingPrompt = await this.buildRoutingPrompt({
       history,
       routes,
-      lastUserMessage,
+      lastMessage: lastUserMessage,
       agentMeta,
       session,
       activeRouteSteps,
-      context
-    );
+      context,
+    });
 
     const routingResult = await provider.generateMessage<
       TContext,
@@ -544,16 +569,19 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
    * @private
    */
   private async buildStepSelectionPrompt<TData>(
-    route: Route<TContext, TData>,
-    currentStep: Step<TContext, TData> | undefined,
-    candidates: CandidateStep<TContext, TData>[],
-    data: Partial<TData>,
-    history: Event[],
-    lastMessage: string,
-    agentMeta?: AgentOptions<TContext>,
-    context?: TContext,
-    session?: SessionState<TData>
+    params: BuildStepSelectionPromptParams<TContext, TData>
   ): Promise<string> {
+    const {
+      route,
+      currentStep,
+      candidates,
+      data,
+      history,
+      lastMessage,
+      agentMeta,
+      context,
+      session,
+    } = params;
     const templateContext = { context, session, history };
     const pc = new PromptComposer(templateContext);
 
@@ -757,14 +785,17 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
   }
 
   async buildRoutingPrompt(
-    history: Event[],
-    routes: Route<TContext, TData>[],
-    lastMessage: string,
-    agentMeta?: AgentOptions<TContext>,
-    session?: SessionState<TData>,
-    activeRouteSteps?: Step<TContext, TData>[],
-    context?: TContext
+    params: BuildRoutingPromptParams<TContext, TData>
   ): Promise<string> {
+    const {
+      history,
+      routes,
+      lastMessage,
+      agentMeta,
+      session,
+      activeRouteSteps,
+      context,
+    } = params;
     const templateContext = { context, session, history };
     const pc = new PromptComposer(templateContext);
     if (agentMeta) {

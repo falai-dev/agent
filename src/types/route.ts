@@ -141,6 +141,8 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
     | string
     | RouteTransitionConfig<TContext, TData>
     | RouteCompletionHandler<TContext, TData>;
+  /** Knowledge base specific to this route containing any JSON structure the AI should know */
+  knowledgeBase?: Record<string, unknown>;
 }
 
 /**

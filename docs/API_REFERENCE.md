@@ -48,6 +48,15 @@ Gets allowed domains for a specific route by ID. Returns filtered domains based 
 
 Gets allowed domains for a specific route by title. Returns filtered domains based on route's `domains` property, or all domains if route has no restrictions.
 
+##### `getKnowledgeBase(): Record<string, unknown>`
+
+Gets the agent's knowledge base containing any JSON structure the AI should know.
+
+```typescript
+const knowledge = agent.getKnowledgeBase();
+// Returns the merged knowledge base from agent and current route
+```
+
 ##### `getData<TData>(routeId?): Partial<TData>`
 
 Gets the collected data from current session, optionally for a specific route.
@@ -532,6 +541,8 @@ interface RouteOptions<TData = unknown> {
 
   // NEW: Sequential steps for simple linear flows
   steps?: StepOptions<unknown, TData>[];
+  /** Knowledge base specific to this route containing any JSON structure the AI should know */
+  knowledgeBase?: Record<string, unknown>;
 }
 ```
 
@@ -563,6 +574,15 @@ Returns the rules that must be followed in this route.
 ##### `getProhibitions(): string[]`
 
 Returns the prohibitions that must never be done in this route.
+
+##### `getKnowledgeBase(): Record<string, unknown>`
+
+Gets the route's knowledge base containing any JSON structure the AI should know.
+
+```typescript
+const knowledge = route.getKnowledgeBase();
+// Returns the route-specific knowledge base
+```
 
 ##### `getRef(): RouteRef`
 
@@ -1619,6 +1639,59 @@ const getTool = defineTool<MyContext, [id: string], Data>(
     description: "Fetches data by ID",
   }
 );
+```
+
+---
+
+### `formatKnowledgeBase(data, title?, maxDepth?)`
+
+Formats a JSON structure into readable markdown format for AI prompts. Handles nested objects, arrays, and primitive values.
+
+```typescript
+formatKnowledgeBase(
+  data: Record<string, unknown> | unknown,
+  title?: string,
+  maxDepth?: number
+): string
+```
+
+**Parameters:**
+
+- `data` - The JSON data to format
+- `title` - Optional title for the knowledge base section
+- `maxDepth` - Maximum nesting depth (default: 3)
+
+**Returns:** Formatted markdown string
+
+**Example:**
+
+```typescript
+import { formatKnowledgeBase } from "@falai/agent";
+
+const knowledge = {
+  company: {
+    name: "Acme Corp",
+    products: ["Widget A", "Widget B"],
+    locations: {
+      headquarters: "NYC",
+      branches: ["LA", "Chicago"],
+    },
+  },
+};
+
+const markdown = formatKnowledgeBase(knowledge, "Company Information");
+// Output:
+// ## Company Information
+//
+// - **name**: Acme Corp
+// - **products**:
+//   - Widget A
+//   - Widget B
+// - **locations**:
+//   - **headquarters**: NYC
+//   - **branches**:
+//     - LA
+//     - Chicago
 ```
 
 ---

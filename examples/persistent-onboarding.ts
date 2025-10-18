@@ -131,6 +131,45 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     description: "A friendly assistant that helps businesses get started",
     goal: "Collect business information efficiently while being conversational",
     provider: provider,
+
+    // Knowledge base with onboarding best practices
+    knowledgeBase: {
+      onboardingFlow: {
+        stages: [
+          "Business identification",
+          "Industry classification",
+          "Contact information collection",
+          "Verification and confirmation"
+        ],
+        averageCompletion: "3-5 minutes",
+        dropOffPoints: ["Contact email collection", "Industry classification"]
+      },
+      businessTypes: {
+        retail: {
+          commonIndustries: ["Fashion", "Electronics", "Home goods", "Food service"],
+          keyQuestions: ["Store location", "Target customers", "Peak hours"]
+        },
+        professional: {
+          commonIndustries: ["Consulting", "Legal", "Accounting", "Healthcare"],
+          keyQuestions: ["Service areas", "Certifications", "Client types"]
+        },
+        manufacturing: {
+          commonIndustries: ["Electronics", "Automotive", "Food processing", "Textiles"],
+          keyQuestions: ["Production capacity", "Supply chain", "Quality standards"]
+        }
+      },
+      dataValidation: {
+        email: "Must contain @ symbol and valid domain",
+        businessName: "2-100 characters, no special characters",
+        description: "10-500 characters, describes what the business does"
+      },
+      completionCriteria: [
+        "Business name provided",
+        "Business description provided",
+        "Industry category selected",
+        "Valid contact email provided"
+      ]
+    },
     // Context is loaded fresh from database on each respond() call
     contextProvider: async () => {
       console.log("🔄 Loading fresh context from database...");
