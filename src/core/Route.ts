@@ -10,13 +10,15 @@ import type {
   RouteTransitionConfig,
   RouteCompletionHandler,
   RouteLifecycleHooks,
-} from "../types/route";
-import type { StructuredSchema } from "../types/schema";
-import type { Capability, Guideline, Term } from "../types/agent";
+  StructuredSchema,
+  Guideline,
+  Term,
+  Tool,
+  Template,
+} from "../types";
 
 import { Step } from "./Step";
 import { generateRouteId } from "../utils/id";
-import { Template } from "../types/template";
 
 /**
  * Represents a conversational route/journey
@@ -28,7 +30,6 @@ export class Route<TContext = unknown, TData = unknown> {
   public readonly identity?: Template<TContext, TData>;
   public readonly personality?: Template<TContext, TData>;
   public readonly conditions: Template<TContext, TData>[];
-  public readonly domains?: string[];
   public readonly rules: Template<TContext, TData>[];
   public readonly prohibitions: Template<TContext, TData>[];
   public readonly initialStep: Step<TContext, TData>;
@@ -47,7 +48,7 @@ export class Route<TContext = unknown, TData = unknown> {
   private routingExtrasSchema?: StructuredSchema;
   private guidelines: Guideline<TContext>[] = [];
   private terms: Term<TContext>[] = [];
-  private capabilities: Capability[] = [];
+  private tools: Tool<TContext, unknown[], unknown, TData>[] = [];
   private knowledgeBase: Record<string, unknown> = {};
 
   constructor(options: RouteOptions<TContext, TData>) {
@@ -58,7 +59,6 @@ export class Route<TContext = unknown, TData = unknown> {
     this.identity = options.identity;
     this.personality = options.personality;
     this.conditions = options.conditions || [];
-    this.domains = options.domains;
     this.rules = options.rules || [];
     this.prohibitions = options.prohibitions || [];
     this.initialStep = new Step<TContext, TData>(this.id, options.initialStep);
@@ -93,10 +93,10 @@ export class Route<TContext = unknown, TData = unknown> {
       });
     }
 
-    // Initialize capabilities from options
-    if (options.capabilities) {
-      options.capabilities.forEach((capability) => {
-        this.createCapability(capability);
+    // Initialize tools from options
+    if (options.tools) {
+      options.tools.forEach((tool) => {
+        this.createTool(tool);
       });
     }
 
@@ -148,14 +148,18 @@ export class Route<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Create a capability for this route
+   * Register a tool for this route
    */
-  createCapability(capability: Capability): this {
-    const capabilityWithId = {
-      ...capability,
-      id: capability.id || `capability_${this.id}_${this.capabilities.length}`,
-    };
-    this.capabilities.push(capabilityWithId);
+  createTool(tool: Tool<TContext, unknown[], unknown, TData>): this {
+    this.tools.push(tool);
+    return this;
+  }
+
+  /**
+   * Register multiple tools for this route
+   */
+  registerTools(tools: Tool<TContext, unknown[], unknown, TData>[]): this {
+    tools.forEach((tool) => this.createTool(tool));
     return this;
   }
 
@@ -174,10 +178,10 @@ export class Route<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Get all capabilities for this route
+   * Get all tools for this route
    */
-  getCapabilities(): Capability[] {
-    return [...this.capabilities];
+  getTools(): Tool<TContext, unknown[], unknown, TData>[] {
+    return [...this.tools];
   }
 
   /**
@@ -185,14 +189,6 @@ export class Route<TContext = unknown, TData = unknown> {
    */
   getKnowledgeBase(): Record<string, unknown> {
     return { ...this.knowledgeBase };
-  }
-
-  /**
-   * Get allowed domain names for this route
-   * @returns Array of domain names, or undefined if all domains are allowed
-   */
-  getDomains(): string[] | undefined {
-    return this.domains ? [...this.domains] : undefined;
   }
 
   /**

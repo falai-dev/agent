@@ -2,32 +2,38 @@
  * Core Agent implementation
  */
 
-import type { AgentOptions, Term, Guideline, Capability } from "../types/agent";
-import type { Event } from "../types/history";
-import type { RouteOptions } from "../types/route";
-import type { SessionState } from "../types/session";
-import type { AgentStructuredResponse } from "../types/ai";
+import type {
+  AgentOptions,
+  Term,
+  Guideline,
+  Tool,
+  Event,
+  RouteOptions,
+  SessionState,
+  AgentStructuredResponse,
+  Template,
+  StepRef,
+} from "../types";
+import { EventKind, EventSource } from "../types/history";
 import {
   createSession,
   enterRoute,
   enterStep,
   mergeCollected,
-} from "../types/session";
-import { logger, LoggerLevel } from "../utils/logger";
+  logger,
+  LoggerLevel,
+  render,
+  getLastMessageFromHistory,
+} from "../utils";
 
 import { Route } from "./Route";
 import { Step } from "./Step";
-import { DomainRegistry } from "./DomainRegistry";
 import { PersistenceManager } from "./PersistenceManager";
 import { RoutingEngine } from "./RoutingEngine";
 import { ResponseEngine } from "./ResponseEngine";
 import { ToolExecutor } from "./ToolExecutor";
-import { getLastMessageFromHistory } from "../utils/event";
+import { ResponsePipeline } from "./ResponsePipeline";
 import { END_ROUTE_ID } from "../constants";
-import { ToolRef } from "../types/tool";
-import { Template } from "../types/template";
-import { StepRef } from "../types";
-import { render } from "../utils/template";
 
 /**
  * Main Agent class with generic context support
@@ -35,21 +41,16 @@ import { render } from "../utils/template";
 export class Agent<TContext = unknown> {
   private terms: Term<TContext>[] = [];
   private guidelines: Guideline<TContext>[] = [];
-  private capabilities: Capability[] = [];
+  private tools: Tool<TContext, unknown[], unknown, unknown>[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private routes: Route<TContext, any>[] = [];
-  private domainRegistry = new DomainRegistry();
   private context: TContext | undefined;
   private persistenceManager: PersistenceManager | undefined;
   private routingEngine: RoutingEngine<TContext>;
   private responseEngine: ResponseEngine<TContext>;
+  private responsePipeline: ResponsePipeline<TContext>;
   private currentSession?: SessionState;
   private knowledgeBase: Record<string, unknown> = {};
-
-  /**
-   * Dynamic domain property - populated via addDomain
-   */
-  public readonly domain: Record<string, Record<string, unknown>> = {};
 
   constructor(private readonly options: AgentOptions<TContext>) {
     // Set log level based on debug option
@@ -77,6 +78,14 @@ export class Agent<TContext = unknown> {
       switchThreshold: 70,
     });
     this.responseEngine = new ResponseEngine<TContext>();
+    this.responsePipeline = new ResponsePipeline<TContext>(
+      options,
+      this.routes,
+      this.tools,
+      this.routingEngine,
+      this.updateContext.bind(this),
+      this.updateData.bind(this)
+    );
 
     // Initialize persistence if configured
     if (options.persistence) {
@@ -106,9 +115,9 @@ export class Agent<TContext = unknown> {
       });
     }
 
-    if (options.capabilities) {
-      options.capabilities.forEach((capability) => {
-        this.createCapability(capability);
+    if (options.tools) {
+      options.tools.forEach((tool) => {
+        this.createTool(tool);
       });
     }
 
@@ -186,45 +195,19 @@ export class Agent<TContext = unknown> {
   }
 
   /**
-   * Add a capability
+   * Register a tool at the agent level
    */
-  createCapability(capability: Capability): this {
-    const capabilityWithId = {
-      ...capability,
-      id: capability.id || `capability_${this.capabilities.length}`,
-    };
-    this.capabilities.push(capabilityWithId);
+  createTool(tool: Tool<TContext, unknown[], unknown, unknown>): this {
+    this.tools.push(tool);
     return this;
   }
 
   /**
-   * Add a domain with its tools/methods
-   * Automatically tags all ToolRef objects with their domain name for security enforcement
+   * Register multiple tools at the agent level
    */
-  addDomain<TName extends string, TDomain extends Record<string, unknown>>(
-    name: TName,
-    domainObject: TDomain
-  ): void {
-    // Tag all tools in this domain with the domain name for security enforcement
-    const taggedDomain = { ...domainObject };
-    for (const key in taggedDomain) {
-      const value = taggedDomain[key];
-      // Check if value is a ToolRef (has handler, id, name properties)
-      if (
-        value &&
-        typeof value === "object" &&
-        "handler" in value &&
-        "id" in value &&
-        "name" in value
-      ) {
-        // Tag the tool with its domain name
-        (value as Record<string, unknown>).domainName = name;
-      }
-    }
-
-    this.domainRegistry.register(name, taggedDomain);
-    // Attach to the domain property for easy access
-    this.domain[name] = taggedDomain;
+  registerTools(tools: Tool<TContext, unknown[], unknown, unknown>[]): this {
+    tools.forEach((tool) => this.createTool(tool));
+    return this;
   }
 
   /**
@@ -332,174 +315,62 @@ export class Agent<TContext = unknown> {
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
     isRouteComplete?: boolean;
   }> {
-    const { history, contextOverride, signal } = params;
+    const { history, signal } = params;
 
-    // Get current context (may fetch from provider)
-    let currentContext = await this.getContext();
+    // Prepare context and session using the response pipeline
+    this.responsePipeline.setContext(this.context);
+    this.responsePipeline.setCurrentSession(this.currentSession);
+    let session: SessionState;
+    const responseContext = await this.responsePipeline.prepareResponseContext({
+      contextOverride: params.contextOverride,
+      session: params.session,
+    });
+    const { effectiveContext } = responseContext;
+    session = responseContext.session;
+    // Update our stored context if it was modified by beforeRespond hook
+    this.context = this.responsePipeline.getStoredContext();
 
-    // Call beforeRespond hook if configured
-    if (this.options.hooks?.beforeRespond && currentContext !== undefined) {
-      currentContext = await this.options.hooks.beforeRespond(currentContext);
-      // Update stored context with the result from beforeRespond
-      this.context = currentContext;
-    }
-
-    // Merge context with override
-    const effectiveContext = {
-      ...(currentContext as Record<string, unknown>),
-      ...(contextOverride as Record<string, unknown>),
-    } as TContext;
-
-    // Initialize or get session (use current session if available)
-    let session = params.session || this.currentSession || createSession();
-
-    // PHASE 1: TOOL EXECUTION - Execute tools if current step has tool
+    // PHASE 1: PREPARE - Execute prepare function if current step has one
     if (session.currentRoute && session.currentStep) {
       const currentRoute = this.routes.find(
         (r) => r.id === session.currentRoute?.id
       );
       if (currentRoute) {
         const currentStep = currentRoute.getStep(session.currentStep.id);
-        if (currentStep) {
-          const transitions = currentStep.getTransitions();
-          const toolStep = transitions.find((s) => s.tool);
-
-          if (toolStep?.tool) {
-            const toolExecutor = new ToolExecutor<TContext, unknown>();
-            // Get allowed domains from current route for security enforcement
-            const allowedDomains = currentRoute.getDomains();
-            const result = await toolExecutor.executeTool({
-              tool: toolStep.tool as ToolRef<TContext, unknown[], unknown>,
-              context: effectiveContext,
-              updateContext: this.updateContext.bind(this),
-              history,
-              data: session.data,
-              allowedDomains,
-            });
-
-            // Update context with tool results
-            if (result.contextUpdate) {
-              await this.updateContext(
-                result.contextUpdate as Partial<TContext>
-              );
-            }
-
-            // Update collected data with tool results
-            if (result.collectedUpdate) {
-              session = await this.updateData(session, result.collectedUpdate);
-              logger.debug(
-                `[Agent] Tool updated collected data:`,
-                result.collectedUpdate
-              );
-            }
-
-            logger.debug(
-              `[Agent] Executed tool: ${result.toolName} (success: ${result.success})`
-            );
-          }
+        if (currentStep?.prepare) {
+          logger.debug(
+            `[Agent] Executing prepare function for step: ${currentStep.id}`
+          );
+          await currentStep.prepare(effectiveContext, session.data);
         }
       }
     }
 
-    // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use (combined)
-    let selectedRoute: Route<TContext, unknown> | undefined;
-    let responseDirectives: string[] | undefined;
-    let selectedStep: Step<TContext, unknown> | undefined;
-    let isRouteComplete = false;
-
-    // Check for pending transition from previous route completion
-    if (session.pendingTransition) {
-      const targetRoute = this.routes.find(
-        (r) => r.id === session.pendingTransition?.targetRouteId
-      );
-
-      if (targetRoute) {
-        logger.debug(
-          `[Agent] Auto-transitioning from pending transition to route: ${targetRoute.title}`
-        );
-        // Clear pending transition and enter new route
-        session = {
-          ...session,
-          pendingTransition: undefined,
-        };
-        session = enterRoute(session, targetRoute.id, targetRoute.title);
-
-        // Merge initial data if available
-        if (targetRoute.initialData) {
-          session = mergeCollected(session, targetRoute.initialData);
-        }
-
-        selectedRoute = targetRoute;
-      } else {
-        logger.warn(
-          `[Agent] Pending transition target route not found: ${session.pendingTransition.targetRouteId}`
-        );
-        // Clear invalid transition
-        session = {
-          ...session,
-          pendingTransition: undefined,
-        };
-      }
-    }
-
-    // If no pending transition or transition handled, do normal routing
-    if (this.routes.length > 0 && !selectedRoute) {
-      const orchestration = await this.routingEngine.decideRouteAndStep({
-        routes: this.routes,
+    // PHASE 2: ROUTING + STEP SELECTION - Use response pipeline
+    const routingResult =
+      await this.responsePipeline.handleRoutingAndStepSelection({
         session,
         history,
-        agentOptions: this.options,
-        provider: this.options.provider,
         context: effectiveContext,
         signal,
       });
+    const selectedRoute = routingResult.selectedRoute;
+    const selectedStep = routingResult.selectedStep;
+    const responseDirectives = routingResult.responseDirectives;
+    const isRouteComplete = routingResult.isRouteComplete;
+    session = routingResult.session;
 
-      selectedRoute = orchestration.selectedRoute;
-      selectedStep = orchestration.selectedStep;
-      responseDirectives = orchestration.responseDirectives;
-      session = orchestration.session;
-      isRouteComplete = orchestration.isRouteComplete || false;
+    // PHASE 3: DETERMINE NEXT STEP - Use pipeline method
+    const stepResult = this.responsePipeline.determineNextStep({
+      selectedRoute,
+      selectedStep,
+      session,
+      isRouteComplete,
+    });
+    const nextStep = stepResult.nextStep;
+    session = stepResult.session;
 
-      // Log if route is complete
-      if (isRouteComplete) {
-        logger.debug(
-          `[Agent] Route complete: all required data collected, END_ROUTE reached`
-        );
-      }
-    }
-
-    // PHASE 3: DETERMINE NEXT STEP - Use step from combined decision or get initial step
     if (selectedRoute && !isRouteComplete) {
-      let nextStep: Step<TContext, unknown>;
-
-      // If we have a selected step from the combined routing decision, use it
-      if (selectedStep) {
-        nextStep = selectedStep;
-      } else {
-        // New route or no step selected - get initial step or first valid step
-        const candidates = this.routingEngine.getCandidateSteps(
-          selectedRoute,
-          undefined,
-          session.data || {}
-        );
-        if (candidates.length > 0) {
-          nextStep = candidates[0].step;
-          logger.debug(
-            `[Agent] Using first valid step: ${nextStep.id} for new route`
-          );
-        } else {
-          // Fallback to initial step even if it should be skipped
-          nextStep = selectedRoute.initialStep;
-          logger.warn(
-            `[Agent] No valid steps found, using initial step: ${nextStep.id}`
-          );
-        }
-      }
-
-      // Update session with next step
-      session = enterStep(session, nextStep.id, nextStep.description);
-      logger.debug(`[Agent] Entered step: ${nextStep.id}`);
-
       // PHASE 4: RESPONSE GENERATION - Stream message using selected route and step
       // Get last user message
       const lastUserMessage = getLastMessageFromHistory(history);
@@ -509,6 +380,15 @@ export class Agent<TContext = unknown> {
         selectedRoute,
         nextStep
       );
+
+      // Check if selected route and next step are defined
+      if (!selectedRoute || !nextStep) {
+        logger.error("[Agent] Selected route or next step is not defined", {
+          selectedRoute,
+          nextStep,
+        });
+        throw new Error("Selected route or next step is not defined");
+      }
 
       // Build response prompt
       const responsePrompt = await this.responseEngine.buildResponsePrompt({
@@ -529,19 +409,22 @@ export class Agent<TContext = unknown> {
           this.getTerms(),
           selectedRoute.getTerms()
         ),
-        combinedCapabilities: [
-          ...this.getCapabilities(),
-          ...selectedRoute.getCapabilities(),
-        ],
         context: effectiveContext,
         session,
       });
+
+      // Collect available tools for AI
+      const availableTools = this.collectAvailableTools(
+        selectedRoute,
+        nextStep
+      );
 
       // Generate message stream using AI provider
       const stream = this.options.provider.generateMessageStream({
         prompt: responsePrompt,
         history,
         context: effectiveContext,
+        tools: availableTools,
         signal,
         parameters: {
           jsonSchema: responseSchema,
@@ -551,9 +434,201 @@ export class Agent<TContext = unknown> {
 
       // Stream chunks to caller
       for await (const chunk of stream) {
-        const toolCalls:
+        let toolCalls:
           | Array<{ toolName: string; arguments: Record<string, unknown> }>
           | undefined = undefined;
+
+        // Extract tool calls from AI response on final chunk
+        if (chunk.done && chunk.structured?.toolCalls) {
+          toolCalls = chunk.structured.toolCalls;
+
+          // Execute dynamic tool calls
+          if (toolCalls.length > 0) {
+            logger.debug(
+              `[Agent] Executing ${toolCalls.length} dynamic tool calls`
+            );
+
+            for (const toolCall of toolCalls) {
+              const tool = this.findAvailableTool(
+                toolCall.toolName,
+                selectedRoute
+              );
+              if (!tool) {
+                logger.warn(`[Agent] Tool not found: ${toolCall.toolName}`);
+                continue;
+              }
+
+              const toolExecutor = new ToolExecutor<TContext, unknown>();
+              const result = await toolExecutor.executeTool({
+                tool: tool,
+                context: effectiveContext,
+                updateContext: this.updateContext.bind(this),
+                history,
+                data: session.data,
+              });
+
+              // Update context with tool results
+              if (result.contextUpdate) {
+                await this.updateContext(
+                  result.contextUpdate as Partial<TContext>
+                );
+              }
+
+              // Update collected data with tool results
+              if (result.collectedUpdate) {
+                session = await this.updateData(
+                  session,
+                  result.collectedUpdate
+                );
+                logger.debug(
+                  `[Agent] Tool updated collected data:`,
+                  result.collectedUpdate
+                );
+              }
+
+              logger.debug(
+                `[Agent] Executed dynamic tool: ${result.toolName} (success: ${result.success})`
+              );
+            }
+          }
+        }
+
+        // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution (streaming)
+        const MAX_TOOL_LOOPS = 5;
+        let toolLoopCount = 0;
+        let hasToolCalls = toolCalls && toolCalls.length > 0;
+
+        while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
+          toolLoopCount++;
+          logger.debug(
+            `[Agent] Starting streaming tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS}`
+          );
+
+          // Add tool execution results to history so AI knows what happened
+          const toolResultsEvents: Event[] = [];
+          for (const toolCall of toolCalls || []) {
+            const tool = this.findAvailableTool(
+              toolCall.toolName,
+              selectedRoute
+            );
+            if (tool) {
+              toolResultsEvents.push({
+                kind: EventKind.TOOL,
+                source: EventSource.AI_AGENT,
+                timestamp: new Date().toISOString(),
+                data: {
+                  tool_calls: [
+                    {
+                      tool_id: toolCall.toolName,
+                      arguments: toolCall.arguments,
+                      result: {
+                        data: "Tool executed successfully",
+                      },
+                    },
+                  ],
+                },
+              });
+            }
+          }
+
+          // Create updated history with tool results
+          const updatedHistory = [...history, ...toolResultsEvents];
+
+          // Make follow-up streaming AI call to see if more tools are needed
+          const followUpStream = this.options.provider.generateMessageStream({
+            prompt: responsePrompt,
+            history: updatedHistory,
+            context: effectiveContext,
+            tools: availableTools,
+            parameters: {
+              jsonSchema: responseSchema,
+              schemaName: "tool_followup",
+            },
+            signal,
+          });
+
+          let followUpToolCalls:
+            | Array<{ toolName: string; arguments: Record<string, unknown> }>
+            | undefined;
+
+          for await (const followUpChunk of followUpStream) {
+            // Extract tool calls from follow-up stream
+            if (followUpChunk.done && followUpChunk.structured?.toolCalls) {
+              followUpToolCalls = followUpChunk.structured.toolCalls;
+            }
+          }
+
+          hasToolCalls = followUpToolCalls && followUpToolCalls.length > 0;
+
+          if (hasToolCalls) {
+            logger.debug(
+              `[Agent] Follow-up streaming call produced ${
+                followUpToolCalls!.length
+              } additional tool calls`
+            );
+
+            // Execute the follow-up tool calls
+            for (const toolCall of followUpToolCalls!) {
+              const tool = this.findAvailableTool(
+                toolCall.toolName,
+                selectedRoute
+              );
+              if (!tool) {
+                logger.warn(
+                  `[Agent] Tool not found in streaming follow-up: ${toolCall.toolName}`
+                );
+                continue;
+              }
+
+              const toolExecutor = new ToolExecutor<TContext, unknown>();
+              const result = await toolExecutor.executeTool({
+                tool: tool,
+                context: effectiveContext,
+                updateContext: this.updateContext.bind(this),
+                history: updatedHistory,
+                data: session.data,
+              });
+
+              // Update context with follow-up tool results
+              if (result.contextUpdate) {
+                await this.updateContext(
+                  result.contextUpdate as Partial<TContext>
+                );
+              }
+
+              if (result.collectedUpdate) {
+                session = await this.updateData(
+                  session,
+                  result.collectedUpdate
+                );
+                logger.debug(
+                  `[Agent] Streaming follow-up tool updated collected data:`,
+                  result.collectedUpdate
+                );
+              }
+
+              logger.debug(
+                `[Agent] Executed streaming follow-up tool: ${result.toolName} (success: ${result.success})`
+              );
+            }
+
+            // Update toolCalls for next iteration
+            toolCalls = followUpToolCalls;
+          } else {
+            logger.debug(
+              `[Agent] Streaming tool loop completed after ${toolLoopCount} iterations`
+            );
+            // Update toolCalls for final response
+            toolCalls = followUpToolCalls || [];
+            break;
+          }
+        }
+
+        if (toolLoopCount >= MAX_TOOL_LOOPS) {
+          logger.warn(
+            `[Agent] Streaming tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`
+          );
+        }
 
         // Extract collected data on final chunk
         if (chunk.done && chunk.structured && nextStep.collect) {
@@ -599,6 +674,22 @@ export class Agent<TContext = unknown> {
           logger.debug(
             `[Agent] Auto-saved session step to persistence: ${session.id}`
           );
+        }
+
+        // Execute finalize function on final chunk
+        if (chunk.done && session.currentRoute && session.currentStep) {
+          const currentRoute = this.routes.find(
+            (r) => r.id === session.currentRoute?.id
+          );
+          if (currentRoute) {
+            const currentStep = currentRoute.getStep(session.currentStep.id);
+            if (currentStep?.finalize) {
+              logger.debug(
+                `[Agent] Executing finalize function for step: ${currentStep.id}`
+              );
+              await currentStep.finalize(effectiveContext, session.data);
+            }
+          }
         }
 
         // Update current session if we have one
@@ -663,10 +754,6 @@ export class Agent<TContext = unknown> {
           this.getTerms(),
           selectedRoute.getTerms()
         ),
-        combinedCapabilities: [
-          ...this.getCapabilities(),
-          ...selectedRoute.getCapabilities(),
-        ],
         context: effectiveContext,
         session,
       });
@@ -754,7 +841,6 @@ export class Agent<TContext = unknown> {
         agentOptions: this.options,
         terms: this.terms,
         guidelines: this.guidelines,
-        capabilities: this.capabilities,
         context: effectiveContext,
         session,
       });
@@ -832,50 +918,18 @@ export class Agent<TContext = unknown> {
     let session =
       params.session || this.currentSession || createSession<TContext>();
 
-    // PHASE 1: TOOL EXECUTION - Execute tools if current step has tool
+    // PHASE 1: PREPARE - Execute prepare function if current step has one
     if (session.currentRoute && session.currentStep) {
       const currentRoute = this.routes.find(
         (r) => r.id === session.currentRoute?.id
       );
       if (currentRoute) {
         const currentStep = currentRoute.getStep(session.currentStep.id);
-        if (currentStep) {
-          const transitions = currentStep.getTransitions();
-          const toolStep = transitions.find((s) => s.tool);
-
-          if (toolStep?.tool) {
-            const toolExecutor = new ToolExecutor<TContext, unknown>();
-            // Get allowed domains from current route for security enforcement
-            const allowedDomains = currentRoute.getDomains();
-            const result = await toolExecutor.executeTool({
-              tool: toolStep.tool as ToolRef<TContext, unknown[], unknown>,
-              context: effectiveContext,
-              updateContext: this.updateContext.bind(this),
-              history,
-              data: session.data,
-              allowedDomains,
-            });
-
-            // Update context with tool results
-            if (result.contextUpdate) {
-              await this.updateContext(
-                result.contextUpdate as Partial<TContext>
-              );
-            }
-
-            // Update collected data with tool results
-            if (result.collectedUpdate) {
-              session = await this.updateData(session, result.collectedUpdate);
-              logger.debug(
-                `[Agent] Tool updated collected data:`,
-                result.collectedUpdate
-              );
-            }
-
-            logger.debug(
-              `[Agent] Executed tool: ${result.toolName} (success: ${result.success})`
-            );
-          }
+        if (currentStep?.prepare) {
+          logger.debug(
+            `[Agent] Executing prepare function for step: ${currentStep.id}`
+          );
+          await currentStep.prepare(effectiveContext, session.data);
         }
       }
     }
@@ -949,7 +1003,7 @@ export class Agent<TContext = unknown> {
 
     // PHASE 3: DETERMINE NEXT STEP - Use step from combined decision or get initial step
     let message: string;
-    const toolCalls:
+    let toolCalls:
       | Array<{ toolName: string; arguments: Record<string, unknown> }>
       | undefined = undefined;
 
@@ -1013,19 +1067,22 @@ export class Agent<TContext = unknown> {
           this.getTerms(),
           selectedRoute.getTerms()
         ),
-        combinedCapabilities: [
-          ...this.getCapabilities(),
-          ...selectedRoute.getCapabilities(),
-        ],
         context: effectiveContext,
         session,
       });
+
+      // Collect available tools for AI
+      const availableTools = this.collectAvailableTools(
+        selectedRoute,
+        nextStep
+      );
 
       // Generate message using AI provider
       const result = await this.options.provider.generateMessage({
         prompt: responsePrompt,
         history,
         context: effectiveContext,
+        tools: availableTools,
         signal,
         parameters: {
           jsonSchema: responseSchema,
@@ -1035,7 +1092,189 @@ export class Agent<TContext = unknown> {
 
       message = result.structured?.message || result.message;
 
-      // Extract collected data from response
+      // Process dynamic tool calls from AI response
+      if (result.structured?.toolCalls) {
+        toolCalls = result.structured.toolCalls;
+
+        // Execute dynamic tool calls
+        if (toolCalls.length > 0) {
+          logger.debug(
+            `[Agent] Executing ${toolCalls.length} dynamic tool calls`
+          );
+
+          for (const toolCall of toolCalls) {
+            const tool = this.findAvailableTool(
+              toolCall.toolName,
+              selectedRoute
+            );
+            if (!tool) {
+              logger.warn(`[Agent] Tool not found: ${toolCall.toolName}`);
+              continue;
+            }
+
+            const toolExecutor = new ToolExecutor<TContext, unknown>();
+            const toolResult = await toolExecutor.executeTool({
+              tool: tool,
+              context: effectiveContext,
+              updateContext: this.updateContext.bind(this),
+              history,
+              data: session.data,
+            });
+
+            // Update context with tool results
+            if (toolResult.contextUpdate) {
+              await this.updateContext(
+                toolResult.contextUpdate as Partial<TContext>
+              );
+            }
+
+            // Update collected data with tool results
+            if (toolResult.collectedUpdate) {
+              session = await this.updateData(
+                session,
+                toolResult.collectedUpdate
+              );
+              logger.debug(
+                `[Agent] Tool updated collected data:`,
+                toolResult.collectedUpdate
+              );
+            }
+
+            logger.debug(
+              `[Agent] Executed dynamic tool: ${toolResult.toolName} (success: ${toolResult.success})`
+            );
+          }
+        }
+      }
+
+      // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution
+      const MAX_TOOL_LOOPS = 5;
+      let toolLoopCount = 0;
+      let hasToolCalls = toolCalls && toolCalls.length > 0;
+
+      while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
+        toolLoopCount++;
+        logger.debug(
+          `[Agent] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS}`
+        );
+
+        // Add tool execution results to history so AI knows what happened
+        const toolResultsEvents: Event[] = [];
+        for (const toolCall of toolCalls || []) {
+          const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
+          if (tool) {
+            toolResultsEvents.push({
+              kind: EventKind.TOOL,
+              source: EventSource.AI_AGENT,
+              timestamp: new Date().toISOString(),
+              data: {
+                tool_calls: [
+                  {
+                    tool_id: toolCall.toolName,
+                    arguments: toolCall.arguments,
+                    result: {
+                      data: "Tool executed successfully",
+                    },
+                  },
+                ],
+              },
+            });
+          }
+        }
+
+        // Create updated history with tool results
+        const updatedHistory = [...history, ...toolResultsEvents];
+
+        // Make follow-up AI call to see if more tools are needed
+        const followUpResult = await this.options.provider.generateMessage({
+          prompt: responsePrompt,
+          history: updatedHistory,
+          context: effectiveContext,
+          tools: availableTools,
+          parameters: {
+            jsonSchema: responseSchema,
+            schemaName: "tool_followup",
+          },
+          signal,
+        });
+
+        // Check if follow-up call has more tool calls
+        const followUpToolCalls = followUpResult.structured?.toolCalls;
+        hasToolCalls = followUpToolCalls && followUpToolCalls.length > 0;
+
+        if (hasToolCalls) {
+          logger.debug(
+            `[Agent] Follow-up call produced ${
+              followUpToolCalls!.length
+            } additional tool calls`
+          );
+
+          // Execute the follow-up tool calls
+          for (const toolCall of followUpToolCalls!) {
+            const tool = this.findAvailableTool(
+              toolCall.toolName,
+              selectedRoute
+            );
+            if (!tool) {
+              logger.warn(
+                `[Agent] Tool not found in follow-up: ${toolCall.toolName}`
+              );
+              continue;
+            }
+
+            const toolExecutor = new ToolExecutor<TContext, unknown>();
+            const toolResult = await toolExecutor.executeTool({
+              tool: tool,
+              context: effectiveContext,
+              updateContext: this.updateContext.bind(this),
+              history: updatedHistory,
+              data: session.data,
+            });
+
+            // Update context with follow-up tool results
+            if (toolResult.contextUpdate) {
+              await this.updateContext(
+                toolResult.contextUpdate as Partial<TContext>
+              );
+            }
+
+            if (toolResult.collectedUpdate) {
+              session = await this.updateData(
+                session,
+                toolResult.collectedUpdate
+              );
+              logger.debug(
+                `[Agent] Follow-up tool updated collected data:`,
+                toolResult.collectedUpdate
+              );
+            }
+
+            logger.debug(
+              `[Agent] Executed follow-up tool: ${toolResult.toolName} (success: ${toolResult.success})`
+            );
+          }
+
+          // Update toolCalls for next iteration or final response
+          toolCalls = followUpToolCalls;
+        } else {
+          logger.debug(
+            `[Agent] Tool loop completed after ${toolLoopCount} iterations`
+          );
+          // Update final message and toolCalls from follow-up result if no more tools
+          message =
+            followUpResult.structured?.message || followUpResult.message;
+          toolCalls = followUpToolCalls || [];
+          break;
+        }
+      }
+
+      if (toolLoopCount >= MAX_TOOL_LOOPS) {
+        logger.warn(
+          `[Agent] Tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`
+        );
+      }
+
+      // Extract collected data from final response
       if (result.structured && nextStep.collect) {
         const collectedData: Record<string, unknown> = {};
         // The structured response includes both base fields and collected extraction fields
@@ -1114,10 +1353,6 @@ export class Agent<TContext = unknown> {
           this.getTerms(),
           selectedRoute.getTerms()
         ),
-        combinedCapabilities: [
-          ...this.getCapabilities(),
-          ...selectedRoute.getCapabilities(),
-        ],
         context: effectiveContext,
         session,
       });
@@ -1190,7 +1425,6 @@ export class Agent<TContext = unknown> {
         agentOptions: this.options,
         terms: this.terms,
         guidelines: this.guidelines,
-        capabilities: this.capabilities,
         context: effectiveContext,
         session,
       });
@@ -1228,6 +1462,22 @@ export class Agent<TContext = unknown> {
       );
     }
 
+    // Execute finalize function
+    if (session.currentRoute && session.currentStep) {
+      const currentRoute = this.routes.find(
+        (r) => r.id === session.currentRoute?.id
+      );
+      if (currentRoute) {
+        const currentStep = currentRoute.getStep(session.currentStep.id);
+        if (currentStep?.finalize) {
+          logger.debug(
+            `[Agent] Executing finalize function for step: ${currentStep.id}`
+          );
+          await currentStep.finalize(effectiveContext, session.data);
+        }
+      }
+    }
+
     // Update current session if we have one
     if (this.currentSession) {
       this.currentSession = session;
@@ -1256,6 +1506,106 @@ export class Agent<TContext = unknown> {
   }
 
   /**
+   * Get all tools
+   */
+  getTools(): Tool<TContext, unknown[], unknown, unknown>[] {
+    return [...this.tools];
+  }
+
+  /**
+   * Find an available tool by name for the given route
+   * Route-level tools take precedence over agent-level tools
+   * @private
+   */
+  private findAvailableTool(
+    toolName: string,
+    route?: Route<TContext, unknown>
+  ): Tool<TContext, unknown[], unknown, unknown> | undefined {
+    // Check route-level tools first (if route provided)
+    if (route) {
+      const routeTool = route.getTools().find((tool) => tool.id === toolName);
+      if (routeTool) return routeTool;
+    }
+
+    // Fall back to agent-level tools
+    return this.tools.find((tool) => tool.id === toolName);
+  }
+
+  /**
+   * Collect all available tools for the given route and step context
+   * @private
+   */
+  private collectAvailableTools(
+    route?: Route<TContext, unknown>,
+    step?: Step<TContext, unknown>
+  ): Array<{ id: string; description?: string; parameters?: unknown }> {
+    const availableTools = new Map<
+      string,
+      Tool<TContext, unknown[], unknown, unknown>
+    >();
+
+    // Add agent-level tools
+    this.tools.forEach((tool) => {
+      availableTools.set(tool.id, tool);
+    });
+
+    // Add route-level tools (these take precedence)
+    if (route) {
+      route.getTools().forEach((tool) => {
+        availableTools.set(tool.id, tool);
+      });
+    }
+
+    // Filter by step-level allowed tools if specified
+    if (step?.tools) {
+      const allowedToolIds = new Set<string>();
+      const stepTools: Tool<TContext, unknown[], unknown, unknown>[] = [];
+
+      for (const toolRef of step.tools) {
+        if (typeof toolRef === "string") {
+          // Reference to registered tool
+          allowedToolIds.add(toolRef);
+        } else {
+          // Inline tool definition
+          if (toolRef.id) {
+            allowedToolIds.add(toolRef.id);
+            stepTools.push(toolRef);
+          }
+        }
+      }
+
+      // If step specifies tools, only include those
+      if (allowedToolIds.size > 0) {
+        const filteredTools = new Map<
+          string,
+          Tool<TContext, unknown[], unknown, unknown>
+        >();
+        for (const toolId of allowedToolIds) {
+          const tool = availableTools.get(toolId);
+          if (tool) {
+            filteredTools.set(toolId, tool);
+          }
+        }
+        // Add inline tools
+        stepTools.forEach((tool) => {
+          if (tool.id) {
+            filteredTools.set(tool.id, tool);
+          }
+        });
+        availableTools.clear();
+        filteredTools.forEach((tool, id) => availableTools.set(id, tool));
+      }
+    }
+
+    // Convert to the format expected by AI providers
+    return Array.from(availableTools.values()).map((tool) => ({
+      id: tool.id,
+      description: tool.description,
+      parameters: tool.parameters,
+    }));
+  }
+
+  /**
    * Get all guidelines
    */
   getGuidelines(): Guideline<TContext>[] {
@@ -1263,24 +1613,10 @@ export class Agent<TContext = unknown> {
   }
 
   /**
-   * Get all capabilities
-   */
-  getCapabilities(): Capability[] {
-    return [...this.capabilities];
-  }
-
-  /**
    * Get the agent's knowledge base
    */
   getKnowledgeBase(): Record<string, unknown> {
     return { ...this.knowledgeBase };
-  }
-
-  /**
-   * Get the domain registry
-   */
-  getDomainRegistry(): DomainRegistry {
-    return this.domainRegistry;
   }
 
   /**
@@ -1322,42 +1658,6 @@ export class Agent<TContext = unknown> {
    */
   hasPersistence(): boolean {
     return this.persistenceManager !== undefined;
-  }
-
-  /**
-   * Get allowed domains for a specific route
-   * @param routeId - Route ID to check
-   * @returns Filtered domains object, or all domains if route has no restrictions
-   */
-  getDomainsForRoute(routeId: string): Record<string, Record<string, unknown>> {
-    const route = this.routes.find((r) => r.id === routeId);
-
-    if (!route) {
-      // Route not found, return all domains
-      return this.domainRegistry.all();
-    }
-
-    const allowedDomains = route.getDomains();
-    return this.domainRegistry.getFiltered(allowedDomains);
-  }
-
-  /**
-   * Get allowed domains for a specific route by title
-   * @param routeTitle - Route title to check
-   * @returns Filtered domains object, or all domains if route has no restrictions
-   */
-  getDomainsForRouteByTitle(
-    routeTitle: string
-  ): Record<string, Record<string, unknown>> {
-    const route = this.routes.find((r) => r.title === routeTitle);
-
-    if (!route) {
-      // Route not found, return all domains
-      return this.domainRegistry.all();
-    }
-
-    const allowedDomains = route.getDomains();
-    return this.domainRegistry.getFiltered(allowedDomains);
   }
 
   /**

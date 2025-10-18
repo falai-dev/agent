@@ -10,7 +10,7 @@ import type {
   MessageData,
   SessionStatus,
   PersistenceAdapter,
-} from "../types/persistence";
+} from "../types";
 
 /**
  * Redis client interface - matches ioredis/redis clients

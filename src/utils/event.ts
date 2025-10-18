@@ -1,4 +1,4 @@
-import { type Event, EventKind } from "../types/history";
+import { type Event, EventKind } from "../types";
 /**
  * Helper to extract last message from history
  */

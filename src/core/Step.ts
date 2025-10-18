@@ -2,8 +2,13 @@
  * Step in the route DSL
  */
 
-import type { StepRef, StepOptions, StepResult } from "../types/route";
-import type { Guideline } from "../types/agent";
+import type {
+  StepRef,
+  StepOptions,
+  StepResult,
+  Guideline,
+  Tool,
+} from "../types";
 import { Template } from "../types/template";
 
 import { END_ROUTE, END_ROUTE_ID } from "../constants";
@@ -23,7 +28,15 @@ export class Step<TContext = unknown, TData = unknown> {
   public skipIf?: (data: Partial<TData>) => boolean;
   public requires?: string[];
   public prompt?: Template<TContext, TData>;
-  public tool?: StepOptions<TContext, TData>["tool"];
+  public prepare?: (
+    context: TContext,
+    data?: Partial<TData>
+  ) => void | Promise<void>;
+  public finalize?: (
+    context: TContext,
+    data?: Partial<TData>
+  ) => void | Promise<void>;
+  public tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
 
   constructor(routeId: string, options: StepOptions<TContext, TData> = {}) {
     // Use provided ID or generate a deterministic one
@@ -35,7 +48,9 @@ export class Step<TContext = unknown, TData = unknown> {
     this.requires = options.requires;
     this.prompt = options.prompt;
     this.when = options.when;
-    this.tool = options.tool;
+    this.prepare = options.prepare;
+    this.finalize = options.finalize;
+    this.tools = options.tools;
   }
 
   /**
@@ -48,6 +63,15 @@ export class Step<TContext = unknown, TData = unknown> {
     skipIf?: (data: Partial<TData>) => boolean;
     requires?: string[];
     prompt?: Template<TContext, TData>;
+    prepare?: (
+      context: TContext,
+      data?: Partial<TData>
+    ) => void | Promise<void>;
+    finalize?: (
+      context: TContext,
+      data?: Partial<TData>
+    ) => void | Promise<void>;
+    tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
   }): this {
     if (config.description !== undefined) {
       this.description = config.description;
@@ -63,6 +87,15 @@ export class Step<TContext = unknown, TData = unknown> {
     }
     if (config.prompt !== undefined) {
       this.prompt = config.prompt;
+    }
+    if (config.prepare !== undefined) {
+      this.prepare = config.prepare;
+    }
+    if (config.finalize !== undefined) {
+      this.finalize = config.finalize;
+    }
+    if (config.tools !== undefined) {
+      this.tools = config.tools;
     }
     return this;
   }

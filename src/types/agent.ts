@@ -3,7 +3,7 @@
  */
 
 import type { AiProvider } from "./ai";
-import type { ToolRef } from "./tool";
+import type { Tool } from "./tool";
 import type { RouteOptions } from "./route";
 import type { PersistenceConfig } from "./persistence";
 import type { SessionState } from "./session";
@@ -96,8 +96,8 @@ export interface AgentOptions<TContext = unknown> {
   terms?: Term<TContext>[];
   /** Initial guidelines for agent behavior */
   guidelines?: Guideline<TContext>[];
-  /** Initial capabilities */
-  capabilities?: Capability[];
+  /** Global tools available to all routes */
+  tools?: Tool<TContext, unknown[], unknown, unknown>[];
   /** Initial routes (will be instantiated as Route objects) */
   routes?: RouteOptions<TContext, unknown>[];
   /** Optional persistence configuration for auto-saving sessions and messages */
@@ -132,26 +132,8 @@ export interface Guideline<TContext = unknown> {
   enabled?: boolean;
   /** Tags for organizing and filtering guidelines */
   tags?: string[];
-  /** Tools available when following this guideline */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tools?: ToolRef<any, any[], any>[];
   /** Additional metadata */
   metadata?: Record<string, unknown>;
-}
-
-/**
- * A capability the agent can perform
- */
-export interface Capability {
-  /** Unique identifier */
-  id?: string;
-  /** Title of the capability */
-  title: string;
-  /** Description of what the capability does */
-  description: string;
-  /** Tools used by this capability */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tools?: ToolRef<any, any[], any>[];
 }
 
 /**

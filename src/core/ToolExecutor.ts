@@ -5,8 +5,7 @@
  * The LLM sees the enriched context when generating responses.
  */
 
-import type { Event } from "../types/history";
-import type { ToolRef, ToolContext } from "../types/tool";
+import type { Event, Tool, ToolContext } from "../types";
 
 export interface ToolExecutionResult {
   toolName: string;
@@ -18,21 +17,19 @@ export interface ToolExecutionResult {
 }
 
 export interface ExecuteToolParams<TContext = unknown, TData = unknown> {
-  tool: ToolRef<TContext, unknown[], unknown>;
+  tool: Tool<TContext, unknown[], unknown>;
   context: TContext;
   updateContext: (updates: Partial<TContext>) => Promise<void>;
   history: Event[];
   data?: Partial<TData>;
-  allowedDomains?: string[];
 }
 
 export interface ExecuteToolsParams<TContext = unknown, TData = unknown> {
-  tools: Array<ToolRef<TContext, unknown[], unknown>>;
+  tools: Array<Tool<TContext, unknown[], unknown>>;
   context: TContext;
   updateContext: (updates: Partial<TContext>) => Promise<void>;
   history: Event[];
   data?: Partial<TData>;
-  allowedDomains?: string[];
 }
 
 export class ToolExecutor<TContext = unknown, TData = unknown> {
@@ -43,25 +40,8 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
   async executeTool(
     params: ExecuteToolParams<TContext, TData>
   ): Promise<ToolExecutionResult> {
-    const { tool, context, updateContext, history, data, allowedDomains } =
-      params;
+    const { tool, context, updateContext, history, data } = params;
     try {
-      // Domain enforcement: Check if tool's domain is allowed
-      if (allowedDomains !== undefined && tool.domainName) {
-        // allowedDomains is explicitly set (could be empty array)
-        if (!allowedDomains.includes(tool.domainName)) {
-          throw new Error(
-            `Domain security violation: Tool "${
-              tool.name
-            }" belongs to domain "${
-              tool.domainName
-            }" which is not allowed in this route. Allowed domains: [${allowedDomains.join(
-              ", "
-            )}]`
-          );
-        }
-      }
-
       // Build tool context with collected data
       const toolContext: ToolContext<TContext, TData> = {
         context,
@@ -70,12 +50,12 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
         data,
       };
 
-      // Execute tool (no arguments - tools read from context/data)
+      // Execute tool
       const result = await tool.handler(toolContext);
 
       // Return execution result
       return {
-        toolName: tool.name,
+        toolName: tool.id || "unknown",
         success: true,
         data: result.data,
         contextUpdate: result.contextUpdate,
@@ -83,7 +63,7 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
       };
     } catch (error) {
       return {
-        toolName: tool.name,
+        toolName: tool.id || "unknown",
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
@@ -97,8 +77,7 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
   async executeTools(
     params: ExecuteToolsParams<TContext, TData>
   ): Promise<ToolExecutionResult[]> {
-    const { tools, context, updateContext, history, data, allowedDomains } =
-      params;
+    const { tools, context, updateContext, history, data } = params;
     const results: ToolExecutionResult[] = [];
 
     for (const tool of tools) {
@@ -108,13 +87,15 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
         updateContext,
         history,
         data,
-        allowedDomains,
       });
       results.push(result);
 
       // If tool failed, stop execution chain
       if (!result.success) {
-        console.error(`[ToolExecutor] Tool ${tool.name} failed:`, result.error);
+        console.error(
+          `[ToolExecutor] Tool ${tool.id || "unknown"} failed:`,
+          result.error
+        );
         break;
       }
 

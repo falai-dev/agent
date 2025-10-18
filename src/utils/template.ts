@@ -1,4 +1,4 @@
-import type { Template, TemplateContext } from "../types/template";
+import type { Template, TemplateContext } from "../types";
 
 /**
  * Renders a template, which can be a string or a function, using the provided context.

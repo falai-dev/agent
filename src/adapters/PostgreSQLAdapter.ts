@@ -10,7 +10,7 @@ import type {
   MessageData,
   SessionStatus,
   PersistenceAdapter,
-} from "../types/persistence";
+} from "../types";
 
 /**
  * PostgreSQL query result interface

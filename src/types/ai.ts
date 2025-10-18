@@ -39,6 +39,12 @@ export interface GenerateMessageInput<TContext = unknown> {
   history: Event[];
   /** Context data */
   context: TContext;
+  /** Tools available for AI to call during this interaction */
+  tools?: Array<{
+    id: string;
+    description?: string;
+    parameters?: unknown;
+  }>;
   /** Additional generation parameters */
   parameters?: {
     /** Maximum output tokens to generate */

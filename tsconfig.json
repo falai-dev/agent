@@ -4,7 +4,7 @@
     "module": "ESNext",
     "lib": ["ES2020", "DOM"],
     "moduleResolution": "bundler",
-    "rootDir": ".",
+    "rootDir": "./src",
     "outDir": "./dist",
     "baseUrl": "./src",
     "paths": {
@@ -29,6 +29,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*", "examples/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

@@ -12,14 +12,10 @@ import type {
   SessionStatus,
   SessionRepository,
   MessageRepository,
-} from "../types/persistence";
-import type { Event } from "../types/history";
-import type { SessionState } from "../types/session";
-import {
-  createSession,
-  sessionStepToData,
-  sessionDataToStep,
-} from "../types/session";
+  Event,
+  SessionState,
+} from "../types";
+import { createSession, sessionStepToData, sessionDataToStep } from "../utils";
 
 /**
  * Manager for handling persistence operations

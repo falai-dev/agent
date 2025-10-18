@@ -8,8 +8,8 @@ import type {
   MessageEventData,
   ToolEventData,
   ToolCall,
-} from "../types/history";
-import { EventKind, EventSource } from "../types/history";
+} from "../types";
+import { EventKind, EventSource } from "../types";
 
 /**
  * Adapt an event for inclusion in prompts

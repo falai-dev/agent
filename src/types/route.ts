@@ -2,7 +2,7 @@
  * Route/Journey DSL type definitions
  */
 
-import type { ToolRef, ToolResult } from "./tool";
+import type { Tool } from "./tool";
 import type { StructuredSchema } from "./schema";
 import { Template } from "./template";
 
@@ -25,9 +25,9 @@ export interface StepRef {
 }
 
 /**
- * Forward declare Guideline, Term, and Capability for circular dependency
+ * Forward declare Guideline and Term for circular dependency
  */
-import type { Guideline, Term, Capability } from "./agent";
+import type { Guideline, Term } from "./agent";
 
 /**
  * Route lifecycle hooks for managing route-specific data and behavior
@@ -103,10 +103,8 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   guidelines?: Guideline<TContext>[];
   /** Initial terms for the route's domain glossary */
   terms?: Term<TContext>[];
-  /** Initial capabilities for this route */
-  capabilities?: Capability[];
-  /** Domain names that are allowed in this route (undefined = all domains) */
-  domains?: string[];
+  /** Tools available in this route */
+  tools?: Tool<TContext, unknown[], unknown, TData>[];
   /** Absolute rules the agent must follow in this route */
   rules?: Template<TContext, TData>[];
   /** Absolute prohibitions the agent must never do in this route */
@@ -183,15 +181,6 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
 }
 
 /**
- * Inline tool handler for dynamic tool generation
- */
-export type InlineToolHandler<TContext = unknown, TData = unknown> = (
-  context: import("./tool").ToolContext<TContext, TData>
-) =>
-  | ToolResult<unknown, TContext, TData>
-  | Promise<ToolResult<unknown, TContext, TData>>;
-
-/**
  * Specification for a step transition
  */
 export interface StepOptions<TContext = unknown, TData = unknown> {
@@ -201,9 +190,12 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
   description?: string;
   /** Transition to a chat state with this description */
   prompt?: Template<TContext, TData>;
-  /** Transition to execute a tool */
-  tool?: // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ToolRef<TContext, any[], any, TData> | InlineToolHandler<TContext, TData>;
+  /** Tools available for AI to call in this step (by ID reference or inline definition) */
+  tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
+  /** Programmatic function to run before AI responds */
+  prepare?: (context: TContext, data?: Partial<TData>) => void | Promise<void>;
+  /** Programmatic function to run after AI responds */
+  finalize?: (context: TContext, data?: Partial<TData>) => void | Promise<void>;
   /** Transition to a specific step or end marker */
   step?: StepRef | symbol;
   /**

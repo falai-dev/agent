@@ -3,7 +3,10 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { MessageCreateParamsNonStreaming } from "@anthropic-ai/sdk/resources/messages";
+import type {
+  MessageCreateParamsNonStreaming,
+  Tool,
+} from "@anthropic-ai/sdk/resources/messages";
 
 import type {
   AiProvider,
@@ -11,7 +14,7 @@ import type {
   GenerateMessageOutput,
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
-} from "../types/ai";
+} from "../types";
 import { withTimeoutAndRetry } from "../utils/retry";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -258,6 +261,15 @@ export class AnthropicProvider implements AiProvider {
         ...this.config,
       };
 
+      // Add tools if provided
+      if (input.tools && input.tools.length > 0) {
+        params.tools = input.tools.map((tool) => ({
+          name: tool.id,
+          description: tool.description || "",
+          input_schema: tool.parameters as Tool["input_schema"], // JSON schema
+        }));
+      }
+
       // Handle schema: Anthropic doesn't have a native schema mode, so embed constraints
       if (input.parameters?.jsonSchema) {
         const systemPrompt =
@@ -281,7 +293,7 @@ export class AnthropicProvider implements AiProvider {
 
       const response = await this.client.messages.create(params);
 
-      // Extract text from response
+      // Extract text and tool calls from response
       const textContent = response.content.find(
         (block) => block.type === "text"
       );
@@ -289,6 +301,22 @@ export class AnthropicProvider implements AiProvider {
 
       if (!message) {
         throw new Error("No response from Anthropic");
+      }
+
+      // Extract tool calls from response
+      const toolCalls: Array<{
+        toolName: string;
+        arguments: Record<string, unknown>;
+      }> = [];
+
+      // Check for tool_use content blocks
+      for (const block of response.content) {
+        if (block.type === "tool_use") {
+          toolCalls.push({
+            toolName: block.name,
+            arguments: block.input as Record<string, unknown>,
+          });
+        }
       }
 
       // Parse JSON response if schema was provided
@@ -300,6 +328,15 @@ export class AnthropicProvider implements AiProvider {
           console.warn("[ANTHROPIC] Failed to parse JSON response:", error);
           // Fall back to treating the message as plain text
         }
+      }
+
+      // If tools were used, include them in structured response
+      if (toolCalls.length > 0) {
+        structured = {
+          message,
+          toolCalls,
+          ...structured,
+        } as AgentStructuredResponse;
       }
 
       return {
@@ -415,6 +452,15 @@ export class AnthropicProvider implements AiProvider {
       ...this.config,
     };
 
+    // Add tools if provided
+    if (input.tools && input.tools.length > 0) {
+      params.tools = input.tools.map((tool) => ({
+        name: tool.id,
+        description: tool.description || "",
+        input_schema: tool.parameters as Tool["input_schema"], // JSON schema
+      }));
+    }
+
     // Handle schema in streaming: embed constraint
     if (input.parameters?.jsonSchema) {
       const systemPrompt =
@@ -442,11 +488,22 @@ export class AnthropicProvider implements AiProvider {
     let stopReason: string | undefined;
     let inputTokens = 0;
     let outputTokens = 0;
+    const toolCalls: Array<{
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }> = [];
 
     for await (const chunk of stream) {
       if (chunk.type === "message_start") {
         currentModel = chunk.message.model;
         inputTokens = chunk.message.usage.input_tokens;
+      } else if (chunk.type === "content_block_start") {
+        if (chunk.content_block.type === "tool_use") {
+          toolCalls.push({
+            toolName: chunk.content_block.name,
+            arguments: chunk.content_block.input as Record<string, unknown>,
+          });
+        }
       } else if (chunk.type === "content_block_delta") {
         if (chunk.delta.type === "text_delta") {
           const delta = chunk.delta.text;
@@ -474,6 +531,15 @@ export class AnthropicProvider implements AiProvider {
           error
         );
       }
+    }
+
+    // If tools were used, include them in structured response
+    if (toolCalls.length > 0) {
+      structured = {
+        message: accumulated,
+        toolCalls,
+        ...structured,
+      } as AgentStructuredResponse;
     }
 
     // Yield final chunk

@@ -8,7 +8,6 @@
 export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
 export { Step } from "./core/Step";
-export { defineTool } from "./core/Tool";
 export { DomainRegistry } from "./core/DomainRegistry";
 export { adaptEvent, createMessageEvent, createToolEvent } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
@@ -72,24 +71,15 @@ export type {
   AgentOptions,
   Term,
   Guideline,
-  Capability,
   GuidelineMatch,
   ContextLifecycleHooks,
   ContextProvider,
-} from "./types/agent";
-export { CompositionMode } from "./types/agent";
-
-export type {
   Event,
   EmittedEvent,
   MessageEventData,
   ToolEventData,
   StatusEventData,
   Participant,
-} from "./types/history";
-export { EventKind, EventSource } from "./types/history";
-
-export type {
   RouteRef,
   StepRef,
   RouteOptions,
@@ -97,34 +87,18 @@ export type {
   StepResult,
   RouteTransitionConfig,
   RouteCompletionHandler,
-} from "./types/route";
-
-export type { SessionState, PendingTransition } from "./types/session";
-export {
-  createSession,
-  enterRoute,
-  enterStep,
-  mergeCollected,
-} from "./types/session";
-
-export type {
+  SessionState,
+  PendingTransition,
   ToolContext,
   ToolResult,
   ToolHandler,
-  ToolRef,
-} from "./types/tool";
-
-export type {
+  Tool,
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
   AgentStructuredResponse,
   ReasoningConfig,
-} from "./types/ai";
-
-export type { StructuredSchema } from "./types/schema";
-
-export type {
+  StructuredSchema,
   SessionData,
   MessageData,
   SessionStatus,
@@ -134,4 +108,6 @@ export type {
   PersistenceConfig,
   CreateSessionOptions,
   SaveMessageOptions,
-} from "./types/persistence";
+} from "./types";
+export { CompositionMode, EventKind, EventSource } from "./types";
+export { createSession, enterRoute, enterStep, mergeCollected } from "./utils";

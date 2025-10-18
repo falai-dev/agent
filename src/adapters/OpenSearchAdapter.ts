@@ -38,7 +38,7 @@ import type {
   MessageRepository,
   SessionData,
   MessageData,
-} from "../types/persistence.js";
+} from "../types";
 
 /**
  * OpenSearch Client interface (minimal typing for the official client)

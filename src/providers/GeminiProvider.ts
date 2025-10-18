@@ -7,6 +7,7 @@ import type {
   GenerateContentConfig,
   GenerateContentResponse,
   Schema,
+  FunctionDeclaration,
 } from "@google/genai";
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -16,8 +17,8 @@ import type {
   GenerateMessageOutput,
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
-} from "../types/ai";
-import type { StructuredSchema } from "../types/schema";
+  StructuredSchema,
+} from "../types";
 import { withTimeoutAndRetry } from "../utils/retry";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -342,6 +343,20 @@ export class GeminiProvider implements AiProvider {
     const operation = async (): Promise<GenerateMessageOutput> => {
       // Schema-required: configure response schema
       const configOverride: Partial<GenerateContentConfig> = { ...this.config };
+
+      // Add tools if provided
+      if (input.tools && input.tools.length > 0) {
+        configOverride.tools = [
+          {
+            functionDeclarations: input.tools.map((tool) => ({
+              name: tool.id,
+              description: tool.description || "",
+              parameters: tool.parameters as FunctionDeclaration["parameters"], // JSON schema
+            })),
+          },
+        ];
+      }
+
       if (input.parameters?.jsonSchema) {
         configOverride.responseMimeType = "application/json";
         // Adapt common schema format to Gemini's specific requirements
@@ -362,6 +377,24 @@ export class GeminiProvider implements AiProvider {
         throw new Error("No response from Gemini");
       }
 
+      // Extract tool calls from response
+      const toolCalls: Array<{
+        toolName: string;
+        arguments: Record<string, unknown>;
+      }> = [];
+
+      // Check for function calls in the response content
+      if (response.candidates && response.candidates[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.functionCall) {
+            toolCalls.push({
+              toolName: part.functionCall.name || "",
+              arguments: part.functionCall.args as Record<string, unknown>,
+            });
+          }
+        }
+      }
+
       // Parse JSON response if schema was provided
       let structured: AgentStructuredResponse | undefined;
       if (input.parameters?.jsonSchema) {
@@ -371,6 +404,15 @@ export class GeminiProvider implements AiProvider {
           console.warn("[GEMINI] Failed to parse JSON response:", error);
           // Fall back to treating the message as plain text
         }
+      }
+
+      // If tools were used, include them in structured response
+      if (toolCalls.length > 0) {
+        structured = {
+          message,
+          toolCalls,
+          ...structured,
+        } as AgentStructuredResponse;
       }
 
       return {
@@ -464,6 +506,20 @@ export class GeminiProvider implements AiProvider {
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Streaming: request JSON if schema provided
     const configOverride: Partial<GenerateContentConfig> = { ...this.config };
+
+    // Add tools if provided
+    if (input.tools && input.tools.length > 0) {
+      configOverride.tools = [
+        {
+          functionDeclarations: input.tools.map((tool) => ({
+            name: tool.id,
+            description: tool.description || "",
+            parameters: tool.parameters as FunctionDeclaration["parameters"],
+          })),
+        },
+      ];
+    }
+
     if (input.parameters?.jsonSchema) {
       configOverride.responseMimeType = "application/json";
       // Adapt common schema format to Gemini's specific requirements
@@ -482,9 +538,25 @@ export class GeminiProvider implements AiProvider {
     let promptTokenCount = 0;
     let candidatesTokenCount = 0;
     let totalTokenCount = 0;
+    const toolCalls: Array<{
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }> = [];
 
     for await (const chunk of stream) {
       const delta = chunk.text || "";
+
+      // Extract tool calls from chunk
+      if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
+        for (const part of chunk.candidates[0].content.parts) {
+          if (part.functionCall) {
+            toolCalls.push({
+              toolName: part.functionCall.name || "",
+              arguments: part.functionCall.args as Record<string, unknown>,
+            });
+          }
+        }
+      }
 
       if (delta) {
         accumulated += delta;
@@ -514,6 +586,15 @@ export class GeminiProvider implements AiProvider {
           error
         );
       }
+    }
+
+    // If tools were used, include them in structured response
+    if (toolCalls.length > 0) {
+      structured = {
+        message: accumulated,
+        toolCalls,
+        ...structured,
+      } as AgentStructuredResponse;
     }
 
     // Yield final chunk

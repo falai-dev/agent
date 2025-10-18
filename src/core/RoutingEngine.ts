@@ -1,12 +1,14 @@
-import type { Event } from "../types/history";
-import type { AgentOptions } from "../types/agent";
+import type {
+  Event,
+  AgentOptions,
+  StructuredSchema,
+  RoutingDecision,
+  SessionState,
+  AiProvider,
+} from "../types";
+import { enterRoute, mergeCollected } from "../utils";
 import type { Route } from "./Route";
 import type { Step } from "./Step";
-import type { StructuredSchema } from "../types/schema";
-import type { RoutingDecision } from "../types/routing";
-import type { SessionState } from "../types/session";
-import type { AiProvider } from "../types/ai";
-import { enterRoute, mergeCollected } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
 import { getLastMessageFromHistory } from "../utils/event";
 import { logger } from "../utils/logger";

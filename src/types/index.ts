@@ -7,8 +7,9 @@ export type {
   AgentOptions,
   Term,
   Guideline,
-  Capability,
   GuidelineMatch,
+  ContextLifecycleHooks,
+  ContextProvider,
 } from "./agent";
 export { CompositionMode } from "./agent";
 
@@ -34,17 +35,30 @@ export type {
   StepResult,
   RouteCompletionHandler,
   RouteTransitionConfig,
+  RouteLifecycleHooks,
 } from "./route";
 
+// Session types
+export type { SessionState, PendingTransition } from "./session";
+
 // Tool types
-export type { ToolRef, ToolContext, ToolResult } from "./tool";
+export type { Tool, ToolContext, ToolResult, ToolHandler } from "./tool";
 
 // AI provider types
 export type {
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
+  AgentStructuredResponse,
+  ReasoningConfig,
+  GenerateMessageStreamChunk,
 } from "./ai";
+
+// Schema types
+export type { StructuredSchema } from "./schema";
+
+// Routing types
+export type { RoutingDecision } from "./routing";
 
 // Persistence types
 export type {

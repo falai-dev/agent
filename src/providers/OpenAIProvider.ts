@@ -11,9 +11,10 @@ import type {
   GenerateMessageOutput,
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
-} from "../types/ai";
-import type { StructuredSchema } from "../types/schema";
+  StructuredSchema,
+} from "../types";
 import { withTimeoutAndRetry } from "../utils/retry";
+import { FunctionParameters } from "openai/resources/shared.mjs";
 
 const DEFAULT_RETRY_CONFIG = {
   timeout: 60000,
@@ -281,6 +282,19 @@ export class OpenAIProvider implements AiProvider {
         params.max_tokens = input.parameters.maxOutputTokens;
       }
 
+      // Add tools if provided
+      if (input.tools && input.tools.length > 0) {
+        params.tools = input.tools.map((tool) => ({
+          type: "function" as const,
+          function: {
+            name: tool.id,
+            description: tool.description,
+            parameters: tool.parameters as FunctionParameters, // JSON schema
+          },
+        }));
+        params.tool_choice = "auto";
+      }
+
       // Use structured output API if JSON schema is provided
       if (input.parameters?.jsonSchema) {
         const response = await this.client.responses.parse({
@@ -327,6 +341,35 @@ export class OpenAIProvider implements AiProvider {
         throw new Error("No response from OpenAI");
       }
 
+      let toolCalls: Array<{
+        toolName: string;
+        arguments: Record<string, unknown>;
+      }> = [];
+      if (response.choices?.[0]?.message?.tool_calls) {
+        toolCalls = response.choices[0].message.tool_calls
+          .filter((toolCall) => toolCall.type === "function")
+          .map((toolCall) => {
+            let toolCallArguments: Record<string, unknown> = {};
+            try {
+              toolCallArguments = JSON.parse(
+                toolCall.function.arguments
+              ) as Record<string, unknown>;
+            } catch (error) {
+              console.warn(
+                `[OPENAI] Failed to parse tool call arguments: ${getErrorMessage(
+                  error
+                )}`
+              );
+              toolCallArguments = {};
+            }
+            return {
+              toolName: toolCall.function.name,
+              arguments: toolCallArguments,
+            };
+          });
+      }
+      // Extract tool calls from response
+
       return {
         message,
         metadata: {
@@ -336,6 +379,10 @@ export class OpenAIProvider implements AiProvider {
           promptTokens: response.usage?.prompt_tokens,
           completionTokens: response.usage?.completion_tokens,
         },
+        structured:
+          toolCalls.length > 0
+            ? ({ message, toolCalls } as AgentStructuredResponse)
+            : undefined,
       };
     };
 
@@ -439,6 +486,19 @@ export class OpenAIProvider implements AiProvider {
       params.max_tokens = input.parameters.maxOutputTokens;
     }
 
+    // Add tools if provided
+    if (input.tools && input.tools.length > 0) {
+      params.tools = input.tools.map((tool) => ({
+        type: "function" as const,
+        function: {
+          name: tool.id,
+          description: tool.description,
+          parameters: tool.parameters as FunctionParameters, // JSON schema
+        },
+      }));
+      params.tool_choice = "auto";
+    }
+
     // Streaming path does not support responses.parse; if schema present,
     // request JSON object and parse at the end.
     if (input.parameters?.jsonSchema) {
@@ -453,10 +513,42 @@ export class OpenAIProvider implements AiProvider {
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
     let totalTokens: number | undefined;
+    const toolCalls: Array<{
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }> = [];
 
     for await (const chunk of stream) {
       currentModel = chunk.model;
       const delta = chunk.choices[0]?.delta?.content || "";
+
+      // Extract tool calls from delta
+      if (chunk.choices[0]?.delta?.tool_calls) {
+        for (const toolCall of chunk.choices[0].delta.tool_calls) {
+          if (toolCall.function) {
+            let toolCallArguments: Record<string, unknown> = {};
+            try {
+              toolCallArguments = toolCall.function.arguments
+                ? (JSON.parse(toolCall.function.arguments) as Record<
+                    string,
+                    unknown
+                  >)
+                : {};
+            } catch (error) {
+              console.warn(
+                `[OPENAI] Failed to parse tool call arguments in stream: ${getErrorMessage(
+                  error
+                )}`
+              );
+              toolCallArguments = {};
+            }
+            toolCalls.push({
+              toolName: toolCall.function.name || "",
+              arguments: toolCallArguments,
+            });
+          }
+        }
+      }
 
       if (delta) {
         accumulated += delta;
@@ -504,7 +596,7 @@ export class OpenAIProvider implements AiProvider {
         promptTokens,
         completionTokens,
       },
-      structured,
+      structured: structured ? { ...structured, toolCalls } : undefined,
     };
   }
 }

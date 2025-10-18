@@ -56,24 +56,20 @@ export type ToolHandler<
   | ToolResult<TResult, TContext, TData>;
 
 /**
- * Reference to a defined tool
+ * Tool definition - plain object interface
  */
-export interface ToolRef<
-  TContext,
-  TArgs extends unknown[],
-  TResult,
+export interface Tool<
+  TContext = unknown,
+  TArgs extends unknown[] = unknown[],
+  TResult = unknown,
   TData = unknown
 > {
   /** Tool identifier */
   id: string;
-  /** Tool name */
-  name: string;
   /** Tool handler function */
   handler: ToolHandler<TContext, TArgs, TResult, TData>;
-  /** Description of what the tool does */
+  /** Description of what the tool does (for AI discovery) */
   description?: string;
   /** Parameter schema or description */
   parameters?: unknown;
-  /** Domain this tool belongs to (set when added via agent.addDomain) */
-  domainName?: string;
 }

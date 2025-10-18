@@ -10,7 +10,7 @@ import type {
   MessageData,
   SessionStatus,
   PersistenceAdapter,
-} from "../types/persistence";
+} from "../types";
 
 /**
  * Memory Adapter - Provider-style API for in-memory persistence

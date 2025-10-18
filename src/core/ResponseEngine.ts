@@ -1,12 +1,16 @@
-import type { Event } from "../types/history";
+import type {
+  Event,
+  StructuredSchema,
+  SessionState,
+  AgentOptions,
+  Guideline,
+  Term,
+  Template,
+} from "../types";
 import type { Route } from "./Route";
 import type { Step } from "./Step";
-import type { StructuredSchema } from "../types/schema";
 import { PromptComposer } from "./PromptComposer";
 import { render } from "../utils/template";
-import type { SessionState } from "../types/session";
-import type { AgentOptions, Capability, Guideline, Term } from "../types/agent";
-import type { Template } from "../types/template";
 
 export interface BuildResponsePromptParams<
   TContext = unknown,
@@ -23,7 +27,6 @@ export interface BuildResponsePromptParams<
   // Combined properties from agent and route
   combinedGuidelines?: Guideline<TContext>[];
   combinedTerms?: Term<TContext>[];
-  combinedCapabilities?: Capability[];
   context?: TContext;
   session?: SessionState<TData>;
 }
@@ -33,7 +36,6 @@ export interface BuildFallbackPromptParams<TContext = unknown> {
   agentOptions: AgentOptions<TContext>;
   terms: Term<TContext>[];
   guidelines: Guideline<TContext>[];
-  capabilities: Capability[];
   context?: TContext;
   session?: SessionState;
 }
@@ -84,7 +86,6 @@ export class ResponseEngine<TContext = unknown> {
       agentOptions,
       combinedGuidelines,
       combinedTerms,
-      combinedCapabilities,
       context,
       session,
     } = params;
@@ -138,11 +139,6 @@ export class ResponseEngine<TContext = unknown> {
       await pc.addGlossary(combinedTerms);
     }
 
-    // Add combined capabilities (agent + route)
-    if (combinedCapabilities && combinedCapabilities.length > 0) {
-      await pc.addCapabilities(combinedCapabilities);
-    }
-
     await pc.addInteractionHistory(history);
     await pc.addLastMessage(lastMessage);
     await pc.addInstruction(
@@ -154,15 +150,8 @@ export class ResponseEngine<TContext = unknown> {
   async buildFallbackPrompt(
     params: BuildFallbackPromptParams<TContext>
   ): Promise<string> {
-    const {
-      history,
-      agentOptions,
-      terms,
-      guidelines,
-      capabilities,
-      context,
-      session,
-    } = params;
+    const { history, agentOptions, terms, guidelines, context, session } =
+      params;
     const templateContext = { context, session, history };
     const pc = new PromptComposer(templateContext);
 
@@ -170,7 +159,6 @@ export class ResponseEngine<TContext = unknown> {
     await pc.addInteractionHistory(history);
     await pc.addGlossary(terms);
     await pc.addGuidelines(guidelines);
-    await pc.addCapabilities(capabilities);
     await pc.addKnowledgeBase(agentOptions.knowledgeBase);
     return pc.build();
   }

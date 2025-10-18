@@ -1,5 +1,4 @@
-import type { Event } from "../types/history";
-import type { Term, Guideline, Capability, AgentOptions } from "../types/agent";
+import type { Event, Term, Guideline, AgentOptions } from "../types";
 import type { Route } from "./Route";
 import { render, renderMany, formatKnowledgeBase } from "../utils/template";
 import { TemplateContext } from "../types/template";
@@ -118,15 +117,6 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
 
     this.parts.push(`## Guidelines\n\n${renderedGuidelines.join("\n")}`);
     return this;
-  }
-
-  async addCapabilities(capabilities: Capability[]): Promise<this> {
-    if (!capabilities.length) return this;
-    const text = capabilities
-      .map((c, i) => `### Capability ${i + 1}: ${c.title}\n\n${c.description}`)
-      .join("\n\n");
-    this.parts.push(`## Capabilities\n\n${text}`);
-    return Promise.resolve(this);
   }
 
   async addKnowledgeBase(

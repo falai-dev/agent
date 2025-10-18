@@ -10,7 +10,7 @@ import type {
   MessageData,
   SessionStatus,
   PersistenceAdapter,
-} from "../types/persistence";
+} from "../types";
 
 /**
  * MongoDB collection interface - matches mongodb driver
