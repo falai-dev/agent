@@ -44,9 +44,10 @@ interface TravelFeedbackData {
 }
 
 // Tools with data access
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getAvailableDestinations = defineTool(
   "get_available_destinations",
-  async ({ context }: ToolContext<TravelContext>) => {
+  () => {
     return {
       data: [
         "Paris, France",
@@ -63,7 +64,7 @@ const getAvailableDestinations = defineTool(
 
 const lookupDestinationCode = defineTool(
   "lookup_destination_code",
-  async ({ context, data }: ToolContext<TravelContext, FlightBookingData>) => {
+  ({ data }: ToolContext<TravelContext, FlightBookingData>) => {
     if (!data?.destination) {
       return { data: undefined };
     }
@@ -90,7 +91,7 @@ const lookupDestinationCode = defineTool(
 
 const searchFlights = defineTool(
   "search_flights",
-  async ({ context, data }: ToolContext<TravelContext, FlightBookingData>) => {
+  ({ data }: ToolContext<TravelContext, FlightBookingData>) => {
     if (!data?.destination || !data?.departureDate) {
       return { data: [] };
     }
@@ -122,7 +123,7 @@ const searchFlights = defineTool(
 
 const bookFlight = defineTool(
   "book_flight",
-  async ({ context, data }: ToolContext<TravelContext, FlightBookingData>) => {
+  ({ context, data }: ToolContext<TravelContext, FlightBookingData>) => {
     if (!data) {
       return { data: "Please provide flight details" };
     }
@@ -147,7 +148,7 @@ const getBookingStatus = defineTool<
   { status: string; details: string; notes?: string }
 >(
   "get_booking_status",
-  async ({ context, data }: ToolContext<TravelContext, BookingStatusData>) => {
+  ({ data }: ToolContext<TravelContext, BookingStatusData>) => {
     if (!data?.confirmationNumber) {
       return {
         data: {
@@ -171,10 +172,10 @@ const getBookingStatus = defineTool<
 );
 
 // Initialize agent
-async function createTravelAgent() {
+function createTravelAgent() {
   const provider = new OpenRouterProvider({
     apiKey: process.env.OPENROUTER_API_KEY || "test-key",
-    model: "google/gemini-2.0-flash-exp",
+    model: "google/gemini-2.5-flash",
     backupModels: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
     siteUrl: "https://github.com/falai-dev/agent",
     siteName: "Falai Travel Agent Example",
@@ -280,13 +281,13 @@ async function createTravelAgent() {
     prompt: "Ask about the destination",
     collect: ["destination"],
     skipIf: (data) => !!data.destination,
-    condition: "Customer needs to specify their travel destination",
+    when: "Customer needs to specify their travel destination",
   });
 
   const enrichDestination = askDestination.nextStep({
     tool: lookupDestinationCode,
     requires: ["destination"],
-    condition: "Destination provided, lookup airport code",
+    when: "Destination provided, lookup airport code",
   });
 
   const askDates = enrichDestination.nextStep({
@@ -294,7 +295,7 @@ async function createTravelAgent() {
     collect: ["departureDate"],
     skipIf: (data) => !!data.departureDate,
     requires: ["destination"],
-    condition: "Destination confirmed, need travel dates",
+    when: "Destination confirmed, need travel dates",
   });
 
   const askPassengers = askDates.nextStep({
@@ -302,40 +303,40 @@ async function createTravelAgent() {
     collect: ["passengers"],
     skipIf: (data) => !!data.passengers,
     requires: ["destination", "departureDate"],
-    condition: "Dates confirmed, need passenger count",
+    when: "Dates confirmed, need passenger count",
   });
 
   const searchFlightsStep = askPassengers.nextStep({
     tool: searchFlights,
     // Triggered when shouldSearchFlights flag is set by hook
-    condition: "All basic info collected, search for available flights",
+    when: "All basic info collected, search for available flights",
   });
 
   const presentFlights = searchFlightsStep.nextStep({
     prompt: "Present available flights and ask which one works for them",
-    condition: "Flight search complete, present options to customer",
+    when: "Flight search complete, present options to customer",
   });
 
   // Happy path: customer selects a flight
   const confirmBooking = presentFlights.nextStep({
     prompt: "Confirm booking details before proceeding",
     collect: ["cabinClass", "urgency"], // Additional optional data
-    condition: "Customer interested in a flight, confirm booking details",
+    when: "Customer interested in a flight, confirm booking details",
   });
 
   const bookFlightStep = confirmBooking.nextStep({
     tool: bookFlight,
-    condition: "Customer confirmed, proceed with booking",
+    when: "Customer confirmed, proceed with booking",
   });
 
   const provideConfirmation = bookFlightStep.nextStep({
     prompt: "Provide confirmation number and booking summary",
-    condition: "Booking completed successfully",
+    when: "Booking completed successfully",
   });
 
   provideConfirmation.nextStep({
     step: END_ROUTE,
-    condition: "Customer has confirmation, booking flow complete",
+    when: "Customer has confirmation, booking flow complete",
   });
 
   // Add route-specific guidelines
@@ -378,24 +379,23 @@ async function createTravelAgent() {
     prompt: "Ask for the confirmation number or booking reference",
     collect: ["confirmationNumber"],
     skipIf: (data) => !!data.confirmationNumber,
-    condition:
-      "Customer wants to check booking status but hasn't provided confirmation number",
+    when: "Customer wants to check booking status but hasn't provided confirmation number",
   });
 
   const checkStatus = askConfirmation.nextStep({
     tool: getBookingStatus,
     requires: ["confirmationNumber"],
-    condition: "Confirmation number provided, look up booking details",
+    when: "Confirmation number provided, look up booking details",
   });
 
   const provideStatus = checkStatus.nextStep({
     prompt: "Provide booking status and relevant information",
-    condition: "Booking status retrieved successfully",
+    when: "Booking status retrieved successfully",
   });
 
   provideStatus.nextStep({
     step: END_ROUTE,
-    condition: "Booking information provided to customer",
+    when: "Booking information provided to customer",
   });
 
   // NEW: Travel Feedback route - collects feedback after booking
@@ -465,7 +465,7 @@ async function createTravelAgent() {
 
 // Example usage with session step
 async function main() {
-  const agent = await createTravelAgent();
+  const agent = createTravelAgent();
 
   // Initialize session step
   let session = createSession<FlightBookingData | BookingStatusData>();
@@ -517,7 +517,7 @@ async function main() {
     ),
   ];
 
-  let statusSession = createSession<BookingStatusData>();
+  const statusSession = createSession<BookingStatusData>();
   const statusResponse = await agent.respond({
     history: statusHistory,
     session: statusSession,
@@ -537,10 +537,9 @@ async function main() {
   console.info("✅ Context awareness - router sees current progress");
 
   if (statusResponse.isRouteComplete) {
+    const data = agent.getData() as unknown as FlightBookingData;
+    await sendBookingConfirmation(data);
     console.info("\n✅ Booking status check complete!");
-    await logBookingStatusCheck(
-      agent.getData(statusResponse.session?.id) as unknown as BookingStatusData
-    );
   }
 }
 
@@ -560,25 +559,4 @@ async function sendBookingConfirmation(data: FlightBookingData) {
   console.info("✨ Confirmation sent!");
 }
 
-/**
- * Mock function to log a booking status check.
- * @param data - The booking status data.
- */
-async function logBookingStatusCheck(data: BookingStatusData) {
-  console.info("\n" + "=".repeat(60));
-  console.info("📝 Logging Booking Status Check...");
-  console.info("=".repeat(60));
-  console.info("Check Details:", JSON.stringify(data, null, 2));
-  console.info(
-    `   - Logging status check for confirmation #${data.confirmationNumber}.`
-  );
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  console.info("✨ Status check logged!");
-}
-
-// Run if executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => console.error(err));
-}
-
-export { createTravelAgent };
+main().catch((err) => console.error(err));

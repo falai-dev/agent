@@ -36,7 +36,7 @@ async function main() {
     description: "A hotel booking assistant with feedback collection",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     debug: true,
   });

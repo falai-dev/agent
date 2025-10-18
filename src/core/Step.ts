@@ -19,7 +19,7 @@ export class Step<TContext = unknown, TData = unknown> {
   public readonly routeId: string;
   public collect?: string[];
   public description?: string;
-  public condition?: Template<TContext, TData>;
+  public when?: Template<TContext, TData>;
   public skipIf?: (data: Partial<TData>) => boolean;
   public requires?: string[];
   public prompt?: Template<TContext, TData>;
@@ -34,7 +34,7 @@ export class Step<TContext = unknown, TData = unknown> {
     this.skipIf = options.skipIf;
     this.requires = options.requires;
     this.prompt = options.prompt;
-    this.condition = options.condition;
+    this.when = options.when;
     this.tool = options.tool;
   }
 

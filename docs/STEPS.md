@@ -213,7 +213,7 @@ interface StepOptions<TData = unknown> {
   requires?: string[];
 
   // AI-evaluated condition (for step selection)
-  condition?: string;
+  when?: string;
 }
 ```
 
@@ -248,13 +248,13 @@ const askType = route.initialStep.nextStep({
 // Branch 1: Flight booking
 const flightFlow = askType.nextStep({
   prompt: "Let's book your flight",
-  condition: "User selected flight",
+  when: "User selected flight",
 });
 
 // Branch 2: Hotel booking
 const hotelFlow = askType.nextStep({
   prompt: "Let's book your hotel",
-  condition: "User selected hotel",
+  when: "User selected hotel",
 });
 
 // Both branches can converge later
@@ -410,7 +410,7 @@ const generateInvoice = processPayment.nextStep({
 });
 ```
 
-### Step Conditions
+### Step When Conditions
 
 AI-evaluated conditions for step selection:
 
@@ -423,19 +423,19 @@ const askIssue = route.initialStep.nextStep({
 // Technical support path
 const technicalHelp = askIssue.nextStep({
   prompt: "Let me help with your technical issue",
-  condition: "Issue is technical in nature",
+  when: "Issue is technical in nature",
 });
 
 // Billing support path
 const billingHelp = askIssue.nextStep({
   prompt: "Let me help with your billing issue",
-  condition: "Issue is related to billing or payments",
+  when: "Issue is related to billing or payments",
 });
 
 // General inquiry path
 const generalHelp = askIssue.nextStep({
   prompt: "Let me help with your question",
-  condition: "Issue is a general inquiry",
+  when: "Issue is a general inquiry",
 });
 ```
 
@@ -624,13 +624,13 @@ const confirmMore = askItems.nextStep({
 // Loop back to askItems if user wants more
 confirmMore.nextStep({
   step: askItems,
-  condition: "User wants to add more items",
+  when: "User wants to add more items",
 });
 
 // Or continue to checkout
 const checkout = confirmMore.nextStep({
   prompt: "Let's proceed to checkout",
-  condition: "User is done adding items",
+  when: "User is done adding items",
 });
 ```
 
@@ -645,20 +645,20 @@ const processPayment = route.initialStep.nextStep({
 // Success path
 const paymentSuccess = processPayment.nextStep({
   prompt: "Payment successful! Here's your receipt",
-  condition: "Payment was successful",
+  when: "Payment was successful",
 });
 
 // Failure path
 const paymentFailed = processPayment.nextStep({
   prompt: "Payment failed. Would you like to try a different payment method?",
   collect: ["retryPayment"],
-  condition: "Payment failed",
+  when: "Payment failed",
 });
 
 // Retry logic
 paymentFailed.nextStep({
   step: processPayment,
-  condition: "User wants to retry",
+  when: "User wants to retry",
 });
 ```
 
@@ -691,7 +691,7 @@ const finish = askDetailed.nextStep({
 // Direct path if no customization
 askPreferences.nextStep({
   step: finish,
-  condition: "User doesn't want customization",
+  when: "User doesn't want customization",
 });
 ```
 
@@ -711,13 +711,13 @@ const validateAge = askAge.nextStep({
 // Valid age
 const proceed = validateAge.nextStep({
   prompt: "Great! Let's continue",
-  condition: "Age is valid",
+  when: "Age is valid",
 });
 
 // Invalid age - loop back
 validateAge.nextStep({
   step: askAge,
-  condition: "Age is invalid",
+  when: "Age is invalid",
 });
 ```
 
@@ -732,12 +732,12 @@ const askQuestion = route.initialStep.nextStep({
 // Different responses based on user type
 const premiumResponse = askQuestion.nextStep({
   prompt: "As a premium member, here's detailed information...",
-  condition: "User has premium account",
+  when: "User has premium account",
 });
 
 const basicResponse = askQuestion.nextStep({
   prompt: "Here's the basic information. Upgrade for more details!",
-  condition: "User has basic account",
+  when: "User has basic account",
 });
 ```
 

@@ -286,19 +286,6 @@ const response = await agent.respond({ history, session: customSession });
 agent.clearCurrentSession();
 ```
 
-### Session Preservation
-
-When switching routes, collected data is preserved in `dataByRoute`:
-
-```typescript
-// User switches from onboarding to booking
-const response = await agent.respond({ history }); // Switches routes
-
-// Access data from previous routes
-const onboardingData = agent.getData('onboarding');
-const bookingData = agent.getData('booking');
-```
-
 ---
 
 ## 🛤️ Route Agent

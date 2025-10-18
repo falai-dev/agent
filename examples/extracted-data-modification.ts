@@ -58,7 +58,7 @@ const enrichDestinationTool: ToolRef<
   id: "enrich_destination",
   name: "Enrich Destination",
   description: "Convert city names to IATA airport codes",
-  handler: async (context) => {
+  handler: (context) => {
     const { data } = context;
     const destination = (data as Partial<FlightData>)?.destination;
 
@@ -94,7 +94,7 @@ const validateDateTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
   name: "Validate Date",
   description:
     "Parse relative dates (today, tomorrow) to ISO format and validate",
-  handler: async (context) => {
+  handler: (context) => {
     const { data } = context;
     const departureDate = (data as Partial<FlightData>)?.departureDate;
 
@@ -145,7 +145,7 @@ const searchFlightsTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
   id: "search_flights",
   name: "Search Flights",
   description: "Search for available flights based on collected data",
-  handler: async (context) => {
+  handler: (context) => {
     const { data } = context;
     const flightData = data as Partial<FlightData>;
 
@@ -191,7 +191,7 @@ const bookFlightTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
   id: "book_flight",
   name: "Book Flight",
   description: "Finalize the flight booking",
-  handler: async (context) => {
+  handler: (context) => {
     const { data } = context;
     const flightData = data as Partial<FlightData>;
     console.log("[Tool] Booking flight with data:", flightData);
@@ -204,10 +204,10 @@ const bookFlightTool: ToolRef<FlightBookingContext, [], void, FlightData> = {
 // LIFECYCLE HOOKS: Data Validation & Business Logic (RESPONSE Phase)
 // ==============================================================================
 
-async function onDataUpdate(
+function onDataUpdate(
   data: Record<string, unknown>,
   previousData: Record<string, unknown>
-): Promise<Record<string, unknown>> {
+): Record<string, unknown> {
   console.log("[Hook] onDataUpdate called");
   console.log("  Previous:", previousData);
   console.log("  New:", data);
@@ -362,7 +362,7 @@ const confirmBooking = presentResults.nextStep({
 // Step 9: Finalize booking
 const finalizeBooking = confirmBooking.nextStep({
   tool: bookFlightTool,
-  condition: "User confirms the booking",
+  when: "User confirms the booking",
 });
 
 // Step 10: End of conversation
@@ -373,7 +373,7 @@ finalizeBooking.nextStep({ step: END_ROUTE });
 // ==============================================================================
 
 async function main() {
-  let session = createSession<FlightData>();
+  const session = createSession<FlightData>();
 
   // Turn 1: User provides everything at once
   const history: Event[] = [

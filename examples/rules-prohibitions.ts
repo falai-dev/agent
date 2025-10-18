@@ -445,13 +445,13 @@ agent.getRoutes().forEach((route) => {
 
   if (rules.length > 0) {
     console.info(`  ✅ Rules (${rules.length}):`);
-    rules.forEach((rule, i) => console.info(`     ${i + 1}. ${rule}`));
+    rules.forEach((rule, i) => console.info(`     ${i + 1}. ${String(rule)}`));
   }
 
   if (prohibitions.length > 0) {
     console.info(`  ❌ Prohibitions (${prohibitions.length}):`);
     prohibitions.forEach((prohibition, i) =>
-      console.info(`     ${i + 1}. ${prohibition}`)
+      console.info(`     ${i + 1}. ${String(prohibition)}`)
     );
   }
 });
@@ -469,6 +469,7 @@ console.info(`
  * Mock function to log support feedback.
  * @param data - The feedback data.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function logSupportFeedback(
   _context: undefined,
   _history: Event[],

@@ -71,7 +71,7 @@ const fetchNewsTool: ToolRef<CompanyContext, [], void> = {
   id: "fetch_news",
   name: "Fetch Company News",
   description: "Retrieve latest company news and updates",
-  handler: async (context) => {
+  handler: () => {
     // Simulate API call to news service
     const news = [
       {
@@ -102,7 +102,7 @@ const searchKnowledgeTool: ToolRef<CompanyContext, [], string> = {
   id: "search_knowledge",
   name: "Search Knowledge Base",
   description: "Search FAQs and documentation",
-  handler: async (context) => {
+  handler: (context) => {
     const { history } = context;
 
     // Get last user message
@@ -116,7 +116,9 @@ const searchKnowledgeTool: ToolRef<CompanyContext, [], string> = {
       return { data: "No query found" };
     }
 
-    const query = (lastMessage.data as any).message.toLowerCase();
+    const query = (
+      lastMessage.data as { message: string }
+    ).message.toLowerCase();
 
     // Simple keyword matching (in real app, use vector search)
     const relevantFaqs = context.context.faqs.filter(
@@ -235,6 +237,7 @@ const agent = new Agent<CompanyContext>({
 // ==============================================================================
 
 // Route 1: Company Information (stepless - no data extraction)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const companyInfoRoute = agent.createRoute({
   title: "Company Information",
   description: "Answer general questions about Acme Corp",
@@ -252,6 +255,7 @@ const companyInfoRoute = agent.createRoute({
 // Initial step: Answer from knowledge base (no data collecting needed)
 
 // Route 2: Product Information (stepless)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const productInfoRoute = agent.createRoute({
   title: "Product Information",
   description: "Answer questions about products",
@@ -267,6 +271,7 @@ const productInfoRoute = agent.createRoute({
 // Initial step is enough - no transitions needed for simple Q&A
 
 // Route 3: Policy Questions (stepless)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const policyRoute = agent.createRoute({
   title: "Policy Information",
   description: "Answer questions about company policies",
@@ -298,6 +303,7 @@ const fetchNews = newsRoute.initialStep.nextStep({
   tool: fetchNewsTool,
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const shareNews = fetchNews.nextStep({
   prompt: "Share the latest company news from context",
 });
@@ -318,11 +324,13 @@ const searchFaqs = faqRoute.initialStep.nextStep({
   tool: searchKnowledgeTool,
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const provideFaqAnswer = searchFaqs.nextStep({
   prompt: "Provide answer based on FAQ search results",
 });
 
 // Route 6: Fallback (generic response)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const fallbackRoute = agent.createRoute({
   title: "General Conversation",
   description: "Handle general conversation or unclear questions",
@@ -392,7 +400,7 @@ feedbackRoute.initialStep
 // ==============================================================================
 
 async function exampleConversations() {
-  let session = createSession();
+  const session = createSession();
 
   // =========================================================================
   // Example 1: Simple company info question (stepless)

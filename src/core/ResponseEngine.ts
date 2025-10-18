@@ -19,14 +19,14 @@ export interface BuildResponsePromptParams<
   directives: string[] | undefined;
   history: Event[];
   lastMessage: string;
-  agentMeta?: AgentOptions<TContext>;
+  agentOptions?: AgentOptions<TContext>;
   context?: TContext;
   session?: SessionState<TData>;
 }
 
 export interface BuildFallbackPromptParams<TContext = unknown> {
   history: Event[];
-  agentMeta: AgentOptions<TContext>;
+  agentOptions: AgentOptions<TContext>;
   terms: Term<TContext>[];
   guidelines: Guideline<TContext>[];
   capabilities: Capability[];
@@ -77,14 +77,14 @@ export class ResponseEngine<TContext = unknown> {
       directives,
       history,
       lastMessage,
-      agentMeta,
+      agentOptions,
       context,
       session,
     } = params;
     const templateContext = { context, session, history };
     const pc = new PromptComposer(templateContext);
-    if (agentMeta) {
-      await pc.addAgentMeta(agentMeta);
+    if (agentOptions) {
+      await pc.addAgentMeta(agentOptions);
     }
     await pc.addInstruction(
       `Route: ${route.title}${
@@ -105,7 +105,7 @@ export class ResponseEngine<TContext = unknown> {
       await pc.addInstruction(`Prohibitions:\n- ${prohibitions.join("\n- ")}`);
     await pc.addDirectives(directives);
     await pc.addKnowledgeBase(
-      agentMeta?.knowledgeBase,
+      agentOptions?.knowledgeBase,
       route.getKnowledgeBase()
     );
     await pc.addInteractionHistory(history);
@@ -121,7 +121,7 @@ export class ResponseEngine<TContext = unknown> {
   ): Promise<string> {
     const {
       history,
-      agentMeta,
+      agentOptions,
       terms,
       guidelines,
       capabilities,
@@ -131,12 +131,12 @@ export class ResponseEngine<TContext = unknown> {
     const templateContext = { context, session, history };
     const pc = new PromptComposer(templateContext);
 
-    await pc.addAgentMeta(agentMeta);
+    await pc.addAgentMeta(agentOptions);
     await pc.addInteractionHistory(history);
     await pc.addGlossary(terms);
     await pc.addGuidelines(guidelines);
     await pc.addCapabilities(capabilities);
-    await pc.addKnowledgeBase(agentMeta.knowledgeBase);
+    await pc.addKnowledgeBase(agentOptions.knowledgeBase);
     return pc.build();
   }
 }

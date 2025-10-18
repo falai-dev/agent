@@ -191,7 +191,7 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
    * Optional condition for this transition
    * Description of when this transition should be taken
    */
-  condition?: Template<TContext, TData>;
+  when?: Template<TContext, TData>;
 }
 
 /**

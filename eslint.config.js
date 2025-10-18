@@ -18,9 +18,10 @@ export default tseslint.config(
         { argsIgnorePattern: "^_" },
       ],
       "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-unsafe-assignment": "warn",
     },
   },
   {
-    ignores: ["node_modules/", "dist/", "examples/", "*.config.js"],
+    ignores: ["node_modules/", "dist/", "*.config.js"],
   }
 );

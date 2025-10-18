@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 /**
  * Example: Using OpenSearch for Persistence with Session Step
  *
@@ -18,7 +19,8 @@ import {
   Event,
   END_ROUTE,
 } from "../src/index";
-// @ts-ignore
+
+// @ts-expect-error - Client is not typed
 import { Client } from "@opensearch-project/opensearch";
 
 /**
@@ -83,7 +85,7 @@ async function example() {
     goal: "Resolve customer issues efficiently",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     context: {
       userId,
@@ -333,7 +335,7 @@ async function analyticsExample() {
     name: "Support Analyzer",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     persistence: {
       adapter,
@@ -412,7 +414,8 @@ async function analyticsExample() {
   console.log("\n--- Analyze Collected data ---");
   const sessions = allSessions.body.hits.hits;
 
-  sessions.forEach((hit: any) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sessions.forEach((hit: Record<string, any>) => {
     const collectedData = hit._source.collectedData;
     console.log(`Session ${hit._id}:`, {
       data: collectedData?.data,
@@ -440,16 +443,14 @@ async function timeSeriesExample() {
   const adapter = new OpenSearchAdapter(client);
   await adapter.initialize();
 
-  const agent = new Agent({
+  new Agent({
     name: "Metrics Agent",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     persistence: { adapter, userId: "metrics_user" },
   });
-
-  const persistence = agent.getPersistenceManager()!;
 
   // Query sessions over time
   const timeQuery = await client.search({

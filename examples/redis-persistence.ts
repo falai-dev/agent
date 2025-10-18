@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 /**
  * Example: Using Redis for Persistence with Session Step
  *
@@ -18,7 +19,7 @@ import {
   Event,
   END_ROUTE,
 } from "../src/index";
-// @ts-ignore
+// @ts-expect-error - Redis is not typed
 import Redis from "ioredis";
 
 /**
@@ -60,6 +61,7 @@ interface OrderData {
 
 async function example() {
   // Initialize Redis client
+
   const redis = new Redis();
 
   const userId = "user_123";
@@ -71,7 +73,7 @@ async function example() {
     goal: "Help users resolve issues quickly",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     context: {
       userId,
@@ -269,6 +271,7 @@ async function example() {
   console.log("✅ Session completed");
 
   // Cleanup
+
   await redis.quit();
 }
 
@@ -283,7 +286,7 @@ async function highThroughputExample() {
     description: "Fast chat responses",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     persistence: {
       adapter: new RedisAdapter({
@@ -368,7 +371,7 @@ async function sessionRecoveryExample() {
     name: "Order Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     persistence: {
       adapter: new RedisAdapter({ redis }),

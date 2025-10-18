@@ -50,7 +50,7 @@ export interface BuildStepSelectionPromptParams<
   data: Partial<TData>;
   history: Event[];
   lastMessage: string;
-  agentMeta?: AgentOptions<TContext>;
+  agentOptions?: AgentOptions<TContext>;
   context?: TContext;
   session?: SessionState<TData>;
 }
@@ -59,7 +59,7 @@ export interface BuildRoutingPromptParams<TContext = unknown, TData = unknown> {
   history: Event[];
   routes: Route<TContext, TData>[];
   lastMessage: string;
-  agentMeta?: AgentOptions<TContext>;
+  agentOptions?: AgentOptions<TContext>;
   session?: SessionState<TData>;
   activeRouteSteps?: Step<TContext, TData>[];
   context?: TContext;
@@ -77,7 +77,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     route: Route<TContext, TData>;
     session: SessionState<TData>;
     history: Event[];
-    agentMeta?: AgentOptions<TContext>;
+    agentOptions?: AgentOptions<TContext>;
     provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
@@ -88,7 +88,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     session: SessionState<TData>;
     isRouteComplete?: boolean;
   }> {
-    const { route, session, history, agentMeta, provider, context, signal } =
+    const { route, session, history, agentOptions, provider, context, signal } =
       params;
 
     let updatedSession = session;
@@ -160,7 +160,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       data: updatedSession.data || {},
       history,
       lastMessage: lastUserMessage,
-      agentMeta,
+      agentOptions,
       context,
       session: updatedSession,
     });
@@ -221,7 +221,6 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     visited: Set<string>
   ): {
     step?: Step<TContext, TData>;
-    condition?: string;
     isRouteComplete?: boolean;
   } {
     // Prevent infinite loops
@@ -252,7 +251,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         );
         return {
           step: target,
-          condition: target.condition as string | undefined,
+          isRouteComplete: false,
         };
       }
 
@@ -401,7 +400,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     routes: Route<TContext, TData>[];
     session: SessionState<TData>;
     history: Event[];
-    agentMeta?: AgentOptions<TContext>;
+    agentOptions?: AgentOptions<TContext>;
     provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
@@ -412,8 +411,15 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     session: SessionState<TData>;
     isRouteComplete?: boolean;
   }> {
-    const { routes, session, history, agentMeta, provider, context, signal } =
-      params;
+    const {
+      routes,
+      session,
+      history,
+      agentOptions,
+      provider,
+      context,
+      signal,
+    } = params;
 
     if (routes.length === 0) {
       return { session };
@@ -425,7 +431,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         route: routes[0],
         session,
         history,
-        agentMeta,
+        agentOptions,
         provider,
         context,
         signal,
@@ -477,7 +483,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       history,
       routes,
       lastMessage: lastUserMessage,
-      agentMeta,
+      agentOptions,
       session,
       activeRouteSteps,
       context,
@@ -578,7 +584,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       data,
       history,
       lastMessage,
-      agentMeta,
+      agentOptions,
       context,
       session,
     } = params;
@@ -586,8 +592,8 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     const pc = new PromptComposer(templateContext);
 
     // Add agent metadata
-    if (agentMeta) {
-      await pc.addAgentMeta(agentMeta);
+    if (agentOptions) {
+      await pc.addAgentMeta(agentOptions);
     }
 
     // Add route context
@@ -628,12 +634,9 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         `   Description: ${candidate.step.description || "N/A"}`,
       ];
 
-      if (candidate.step.condition) {
-        const renderedCondition = await render(
-          candidate.step.condition,
-          templateContext
-        );
-        parts.push(`   Condition: ${renderedCondition}`);
+      if (candidate.step.when) {
+        const renderedWhen = await render(candidate.step.when, templateContext);
+        parts.push(`   When this step should be completed: ${renderedWhen}`);
       }
 
       if (candidate.step.requires && candidate.step.requires.length > 0) {
@@ -791,15 +794,15 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       history,
       routes,
       lastMessage,
-      agentMeta,
+      agentOptions,
       session,
       activeRouteSteps,
       context,
     } = params;
     const templateContext = { context, session, history };
     const pc = new PromptComposer(templateContext);
-    if (agentMeta) {
-      await pc.addAgentMeta(agentMeta);
+    if (agentOptions) {
+      await pc.addAgentMeta(agentOptions);
     }
     await pc.addInstruction(
       "Task: Intent analysis and route scoring (0-100). Score ALL listed routes."
@@ -837,12 +840,11 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
           if (step.description) {
             stepInfo.push(`   Description: ${step.description}`);
           }
-          const renderedCondition = await render(
-            step.condition,
-            templateContext
-          );
-          if (step.condition) {
-            stepInfo.push(`   Condition: ${renderedCondition}`);
+          const renderedWhen = await render(step.when, templateContext);
+          if (step.when) {
+            stepInfo.push(
+              `   When this step should be completed: ${renderedWhen}`
+            );
           }
           if (step.requires && step.requires.length > 0) {
             stepInfo.push(`   Required data: ${step.requires.join(", ")}`);

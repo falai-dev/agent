@@ -420,7 +420,7 @@ export class Agent<TContext = unknown> {
         routes: this.routes,
         session,
         history,
-        agentMeta: this.options,
+        agentOptions: this.options,
         provider: this.options.provider,
         context: effectiveContext,
         signal,
@@ -491,7 +491,7 @@ export class Agent<TContext = unknown> {
         directives: responseDirectives,
         history,
         lastMessage: lastUserMessage,
-        agentMeta: this.options,
+        agentOptions: this.options,
         context: effectiveContext,
         session,
       });
@@ -612,7 +612,7 @@ export class Agent<TContext = unknown> {
         directives: undefined, // No directives for completion
         history,
         lastMessage: lastUserMessage,
-        agentMeta: this.options,
+        agentOptions: this.options,
         context: effectiveContext,
         session,
       });
@@ -697,7 +697,7 @@ export class Agent<TContext = unknown> {
       // Fallback: No routes defined, stream a simple response
       const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
         history,
-        agentMeta: this.options,
+        agentOptions: this.options,
         terms: this.terms,
         guidelines: this.guidelines,
         capabilities: this.capabilities,
@@ -873,7 +873,7 @@ export class Agent<TContext = unknown> {
         routes: this.routes,
         session,
         history,
-        agentMeta: this.options,
+        agentOptions: this.options,
         provider: this.options.provider,
         context: effectiveContext,
         signal,
@@ -949,7 +949,7 @@ export class Agent<TContext = unknown> {
         directives: responseDirectives,
         history,
         lastMessage: lastUserMessage,
-        agentMeta: this.options,
+        agentOptions: this.options,
         context: effectiveContext,
         session,
       });
@@ -1037,7 +1037,7 @@ export class Agent<TContext = unknown> {
         directives: undefined, // No directives for completion
         history,
         lastMessage: lastUserMessage,
-        agentMeta: this.options,
+        agentOptions: this.options,
         context: effectiveContext,
         session,
       });
@@ -1107,7 +1107,7 @@ export class Agent<TContext = unknown> {
       // Fallback: No routes defined, generate a simple response
       const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
         history,
-        agentMeta: this.options,
+        agentOptions: this.options,
         terms: this.terms,
         guidelines: this.guidelines,
         capabilities: this.capabilities,

@@ -21,7 +21,6 @@ import {
   type Guideline,
   type Capability,
   type RouteOptions,
-  END_ROUTE,
 } from "../src/index";
 
 // Context type
@@ -48,7 +47,7 @@ interface LabData {
 // Define tools with custom IDs (optional - IDs are deterministic by default)
 const getInsuranceProviders = defineTool<HealthcareContext, [], string[]>({
   name: "get_insurance_providers",
-  handler: async () => {
+  handler: () => {
     return { data: ["MegaCare Insurance", "HealthFirst", "WellnessPlus"] };
   },
   id: "healthcare_insurance_providers", // Custom ID for persistence
@@ -61,7 +60,7 @@ const getAvailableSlots = defineTool<
   { date: string; time: string }[]
 >({
   name: "get_available_slots",
-  handler: async () => {
+  handler: () => {
     return {
       data: [
         { date: "2025-10-20", time: "10:00 AM" },
@@ -80,7 +79,7 @@ const getLabResults = defineTool<
   { report: string; status: string }
 >({
   name: "get_lab_results",
-  handler: async ({ context, data }) => {
+  handler: ({ context, data }) => {
     // Tools can now access collected data
     const labData = data as Partial<LabData>;
     if (labData?.testType) {
@@ -105,7 +104,7 @@ const getLabResults = defineTool<
 
 const scheduleAppointment = defineTool<HealthcareContext>({
   name: "schedule_appointment",
-  handler: async ({ context, data }) => {
+  handler: ({ context: _context, data }) => {
     // Tools can access data appointment data
     const appointment = data as Partial<AppointmentData>;
     if (!appointment?.preferredDate || !appointment?.preferredTime) {
@@ -211,7 +210,7 @@ const routes: RouteOptions<HealthcareContext>[] = [
     },
     guidelines: [
       {
-        condition: "The patient says their visit is urgent",
+        when: "The patient says their visit is urgent",
         action: "Tell them to call the office immediately",
         tags: ["urgent"],
         enabled: true,
@@ -274,7 +273,7 @@ const routes: RouteOptions<HealthcareContext>[] = [
     },
     guidelines: [
       {
-        condition: "The patient presses for more conclusions about results",
+        when: "The patient presses for more conclusions about results",
         action:
           "Assertively tell them they should call the office to speak with a doctor",
         tags: ["escalation"],
@@ -323,6 +322,7 @@ agent
   });
 
 // Example usage with session step
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function main() {
   // Initialize session step
   let session = createSession<AppointmentData | LabData>();

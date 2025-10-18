@@ -34,7 +34,7 @@ const getWeather = defineTool<
   { location: string; temperature: number; condition: string }
 >(
   "get_weather",
-  async ({ context, data }, args) => {
+  ({ context: _context, data }, args) => {
     // Use data location if available, otherwise use args
     const location = (data as Partial<WeatherData>)?.location || args.location;
 

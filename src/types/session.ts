@@ -38,14 +38,14 @@ export interface SessionState<TData = unknown> {
 
   /**
    * Data collected during the current route
-   * This is a convenience reference to dataByRoute[currentRoute.id]
+   * Convenience reference to dataByRoute[currentRoute.id]
    */
   data?: Partial<TData>;
 
   /**
-   * Collected data organized by route ID
-   * Preserves data when switching between routes
-   * Format: { "routeId": { ...dataData } }
+   * Data collected organized by route ID
+   * Persists data when switching between routes
+   * Allows resuming incomplete routes where they left off
    */
   dataByRoute?: Record<string, Partial<unknown>>;
 
@@ -102,7 +102,7 @@ export function enterRoute<TData = Record<string, unknown>>(
   routeId: string,
   routeTitle: string
 ): SessionState<TData> {
-  // Save current route's collected data before switching
+  // Save current route's collected data before switching (if any)
   const dataByRoute = { ...session.dataByRoute };
   if (
     session.currentRoute &&
@@ -177,7 +177,7 @@ export function enterStep<TData = Record<string, unknown>>(
 
 /**
  * Helper to merge collected data into session
- * Updates both the data field and the dataByRoute map
+ * Updates both data and dataByRoute for current route
  */
 export function mergeCollected<TData = Record<string, unknown>>(
   session: SessionState<TData>,

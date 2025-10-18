@@ -91,7 +91,7 @@ const saveBusinessInfo = defineTool<
   boolean
 >(
   "save_business_info",
-  async (
+  (
     toolContext: ToolContext<OnboardingContext>,
     name: string,
     description: string,
@@ -127,7 +127,7 @@ const saveProductsServices = defineTool<
   boolean
 >(
   "save_products_services",
-  async (
+  (
     toolContext: ToolContext<OnboardingContext>,
     products: string[],
     services: string[],
@@ -161,7 +161,7 @@ const saveLocationInfo = defineTool<
   boolean
 >(
   "save_location_info",
-  async (
+  (
     toolContext: ToolContext<OnboardingContext>,
     address: string,
     city: string,
@@ -198,7 +198,7 @@ const saveContactInfo = defineTool<
   boolean
 >(
   "save_contact_info",
-  async (
+  (
     toolContext: ToolContext<OnboardingContext>,
     website: string,
     openingHours: string
@@ -235,7 +235,7 @@ const savePaymentInfo = defineTool<
   boolean
 >(
   "save_payment_info",
-  async (
+  (
     toolContext: ToolContext<OnboardingContext>,
     paymentMethods: string[],
     pixKey: string,
@@ -293,7 +293,7 @@ const addConversationRoute = defineTool<
   boolean
 >(
   "add_conversation_route",
-  async (
+  (
     toolContext: ToolContext<OnboardingContext>,
     title: string,
     description: string,
@@ -341,7 +341,7 @@ const addConversationRoute = defineTool<
  */
 const getData = defineTool<OnboardingContext, [], OnboardingData>(
   "get_collected_data",
-  async (toolContext: ToolContext<OnboardingContext>) => {
+  (toolContext: ToolContext<OnboardingContext>) => {
     return { data: toolContext.context.collectedData };
   },
   {
@@ -357,12 +357,12 @@ const getData = defineTool<OnboardingContext, [], OnboardingData>(
  * - beforeRespond: Load fresh context before each response
  * - onContextUpdate: Automatically persist context changes
  */
-async function createBusinessOnboardingAgent(
+function createBusinessOnboardingAgent(
   userId: string,
   userName: string,
   sessionId: string,
   initialData: OnboardingData = { routes: [] }
-): Promise<Agent<OnboardingContext>> {
+): Agent<OnboardingContext> {
   const provider = new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY || "test-key",
     model: "gpt-5",
@@ -428,7 +428,7 @@ async function createBusinessOnboardingAgent(
     // Lifecycle hooks enable agent caching!
     hooks: {
       // Load fresh context before each response
-      beforeRespond: async (currentContext) => {
+      beforeRespond: (currentContext) => {
         // In a real app, fetch from database here
         console.log(
           `[beforeRespond] Loading fresh context for session ${sessionId}`
@@ -438,7 +438,7 @@ async function createBusinessOnboardingAgent(
       },
 
       // Automatically persist context updates
-      onContextUpdate: async (newContext) => {
+      onContextUpdate: (newContext) => {
         // In a real app, save to database here
         console.log(
           `[onContextUpdate] Persisting context for session ${sessionId}`
@@ -491,7 +491,7 @@ async function createBusinessOnboardingAgent(
   // Step 1: Business basics - Save
   const saveBusiness = askBusiness.nextStep({
     tool: saveBusinessInfo,
-    condition: "User provided company name, sector, and description",
+    when: "User provided company name, sector, and description",
   });
 
   // Step 2: Products/Services - Ask
@@ -503,7 +503,7 @@ async function createBusinessOnboardingAgent(
   // Step 2: Products/Services - Save
   const saveProducts = askProducts.nextStep({
     tool: saveProductsServices,
-    condition: "User listed products/services and target audience",
+    when: "User listed products/services and target audience",
   });
 
   // Step 3: Location - Branch point
@@ -516,24 +516,24 @@ async function createBusinessOnboardingAgent(
   const askPhysicalLocation = askLocation.nextStep({
     prompt:
       "I see! Since you have a physical presence, I need the complete address (street, number, city, and step) and business hours. This is important for your assistant to inform customers. (e.g., 'José Silva Street, 123, São Paulo - SP - Mon to Fri: 9am to 6pm')",
-    condition: "User has a physical store",
+    when: "User has a physical store",
   });
 
   const savePhysicalLocation = askPhysicalLocation.nextStep({
     tool: saveLocationInfo,
-    condition: "User provided physical address",
+    when: "User provided physical address",
   });
 
   // Step 3b: Online-only path
   const askOnlineLocation = askLocation.nextStep({
     prompt:
       "Perfect! Since it's online only, please share your main website or social media where customers can find you? And what are your support hours? (e.g., 'www.example.com - 24/7 support' or 'Instagram @mycompany - Mon to Fri: 9am-6pm')",
-    condition: "User does not have a physical store",
+    when: "User does not have a physical store",
   });
 
   const saveOnlineLocation = askOnlineLocation.nextStep({
     tool: saveContactInfo,
-    condition: "User provided website/social media and support hours",
+    when: "User provided website/social media and support hours",
   });
 
   // Step 4: Contact info (convergence point for physical stores)
@@ -544,7 +544,7 @@ async function createBusinessOnboardingAgent(
 
   const saveContact = askContact.nextStep({
     tool: saveContactInfo,
-    condition: "User provided website/social media",
+    when: "User provided website/social media",
   });
 
   // Step 5: Payment info (convergence point from both paths)
@@ -558,7 +558,7 @@ async function createBusinessOnboardingAgent(
 
   const savePayment = askPayment.nextStep({
     tool: savePaymentInfo,
-    condition: "User provided payment methods or said not applicable",
+    when: "User provided payment methods or said not applicable",
   });
 
   // Step 6: Suggest automatic routes
@@ -569,13 +569,13 @@ async function createBusinessOnboardingAgent(
 
   const createRoutes = suggestRoutes.nextStep({
     tool: addConversationRoute,
-    condition: "User approved automatic route creation",
+    when: "User approved automatic route creation",
   });
 
   // Step 7: Review collected data
   const reviewData = createRoutes.nextStep({
     tool: getData,
-    condition: "Routes created successfully",
+    when: "Routes created successfully",
   });
 
   // Step 8: Summary and options
@@ -588,12 +588,12 @@ async function createBusinessOnboardingAgent(
   const askCustomRoute = summary.nextStep({
     prompt:
       "Got it! Tell me about this additional route: what's the title, what kind of questions should it answer, and what keywords do customers use? (e.g., 'Warranty and Exchange - answers about warranty, exchange, and returns - keywords: warranty, exchange, return')",
-    condition: "User wants to add more routes",
+    when: "User wants to add more routes",
   });
 
   const saveCustomRoute = askCustomRoute.nextStep({
     tool: addConversationRoute,
-    condition: "User provided custom route information",
+    when: "User provided custom route information",
   });
 
   // Loop back to summary after adding custom route
@@ -602,7 +602,7 @@ async function createBusinessOnboardingAgent(
   // Step 9b: Final confirmation - transition to END_ROUTE (uses route-level endStep)
   summary.nextStep({
     step: END_ROUTE,
-    condition: "User confirmed everything is okay",
+    when: "User confirmed everything is okay",
   });
 
   // ==================== Alternative: Sequential Steps ====================
@@ -678,7 +678,7 @@ async function createBusinessOnboardingAgent(
     .nextStep({
       id: "ask_improve",
       prompt: "Is there anything we could improve?",
-      condition: "User wants to provide feedback",
+      when: "User wants to provide feedback",
     })
     .nextStep({ step: END_ROUTE }); // Uses route-level endStep
 
@@ -741,7 +741,7 @@ async function main() {
   console.log("=".repeat(60));
 
   // Create agent with sample initial data
-  const agent = await createBusinessOnboardingAgent(
+  const agent = createBusinessOnboardingAgent(
     "user_123",
     "Alice",
     "session_456",
@@ -812,9 +812,12 @@ async function main() {
     console.log("   - Data extraction tracked across turns");
     console.log("   - Step progression managed automatically");
     console.log("   - Always-on routing respects intent changes");
-  } catch (error: any) {
+  } catch (error) {
     console.log("\n(Skipping AI response - requires valid API key)");
-    console.log("Error:", error.message);
+    console.log(
+      "Error:",
+      error instanceof Error ? error.message : String(error)
+    );
   }
 }
 

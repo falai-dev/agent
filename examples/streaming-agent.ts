@@ -14,7 +14,6 @@ import {
   OpenAIProvider,
   GeminiProvider,
   createSession,
-  END_ROUTE,
 } from "../src/index";
 
 // Custom context type
@@ -97,6 +96,7 @@ async function streamingWithAnthropic() {
         console.log(`   - Data:`, chunk.session?.data || "None");
         console.log(`   - Tool Calls: ${chunk.toolCalls?.length || 0}`);
 
+        console.log(`   - Full Message: ${fullMessage}`);
         // Update session with progress
         session = chunk.session!;
       }
@@ -171,7 +171,7 @@ async function streamingWithGemini() {
 
   const provider = new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY || "",
-    model: "models/gemini-2.0-flash-exp",
+    model: "models/gemini-2.5-flash",
     config: {
       temperature: 0.7,
     },
@@ -259,6 +259,7 @@ async function streamingWithRoutes() {
   });
 
   // Create a feedback route
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const feedbackRoute = agent.createRoute<{
     rating: number;
     comments: string;

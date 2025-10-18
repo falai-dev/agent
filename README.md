@@ -159,7 +159,7 @@ const agent = new Agent({
   description: "A helpful assistant",
   provider: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY,
-    model: "models/gemini-2.0-flash-exp",
+    model: "models/gemini-2.5-flash",
   }),
 });
 

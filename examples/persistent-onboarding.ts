@@ -35,14 +35,11 @@ const database = new Map<string, SessionData>();
 
 const db = {
   sessions: {
-    async findById(sessionId: string): Promise<SessionData | undefined> {
+    findById(sessionId: string): SessionData | undefined {
       return database.get(sessionId);
     },
 
-    async update(
-      sessionId: string,
-      updates: Partial<SessionData>
-    ): Promise<void> {
+    update(sessionId: string, updates: Partial<SessionData>): void {
       const existing = database.get(sessionId);
       if (existing) {
         database.set(sessionId, {
@@ -53,7 +50,7 @@ const db = {
       }
     },
 
-    async create(sessionData: SessionData): Promise<void> {
+    create(sessionData: SessionData): void {
       database.set(sessionData.sessionId, sessionData);
     },
   },
@@ -90,9 +87,9 @@ interface OnboardingContext {
  * - Load fresh context from database before each response
  * - Persist context updates automatically after changes
  */
-async function createPersistentOnboardingAgent(sessionId: string) {
+function createPersistentOnboardingAgent(sessionId: string) {
   // Load session from database
-  const session = await db.sessions.findById(sessionId);
+  const session = db.sessions.findById(sessionId);
 
   if (!session) {
     throw new Error(`Session ${sessionId} not found`);
@@ -101,7 +98,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
   // Define lifecycle hooks for automatic persistence
   const hooks = {
     // Called after data extraction - validate and enrich collected data
-    onDataUpdate: async (data: Partial<OnboardingData>) => {
+    onDataUpdate: (data: Partial<OnboardingData>) => {
       console.log("🔄 Processing collected data...");
 
       // Update completed steps based on what's been data
@@ -112,7 +109,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
       if (data.contactEmail) completedSteps.push("contact");
 
       // Persist to database
-      await db.sessions.update(sessionId, {
+      db.sessions.update(sessionId, {
         collectedData: data,
         completedSteps,
       });
@@ -139,41 +136,55 @@ async function createPersistentOnboardingAgent(sessionId: string) {
           "Business identification",
           "Industry classification",
           "Contact information collection",
-          "Verification and confirmation"
+          "Verification and confirmation",
         ],
         averageCompletion: "3-5 minutes",
-        dropOffPoints: ["Contact email collection", "Industry classification"]
+        dropOffPoints: ["Contact email collection", "Industry classification"],
       },
       businessTypes: {
         retail: {
-          commonIndustries: ["Fashion", "Electronics", "Home goods", "Food service"],
-          keyQuestions: ["Store location", "Target customers", "Peak hours"]
+          commonIndustries: [
+            "Fashion",
+            "Electronics",
+            "Home goods",
+            "Food service",
+          ],
+          keyQuestions: ["Store location", "Target customers", "Peak hours"],
         },
         professional: {
           commonIndustries: ["Consulting", "Legal", "Accounting", "Healthcare"],
-          keyQuestions: ["Service areas", "Certifications", "Client types"]
+          keyQuestions: ["Service areas", "Certifications", "Client types"],
         },
         manufacturing: {
-          commonIndustries: ["Electronics", "Automotive", "Food processing", "Textiles"],
-          keyQuestions: ["Production capacity", "Supply chain", "Quality standards"]
-        }
+          commonIndustries: [
+            "Electronics",
+            "Automotive",
+            "Food processing",
+            "Textiles",
+          ],
+          keyQuestions: [
+            "Production capacity",
+            "Supply chain",
+            "Quality standards",
+          ],
+        },
       },
       dataValidation: {
         email: "Must contain @ symbol and valid domain",
         businessName: "2-100 characters, no special characters",
-        description: "10-500 characters, describes what the business does"
+        description: "10-500 characters, describes what the business does",
       },
       completionCriteria: [
         "Business name provided",
         "Business description provided",
         "Industry category selected",
-        "Valid contact email provided"
-      ]
+        "Valid contact email provided",
+      ],
     },
     // Context is loaded fresh from database on each respond() call
-    contextProvider: async () => {
+    contextProvider: () => {
       console.log("🔄 Loading fresh context from database...");
-      const freshSession = await db.sessions.findById(sessionId);
+      const freshSession = db.sessions.findById(sessionId);
 
       if (!freshSession) {
         throw new Error(`Session ${sessionId} not found`);
@@ -200,7 +211,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     boolean
   >(
     "save_business_info",
-    async (toolContext, name, description) => {
+    (toolContext, name, description) => {
       console.log(`📝 Saving business info: ${name}`);
 
       return {
@@ -315,14 +326,14 @@ async function createPersistentOnboardingAgent(sessionId: string) {
     prompt: "Ask for business name and a brief description",
     collect: ["businessName", "businessDescription"],
     skipIf: (data) => !!data.businessName && !!data.businessDescription,
-    condition: "Need to collect basic business information first",
+    when: "Need to collect basic business information first",
   });
 
   // Step 2: Save business info (tool execution)
   const saveBusiness = collectBusinessInfo.nextStep({
     tool: saveBusinessInfo,
     requires: ["businessName", "businessDescription"],
-    condition: "Business name and description provided, save to database",
+    when: "Business name and description provided, save to database",
   });
 
   // Step 3: Collect industry
@@ -389,7 +400,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
  * - No need for beforeRespond hook
  * - Still use onContextUpdate for persistence
  */
-async function createOnboardingAgentWithProvider(sessionId: string) {
+function createOnboardingAgentWithProvider(sessionId: string) {
   const provider = new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY || "test-key",
     model: "models/gemini-2.5-flash",
@@ -401,8 +412,8 @@ async function createOnboardingAgentWithProvider(sessionId: string) {
     provider: provider,
 
     // Context is always fetched fresh from database
-    contextProvider: async () => {
-      const session = await db.sessions.findById(sessionId);
+    contextProvider: () => {
+      const session = db.sessions.findById(sessionId);
       if (!session) {
         throw new Error(`Session ${sessionId} not found`);
       }
@@ -417,8 +428,8 @@ async function createOnboardingAgentWithProvider(sessionId: string) {
 
     // Still persist updates
     hooks: {
-      onContextUpdate: async (newContext) => {
-        await db.sessions.update(sessionId, {
+      onContextUpdate: (newContext) => {
+        db.sessions.update(sessionId, {
           collectedData: newContext.collectedData,
           completedSteps: newContext.completedSteps,
         });
@@ -440,7 +451,7 @@ async function main() {
   const userId = "user_456";
 
   // Initialize session in database
-  await db.sessions.create({
+  db.sessions.create({
     sessionId,
     userId,
     collectedData: {},
@@ -449,7 +460,7 @@ async function main() {
   });
 
   // Create agent with fresh context loading
-  const agent = await createPersistentOnboardingAgent(sessionId);
+  const agent = createPersistentOnboardingAgent(sessionId);
 
   console.log("=== MULTI-TURN CONVERSATION SIMULATION ===\n");
 
@@ -570,7 +581,7 @@ async function main() {
 
   // Verify persistence
   console.log("=== PERSISTENCE VERIFICATION ===");
-  const finalSession = await db.sessions.findById(sessionId);
+  const finalSession = db.sessions.findById(sessionId);
   console.log(
     "💾 Final persisted session:",
     JSON.stringify(finalSession, null, 2)

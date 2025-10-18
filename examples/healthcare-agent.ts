@@ -43,7 +43,7 @@ interface SatisfactionData {
 // Tools
 const getInsuranceProviders = defineTool<HealthcareContext, [], string[]>(
   "get_insurance_providers",
-  async () => {
+  () => {
     return { data: ["Mega Insurance", "Acme Insurance"] };
   },
   { description: "Get list of accepted insurance providers" }
@@ -51,7 +51,7 @@ const getInsuranceProviders = defineTool<HealthcareContext, [], string[]>(
 
 const getUpcomingSlots = defineTool<HealthcareContext, [], string[]>(
   "get_upcoming_slots",
-  async () => {
+  () => {
     return { data: ["Monday 10 AM", "Tuesday 2 PM", "Wednesday 1 PM"] };
   },
   { description: "Get upcoming appointment slots" }
@@ -59,7 +59,7 @@ const getUpcomingSlots = defineTool<HealthcareContext, [], string[]>(
 
 const getLaterSlots = defineTool<HealthcareContext, [], string[]>(
   "get_later_slots",
-  async () => {
+  () => {
     return { data: ["November 3, 11:30 AM", "November 12, 3 PM"] };
   },
   { description: "Get later appointment slots" }
@@ -69,7 +69,7 @@ const scheduleAppointment = defineTool<
   HealthcareContext,
   [datetime: string],
   string
->("schedule_appointment", async ({ context, data }, datetime) => {
+>("schedule_appointment", ({ context: _context, data }, _datetime) => {
   const appointment = data as Partial<AppointmentData>;
   if (!appointment?.preferredDate || !appointment?.preferredTime) {
     return {
@@ -85,7 +85,7 @@ const scheduleAppointment = defineTool<
 
 const getLabResults = defineTool<HealthcareContext, [], object>(
   "get_lab_results",
-  async ({ context, data }) => {
+  ({ context, data }) => {
     const labData = data as Partial<LabResultsData>;
     return {
       data: {
@@ -97,7 +97,7 @@ const getLabResults = defineTool<HealthcareContext, [], object>(
   }
 );
 
-async function createHealthcareAgent() {
+function createHealthcareAgent() {
   const provider = new AnthropicProvider({
     apiKey: process.env.ANTHROPIC_API_KEY || "test-key",
     model: "claude-sonnet-4-5",
@@ -217,7 +217,7 @@ async function createHealthcareAgent() {
     prompt: "Ask what the patient needs an appointment for",
     collect: ["appointmentReason"],
     skipIf: (data) => !!data.appointmentReason,
-    condition: "Patient hasn't specified reason for appointment yet",
+    when: "Patient hasn't specified reason for appointment yet",
   });
 
   // Step 2: Check urgency and show available slots
@@ -226,7 +226,7 @@ async function createHealthcareAgent() {
     collect: ["urgency"],
     skipIf: (data) => !!data.urgency,
     requires: ["appointmentReason"],
-    condition: "Reason provided, now assess urgency level",
+    when: "Reason provided, now assess urgency level",
   });
 
   const showSlots = checkUrgency.nextStep({
@@ -256,7 +256,7 @@ async function createHealthcareAgent() {
   const schedule = confirmDetails.nextStep({
     tool: scheduleAppointment,
     requires: ["appointmentReason", "preferredTime", "preferredDate"],
-    condition: "All details confirmed, book the appointment",
+    when: "All details confirmed, book the appointment",
   });
 
   const confirmation = schedule.nextStep({
@@ -265,7 +265,7 @@ async function createHealthcareAgent() {
 
   confirmation.nextStep({
     step: END_ROUTE,
-    condition: "Appointment booked successfully",
+    when: "Appointment booked successfully",
   });
 
   // Alternative path: no times work - show later slots
@@ -446,7 +446,7 @@ async function createHealthcareAgent() {
 
 // Example usage with session step management
 async function main() {
-  const agent = await createHealthcareAgent();
+  const agent = createHealthcareAgent();
 
   // Initialize session step for multi-turn conversation
   let session = createSession<AppointmentData | LabResultsData>();
@@ -562,6 +562,7 @@ async function sendAppointmentReminder(data: AppointmentData) {
  * Mock function to log a patient inquiry about lab results.
  * @param data - The lab results data.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function logPatientInquiry(data: LabResultsData) {
   console.log("\n" + "=".repeat(60));
   console.log("📝 Logging Patient Inquiry...");

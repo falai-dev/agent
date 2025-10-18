@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 /**
  * Example: Using Prisma ORM for Persistence with Session Step
  *
@@ -14,7 +15,7 @@ import {
   END_ROUTE,
 } from "../src/index";
 
-// @ts-ignore
+// @ts-expect-error - PrismaClient is not typed
 import { PrismaClient } from "@prisma/client";
 
 /**
@@ -87,7 +88,7 @@ async function example() {
     goal: "Help users book flights with ease",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     context: {
       userId,
@@ -195,7 +196,7 @@ async function example() {
   /**
    * Create or find a session - New Pattern!
    */
-  let sessionResult =
+  const sessionResult =
     await persistence.createSessionWithStep<FlightBookingData>({
       userId,
       agentName: "Travel Assistant",
@@ -385,7 +386,7 @@ async function advancedExample() {
     description: "Help new users get started",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     context: {
       userId,
@@ -398,7 +399,7 @@ async function advancedExample() {
     // Lifecycle hooks for session step enrichment
     hooks: {
       // Enrich collected data before saving
-      onDataUpdate: async (data, previous) => {
+      onDataUpdate: async (data: OnboardingData, previous: OnboardingData) => {
         console.log("🔄 Collected data updated:", { data, previous });
 
         // Normalize phone numbers
@@ -411,12 +412,13 @@ async function advancedExample() {
           console.warn("⚠️ Invalid email detected");
         }
 
-        return data;
+        return Promise.resolve(data);
       },
 
       // Update context when session step changes
       onContextUpdate: async (newContext, oldContext) => {
         console.log("🔄 Context updated:", { newContext, oldContext });
+        return Promise.resolve();
       },
     },
     persistence: {
@@ -479,8 +481,7 @@ async function advancedExample() {
   console.log("✨ Created onboarding session:", sessionData.id);
 
   // Simulate conversation
-  const history = [];
-  let session = sessionStep;
+  const session = sessionStep;
 
   const response = await agent.respond({
     history: [
@@ -519,7 +520,7 @@ async function quickStart() {
     name: "Support Agent",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     persistence: {
       adapter: new PrismaAdapter({ prisma }),

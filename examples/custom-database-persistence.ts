@@ -59,13 +59,13 @@ class CustomDatabase {
   private sessions: Map<string, CustomDatabaseSession> = new Map();
   private messages: Map<string, CustomDatabaseMessage[]> = new Map();
 
-  async findSession(id: string): Promise<CustomDatabaseSession | null> {
+  findSession(id: string): CustomDatabaseSession | null {
     return this.sessions.get(id) || null;
   }
 
-  async createSession(
+  createSession(
     data: Omit<CustomDatabaseSession, "id" | "createdAt" | "updatedAt">
-  ): Promise<CustomDatabaseSession> {
+  ): CustomDatabaseSession {
     const session: CustomDatabaseSession = {
       id: `session_${Date.now()}`,
       ...data,
@@ -76,10 +76,10 @@ class CustomDatabase {
     return session;
   }
 
-  async updateSession(
+  updateSession(
     id: string,
     data: Partial<CustomDatabaseSession>
-  ): Promise<CustomDatabaseSession | null> {
+  ): CustomDatabaseSession | null {
     const session = this.sessions.get(id);
     if (!session) return null;
 
@@ -92,9 +92,9 @@ class CustomDatabase {
     return updated;
   }
 
-  async createMessage(
+  createMessage(
     data: Omit<CustomDatabaseMessage, "id" | "createdAt">
-  ): Promise<CustomDatabaseMessage> {
+  ): CustomDatabaseMessage {
     const message: CustomDatabaseMessage = {
       id: `msg_${Date.now()}`,
       ...data,
@@ -108,9 +108,7 @@ class CustomDatabase {
     return message;
   }
 
-  async getSessionMessages(
-    sessionId: string
-  ): Promise<CustomDatabaseMessage[]> {
+  getSessionMessages(sessionId: string): CustomDatabaseMessage[] {
     return this.messages.get(sessionId) || [];
   }
 }
@@ -135,7 +133,7 @@ async function example() {
     goal: "Collect customer information efficiently",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     // NOTE: No persistence adapter - we handle it manually!
   });
@@ -206,11 +204,11 @@ async function example() {
   /**
    * Create or load session from your custom database
    */
-  let dbSession = await db.findSession("existing_session_id");
+  let dbSession = db.findSession("existing_session_id");
 
   if (!dbSession) {
     // Create new session in your database
-    dbSession = await db.createSession({
+    dbSession = db.createSession({
       userId,
       collectedData: {},
     });
@@ -290,7 +288,7 @@ async function example() {
   history.push(userMessage1);
 
   // Save user message to database
-  await db.createMessage({
+  db.createMessage({
     sessionId: dbSession.id,
     userId,
     role: "user",
@@ -306,7 +304,7 @@ async function example() {
   console.log("📊 Data so far:", response1.session?.data);
 
   // Save agent message to database
-  await db.createMessage({
+  db.createMessage({
     sessionId: dbSession.id,
     userId,
     role: "agent",
@@ -316,7 +314,7 @@ async function example() {
   });
 
   // Manually save session step back to database
-  await db.updateSession(dbSession.id, {
+  db.updateSession(dbSession.id, {
     currentRoute: response1.session?.currentRoute?.id,
     currentStep: response1.session?.currentStep?.id,
     collectedData: {
@@ -346,7 +344,7 @@ async function example() {
   );
   history.push(userMessage2);
 
-  await db.createMessage({
+  db.createMessage({
     sessionId: dbSession.id,
     userId,
     role: "user",
@@ -361,7 +359,7 @@ async function example() {
   console.log("🤖 Agent:", response2.message);
   console.log("📊 Data so far:", response2.session?.data);
 
-  await db.createMessage({
+  db.createMessage({
     sessionId: dbSession.id,
     userId,
     role: "agent",
@@ -371,7 +369,7 @@ async function example() {
   });
 
   // Save session step
-  await db.updateSession(dbSession.id, {
+  db.updateSession(dbSession.id, {
     currentRoute: response2.session?.currentRoute?.id,
     currentStep: response2.session?.currentStep?.id,
     collectedData: {
@@ -400,7 +398,7 @@ async function example() {
   console.log("Simulating app restart...\n");
 
   // Load session from database again
-  const reloadedDbSession = await db.findSession(dbSession.id);
+  const reloadedDbSession = db.findSession(dbSession.id);
   if (!reloadedDbSession) throw new Error("Session not found");
 
   // Reconstruct session step
@@ -447,7 +445,7 @@ async function example() {
   });
 
   // Load message history
-  const messages = await db.getSessionMessages(dbSession.id);
+  const messages = db.getSessionMessages(dbSession.id);
   console.log(`📜 Loaded ${messages.length} messages from history`);
 
   console.log("\n✅ Example complete!");
@@ -481,11 +479,11 @@ async function advancedExample() {
     name: "Smart Onboarding",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: "models/gemini-2.0-flash-exp",
+      model: "models/gemini-2.5-flash",
     }),
     hooks: {
       // Validate and enrich collected data
-      onDataUpdate: async (data, previous) => {
+      onDataUpdate: (data: OnboardingData, _previous) => {
         console.log("🔄 Data collected, validating...");
 
         // Normalize email
@@ -524,13 +522,13 @@ async function advancedExample() {
   });
 
   // Create database session
-  const dbSession = await db.createSession({
+  const dbSession = db.createSession({
     userId,
     collectedData: {},
   });
 
   // Create agent session
-  let agentSession = createSession<OnboardingData>(dbSession.id, {
+  const agentSession = createSession<OnboardingData>(dbSession.id, {
     userId,
   });
 
@@ -551,7 +549,7 @@ async function advancedExample() {
   // Shows: { email: "alice@example.com", phoneNumber: "5551234567", ... }
 
   // Save to database
-  await db.updateSession(dbSession.id, {
+  db.updateSession(dbSession.id, {
     currentRoute: response.session?.currentRoute?.id,
     currentStep: response.session?.currentStep?.id,
     collectedData: {

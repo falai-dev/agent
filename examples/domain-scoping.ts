@@ -17,7 +17,6 @@ import {
   createMessageEvent,
   EventSource,
   createSession,
-  END_ROUTE,
   defineTool,
 } from "../src/index";
 import { OpenRouterProvider } from "../src/providers";
@@ -25,7 +24,7 @@ import { OpenRouterProvider } from "../src/providers";
 // Initialize AI provider
 const provider = new OpenRouterProvider({
   apiKey: process.env.OPENROUTER_API_KEY || "your-api-key-here",
-  model: "google/gemini-2.0-flash-exp",
+  model: "google/gemini-2.5-flash",
   backupModels: ["anthropic/claude-sonnet-4-5"],
 });
 
@@ -39,57 +38,54 @@ const agent = new Agent({
 
 // Register different domains with their tools
 agent.addDomain("scraping", {
-  scrapeSite: async (url: string) => {
+  scrapeSite: (url: string) => {
     console.log(`[Scraping] Scraping site: ${url}`);
     return { success: true, data: "Scraped content..." };
   },
-  extractData: async (html: string, selector: string) => {
+  extractData: (_html: string, selector: string) => {
     console.log(`[Scraping] Extracting data with selector: ${selector}`);
     return { elements: [] };
   },
 });
 
 agent.addDomain("calendar", {
-  scheduleEvent: async (date: Date, title: string, description?: string) => {
-    console.log(`[Calendar] Scheduling event: ${title} on ${date}`);
+  scheduleEvent: (_date: Date, title: string, _description?: string) => {
+    console.log(`[Calendar] Scheduling event: ${title}`);
     return { eventId: "evt_123", success: true };
   },
-  listEvents: async (startDate: Date, endDate: Date) => {
-    console.log(`[Calendar] Listing events from ${startDate} to ${endDate}`);
+  listEvents: (_startDate: Date, _endDate: Date) => {
+    console.log(`[Calendar] Listing events`);
     return { events: [] };
   },
-  cancelEvent: async (eventId: string) => {
+  cancelEvent: (eventId: string) => {
     console.log(`[Calendar] Cancelling event: ${eventId}`);
     return { success: true };
   },
 });
 
 agent.addDomain("payment", {
-  processPayment: async (amount: number, currency: string) => {
+  processPayment: (amount: number, currency: string) => {
     console.log(`[Payment] Processing payment: ${amount} ${currency}`);
     return { transactionId: "txn_456", success: true };
   },
-  refund: async (transactionId: string) => {
+  refund: (transactionId: string) => {
     console.log(`[Payment] Processing refund for: ${transactionId}`);
     return { success: true };
   },
-  checkBalance: async () => {
+  checkBalance: () => {
     console.log(`[Payment] Checking balance`);
     return { balance: 1000, currency: "USD" };
   },
 });
 
 agent.addDomain("analytics", {
-  trackEvent: async (
-    eventName: string,
-    properties: Record<string, unknown>
-  ) => {
+  trackEvent: (eventName: string, properties: Record<string, unknown>) => {
     console.log(`[Analytics] Tracking event: ${eventName}`, properties);
     return { success: true };
   },
-  generateReport: async (
+  generateReport: (
     reportType: string,
-    dateRange: { start: Date; end: Date }
+    _dateRange: { start: Date; end: Date }
   ) => {
     console.log(`[Analytics] Generating ${reportType} report`);
     return { report: {} };
@@ -108,11 +104,10 @@ const scheduleEventTool = defineTool({
   id: "scheduleEvent",
   name: "scheduleEvent",
   description: "Schedules an event in the calendar",
-  handler: async ({ data }) => {
-    const { title, date, description } = data as {
+  handler: ({ data }) => {
+    const { title, date } = data as {
       title: string;
       date: string;
-      description: string;
     };
     console.log(`[Calendar] Scheduling event: ${title} on ${date}`);
     return { data: { eventId: "evt_123", success: true } };
