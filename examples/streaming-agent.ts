@@ -259,8 +259,7 @@ async function streamingWithRoutes() {
   });
 
   // Create a feedback route
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const feedbackRoute = agent.createRoute<{
+  agent.createRoute<{
     rating: number;
     comments: string;
   }>({

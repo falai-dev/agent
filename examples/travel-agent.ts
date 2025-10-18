@@ -44,7 +44,6 @@ interface TravelFeedbackData {
 }
 
 // Tools with data access
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getAvailableDestinations = defineTool(
   "get_available_destinations",
   () => {
@@ -278,6 +277,7 @@ function createTravelAgent() {
 
   // Build the route flow with data extraction and smart step progression
   const askDestination = flightBookingRoute.initialStep.nextStep({
+    tool: getAvailableDestinations,
     prompt: "Ask about the destination",
     collect: ["destination"],
     skipIf: (data) => !!data.destination,

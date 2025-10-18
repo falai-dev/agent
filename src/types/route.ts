@@ -101,10 +101,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
    * Accepts full StepOptions configuration (id, prompt, collect, skipIf, etc.)
    * Note: tool and step properties are ignored for initial step
    */
-  initialStep?: Omit<
-    StepOptions<TContext, TData>,
-    "tool" | "step" | "condition"
-  >;
+  initialStep?: Omit<StepOptions<TContext, TData>, "step">;
   /**
    * Configure the end step (optional)
    * Defines what happens when the route completes (reaches END_ROUTE)

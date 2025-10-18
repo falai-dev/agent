@@ -1,3 +1,4 @@
+/* eslint @typescript-eslint/no-unused-vars: "off" */
 /**
  * Example: Company Q&A Agent (Stepless, Knowledge-Based)
  *
@@ -237,7 +238,7 @@ const agent = new Agent<CompanyContext>({
 // ==============================================================================
 
 // Route 1: Company Information (stepless - no data extraction)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 const companyInfoRoute = agent.createRoute({
   title: "Company Information",
   description: "Answer general questions about Acme Corp",
@@ -255,7 +256,7 @@ const companyInfoRoute = agent.createRoute({
 // Initial step: Answer from knowledge base (no data collecting needed)
 
 // Route 2: Product Information (stepless)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 const productInfoRoute = agent.createRoute({
   title: "Product Information",
   description: "Answer questions about products",
@@ -271,7 +272,7 @@ const productInfoRoute = agent.createRoute({
 // Initial step is enough - no transitions needed for simple Q&A
 
 // Route 3: Policy Questions (stepless)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 const policyRoute = agent.createRoute({
   title: "Policy Information",
   description: "Answer questions about company policies",
@@ -303,7 +304,6 @@ const fetchNews = newsRoute.initialStep.nextStep({
   tool: fetchNewsTool,
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const shareNews = fetchNews.nextStep({
   prompt: "Share the latest company news from context",
 });
@@ -324,13 +324,12 @@ const searchFaqs = faqRoute.initialStep.nextStep({
   tool: searchKnowledgeTool,
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const provideFaqAnswer = searchFaqs.nextStep({
   prompt: "Provide answer based on FAQ search results",
 });
 
 // Route 6: Fallback (generic response)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 const fallbackRoute = agent.createRoute({
   title: "General Conversation",
   description: "Handle general conversation or unclear questions",

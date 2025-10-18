@@ -578,3 +578,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 }
 
 export { createHealthcareAgent };
+
+main().catch(console.error);

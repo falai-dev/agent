@@ -322,7 +322,7 @@ agent
   });
 
 // Example usage with session step
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 async function main() {
   // Initialize session step
   let session = createSession<AppointmentData | LabData>();
@@ -401,3 +401,5 @@ async function sendAppointmentConfirmation(data: AppointmentData) {
 // main().catch(console.error);
 
 export { agent };
+
+main().catch(console.error);
