@@ -1,10 +1,63 @@
-/**
- * Template rendering utilities for agent prompts
- * Supports {{variable}} and {{object.property}} syntax for context-aware prompt templating
- * Handles complex objects, arrays, and nested property access
- */
+import type { Template, TemplateContext } from "../types/template";
 
 /**
+ * Renders a template, which can be a string or a function, using the provided context.
+ * This function is asynchronous to support template functions that perform async operations.
+ *
+ * @param template - The template to render (string or function).
+ * @param params - The context object to pass to the template function.
+ * @returns A promise that resolves to the rendered string.
+ *
+ * @example
+ * ```typescript
+ * // With a string template
+ * const result1 = await render("Hello {{name}}", { context: { name: "Alice" } });
+ * // Result: "Hello Alice"
+ *
+ * // With a function template
+ * const fnTemplate = ({ context }) => `Hello ${context.name}`;
+ * const result2 = await render(fnTemplate, { context: { name: "Bob" } });
+ * // Result: "Hello Bob"
+ * ```
+ */
+export async function render<TContext = unknown, TData = unknown>(
+  template: Template<TContext, TData> | undefined,
+  params: TemplateContext<TContext, TData>
+): Promise<string> {
+  if (typeof template === "function") {
+    // Execute the function and await the result if it's a promise
+    const result = await Promise.resolve(template(params));
+    return result;
+  }
+
+  if (typeof template === "string") {
+    // Fallback to the old renderTemplate logic for string-based templates
+    return renderTemplate(template, params.context as Record<string, unknown>);
+  }
+
+  // Return empty string if template is undefined or not a supported type
+  return "";
+}
+
+/**
+ * Renders an array of templates.
+ *
+ * @param templates - An array of templates to render.
+ * @param params - The context object.
+ * @returns A promise that resolves to an array of rendered strings.
+ */
+export async function renderMany<TContext = unknown, TData = unknown>(
+  templates: Template<TContext, TData>[] | undefined,
+  params: TemplateContext<TContext, TData>
+): Promise<string[]> {
+  if (!templates) {
+    return [];
+  }
+  return Promise.all(templates.map((t) => render(t, params)));
+}
+
+/**
+ * @deprecated Use the asynchronous `render` function instead.
  * Renders template variables in a string using the provided context.
  * Supports {{variable}} and {{object.property}} syntax for property access.
  *
@@ -116,20 +169,7 @@ function valueToString(value: unknown): string {
 }
 
 /**
- * Renders template variables in an array of strings.
- *
- * @param templates - Array of template strings
- * @param context - The context object to pull values from
- * @returns Array of rendered strings
- */
-export function renderTemplateArray(
-  templates: string[],
-  context: Record<string, unknown> | undefined
-): string[] {
-  return templates.map((template) => renderTemplate(template, context));
-}
-
-/**
+ * @deprecated This function does not support async template functions.
  * Renders template variables in an object recursively.
  * Handles nested objects and arrays.
  *

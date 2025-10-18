@@ -18,7 +18,7 @@ export interface PendingTransition {
  * Session step tracks the current position in the conversation flow
  * and data collected during the route progression
  */
-export interface SessionState<TData = Record<string, unknown>> {
+export interface SessionState<TData = unknown> {
   /** Unique session identifier (useful for persistence) */
   id?: string;
 

@@ -3,9 +3,8 @@
  */
 
 import type { AgentOptions, Term, Guideline, Capability } from "../types/agent";
-import type { Event, StepRef } from "../types/index";
+import type { Event } from "../types/history";
 import type { RouteOptions } from "../types/route";
-
 import type { SessionState } from "../types/session";
 import type { AgentStructuredResponse } from "../types/ai";
 import {
@@ -14,7 +13,6 @@ import {
   enterStep,
   mergeCollected,
 } from "../types/session";
-import { PromptComposer } from "./PromptComposer";
 import { logger, LoggerLevel } from "../utils/logger";
 
 import { Route } from "./Route";
@@ -26,14 +24,17 @@ import { ResponseEngine } from "./ResponseEngine";
 import { ToolExecutor } from "./ToolExecutor";
 import { getLastMessageFromHistory } from "../utils/event";
 import { END_ROUTE_ID } from "../constants";
-import { ToolRef } from "../types";
+import { ToolRef } from "../types/tool";
+import { Template } from "../types/template";
+import { StepRef } from "../types";
+import { render } from "../utils/template";
 
 /**
  * Main Agent class with generic context support
  */
 export class Agent<TContext = unknown> {
-  private terms: Term[] = [];
-  private guidelines: Guideline[] = [];
+  private terms: Term<TContext>[] = [];
+  private guidelines: Guideline<TContext>[] = [];
   private capabilities: Capability[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private routes: Route<TContext, any>[] = [];
@@ -139,7 +140,7 @@ export class Agent<TContext = unknown> {
   /**
    * Get agent identity
    */
-  get identity(): string | undefined {
+  get identity(): Template<TContext> | undefined {
     return this.options.identity;
   }
 
@@ -158,7 +159,7 @@ export class Agent<TContext = unknown> {
   /**
    * Create a domain term for the glossary
    */
-  createTerm(term: Term): this {
+  createTerm(term: Term<TContext>): this {
     this.terms.push(term);
     return this;
   }
@@ -166,7 +167,7 @@ export class Agent<TContext = unknown> {
   /**
    * Create a behavioral guideline
    */
-  createGuideline(guideline: Guideline): this {
+  createGuideline(guideline: Guideline<TContext>): this {
     const guidelineWithId = {
       ...guideline,
       id: guideline.id || `guideline_${this.guidelines.length}`,
@@ -327,14 +328,14 @@ export class Agent<TContext = unknown> {
         const currentStep = currentRoute.getStep(session.currentStep.id);
         if (currentStep) {
           const transitions = currentStep.getTransitions();
-          const toolTransition = transitions.find((t) => t.spec.tool);
+          const toolStep = transitions.find((s) => s.tool);
 
-          if (toolTransition?.spec.tool) {
+          if (toolStep?.tool) {
             const toolExecutor = new ToolExecutor<TContext, unknown>();
             // Get allowed domains from current route for security enforcement
             const allowedDomains = currentRoute.getDomains();
             const result = await toolExecutor.executeTool(
-              toolTransition.spec.tool as ToolRef<TContext, unknown[], unknown>,
+              toolStep.tool as ToolRef<TContext, unknown[], unknown>,
               effectiveContext,
               this.updateContext.bind(this),
               history,
@@ -367,9 +368,9 @@ export class Agent<TContext = unknown> {
     }
 
     // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use (combined)
-    let selectedRoute: Route<TContext> | undefined;
+    let selectedRoute: Route<TContext, unknown> | undefined;
     let responseDirectives: string[] | undefined;
-    let selectedStep: Step<TContext> | undefined;
+    let selectedStep: Step<TContext, unknown> | undefined;
     let isRouteComplete = false;
 
     // Check for pending transition from previous route completion
@@ -413,13 +414,7 @@ export class Agent<TContext = unknown> {
         routes: this.routes,
         session,
         history,
-        agentMeta: {
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-          personality: this.options.personality,
-          identity: this.options.identity,
-        },
+        agentMeta: this.options,
         provider: this.options.provider,
         context: effectiveContext,
         signal,
@@ -441,7 +436,7 @@ export class Agent<TContext = unknown> {
 
     // PHASE 3: DETERMINE NEXT STEP - Use step from combined decision or get initial step
     if (selectedRoute && !isRouteComplete) {
-      let nextStep: Step<TContext>;
+      let nextStep: Step<TContext, unknown>;
 
       // If we have a selected step from the combined routing decision, use it
       if (selectedStep) {
@@ -482,7 +477,7 @@ export class Agent<TContext = unknown> {
       );
 
       // Build response prompt
-      const responsePrompt = this.responseEngine.buildResponsePrompt(
+      const responsePrompt = await this.responseEngine.buildResponsePrompt(
         selectedRoute,
         nextStep,
         selectedRoute.getRules(),
@@ -490,12 +485,9 @@ export class Agent<TContext = unknown> {
         responseDirectives,
         history,
         lastUserMessage,
-        {
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-          personality: this.options.personality,
-        }
+        this.options,
+        effectiveContext,
+        session
       );
 
       // Generate message stream using AI provider
@@ -517,13 +509,13 @@ export class Agent<TContext = unknown> {
           | undefined = undefined;
 
         // Extract collected data on final chunk
-        if (chunk.done && chunk.structured && nextStep.collectFields) {
+        if (chunk.done && chunk.structured && nextStep.collect) {
           const collectedData: Record<string, unknown> = {};
           // The structured response includes both base fields and collected extraction fields
           const structuredData = chunk.structured as AgentStructuredResponse &
             Record<string, unknown>;
 
-          for (const field of nextStep.collectFields) {
+          for (const field of nextStep.collect) {
             if (field in structuredData) {
               collectedData[field] = structuredData[field];
             }
@@ -584,26 +576,29 @@ export class Agent<TContext = unknown> {
       const endStepSpec = selectedRoute.endStepSpec;
 
       // Create a temporary step for completion message generation using endStep configuration
-      const completionStep = new Step<TContext>(
-        selectedRoute.id,
-        endStepSpec.prompt ||
-          "Summarize what was accomplished and confirm completion",
-        endStepSpec.id || END_ROUTE_ID,
-        endStepSpec.collect,
-        undefined,
-        endStepSpec.requires,
-        endStepSpec.prompt ||
-          "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
-      );
+      const completionStep = new Step<TContext, unknown>(selectedRoute.id, {
+        description: endStepSpec.description,
+        id: endStepSpec.id || END_ROUTE_ID,
+        collect: endStepSpec.collect,
+        requires: endStepSpec.requires,
+        prompt:
+          endStepSpec.prompt ||
+          "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
+      });
 
       // Build response schema for completion
       const responseSchema = this.responseEngine.responseSchemaForRoute(
         selectedRoute,
         completionStep
       );
+      const templateContext = {
+        context: effectiveContext,
+        session,
+        history,
+      };
 
       // Build completion response prompt
-      const completionPrompt = this.responseEngine.buildResponsePrompt(
+      const completionPrompt = await this.responseEngine.buildResponsePrompt(
         selectedRoute,
         completionStep,
         selectedRoute.getRules(),
@@ -611,13 +606,9 @@ export class Agent<TContext = unknown> {
         undefined, // No directives for completion
         history,
         lastUserMessage,
-        {
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-          personality: this.options.personality,
-          identity: this.options.identity,
-        }
+        this.options,
+        effectiveContext,
+        session
       );
 
       // Stream completion message using AI provider
@@ -651,12 +642,16 @@ export class Agent<TContext = unknown> {
         );
 
         if (targetRoute) {
+          const renderedCondition = await render(
+            transitionConfig.condition,
+            templateContext
+          );
           // Set pending transition in session
           session = {
             ...session,
             pendingTransition: {
               targetRouteId: targetRoute.id,
-              condition: transitionConfig.condition,
+              condition: renderedCondition,
               reason: "route_complete",
             },
           };
@@ -694,19 +689,15 @@ export class Agent<TContext = unknown> {
       }
     } else {
       // Fallback: No routes defined, stream a simple response
-      const fallbackPrompt = new PromptComposer<TContext>()
-        .addAgentMeta({
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-          identity: this.options.identity,
-        })
-        .addPersonality(this.options.personality)
-        .addInteractionHistory(history)
-        .addGlossary(this.terms)
-        .addGuidelines(this.guidelines)
-        .addCapabilities(this.capabilities)
-        .build();
+      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt(
+        history,
+        this.options,
+        this.terms,
+        this.guidelines,
+        this.capabilities,
+        effectiveContext,
+        session
+      );
 
       const stream = this.options.provider.generateMessageStream({
         prompt: fallbackPrompt,
@@ -790,14 +781,14 @@ export class Agent<TContext = unknown> {
         const currentStep = currentRoute.getStep(session.currentStep.id);
         if (currentStep) {
           const transitions = currentStep.getTransitions();
-          const toolTransition = transitions.find((t) => t.spec.tool);
+          const toolStep = transitions.find((s) => s.tool);
 
-          if (toolTransition?.spec.tool) {
+          if (toolStep?.tool) {
             const toolExecutor = new ToolExecutor<TContext, unknown>();
             // Get allowed domains from current route for security enforcement
             const allowedDomains = currentRoute.getDomains();
             const result = await toolExecutor.executeTool(
-              toolTransition.spec.tool as ToolRef<TContext, unknown[], unknown>,
+              toolStep.tool as ToolRef<TContext, unknown[], unknown>,
               effectiveContext,
               this.updateContext.bind(this),
               history,
@@ -830,9 +821,9 @@ export class Agent<TContext = unknown> {
     }
 
     // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use (combined)
-    let selectedRoute: Route<TContext> | undefined;
+    let selectedRoute: Route<TContext, unknown> | undefined;
     let responseDirectives: string[] | undefined;
-    let selectedStep: Step<TContext> | undefined;
+    let selectedStep: Step<TContext, unknown> | undefined;
     let isRouteComplete = false;
 
     // Check for pending transition from previous route completion
@@ -876,13 +867,7 @@ export class Agent<TContext = unknown> {
         routes: this.routes,
         session,
         history,
-        agentMeta: {
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-          personality: this.options.personality,
-          identity: this.options.identity,
-        },
+        agentMeta: this.options,
         provider: this.options.provider,
         context: effectiveContext,
         signal,
@@ -909,7 +894,7 @@ export class Agent<TContext = unknown> {
       | undefined = undefined;
 
     if (selectedRoute && !isRouteComplete) {
-      let nextStep: Step<TContext>;
+      let nextStep: Step<TContext, unknown>;
 
       // If we have a selected step from the combined routing decision, use it
       if (selectedStep) {
@@ -950,7 +935,7 @@ export class Agent<TContext = unknown> {
       );
 
       // Build response prompt
-      const responsePrompt = this.responseEngine.buildResponsePrompt(
+      const responsePrompt = await this.responseEngine.buildResponsePrompt(
         selectedRoute,
         nextStep,
         selectedRoute.getRules(),
@@ -958,12 +943,9 @@ export class Agent<TContext = unknown> {
         responseDirectives,
         history,
         lastUserMessage,
-        {
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-          personality: this.options.personality,
-        }
+        this.options,
+        effectiveContext,
+        session
       );
 
       // Generate message using AI provider
@@ -981,13 +963,13 @@ export class Agent<TContext = unknown> {
       message = result.structured?.message || result.message;
 
       // Extract collected data from response
-      if (result.structured && nextStep.collectFields) {
+      if (result.structured && nextStep.collect) {
         const collectedData: Record<string, unknown> = {};
         // The structured response includes both base fields and collected extraction fields
         const structuredData = result.structured as AgentStructuredResponse &
           Record<string, unknown>;
 
-        for (const field of nextStep.collectFields) {
+        for (const field of nextStep.collect) {
           if (field in structuredData) {
             collectedData[field] = structuredData[field];
           }
@@ -1019,26 +1001,29 @@ export class Agent<TContext = unknown> {
       const endStepSpec = selectedRoute.endStepSpec;
 
       // Create a temporary step for completion message generation using endStep configuration
-      const completionStep = new Step<TContext>(
-        selectedRoute.id,
-        endStepSpec.prompt ||
-          "Summarize what was accomplished and confirm completion",
-        endStepSpec.id || END_ROUTE_ID,
-        endStepSpec.collect,
-        undefined,
-        endStepSpec.requires,
-        endStepSpec.prompt ||
-          "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
-      );
+      const completionStep = new Step<TContext, unknown>(selectedRoute.id, {
+        description: endStepSpec.description,
+        id: endStepSpec.id || END_ROUTE_ID,
+        collect: endStepSpec.collect,
+        requires: endStepSpec.requires,
+        prompt:
+          endStepSpec.prompt ||
+          "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
+      });
 
       // Build response schema for completion
       const responseSchema = this.responseEngine.responseSchemaForRoute(
         selectedRoute,
         completionStep
       );
+      const templateContext = {
+        context: effectiveContext,
+        session,
+        history,
+      };
 
       // Build completion response prompt
-      const completionPrompt = this.responseEngine.buildResponsePrompt(
+      const completionPrompt = await this.responseEngine.buildResponsePrompt(
         selectedRoute,
         completionStep,
         selectedRoute.getRules(),
@@ -1046,12 +1031,9 @@ export class Agent<TContext = unknown> {
         undefined, // No directives for completion
         history,
         lastUserMessage,
-        {
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-          personality: this.options.personality,
-        }
+        this.options,
+        effectiveContext,
+        session
       );
 
       // Generate completion message using AI provider
@@ -1087,12 +1069,16 @@ export class Agent<TContext = unknown> {
         );
 
         if (targetRoute) {
+          const renderedCondition = await render(
+            transitionConfig.condition,
+            templateContext
+          );
           // Set pending transition in session
           session = {
             ...session,
             pendingTransition: {
               targetRouteId: targetRoute.id,
-              condition: transitionConfig.condition,
+              condition: renderedCondition,
               reason: "route_complete",
             },
           };
@@ -1113,18 +1099,15 @@ export class Agent<TContext = unknown> {
       );
     } else {
       // Fallback: No routes defined, generate a simple response
-      const fallbackPrompt = new PromptComposer<TContext>()
-        .addAgentMeta({
-          name: this.options.name,
-          goal: this.options.goal,
-          description: this.options.description,
-        })
-        .addPersonality(this.options.personality)
-        .addInteractionHistory(history)
-        .addGlossary(this.terms)
-        .addGuidelines(this.guidelines)
-        .addCapabilities(this.capabilities)
-        .build();
+      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt(
+        history,
+        this.options,
+        this.terms,
+        this.guidelines,
+        this.capabilities,
+        effectiveContext,
+        session
+      );
 
       const result = await this.options.provider.generateMessage({
         prompt: fallbackPrompt,
@@ -1182,14 +1165,14 @@ export class Agent<TContext = unknown> {
   /**
    * Get all terms
    */
-  getTerms(): Term[] {
+  getTerms(): Term<TContext>[] {
     return [...this.terms];
   }
 
   /**
    * Get all guidelines
    */
-  getGuidelines(): Guideline[] {
+  getGuidelines(): Guideline<TContext>[] {
     return [...this.guidelines];
   }
 
@@ -1314,11 +1297,12 @@ export class Agent<TContext = unknown> {
    *   const nextResponse = await agent.respond({ history, session: updatedSession });
    * }
    */
-  nextStepRoute(
+  async nextStepRoute(
     routeIdOrTitle: string,
     session?: SessionState,
-    condition?: string
-  ): SessionState {
+    condition?: Template<TContext, unknown>,
+    history?: Event[]
+  ): Promise<SessionState> {
     const targetSession = session || this.currentSession;
 
     if (!targetSession) {
@@ -1339,12 +1323,19 @@ export class Agent<TContext = unknown> {
           .join(", ")}`
       );
     }
+    const templateContext = {
+      context: this.context,
+      session,
+      history,
+      data: this.currentSession?.data,
+    };
+    const renderedCondition = await render(condition, templateContext);
 
     const updatedSession: SessionState = {
       ...targetSession,
       pendingTransition: {
         targetRouteId: targetRoute.id,
-        condition,
+        condition: renderedCondition,
         reason: "manual",
       },
     };

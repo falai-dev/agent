@@ -531,7 +531,7 @@ interface RouteOptions<TData = unknown> {
   };
 
   // NEW: Sequential steps for simple linear flows
-  steps?: TransitionSpec<unknown, TData>[];
+  steps?: StepOptions<unknown, TData>[];
 }
 ```
 
@@ -604,12 +604,14 @@ Represents a step within a conversation route.
 
 #### Methods
 
-##### `nextStep(spec: TransitionSpec): TransitionResult`
+##### `nextStep(spec: StepOptions): StepResult`
 
 Creates a transition from this step and returns a chainable result.
 
 ```typescript
-interface TransitionSpec<TData = unknown> {
+interface StepOptions<TData = unknown> {
+  id?: string; // step id
+  description?: string; // Step description
   prompt?: string; // Transition to a chat interaction
   tool?: ToolRef; // Transition to execute a tool
   step?: StepRef | symbol; // Transition to specific step or END_ROUTE
@@ -627,18 +629,18 @@ interface TransitionSpec<TData = unknown> {
   condition?: string;
 }
 
-interface TransitionResult<TData = unknown> {
+interface StepResult<TData = unknown> {
   id: string; // Step identifier
   routeId: string; // Route identifier
-  nextStep: (spec: TransitionSpec<TData>) => TransitionResult<TData>;
+  nextStep: (spec: StepOptions<TData>) => StepResult<TData>;
 }
 ```
 
 **Parameters:**
 
-- `spec`: The transition specification (see `TransitionSpec` above). Can include an optional `condition` property for AI-evaluated step selection guidance.
+- `spec`: The transition specification (see `StepOptions` above). Can include an optional `condition` property for AI-evaluated step selection guidance.
 
-**Returns:** A `TransitionResult` that includes the target step's reference (`id`, `routeId`) and a `nextStep` method for chaining additional transitions.
+**Returns:** A `StepResult` that includes the target step's reference (`id`, `routeId`) and a `nextStep` method for chaining additional transitions.
 
 **Example:**
 
@@ -719,7 +721,7 @@ Configure the step properties after creation. Useful for overriding initial step
 // Configure initial step after route creation
 route.initialStep.configure({
   description: "Welcome! Let's get started",
-  collectFields: ["name", "email"],
+  collect: ["name", "email"],
   skipIf: (data) => !!data.name && !!data.email,
   requires: [],
 });
@@ -727,7 +729,7 @@ route.initialStep.configure({
 // Or configure any step
 const askName = route.initialStep.nextStep({ prompt: "Ask for name" });
 askName.configure({
-  collectFields: ["firstName", "lastName"],
+  collect: ["firstName", "lastName"],
 });
 ```
 
@@ -735,7 +737,7 @@ askName.configure({
 
 - `config`: Configuration object with optional properties:
   - `description?: string` - Step description
-  - `collectFields?: string[]` - Fields to collect in this step
+  - `collect?: string[]` - Fields to collect in this step
   - `skipIf?: (data: Partial<TData>) => boolean` - Skip condition function
   - `requires?: string[]` - Required data prerequisites
 
@@ -1546,6 +1548,44 @@ Builds the final prompt string.
 
 ---
 
+### `PromptComposer`
+
+Constructs prompts for AI generation.
+
+**Note:** As of the latest version, many methods in `PromptComposer` are `async` to support function-based templates.
+
+#### Methods
+
+##### `addIdentity(name: string, description?: string, goal?: string): this`
+
+Adds agent identity section.
+
+##### `addContext(variables: ContextVariable[]): this`
+
+Adds context variables.
+
+##### `addGlossary(terms: Term[]): this`
+
+Adds domain glossary terms.
+
+##### `addGuidelinesForMessageGeneration(guidelines: GuidelineMatch[]): this`
+
+Adds guidelines section.
+
+##### `addCapabilitiesForMessageGeneration(capabilities: Capability[]): this`
+
+Adds capabilities section.
+
+##### `addActiveRoutes(routes): this`
+
+Adds active routes to the prompt.
+
+##### `build(): Promise<string>`
+
+Builds the final prompt string.
+
+---
+
 ## Utility Functions
 
 ### `defineTool<TContext, TArgs, TReturn>()`
@@ -1658,10 +1698,10 @@ adaptEvent(event: EmittedEvent): Event
 ### `Term`
 
 ```typescript
-interface Term {
-  name: string;
-  description: string;
-  synonyms?: string[];
+interface Term<TContext = unknown> {
+  name: Template<TContext>;
+  description: Template<TContext>;
+  synonyms?: Template<TContext>[];
 }
 ```
 
@@ -1670,10 +1710,10 @@ interface Term {
 ### `Guideline`
 
 ```typescript
-interface Guideline {
+interface Guideline<TContext = unknown> {
   id?: string;
-  condition?: string;
-  action: string;
+  condition?: Template<TContext>;
+  action: Template<TContext>;
   enabled?: boolean; // Default: true
   tags?: string[];
   tools?: ToolRef[];
@@ -2188,91 +2228,88 @@ agent.addDomain("payment", paymentDomain);
 
 ## Template Utilities
 
-### Template Variable Support
+### Dynamic Content with Templates
 
-The framework supports template variables using `{{variable}}` syntax in selected parts of the agent configuration. Templates are replaced with values from the agent's context at runtime to enable dynamic, personalized interactions while keeping structural elements predictable for AI consistency.
+The framework supports dynamic content generation through a versatile `Template` system. A `Template` can be either a simple string with `{{variable}}` placeholders or a function that returns a string, allowing for more complex, context-aware logic.
 
-#### `renderTemplate(template: string, context?: Record<string, unknown>): string`
-
-Renders template variables in a string using the provided context. Supports nested property access with dot notation.
+Templates are evaluated at runtime with a `TemplateContext` object that provides access to the agent's state:
 
 ```typescript
-import { renderTemplate } from "@falai/agent";
-
-// Basic usage
-const template1 = "Hello {{name}}, welcome to {{company}}!";
-const context1 = { name: "Alice", company: "Acme Corp" };
-const result1 = renderTemplate(template1, context1);
-// Result: "Hello Alice, welcome to Acme Corp!"
-
-// Nested properties
-const template2 = "Hello {{user.name}}, you are {{user.age}} years old!";
-const context2 = { user: { name: "Alice", age: 30 } };
-const result2 = renderTemplate(template2, context2);
-// Result: "Hello Alice, you are 30 years old!"
-
-// Arrays (joined with commas)
-const template3 = "Items: {{items}}";
-const context3 = { items: ["apple", "banana", "cherry"] };
-const result3 = renderTemplate(template3, context3);
-// Result: "Items: apple, banana, cherry"
-
-// Objects (converted to JSON)
-const template4 = "User data: {{user}}";
-const context4 = { user: { name: "Alice", age: 30 } };
-const result4 = renderTemplate(template4, context4);
-// Result: "User data: {"name":"Alice","age":30}"
+interface TemplateContext<TContext = unknown, TData = unknown> {
+  context?: TContext;
+  session?: SessionState<TData>;
+  history?: Event[];
+  data?: Partial<TData>; // Convenience alias for session.data
+}
 ```
 
-#### `renderTemplateArray(templates: string[], context?: Record<string, unknown>): string[]`
+#### `Template<TContext, TData>` Type
 
-Renders template variables in an array of strings.
+This is the core type for all dynamic content:
 
-#### `renderTemplateObject(obj: unknown, context?: Record<string, unknown>): unknown`
+```typescript
+type Template<TContext = unknown, TData = unknown> =
+  | string
+  | ((params: TemplateContext<TContext, TData>) => string | Promise<string>);
+```
 
-Recursively renders template variables in objects and arrays.
+**String Templates:**
+
+Simple strings with `{{variable}}` placeholders are rendered using values from the `context` object.
+
+```typescript
+const agent = new Agent({
+  identity: "I am {{name}}",
+  context: { name: "HelperBot" },
+});
+```
+
+**Function Templates:**
+
+For more complex logic, you can provide a function that receives the `TemplateContext` and returns a string (or a `Promise<string>` for async operations).
+
+```typescript
+const agent = new Agent({
+  identity: ({ context }) => `I am here to help, ${context.user.name}`,
+  context: { user: { name: "Alice" } },
+});
+```
+
+#### `render(template, params)`
+
+An internal async utility that resolves a `Template` to a string. You won't typically call this directly, but it powers the dynamic content generation throughout the framework.
 
 **Supported in (Dynamic/Personalized):**
 
-- Agent identity and personality (for customized AI persona)
-- Route conditions (for context-aware routing logic)
-- Step prompts (for personalized user messages)
-- Guideline conditions and actions (for dynamic behavioral rules)
-- Term names, descriptions, and synonyms (for domain-specific customization)
+- **Agent**: `identity`
+- **Terms**: `name`, `description`, `synonyms`
+- **Guidelines**: `condition`, `action`
+- **Routes**: `conditions`, `rules`, `prohibitions`
+- **Steps/Transitions**: `prompt`, `condition`
 
 **Not supported in (Static/Predictable):**
 
-- Route titles and descriptions (kept literal for consistent AI routing decisions)
-- Step descriptions (kept literal for predictable step selection)
-- Capability titles and descriptions (kept literal for stable AI tool understanding)
-- Agent name, goal, description (kept literal for consistent agent metadata)
+- Agent `name`, `goal`, `description`
+- Route `title`, `description`
+- Step `description`
+- Capability `title`, `description`
 
 **Example:**
 
 ```typescript
 const agent = new Agent({
-  name: "Assistant", // Static - AI knows its identity
-  identity:
-    "I am {{name}}, here to help you, {{user.firstName}} {{user.lastName}}.", // Dynamic - personalized greeting
+  name: "Assistant", // Static
+  identity: ({ context }) =>
+    `I am here to help you, ${context.user.firstName}.`, // Dynamic
   context: {
-    name: "HelperBot",
-    user: { firstName: "Alice", lastName: "Smith", age: 30 },
+    user: { firstName: "Alice", age: 30 },
   },
 });
 
 agent.createGuideline({
-  condition: "User is {{user.age}} years old", // Dynamic - context-aware condition
+  condition: ({ context }) => context.user.age > 18, // Dynamic condition
   action:
-    "Be helpful to {{user.firstName}} and consider their age in responses", // Dynamic - personalized action
-});
-
-const route = agent.createRoute({
-  title: "User Onboarding", // Static - predictable route identifier
-  description: "Standard onboarding process", // Static - consistent AI understanding
-  conditions: ["{{user.needsOnboarding}}"], // Dynamic - context-aware activation
-  initialStep: {
-    prompt: "Welcome {{user.firstName}}! Let's get you set up.", // Dynamic - personalized message
-  },
+    "Be helpful to {{user.firstName}} and consider their age in responses", // Dynamic action
 });
 ```
 

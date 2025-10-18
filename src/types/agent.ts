@@ -7,6 +7,7 @@ import type { ToolRef } from "./tool";
 import type { RouteOptions } from "./route";
 import type { PersistenceConfig } from "./persistence";
 import type { SessionState } from "./session";
+import { Template } from "./template";
 
 /**
  * Composition mode determines how the agent processes and structures responses
@@ -76,7 +77,7 @@ export interface AgentOptions<TContext = unknown> {
   /** Optional personality/tone prompt used in prompts */
   personality?: string;
   /** Optional identity prompt defining the agent's self-concept and role */
-  identity?: string;
+  identity?: Template<TContext>;
   /** Enable debug logging */
   debug?: boolean;
   /** Default context data available to the agent */
@@ -92,13 +93,13 @@ export interface AgentOptions<TContext = unknown> {
   /** Composition mode for response generation */
   compositionMode?: CompositionMode;
   /** Initial terms for domain glossary */
-  terms?: Term[];
+  terms?: Term<TContext>[];
   /** Initial guidelines for agent behavior */
-  guidelines?: Guideline[];
+  guidelines?: Guideline<TContext>[];
   /** Initial capabilities */
   capabilities?: Capability[];
   /** Initial routes (will be instantiated as Route objects) */
-  routes?: RouteOptions<unknown>[];
+  routes?: RouteOptions<TContext, unknown>[];
   /** Optional persistence configuration for auto-saving sessions and messages */
   persistence?: PersistenceConfig;
 }
@@ -106,25 +107,25 @@ export interface AgentOptions<TContext = unknown> {
 /**
  * A term in the domain glossary
  */
-export interface Term {
+export interface Term<TContext = unknown> {
   /** Name of the term */
-  name: string;
+  name: Template<TContext>;
   /** Description/definition of the term */
-  description: string;
+  description: Template<TContext>;
   /** Alternative names or synonyms */
-  synonyms?: string[];
+  synonyms?: Template<TContext>[];
 }
 
 /**
  * A behavioral guideline for the agent
  */
-export interface Guideline {
+export interface Guideline<TContext = unknown> {
   /** Unique identifier */
   id?: string;
   /** Condition that triggers this guideline (optional for always-active guidelines) */
-  condition?: string;
+  condition?: Template<TContext>;
   /** Action the agent should take when the condition is met */
-  action: string;
+  action: Template<TContext>;
   /** Whether this guideline is currently enabled */
   enabled?: boolean;
   /** Tags for organizing and filtering guidelines */
@@ -154,9 +155,9 @@ export interface Capability {
 /**
  * Guideline match with rationale
  */
-export interface GuidelineMatch {
+export interface GuidelineMatch<TContext = unknown> {
   /** The matched guideline */
-  guideline: Guideline;
+  guideline: Guideline<TContext>;
   /** Explanation of why this guideline was matched */
   rationale?: string;
 }

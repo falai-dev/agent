@@ -230,7 +230,12 @@ async function main() {
   if (manualResponse.isRouteComplete && manualResponse.session) {
     // Manually trigger transition instead of auto-transition
     console.log("\n[Manually transitioning to feedback route...]");
-    session2 = agent.nextStepRoute("Collect Feedback", manualResponse.session);
+    session2 = await agent.nextStepRoute(
+      "Collect Feedback",
+      manualResponse.session,
+      "if booking was successful",
+      history2
+    );
     console.log(
       "Pending transition set:",
       session2.pendingTransition?.targetRouteId

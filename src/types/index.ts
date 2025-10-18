@@ -27,15 +27,17 @@ export { EventKind, EventSource } from "./history";
 
 // Route types
 export type {
+  RouteOptions,
   RouteRef,
   StepRef,
-  RouteOptions,
-  TransitionSpec,
-  TransitionResult,
+  StepOptions,
+  StepResult,
+  RouteCompletionHandler,
+  RouteTransitionConfig,
 } from "./route";
 
 // Tool types
-export type { ToolContext, ToolResult, ToolHandler, ToolRef } from "./tool";
+export type { ToolRef, ToolContext, ToolResult } from "./tool";
 
 // AI provider types
 export type {
@@ -57,3 +59,6 @@ export type {
   CreateSessionOptions,
   SaveMessageOptions,
 } from "./persistence";
+
+// Template types
+export type { Template, TemplateContext } from "./template";

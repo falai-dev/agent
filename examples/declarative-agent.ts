@@ -123,7 +123,7 @@ const scheduleAppointment = defineTool<HealthcareContext>({
 });
 
 // Declarative configuration
-const terms: Term[] = [
+const terms: Term<HealthcareContext>[] = [
   {
     name: "Office Phone Number",
     description: "The phone number of our office, at +1-234-567-8900",
@@ -134,12 +134,13 @@ const terms: Term[] = [
   },
   {
     name: "Dr. Charles Xavier",
-    description: "Neurologist specializing in brain disorders",
+    description: ({ context }) =>
+      `Neurologist specializing in brain disorders for patient ${context?.patientName}`,
     synonyms: ["Professor X", "Dr. Xavier"],
   },
 ];
 
-const guidelines: Guideline[] = [
+const guidelines: Guideline<HealthcareContext>[] = [
   {
     condition: "The patient asks about insurance",
     action:
@@ -149,7 +150,8 @@ const guidelines: Guideline[] = [
   },
   {
     condition: "The patient asks to talk to a human agent",
-    action: "Provide the office phone number and office hours",
+    action: ({ context }) =>
+      `Of course. You can reach our office at +1-234-567-8900 during office hours (Monday to Friday, 9 AM to 5 PM). I've noted that you'd like to speak with someone, and I can have a representative call you back if you'd like, ${context?.patientName}.`,
     tags: ["escalation"],
   },
   {
@@ -173,7 +175,7 @@ const capabilities: Capability[] = [
   },
 ];
 
-const routes: RouteOptions[] = [
+const routes: RouteOptions<HealthcareContext>[] = [
   {
     id: "route_schedule_appointment", // Custom ID ensures consistency across restarts
     title: "Schedule Appointment",

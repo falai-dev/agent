@@ -3,7 +3,10 @@ import type { Route } from "./Route";
 import type { Step } from "./Step";
 import type { StructuredSchema } from "../types/schema";
 import { PromptComposer } from "./PromptComposer";
-import { renderTemplate } from "../utils/template";
+import { render } from "../utils/template";
+import type { SessionState } from "../types/session";
+import type { AgentOptions, Capability, Guideline, Term } from "../types/agent";
+import type { Template } from "../types/template";
 
 export class ResponseEngine<TContext = unknown> {
   responseSchemaForRoute<TData = unknown>(
@@ -25,8 +28,8 @@ export class ResponseEngine<TContext = unknown> {
     }
 
     // Add collect fields from current step
-    if (currentStep?.collectFields && route.schema?.properties) {
-      for (const field of currentStep.collectFields) {
+    if (currentStep?.collect && route.schema?.properties) {
+      for (const field of currentStep.collect) {
         const fieldSchema = route.schema.properties[field];
         if (fieldSchema) {
           base.properties![field] = fieldSchema;
@@ -37,59 +40,66 @@ export class ResponseEngine<TContext = unknown> {
     return base;
   }
 
-  buildResponsePrompt(
+  async buildResponsePrompt(
     route: Route<TContext>,
     currentStep: Step<TContext>,
-    rules: string[],
-    prohibitions: string[],
+    rules: Template<TContext>[],
+    prohibitions: Template<TContext>[],
     directives: string[] | undefined,
     history: Event[],
     lastMessage: string,
-    agentMeta?: {
-      name?: string;
-      goal?: string;
-      description?: string;
-      personality?: string;
-      identity?: string;
-    },
-    context?: Record<string, unknown>
-  ): string {
-    const pc = new PromptComposer(context);
-    if (agentMeta?.name || agentMeta?.goal || agentMeta?.description)
-      pc.addAgentMeta({
-        name: agentMeta?.name || "Agent",
-        goal: agentMeta?.goal,
-        description: agentMeta?.description,
-        identity: agentMeta?.identity,
-      });
-    const personality =
-      agentMeta?.personality || "Tone: brief, natural, 1-2 short sentences.";
-    pc.addPersonality(personality);
-    if (agentMeta?.identity) {
-      pc.addIdentity(agentMeta.identity);
+    agentMeta?: AgentOptions<TContext>,
+    context?: TContext,
+    session?: SessionState
+  ): Promise<string> {
+    const templateContext = { context, session, history };
+    const pc = new PromptComposer(templateContext);
+    if (agentMeta) {
+      await pc.addAgentMeta(agentMeta);
     }
-    pc.addInstruction(
+    await pc.addInstruction(
       `Route: ${route.title}${
         route.description ? ` — ${route.description}` : ""
       }`
     );
     if (currentStep.prompt) {
-      pc.addInstruction(
-        `Guideline for your response (adapt to the conversation):\n${renderTemplate(
+      await pc.addInstruction(
+        `Guideline for your response (adapt to the conversation):\n${await render(
           currentStep.prompt,
-          context
+          templateContext
         )}`
       );
     }
-    if (rules.length) pc.addInstruction(`Rules:\n- ${rules.join("\n- ")}`);
+    if (rules.length)
+      await pc.addInstruction(`Rules:\n- ${rules.join("\n- ")}`);
     if (prohibitions.length)
-      pc.addInstruction(`Prohibitions:\n- ${prohibitions.join("\n- ")}`);
-    pc.addDirectives(directives);
-    pc.addInteractionHistory(history);
-    pc.addLastMessage(lastMessage);
-    pc.addInstruction(
+      await pc.addInstruction(`Prohibitions:\n- ${prohibitions.join("\n- ")}`);
+    await pc.addDirectives(directives);
+    await pc.addInteractionHistory(history);
+    await pc.addLastMessage(lastMessage);
+    await pc.addInstruction(
       "Return ONLY JSON matching the schema. The 'message' field is required."
     );
+    return pc.build();
+  }
+
+  async buildFallbackPrompt(
+    history: Event[],
+    agentMeta: AgentOptions<TContext>,
+    terms: Term<TContext>[],
+    guidelines: Guideline<TContext>[],
+    capabilities: Capability[],
+    context?: TContext,
+    session?: SessionState
+  ): Promise<string> {
+    const templateContext = { context, session, history };
+    const pc = new PromptComposer(templateContext);
+
+    await pc.addAgentMeta(agentMeta);
+    await pc.addInteractionHistory(history);
+    await pc.addGlossary(terms);
+    await pc.addGuidelines(guidelines);
+    await pc.addCapabilities(capabilities);
     return pc.build();
   }
 }

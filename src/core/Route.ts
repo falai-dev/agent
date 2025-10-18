@@ -5,8 +5,8 @@
 import type {
   RouteOptions,
   RouteRef,
-  TransitionSpec,
-  TransitionResult,
+  StepOptions,
+  StepResult,
   RouteTransitionConfig,
   RouteCompletionHandler,
 } from "../types/route";
@@ -15,6 +15,7 @@ import type { Guideline } from "../types/agent";
 
 import { Step } from "./Step";
 import { generateRouteId } from "../utils/id";
+import { Template } from "../types/template";
 
 /**
  * Represents a conversational route/journey
@@ -23,13 +24,13 @@ export class Route<TContext = unknown, TData = unknown> {
   public readonly id: string;
   public readonly title: string;
   public readonly description?: string;
-  public readonly conditions: string[];
+  public readonly conditions: Template<TContext, TData>[];
   public readonly domains?: string[];
-  public readonly rules: string[];
-  public readonly prohibitions: string[];
+  public readonly rules: Template<TContext, TData>[];
+  public readonly prohibitions: Template<TContext, TData>[];
   public readonly initialStep: Step<TContext, TData>;
   public readonly endStepSpec: Omit<
-    TransitionSpec<TContext, TData>,
+    StepOptions<TContext, TData>,
     "step" | "condition" | "skipIf"
   >;
   public readonly responseOutputSchema?: StructuredSchema;
@@ -37,10 +38,10 @@ export class Route<TContext = unknown, TData = unknown> {
   public readonly initialData?: Partial<TData>;
   public readonly onComplete?:
     | string
-    | RouteTransitionConfig
+    | RouteTransitionConfig<TContext, TData>
     | RouteCompletionHandler<TContext, TData>;
   private routingExtrasSchema?: StructuredSchema;
-  private guidelines: Guideline[] = [];
+  private guidelines: Guideline<TContext>[] = [];
 
   constructor(options: RouteOptions<TContext, TData>) {
     // Use provided ID or generate a deterministic one from the title
@@ -49,17 +50,9 @@ export class Route<TContext = unknown, TData = unknown> {
     this.description = options.description;
     this.conditions = options.conditions || [];
     this.domains = options.domains;
-    this.rules = options.rules || ([] as string[]);
-    this.prohibitions = options.prohibitions || ([] as string[]);
-    this.initialStep = new Step<TContext, TData>(
-      this.id,
-      options.initialStep?.prompt || "Initial step",
-      options.initialStep?.id,
-      options.initialStep?.collect,
-      options.initialStep?.skipIf,
-      options.initialStep?.requires,
-      options.initialStep?.prompt
-    );
+    this.rules = options.rules || [];
+    this.prohibitions = options.prohibitions || [];
+    this.initialStep = new Step<TContext, TData>(this.id, options.initialStep);
     // Store endStep spec (will be used when route completes)
     this.endStepSpec = options.endStep || {
       prompt:
@@ -89,12 +82,13 @@ export class Route<TContext = unknown, TData = unknown> {
    * @private
    */
   private buildSequentialSteps(
-    steps: Array<TransitionSpec<TContext, TData>>
+    steps: Array<StepOptions<TContext, TData>>
   ): void {
     // Import END_ROUTE dynamically to avoid circular dependency
     const END_ROUTE = Symbol.for("END_ROUTE");
 
-    let currentStep: TransitionResult<TContext, TData> = this.initialStep;
+    let currentStep: StepResult<TContext, TData> =
+      this.initialStep.asStepResult();
 
     for (const step of steps) {
       currentStep = currentStep.nextStep(step);
@@ -107,7 +101,7 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Create a guideline specific to this route
    */
-  createGuideline(guideline: Guideline): this {
+  createGuideline(guideline: Guideline<TContext>): this {
     this.guidelines.push({
       ...guideline,
       id: guideline.id || `guideline_${this.id}_${this.guidelines.length}`,
@@ -119,7 +113,7 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Get all guidelines for this route
    */
-  getGuidelines(): Guideline[] {
+  getGuidelines(): Guideline<TContext>[] {
     return [...this.guidelines];
   }
 
@@ -134,14 +128,14 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Get rules for this route
    */
-  getRules(): string[] {
+  getRules(): Template<TContext, TData>[] {
     return [...this.rules];
   }
 
   /**
    * Get prohibitions for this route
    */
-  getProhibitions(): string[] {
+  getProhibitions(): Template<TContext, TData>[] {
     return [...this.prohibitions];
   }
 
@@ -187,10 +181,9 @@ export class Route<TContext = unknown, TData = unknown> {
       steps.push(current);
 
       // Add target steps from transitions
-      for (const transition of current.getTransitions()) {
-        const target = transition.getTarget();
-        if (target && !visited.has(target.id)) {
-          queue.push(target);
+      for (const nextStep of current.getTransitions()) {
+        if (nextStep && !visited.has(nextStep.id)) {
+          queue.push(nextStep);
         }
       }
     }
@@ -229,7 +222,11 @@ export class Route<TContext = unknown, TData = unknown> {
 
       const transitions = step.getTransitions();
       for (const transition of transitions) {
-        lines.push(`    -> ${transition.describe()}`);
+        lines.push(
+          `    -> ${transition.id}${
+            transition.description ? `: ${transition.description}` : ""
+          }`
+        );
       }
     }
 
@@ -245,7 +242,7 @@ export class Route<TContext = unknown, TData = unknown> {
   async evaluateOnComplete(
     session: { data?: Partial<TData> },
     context?: TContext
-  ): Promise<RouteTransitionConfig | undefined> {
+  ): Promise<RouteTransitionConfig<TContext, TData> | undefined> {
     if (!this.onComplete) {
       return undefined;
     }

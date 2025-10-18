@@ -4,6 +4,7 @@
 
 import type { ToolRef, ToolResult } from "./tool";
 import type { StructuredSchema } from "./schema";
+import { Template } from "./template";
 
 /**
  * Reference to a route
@@ -31,11 +32,11 @@ import type { Guideline } from "./agent";
 /**
  * Route transition configuration when route completes
  */
-export interface RouteTransitionConfig {
+export interface RouteTransitionConfig<TContext = unknown, TData = unknown> {
   /** Target route ID or title to transition to */
   nextStep: string;
   /** Optional AI-evaluated condition for the transition */
-  condition?: string;
+  condition?: Template<TContext, TData>;
 }
 
 /**
@@ -49,9 +50,9 @@ export type RouteCompletionHandler<TContext = unknown, TData = unknown> = (
   context?: TContext
 ) =>
   | string
-  | RouteTransitionConfig
+  | RouteTransitionConfig<TContext, TData>
   | undefined
-  | Promise<string | RouteTransitionConfig | undefined>;
+  | Promise<string | RouteTransitionConfig<TContext, TData> | undefined>;
 
 /**
  * Options for creating a route
@@ -65,15 +66,15 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   /** Description of what this route accomplishes */
   description?: string;
   /** Conditions that activate this route */
-  conditions?: string[];
+  conditions?: Template<TContext, TData>[];
   /** Initial guidelines for this route */
-  guidelines?: Guideline[];
+  guidelines?: Guideline<TContext>[];
   /** Domain names that are allowed in this route (undefined = all domains) */
   domains?: string[];
   /** Absolute rules the agent must follow in this route */
-  rules?: string[];
+  rules?: Template<TContext, TData>[];
   /** Absolute prohibitions the agent must never do in this route */
-  prohibitions?: string[];
+  prohibitions?: Template<TContext, TData>[];
   /** Optional: extractions the router may return (added to routing schema) */
   routingExtrasSchema?: StructuredSchema;
   /** Optional: structured response data for this route's message generation */
@@ -94,14 +95,14 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
    * If provided, automatically chains the steps from initialStep to END_ROUTE
    * For complex flows with branching, build the step machine manually instead
    */
-  steps?: TransitionSpec<TContext, TData>[];
+  steps?: StepOptions<TContext, TData>[];
   /**
    * Configure the initial step (optional)
-   * Accepts full TransitionSpec configuration (id, prompt, collect, skipIf, etc.)
+   * Accepts full StepOptions configuration (id, prompt, collect, skipIf, etc.)
    * Note: tool and step properties are ignored for initial step
    */
   initialStep?: Omit<
-    TransitionSpec<TContext, TData>,
+    StepOptions<TContext, TData>,
     "tool" | "step" | "condition"
   >;
   /**
@@ -110,10 +111,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
    * Can include prompt for completion message, tool for final actions, etc.
    * Note: step, condition, skipIf properties are ignored for end step
    */
-  endStep?: Omit<
-    TransitionSpec<TContext, TData>,
-    "step" | "condition" | "skipIf"
-  >;
+  endStep?: Omit<StepOptions<TContext, TData>, "step" | "condition" | "skipIf">;
   /**
    * Optional transition when route completes (reaches END_ROUTE)
    * Can be:
@@ -141,7 +139,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
    */
   onComplete?:
     | string
-    | RouteTransitionConfig
+    | RouteTransitionConfig<TContext, TData>
     | RouteCompletionHandler<TContext, TData>;
 }
 
@@ -157,11 +155,13 @@ export type InlineToolHandler<TContext = unknown, TData = unknown> = (
 /**
  * Specification for a step transition
  */
-export interface TransitionSpec<TContext = unknown, TData = unknown> {
+export interface StepOptions<TContext = unknown, TData = unknown> {
   /** Custom ID for this step (optional - will generate deterministic ID if not provided) */
   id?: string;
+  /** Description of the transition */
+  description?: string;
   /** Transition to a chat state with this description */
-  prompt?: string;
+  prompt?: Template<TContext, TData>;
   /** Transition to execute a tool */
   tool?: // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ToolRef<TContext, any[], any, TData> | InlineToolHandler<TContext, TData>;
@@ -189,17 +189,15 @@ export interface TransitionSpec<TContext = unknown, TData = unknown> {
    * Optional condition for this transition
    * Description of when this transition should be taken
    */
-  condition?: string;
+  condition?: Template<TContext, TData>;
 }
 
 /**
  * Result of a transition operation
  * Combines step reference with the ability to chain transitions
  */
-export interface TransitionResult<TContext = unknown, TData = unknown>
+export interface StepResult<TContext = unknown, TData = unknown>
   extends StepRef {
   /** Allow chaining transitions */
-  nextStep: (
-    spec: TransitionSpec<TContext, TData>
-  ) => TransitionResult<TContext, TData>;
+  nextStep: (spec: StepOptions<TContext, TData>) => StepResult<TContext, TData>;
 }

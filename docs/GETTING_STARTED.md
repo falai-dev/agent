@@ -263,6 +263,31 @@ const route = agent.createRoute({
 });
 ```
 
+### Use Function-Based Templates for Dynamic Logic
+
+For more advanced scenarios, you can use functions instead of string templates to generate content dynamically. This allows you to incorporate complex logic and async operations directly into your agent's configuration.
+
+```typescript
+// Function templates provide access to the agent's context, session, and history
+agent.createGuideline({
+  condition: ({ context }) => context.user.age > 65, // Dynamic condition
+  action: async ({ context, session }) => {
+    // Functions can be async and access session data
+    const specialOffer = await fetchSpecialOffer(context.user.id);
+    return `As a valued senior, ${
+      session?.data?.userName || "customer"
+    }, you qualify for: ${specialOffer}`;
+  },
+});
+
+// You can also use function templates for terms or route conditions
+agent.createTerm({
+  name: "Personalized Greeting",
+  description: ({ session }) =>
+    `A warm greeting for ${session?.data?.userName || "our guest"}`,
+});
+```
+
 ### Handle Context Dynamically
 
 Override context per request:

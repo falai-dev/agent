@@ -152,7 +152,7 @@ const bookingRoute = agent.createRoute<FlightData>({
 // Configure initial step later
 bookingRoute.initialStep.configure({
   description: "Welcome! Let's book your flight",
-  collectFields: ["destination"],
+  collect: ["destination"],
   skipIf: (data) => !!data.destination,
 });
 ```
@@ -868,7 +868,7 @@ const response = await agent.respond({ history, session });
 
 if (response.isRouteComplete && shouldCollectFeedback) {
   // Manually trigger transition instead of onComplete
-  const updatedSession = agent.nextStepRoute(
+  const updatedSession = await agent.nextStepRoute(
     "Collect Feedback",
     response.session
   );

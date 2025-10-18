@@ -1,4 +1,5 @@
 import type { Event } from "../types/history";
+import type { AgentOptions } from "../types/agent";
 import type { Route } from "./Route";
 import type { Step } from "./Step";
 import type { StructuredSchema } from "../types/schema";
@@ -9,6 +10,13 @@ import { enterRoute, mergeCollected } from "../types/session";
 import { PromptComposer } from "./PromptComposer";
 import { getLastMessageFromHistory } from "../utils/event";
 import { logger } from "../utils/logger";
+import { render } from "@utils/template";
+import { END_ROUTE_ID } from "../constants";
+
+export interface CandidateStep<TContext = unknown, TData = unknown> {
+  step: Step<TContext, TData>;
+  isRouteComplete?: boolean;
+}
 
 export interface RoutingDecisionOutput {
   context: string;
@@ -32,7 +40,7 @@ export interface RoutingEngineOptions {
   maxCandidates?: number;
 }
 
-export class RoutingEngine<TContext = unknown> {
+export class RoutingEngine<TContext = unknown, TData = unknown> {
   constructor(private readonly options?: RoutingEngineOptions) {}
 
   /**
@@ -41,16 +49,10 @@ export class RoutingEngine<TContext = unknown> {
    * @private
    */
   private async decideSingleRouteStep(params: {
-    route: Route<TContext, unknown>;
-    session: SessionState;
+    route: Route<TContext, TData>;
+    session: SessionState<TData>;
     history: Event[];
-    agentMeta?: {
-      name?: string;
-      goal?: string;
-      description?: string;
-      personality?: string;
-      identity?: string;
-    };
+    agentMeta?: AgentOptions<TContext>;
     provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
@@ -58,7 +60,7 @@ export class RoutingEngine<TContext = unknown> {
     selectedRoute?: Route<TContext>;
     selectedStep?: Step<TContext>;
     responseDirectives?: string[];
-    session: SessionState;
+    session: SessionState<TData>;
     isRouteComplete?: boolean;
   }> {
     const { route, session, history, agentMeta, provider, context, signal } =
@@ -126,7 +128,7 @@ export class RoutingEngine<TContext = unknown> {
 
     // Multiple candidates - use AI to select best step
     const lastUserMessage = getLastMessageFromHistory(history);
-    const stepPrompt = this.buildStepSelectionPrompt(
+    const stepPrompt = await this.buildStepSelectionPrompt(
       route,
       currentStep,
       candidates,
@@ -134,11 +136,12 @@ export class RoutingEngine<TContext = unknown> {
       history,
       lastUserMessage,
       agentMeta,
-      params.context as Record<string, unknown>
+      context,
+      updatedSession
     );
 
     const stepSchema = this.buildStepSelectionSchema(
-      candidates.map((c) => c.step.id)
+      candidates.map((c) => c.step)
     );
 
     const stepResult = await provider.generateMessage<
@@ -160,13 +163,11 @@ export class RoutingEngine<TContext = unknown> {
     });
 
     const selectedStepId = stepResult.structured?.selectedStepId;
-    const selectedStep = candidates.find(
-      (c) => c.step.id === selectedStepId
-    )?.step;
+    const selectedStep = candidates.find((c) => c.step.id === selectedStepId);
 
     if (selectedStep) {
       logger.debug(
-        `[RoutingEngine] Single-route: AI selected step: ${selectedStep.id}`
+        `[RoutingEngine] Single-route: AI selected step: ${selectedStep.step.id}`
       );
       logger.debug(
         `[RoutingEngine] Single-route: Reasoning: ${stepResult.structured?.reasoning}`
@@ -179,7 +180,7 @@ export class RoutingEngine<TContext = unknown> {
 
     return {
       selectedRoute,
-      selectedStep: selectedStep || candidates[0].step,
+      selectedStep: selectedStep?.step || candidates[0].step,
       responseDirectives: stepResult.structured?.responseDirectives,
       session: updatedSession,
     };
@@ -207,14 +208,10 @@ export class RoutingEngine<TContext = unknown> {
     const transitions = currentStep.getTransitions();
 
     for (const transition of transitions) {
-      const target = transition.getTarget();
+      const target = transition;
 
       // Check for END_ROUTE transition
-      if (
-        !target &&
-        transition.spec.step &&
-        typeof transition.spec.step === "symbol"
-      ) {
+      if (target && target.id === END_ROUTE_ID) {
         // Found END_ROUTE - route is complete
         return {
           isRouteComplete: true,
@@ -230,7 +227,7 @@ export class RoutingEngine<TContext = unknown> {
         );
         return {
           step: target,
-          condition: transition.condition,
+          condition: target.condition as string | undefined,
         };
       }
 
@@ -258,20 +255,8 @@ export class RoutingEngine<TContext = unknown> {
     route: Route<TContext, TData>,
     currentStep: Step<TContext, TData> | undefined,
     data: Partial<TData>
-  ): Array<{
-    step: Step<TContext, TData>;
-    condition?: string;
-    requires?: string[];
-    collectFields?: string[];
-    isRouteComplete?: boolean;
-  }> {
-    const candidates: Array<{
-      step: Step<TContext, TData>;
-      condition?: string;
-      requires?: string[];
-      collectFields?: string[];
-      isRouteComplete?: boolean;
-    }> = [];
+  ): CandidateStep<TContext, TData>[] {
+    const candidates: CandidateStep<TContext, TData>[] = [];
 
     if (!currentStep) {
       const initialStep = route.initialStep;
@@ -288,28 +273,22 @@ export class RoutingEngine<TContext = unknown> {
           logger.debug(
             `[RoutingEngine] Route complete on entry: all steps skipped, END_ROUTE reached`
           );
-          return [
-            {
-              step: initialStep,
-              condition: "Route complete - all data collected on entry",
-              isRouteComplete: true,
-            },
-          ];
+          candidates.push({
+            step: initialStep,
+            isRouteComplete: true,
+          });
         } else if (result.step) {
           // Found a non-skipped step
           candidates.push({
             step: result.step,
-            condition: result.condition,
-            requires: result.step.requires,
-            collectFields: result.step.collectFields,
+            isRouteComplete: result.isRouteComplete || false,
           });
         }
         // If no step found and not complete, fall through to return empty candidates
       } else {
         candidates.push({
           step: initialStep,
-          requires: initialStep.requires,
-          collectFields: initialStep.collectFields,
+          isRouteComplete: false,
         });
       }
       return candidates;
@@ -319,14 +298,10 @@ export class RoutingEngine<TContext = unknown> {
     let hasEndRoute = false;
 
     for (const transition of transitions) {
-      const target = transition.getTarget();
+      const target = transition;
 
       // Check for END_ROUTE transition (no target step)
-      if (
-        !target &&
-        transition.spec.step &&
-        typeof transition.spec.step === "symbol"
-      ) {
+      if (target && target.id === END_ROUTE_ID) {
         hasEndRoute = true;
         continue;
       }
@@ -351,9 +326,7 @@ export class RoutingEngine<TContext = unknown> {
           // Found a non-skipped step deeper in the chain
           candidates.push({
             step: result.step,
-            condition: result.condition || transition.condition,
-            requires: result.step.requires,
-            collectFields: result.step.collectFields,
+            isRouteComplete: result.isRouteComplete || false,
           });
         }
         continue;
@@ -361,9 +334,7 @@ export class RoutingEngine<TContext = unknown> {
 
       candidates.push({
         step: target,
-        condition: transition.condition,
-        requires: target.requires,
-        collectFields: target.collectFields,
+        isRouteComplete: hasEndRoute || false,
       });
     }
 
@@ -378,7 +349,6 @@ export class RoutingEngine<TContext = unknown> {
         return [
           {
             step: currentStep,
-            condition: "Route complete - all data collected",
             isRouteComplete: true,
           },
         ];
@@ -388,9 +358,7 @@ export class RoutingEngine<TContext = unknown> {
       if (!currentStep.shouldSkip(data)) {
         candidates.push({
           step: currentStep,
-          condition: "Continue in current step (no valid transitions)",
-          requires: currentStep.requires,
-          collectFields: currentStep.collectFields,
+          isRouteComplete: hasEndRoute || false,
         });
       }
     }
@@ -405,16 +373,10 @@ export class RoutingEngine<TContext = unknown> {
    * OPTIMIZATION: If there's only 1 route, skips route scoring and only does step selection.
    */
   async decideRouteAndStep(params: {
-    routes: Route<TContext, unknown>[];
-    session: SessionState;
+    routes: Route<TContext, TData>[];
+    session: SessionState<TData>;
     history: Event[];
-    agentMeta?: {
-      name?: string;
-      goal?: string;
-      description?: string;
-      personality?: string;
-      identity?: string;
-    };
+    agentMeta?: AgentOptions<TContext>;
     provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
@@ -422,7 +384,7 @@ export class RoutingEngine<TContext = unknown> {
     selectedRoute?: Route<TContext>;
     selectedStep?: Step<TContext>;
     responseDirectives?: string[];
-    session: SessionState;
+    session: SessionState<TData>;
     isRouteComplete?: boolean;
   }> {
     const { routes, session, history, agentMeta, provider, context, signal } =
@@ -447,16 +409,8 @@ export class RoutingEngine<TContext = unknown> {
 
     const lastUserMessage = getLastMessageFromHistory(history);
 
-    let activeRouteSteps:
-      | Array<{
-          stepId: string;
-          description: string;
-          condition?: string;
-          requires?: string[];
-          collectFields?: string[];
-        }>
-      | undefined;
-    let activeRoute: Route<TContext> | undefined;
+    let activeRouteSteps: Step<TContext, TData>[] | undefined;
+    let activeRoute: Route<TContext, TData> | undefined;
     let isRouteComplete = false;
 
     if (session.currentRoute) {
@@ -480,13 +434,7 @@ export class RoutingEngine<TContext = unknown> {
           // Don't include steps in routing if route is complete
           activeRouteSteps = undefined;
         } else {
-          activeRouteSteps = candidates.map((c) => ({
-            stepId: c.step.id,
-            description: c.step.description || "",
-            condition: c.condition,
-            requires: c.requires,
-            collectFields: c.collectFields,
-          }));
+          activeRouteSteps = candidates.map((c) => c.step);
           logger.debug(
             `[RoutingEngine] Found ${activeRouteSteps.length} candidate steps for active route`
           );
@@ -500,14 +448,14 @@ export class RoutingEngine<TContext = unknown> {
       activeRouteSteps
     );
 
-    const routingPrompt = this.buildRoutingPrompt(
+    const routingPrompt = await this.buildRoutingPrompt(
       history,
       routes,
       lastUserMessage,
       agentMeta,
       session,
       activeRouteSteps,
-      params.context as Record<string, unknown>
+      context
     );
 
     const routingResult = await provider.generateMessage<
@@ -595,103 +543,88 @@ export class RoutingEngine<TContext = unknown> {
    * Build prompt for step selection within a single route
    * @private
    */
-  private buildStepSelectionPrompt(
-    route: Route<TContext>,
-    currentStep: Step<TContext> | undefined,
-    candidates: Array<{
-      step: Step<TContext>;
-      condition?: string;
-      requires?: string[];
-      collectFields?: string[];
-    }>,
-    data: Partial<unknown>,
+  private async buildStepSelectionPrompt<TData>(
+    route: Route<TContext, TData>,
+    currentStep: Step<TContext, TData> | undefined,
+    candidates: CandidateStep<TContext, TData>[],
+    data: Partial<TData>,
     history: Event[],
     lastMessage: string,
-    agentMeta?: {
-      name?: string;
-      goal?: string;
-      description?: string;
-      personality?: string;
-      identity?: string;
-    },
-    context?: Record<string, unknown>
-  ): string {
-    const pc = new PromptComposer(context);
+    agentMeta?: AgentOptions<TContext>,
+    context?: TContext,
+    session?: SessionState<TData>
+  ): Promise<string> {
+    const templateContext = { context, session, history };
+    const pc = new PromptComposer(templateContext);
 
     // Add agent metadata
-    if (agentMeta?.name || agentMeta?.goal || agentMeta?.description) {
-      pc.addAgentMeta({
-        name: agentMeta?.name || "Agent",
-        description: agentMeta?.description,
-        goal: agentMeta?.goal,
-        identity: agentMeta?.identity,
-      });
-    }
-
-    const personality =
-      agentMeta?.personality || "Tone: brief, natural, 1-2 short sentences.";
-    pc.addPersonality(personality);
-    if (agentMeta?.identity) {
-      pc.addIdentity(agentMeta.identity);
+    if (agentMeta) {
+      await pc.addAgentMeta(agentMeta);
     }
 
     // Add route context
-    pc.addInstruction(
+    await pc.addInstruction(
       `Active Route: ${route.title}\nDescription: ${route.description || "N/A"}`
     );
 
     // Add current step context
     if (currentStep) {
-      pc.addInstruction(
+      await pc.addInstruction(
         `Current Step: ${currentStep.id}\nDescription: ${
           currentStep.description || "N/A"
         }`
       );
     } else {
-      pc.addInstruction("Current Step: None (entering route)");
+      await pc.addInstruction("Current Step: None (entering route)");
     }
 
     // Add collected data context
     if (Object.keys(data).length > 0) {
-      pc.addInstruction(
+      await pc.addInstruction(
         `Collected Data So Far:\n${JSON.stringify(data, null, 2)}`
       );
     } else {
-      pc.addInstruction("Collected Data: None yet");
+      await pc.addInstruction("Collected Data: None yet");
     }
 
     // Add conversation history
-    pc.addInteractionHistory(history);
-    pc.addLastMessage(lastMessage);
+    await pc.addInteractionHistory(history);
+    await pc.addLastMessage(lastMessage);
 
     // Add candidate steps
-    const stepDescriptions = candidates.map((candidate, idx) => {
+    const stepDescriptions = [];
+    for (const candidate of candidates) {
+      const idx = candidates.indexOf(candidate);
       const parts = [
         `${idx + 1}. Step ID: ${candidate.step.id}`,
         `   Description: ${candidate.step.description || "N/A"}`,
       ];
 
-      if (candidate.condition) {
-        parts.push(`   Condition: ${candidate.condition}`);
+      if (candidate.step.condition) {
+        const renderedCondition = await render(
+          candidate.step.condition,
+          templateContext
+        );
+        parts.push(`   Condition: ${renderedCondition}`);
       }
 
-      if (candidate.requires && candidate.requires.length > 0) {
-        parts.push(`   Required Data: ${candidate.requires.join(", ")}`);
+      if (candidate.step.requires && candidate.step.requires.length > 0) {
+        parts.push(`   Required Data: ${candidate.step.requires.join(", ")}`);
       }
 
-      if (candidate.collectFields && candidate.collectFields.length > 0) {
-        parts.push(`   Collects: ${candidate.collectFields.join(", ")}`);
+      if (candidate.step.collect && candidate.step.collect.length > 0) {
+        parts.push(`   Collects: ${candidate.step.collect.join(", ")}`);
       }
 
-      return parts.join("\n");
-    });
+      stepDescriptions.push(parts.join("\n"));
+    }
 
-    pc.addInstruction(
+    await pc.addInstruction(
       `Available Steps to Transition To:\n${stepDescriptions.join("\n\n")}`
     );
 
     // Add decision prompt
-    pc.addInstruction(
+    await pc.addInstruction(
       [
         "Task: Decide which step to transition to based on:",
         "1. The user's current message and intent",
@@ -717,7 +650,9 @@ export class RoutingEngine<TContext = unknown> {
    * Build schema for step selection
    * @private
    */
-  private buildStepSelectionSchema(validStepIds: string[]): StructuredSchema {
+  private buildStepSelectionSchema(
+    validSteps: Step<TContext, TData>[]
+  ): StructuredSchema {
     return {
       description:
         "Step transition decision based on conversation context and collected data",
@@ -732,7 +667,7 @@ export class RoutingEngine<TContext = unknown> {
           type: "string",
           nullable: false,
           description: "The ID of the selected step to transition to",
-          enum: validStepIds,
+          enum: validSteps.map((s) => s.id),
         },
         responseDirectives: {
           type: "array",
@@ -747,9 +682,9 @@ export class RoutingEngine<TContext = unknown> {
   }
 
   buildDynamicRoutingSchema(
-    routes: Route<TContext>[],
+    routes: Route<TContext, TData>[],
     extrasSchema?: StructuredSchema,
-    activeRouteSteps?: { stepId: string; description: string }[]
+    activeRouteSteps?: Step<TContext, TData>[]
   ): StructuredSchema {
     const routeIds = routes.map((r) => r.id);
     const routeProperties: Record<string, StructuredSchema> = {};
@@ -799,7 +734,7 @@ export class RoutingEngine<TContext = unknown> {
         nullable: false,
         description:
           "The step ID to transition to within the active route (required if continuing in current route)",
-        enum: activeRouteSteps.map((s) => s.stepId),
+        enum: activeRouteSteps.map((s) => s.id),
       };
       base.properties.stepReasoning = {
         type: "string",
@@ -821,38 +756,21 @@ export class RoutingEngine<TContext = unknown> {
     return base;
   }
 
-  buildRoutingPrompt(
+  async buildRoutingPrompt(
     history: Event[],
-    routes: Route<TContext>[],
+    routes: Route<TContext, TData>[],
     lastMessage: string,
-    agentMeta?: {
-      name?: string;
-      goal?: string;
-      description?: string;
-      personality?: string;
-    },
-    session?: SessionState,
-    activeRouteSteps?: Array<{
-      stepId: string;
-      description: string;
-      condition?: string;
-      requires?: string[];
-      collectFields?: string[];
-    }>,
-    context?: Record<string, unknown>
-  ): string {
-    const pc = new PromptComposer(context);
-    if (agentMeta?.name || agentMeta?.goal || agentMeta?.description) {
-      pc.addAgentMeta({
-        name: agentMeta?.name || "Agent",
-        description: agentMeta?.description,
-        goal: agentMeta?.goal,
-      });
+    agentMeta?: AgentOptions<TContext>,
+    session?: SessionState<TData>,
+    activeRouteSteps?: Step<TContext, TData>[],
+    context?: TContext
+  ): Promise<string> {
+    const templateContext = { context, session, history };
+    const pc = new PromptComposer(templateContext);
+    if (agentMeta) {
+      await pc.addAgentMeta(agentMeta);
     }
-    const personality =
-      agentMeta?.personality || "Tone: brief, natural, 1-2 short sentences.";
-    pc.addPersonality(personality);
-    pc.addInstruction(
+    await pc.addInstruction(
       "Task: Intent analysis and route scoring (0-100). Score ALL listed routes."
     );
 
@@ -874,7 +792,7 @@ export class RoutingEngine<TContext = unknown> {
       sessionInfo.push(
         "Note: User is mid-conversation. They may want to continue current route or switch to a new one based on their intent."
       );
-      pc.addInstruction(sessionInfo.join("\n"));
+      await pc.addInstruction(sessionInfo.join("\n"));
 
       // Add available steps for the active route
       if (activeRouteSteps && activeRouteSteps.length > 0) {
@@ -882,21 +800,26 @@ export class RoutingEngine<TContext = unknown> {
           "",
           "Available steps in active route (choose one to transition to):",
         ];
-        activeRouteSteps.forEach((step, idx) => {
-          stepInfo.push(`${idx + 1}. Step: ${step.stepId}`);
+        for (const step of activeRouteSteps) {
+          const idx = activeRouteSteps.indexOf(step);
+          stepInfo.push(`${idx + 1}. Step: ${step.id}`);
           if (step.description) {
             stepInfo.push(`   Description: ${step.description}`);
           }
+          const renderedCondition = await render(
+            step.condition,
+            templateContext
+          );
           if (step.condition) {
-            stepInfo.push(`   Condition: ${step.condition}`);
+            stepInfo.push(`   Condition: ${renderedCondition}`);
           }
           if (step.requires && step.requires.length > 0) {
             stepInfo.push(`   Required data: ${step.requires.join(", ")}`);
           }
-          if (step.collectFields && step.collectFields.length > 0) {
-            stepInfo.push(`   Will collect: ${step.collectFields.join(", ")}`);
+          if (step.collect && step.collect.length > 0) {
+            stepInfo.push(`   Will collect: ${step.collect.join(", ")}`);
           }
-        });
+        }
         stepInfo.push("");
         stepInfo.push(
           "IMPORTANT: You MUST select a step to transition to. Evaluate which step makes the most sense based on:"
@@ -905,16 +828,16 @@ export class RoutingEngine<TContext = unknown> {
         stepInfo.push("- What data is still needed vs already present");
         stepInfo.push("- The logical next step in the conversation");
         stepInfo.push("- Whether conditions for steps are met");
-        pc.addInstruction(stepInfo.join("\n"));
+        await pc.addInstruction(stepInfo.join("\n"));
       }
     }
 
-    pc.addInteractionHistory(history);
-    pc.addLastMessage(lastMessage);
+    await pc.addInteractionHistory(history);
+    await pc.addLastMessage(lastMessage);
     // Cast to unknown to satisfy generic constraints in composer
     // This is safe because PromptComposer only reads route metadata (id, title, description)
-    pc.addRoutingOverview(routes as unknown as Route<unknown>[]);
-    pc.addInstruction(
+    await pc.addRoutingOverview(routes);
+    await pc.addInstruction(
       [
         "Scoring rules:",
         "- 90-100: explicit keywords + clear intent",

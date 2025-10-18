@@ -8,7 +8,6 @@
 export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
 export { Step } from "./core/Step";
-export { Transition } from "./core/Transition";
 export { defineTool } from "./core/Tool";
 export { DomainRegistry } from "./core/DomainRegistry";
 export { adaptEvent, createMessageEvent, createToolEvent } from "./core/Events";
@@ -93,8 +92,8 @@ export type {
   RouteRef,
   StepRef,
   RouteOptions,
-  TransitionSpec,
-  TransitionResult,
+  StepOptions,
+  StepResult,
   RouteTransitionConfig,
   RouteCompletionHandler,
 } from "./types/route";

@@ -135,7 +135,7 @@ const route = agent.createRoute({
 // Option 2: Configure after creation
 route.initialStep.configure({
   description: "Welcome! Let's start booking",
-  collectFields: ["destination"],
+  collect: ["destination"],
   skipIf: (data) => !!data.destination,
   requires: [],
 });
@@ -153,14 +153,14 @@ const askName = route.initialStep.nextStep({
 // Later, reconfigure it
 askName.configure({
   description: "Ask for user's full name",
-  collectFields: ["firstName", "lastName"],
+  collect: ["firstName", "lastName"],
   skipIf: (data) => !!data.firstName && !!data.lastName,
 });
 
 // Chaining is supported
 askName
   .configure({ description: "Updated description" })
-  .configure({ collectFields: ["fullName"] });
+  .configure({ collect: ["fullName"] });
 ```
 
 ### Configuration Options
@@ -171,7 +171,7 @@ step.configure({
   description?: string;
 
   // Fields to collect from conversation
-  collectFields?: string[];
+  collect?: string[];
 
   // Skip this step if condition is met
   skipIf?: (data: Partial<TData>) => boolean;
@@ -187,10 +187,10 @@ step.configure({
 
 ### Transition Specification
 
-Every transition from one step to another uses a `TransitionSpec`:
+Every transition from one step to another uses a `StepOptions`:
 
 ```typescript
-interface TransitionSpec<TData = unknown> {
+interface StepOptions<TData = unknown> {
   // Custom step ID (optional)
   id?: string;
 
@@ -487,7 +487,7 @@ Every route's starting point:
 ```typescript
 route.initialStep.configure({
   description: "Welcome message",
-  collectFields: ["initialInput"],
+  collect: ["initialInput"],
 });
 ```
 
@@ -756,7 +756,7 @@ console.log(step.routeId); // "route_onboarding_xyz789"
 console.log(step.description); // "Ask for user's name"
 
 // Step configuration
-console.log(step.collectFields); // ["firstName", "lastName"]
+console.log(step.collect); // ["firstName", "lastName"]
 console.log(step.requires); // ["userId"]
 
 // Step logic
@@ -773,7 +773,7 @@ step.addGuideline({
 console.log(step.getGuidelines());
 
 // Transitions
-console.log(step.getTransitions()); // [Transition, Transition, ...]
+console.log(step.getTransitions()); // [Step, Step, ...]
 ```
 
 ### Step Reference
