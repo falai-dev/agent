@@ -623,8 +623,12 @@ interface RouteOptions<TData = unknown> {
   id?: string;              // Optional custom ID (deterministic ID generated from title if not provided)
   title: string;            // Route title
   description?: string;     // Route description
+  identity?: string;        // Optional identity prompt defining the agent's role and persona for this route
+  personality?: string;     // Optional personality prompt defining the agent's communication style for this route
   conditions?: string[];    // Conditions that activate this route
   guidelines?: Guideline[]; // Initial guidelines for this route
+  terms?: Term[];          // Initial terms for the route's domain glossary
+  capabilities?: Capability[]; // Initial capabilities for this route
   domains?: string[];       // Domain names allowed in this route (undefined = all domains)
   rules?: string[];         // Absolute rules the agent MUST follow in this route
   prohibitions?: string[];  // Absolute prohibitions the agent MUST NEVER do in this route
@@ -653,6 +657,10 @@ interface RouteOptions<TData = unknown> {
   steps?: StepOptions<unknown, TData>[];
   /** Knowledge base specific to this route containing any JSON structure the AI should know */
   knowledgeBase?: Record<string, unknown>;
+  /**
+   * Route lifecycle hooks
+   */
+  hooks?: RouteLifecycleHooks<TContext, TData>;
 }
 ```
 
@@ -672,6 +680,22 @@ Adds a guideline specific to this route. Returns `this` for chaining.
 ##### `getGuidelines(): Guideline[]`
 
 Returns all guidelines for this route.
+
+##### `createTerm(term: Term): this`
+
+Adds a term to the route's domain glossary. Returns `this` for chaining.
+
+##### `getTerms(): Term[]`
+
+Returns all terms in the route's domain glossary.
+
+##### `createCapability(capability: Capability): this`
+
+Adds a capability to this route. Returns `this` for chaining.
+
+##### `getCapabilities(): Capability[]`
+
+Returns all capabilities for this route.
 
 ##### `getDomains(): string[] | undefined`
 
@@ -735,6 +759,34 @@ console.log(description);
 //     -> step_ask_passengers: How many passengers?
 ```
 
+##### `handleDataUpdate(data, previousCollected): Promise<Partial<TData>>`
+
+Handles data updates for this route, calling the onDataUpdate hook if configured. Returns modified data after hook processing, or original data if no hook.
+
+```typescript
+const updatedData = await route.handleDataUpdate(newData, previousData);
+```
+
+**Parameters:**
+
+- `data`: New collected data
+- `previousCollected`: Previously collected data
+
+**Returns:** Modified data after hook processing
+
+##### `handleContextUpdate(newContext, previousContext): Promise<void>`
+
+Handles context updates for this route, calling the onContextUpdate hook if configured.
+
+```typescript
+await route.handleContextUpdate(newContext, previousContext);
+```
+
+**Parameters:**
+
+- `newContext`: New context
+- `previousContext`: Previous context
+
 ##### `evaluateOnComplete(session, context?): Promise<RouteTransitionConfig<TContext, TData> | undefined>`
 
 Evaluates the onComplete handler and returns transition config.
@@ -774,6 +826,10 @@ Conditions that trigger this route (readonly).
 ##### `initialStep: Step`
 
 Starting step of the route (readonly).
+
+##### `hooks?: RouteLifecycleHooks<TContext, TData>`
+
+Route lifecycle hooks for managing route-specific data and behavior (readonly).
 
 ---
 
@@ -2208,6 +2264,39 @@ interface Guideline<TContext = unknown> {
   tags?: string[];
   tools?: ToolRef[];
   metadata?: Record<string, unknown>;
+}
+```
+
+---
+
+### `RouteLifecycleHooks<TContext, TData>`
+
+Route lifecycle hooks for managing route-specific data and behavior.
+
+```typescript
+interface RouteLifecycleHooks<TContext = unknown, TData = unknown> {
+  /**
+   * Called after collected data is updated for this route (from AI response or tool execution)
+   * Useful for validation, enrichment, or persistence of route-specific collected data
+   * Return modified collected data or the same data to keep it unchanged
+   *
+   * Unlike Agent-level onDataUpdate, this only triggers for data changes in this specific route.
+   */
+  onDataUpdate?: (
+    data: Partial<TData>,
+    previousCollected: Partial<TData>
+  ) => Partial<TData> | Promise<Partial<TData>>;
+
+  /**
+   * Called after context is updated via updateContext() when this route is active
+   * Useful for route-specific context reactions, validation, or side effects
+   *
+   * Unlike Agent-level onContextUpdate, this only triggers when this specific route is active.
+   */
+  onContextUpdate?: (
+    newContext: TContext,
+    previousContext: TContext
+  ) => void | Promise<void>;
 }
 ```
 

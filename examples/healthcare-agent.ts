@@ -180,6 +180,26 @@ function createHealthcareAgent() {
     title: "Schedule an Appointment",
     description: "Helps the patient find a time for their appointment.",
     conditions: ["The patient wants to schedule an appointment"],
+    // Route-level identity for healthcare scheduling
+    identity:
+      "You are a compassionate healthcare scheduling assistant who helps patients book appointments. Be empathetic, prioritize urgent cases, and ensure patients feel supported throughout the process.",
+    // Healthcare-specific terms
+    terms: [
+      {
+        name: "HIPAA",
+        description:
+          "Health Insurance Portability and Accountability Act - protects patient privacy and medical records",
+      },
+      {
+        name: "PHI",
+        description:
+          "Protected Health Information - any medical data that can identify a patient",
+      },
+      {
+        name: "Telemedicine",
+        description: "Remote healthcare consultation via video call or phone",
+      },
+    ],
     schema: {
       type: "object",
       properties: {

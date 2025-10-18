@@ -14,6 +14,7 @@ A complete guide to creating and managing conversational routes in `@falai/agent
 - [Sequential Steps](#sequential-steps)
 - [Route Properties](#route-properties)
 - [Route Security](#route-security)
+- [Route Hooks](#route-hooks)
 - [Advanced Patterns](#advanced-patterns)
 
 ---
@@ -518,6 +519,207 @@ console.log(route.describe());
 
 ---
 
+## Hierarchical Properties
+
+Routes can define their own properties that combine with agent-level properties following specific inheritance rules. This allows routes to specialize behavior while maintaining consistency.
+
+### Property Combination Logic
+
+| Property        | Agent Level                                                    | Route Level                                                            | Combination Logic                                                   | Strategic Benefit                                                                          |
+| --------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `knowledgeBase` | Universal company/product facts                                | Task-specific detailed information                                     | **Extension**: Global + Route facts                                 | Reduces prompt noise, saves tokens, increases AI precision                                 |
+| `identity`      | Base agent persona (e.g., "Friendly Acme Assistant")           | Focused persona (e.g., "Technical Support Specialist")                 | **Override**: Route takes priority                                  | Adapts agent tone and behavior to conversation context                                     |
+| `personality`   | General communication style (e.g., "Professional and concise") | Route-specific style (e.g., "Casual and friendly for support chats")   | **Override**: Route takes priority                                  | Fine-tunes communication tone per context while maintaining brand consistency              |
+| `guidelines`    | Universal rules (e.g., "Never use slang")                      | Contextual rules (e.g., "Avoid technical jargon in onboarding")        | **Extension**: Global + Local rules                                 | Creates robust, layered behavior system with safety and consistency                        |
+| `terms`         | Global company glossary                                        | Route-specific technical terms                                         | **Extension**: Merged, route-specific takes precedence on conflicts | Improves AI understanding of domain-specific terminology                                   |
+| `capabilities`  | General utility tools (calculator, date lookup)                | High-permission or task-specific tools (processPayment, deleteAccount) | **Scope**: Routes access their tools + global tools                 | Security and efficiency - prevents feedback routes from accidentally calling payment tools |
+
+### Route-Level Identity
+
+Override the agent's base persona for specific routes:
+
+```typescript
+const supportRoute = agent.createRoute({
+  title: "Technical Support",
+  identity:
+    "You are a technical support specialist with deep knowledge of our products. Be precise, patient, and focus on solving problems efficiently.",
+
+  // ... other route config
+});
+
+const salesRoute = agent.createRoute({
+  title: "Sales Consultation",
+  identity:
+    "You are an enthusiastic sales representative who understands customer needs and can explain complex products in simple terms.",
+
+  // ... other route config
+});
+```
+
+### Route-Level Personality
+
+Override the agent's general communication style for specific routes:
+
+```typescript
+const supportRoute = agent.createRoute({
+  title: "Customer Support",
+  personality:
+    "Casual and friendly, use contractions like 'don't' and 'can't', add occasional emojis to be approachable",
+
+  // ... other route config
+});
+
+const salesRoute = agent.createRoute({
+  title: "Enterprise Sales",
+  personality:
+    "Professional and confident, use industry terminology, focus on ROI and business outcomes",
+
+  // ... other route config
+});
+```
+
+### Route-Level Terms
+
+Add specialized terminology for specific domains:
+
+```typescript
+const healthcareRoute = agent.createRoute({
+  title: "Healthcare Consultation",
+  terms: [
+    {
+      name: "HIPAA",
+      description:
+        "Health Insurance Portability and Accountability Act - federal law protecting patient health information privacy",
+    },
+    {
+      name: "PHI",
+      description:
+        "Protected Health Information - any individually identifiable health information",
+    },
+  ],
+
+  // ... other route config
+});
+```
+
+### Route-Level Capabilities
+
+Define route-specific tools and capabilities:
+
+```typescript
+const adminRoute = agent.createRoute({
+  title: "Admin Panel",
+  capabilities: [
+    {
+      title: "User Management",
+      description: "Tools for managing user accounts",
+      tools: [userDeleteTool, userSuspendTool], // High-permission tools
+    },
+  ],
+
+  // ... other route config
+});
+
+// These capabilities combine with agent-level capabilities
+// Route can access both admin tools AND general agent tools
+```
+
+### Route-Level Guidelines
+
+Add contextual behavioral guidelines:
+
+```typescript
+const onboardingRoute = agent.createRoute({
+  title: "New User Onboarding",
+  guidelines: [
+    {
+      condition: "User seems confused",
+      action: "Break down explanations into smaller, simpler steps",
+    },
+    {
+      condition: "User mentions technical background",
+      action: "Include relevant technical details but explain them clearly",
+    },
+  ],
+
+  // ... other route config
+});
+```
+
+### Route-Level Knowledge Base
+
+Provide specialized knowledge for specific tasks:
+
+```typescript
+const salesRoute = agent.createRoute({
+  title: "Product Sales",
+  knowledgeBase: {
+    pricing: {
+      basic: "$29/month",
+      pro: "$99/month",
+      enterprise: "Custom pricing",
+    },
+    features: {
+      basic: ["Feature A", "Feature B"],
+      pro: ["All Basic features", "Feature C", "Feature D"],
+      enterprise: [
+        "All Pro features",
+        "Custom integrations",
+        "Dedicated support",
+      ],
+    },
+  },
+
+  // ... other route config
+});
+```
+
+### Practical Example
+
+```typescript
+const agent = new Agent({
+  name: "Acme Assistant",
+  identity: "You are a helpful assistant for Acme Corporation",
+  personality: "Professional and concise, use clear business language",
+  knowledgeBase: {
+    company: "Acme Corp provides enterprise software solutions",
+    values: ["Innovation", "Customer Success", "Integrity"],
+  },
+  guidelines: [
+    { action: "Always be polite and professional" },
+    { action: "Never share confidential information" },
+  ],
+  terms: [{ name: "SLA", description: "Service Level Agreement" }],
+});
+
+// Specialized sales route
+const salesRoute = agent.createRoute({
+  title: "Enterprise Sales",
+  identity:
+    "You are an enterprise sales specialist focused on closing large deals", // Overrides agent identity
+  personality: "Confident and results-oriented, focus on business outcomes", // Overrides agent personality
+  knowledgeBase: {
+    products: ["Enterprise Suite", "Cloud Platform"],
+    pricing: "Starting at $10,000/year",
+  }, // Extends agent knowledge base
+  guidelines: [
+    { action: "Always mention ROI and cost savings" }, // Extends agent guidelines
+  ],
+  terms: [
+    { name: "ROI", description: "Return on Investment" }, // Extends agent terms
+  ],
+});
+
+// Result: Route combines both agent and route properties
+// Identity: Route identity takes precedence
+// Personality: Route personality takes precedence
+// Knowledge: Agent knowledge + Route knowledge merged
+// Guidelines: Agent guidelines + Route guidelines combined
+// Terms: Agent terms + Route terms combined (route takes precedence on conflicts)
+```
+
+---
+
 ## Route Security
 
 ### Domain Scoping
@@ -577,6 +779,184 @@ const adminRoute = agent.createRoute({
 - ✅ Prevents accidental tool execution in wrong context
 - ✅ Reduces attack surface for each route
 - ✅ Makes permissions explicit and auditable
+
+---
+
+## Route Hooks
+
+Routes support lifecycle hooks that allow you to intercept and modify data as it's collected during conversations. Unlike agent-level hooks which apply to all routes, route hooks are specific to individual routes.
+
+### Data Update Hook
+
+The `onDataUpdate` hook is called whenever collected data changes for a specific route. This happens when:
+
+- AI extracts data from user responses
+- Tools update collected data
+- Data is manually modified
+
+### Context Update Hook
+
+The `onContextUpdate` hook is called whenever the agent's context is updated via `updateContext()` while this route is active. This allows routes to react to context changes in a route-specific way.
+
+```typescript
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Flight",
+  schema: BOOKING_SCHEMA,
+
+  hooks: {
+    // Called when context updates for this route
+    onContextUpdate: async (newContext, previousContext) => {
+      console.log("Context updated for booking route");
+
+      // Check if user preferences changed
+      if (
+        newContext.user?.preferredAirline !==
+        previousContext.user?.preferredAirline
+      ) {
+        console.log("User changed preferred airline, updating options...");
+        // Update route-specific logic based on new preference
+      }
+
+      // Validate context for this route
+      if (newContext.booking?.restrictions && !newContext.user?.isVip) {
+        throw new Error("VIP membership required for this booking type");
+      }
+
+      // Context is updated by side effects, no return value needed
+    },
+  },
+});
+```
+
+```typescript
+interface BookingData {
+  destination: string;
+  passengers: number;
+  email: string;
+}
+
+const bookingRoute = agent.createRoute<BookingData>({
+  title: "Book Flight",
+  schema: BOOKING_SCHEMA,
+
+  hooks: {
+    // Called whenever data changes for this route
+    onDataUpdate: async (data, previousData) => {
+      console.log("Booking data updated:", data);
+
+      // Validate email format
+      if (data.email && !data.email.includes("@")) {
+        throw new Error("Invalid email format");
+      }
+
+      // Auto-format passenger count
+      if (typeof data.passengers === "string") {
+        data.passengers = parseInt(data.passengers);
+      }
+
+      // Enrich data with external service
+      if (data.destination && !data.destinationCode) {
+        data.destinationCode = await getAirportCode(data.destination);
+      }
+
+      return data; // Return modified data
+    },
+  },
+});
+```
+
+**Hook Parameters:**
+
+- `data`: The new collected data (after merging with existing data)
+- `previousData`: The data before this update
+- **Returns**: Modified data object, or throw an error to reject the update
+
+**Use Cases:**
+
+- ✅ **Validation**: Ensure data meets business rules
+- ✅ **Enrichment**: Add derived or external data
+- ✅ **Transformation**: Convert data types or formats
+- ✅ **Logging**: Track data changes for analytics
+- ✅ **Integration**: Sync with external systems
+
+### Hook Execution Order
+
+#### Data Updates
+
+When collected data updates occur, hooks execute in this order:
+
+1. **Route-specific `onDataUpdate`** (if configured)
+2. **Agent-level `onDataUpdate`** (if configured)
+3. **Data merge** into session
+
+#### Context Updates
+
+When context updates occur via `updateContext()`, hooks execute in this order:
+
+1. **Route-specific `onContextUpdate`** (if current route is active)
+2. **Agent-level `onContextUpdate`** (if configured)
+3. **Context update** applied to agent
+
+```typescript
+// Example: Both route and agent hooks
+const bookingRoute = agent.createRoute({
+  title: "Book Flight",
+  hooks: {
+    onDataUpdate: (data) => {
+      console.log("Route: Validating booking data");
+      return data;
+    },
+    onContextUpdate: (newContext, previousContext) => {
+      console.log("Route: Context updated for booking");
+      return newContext;
+    },
+  },
+});
+
+const agent = new Agent({
+  hooks: {
+    onDataUpdate: (data) => {
+      console.log("Agent: General data processing");
+      return data;
+    },
+    onContextUpdate: (newContext, previousContext) => {
+      console.log("Agent: Context updated globally");
+      return newContext;
+    },
+  },
+});
+```
+
+**Important Notes:**
+
+- **Route hooks only trigger when that specific route is active**
+- **Agent hooks trigger for all routes and contexts**
+- Both route and agent hooks can modify data/context before it's saved
+- If a hook throws an error, the update is rejected
+- Hooks are async and support Promises
+- Route hooks provide route-specific behavior isolation
+
+### Error Handling
+
+Hooks can reject data updates by throwing errors:
+
+```typescript
+hooks: {
+  onDataUpdate: (data, previousData) => {
+    // Reject invalid passenger count
+    if (data.passengers < 1 || data.passengers > 9) {
+      throw new Error("Passenger count must be between 1 and 9");
+    }
+
+    // Reject if trying to change immutable fields
+    if (previousData.confirmed && data.destination !== previousData.destination) {
+      throw new Error("Cannot change destination after confirmation");
+    }
+
+    return data;
+  },
+}
+```
 
 ---
 

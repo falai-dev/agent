@@ -132,6 +132,22 @@ agent.createRoute({
     "Never send more than 2 messages without waiting for response",
     "Do not make promises you cannot keep",
   ],
+  // Route-level guidelines for sales behavior
+  guidelines: [
+    {
+      condition: "Customer mentions budget concerns",
+      action: "Focus on ROI and long-term value rather than upfront cost",
+    },
+    {
+      condition: "Customer seems hesitant or unsure",
+      action: "Offer a free trial or consultation to reduce risk",
+    },
+    {
+      condition: "Customer asks for competitors comparison",
+      action:
+        "Highlight unique strengths and differentiators without negative comments",
+    },
+  ],
 });
 
 agent.createRoute({

@@ -46,6 +46,19 @@ async function main() {
     title: "Book Hotel",
     description: "Collects hotel booking information",
     conditions: ["User wants to book a hotel"],
+    // Route-level capabilities for booking-specific tools
+    capabilities: [
+      {
+        title: "Hotel Booking Tools",
+        description: "Tools for managing hotel reservations",
+        tools: [], // Would include booking tools here
+      },
+      {
+        title: "Payment Processing",
+        description: "Tools for handling payments",
+        tools: [], // Would include payment tools here
+      },
+    ],
     schema: {
       type: "object",
       properties: {

@@ -221,6 +221,21 @@ function createTravelAgent() {
     description:
       "Helps the customer find and book a flight to their desired destination.",
     conditions: ["The customer wants to book a flight"],
+    // Route-level identity for travel booking
+    identity:
+      "You are an experienced travel booking specialist who helps customers find the best flight options. Be knowledgeable about airlines, routes, and booking policies while focusing on customer satisfaction.",
+    // Travel industry knowledge base
+    knowledgeBase: {
+      airlines: {
+        major: ["American Airlines", "Delta", "United", "Southwest"],
+        lowCost: ["Spirit", "Frontier", "Allegiant"],
+      },
+      bookingTips: {
+        flexibility: "Book mid-week flights for better prices",
+        advance: "Book 2-3 months in advance for domestic flights",
+        baggage: "Check airline-specific baggage fees",
+      },
+    },
     // NEW: Transition to feedback collection after successful booking
     onComplete: (session) => {
       // Dynamic logic: only collect feedback if destination is known

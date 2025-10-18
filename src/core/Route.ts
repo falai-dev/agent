@@ -9,9 +9,10 @@ import type {
   StepResult,
   RouteTransitionConfig,
   RouteCompletionHandler,
+  RouteLifecycleHooks,
 } from "../types/route";
 import type { StructuredSchema } from "../types/schema";
-import type { Guideline } from "../types/agent";
+import type { Capability, Guideline, Term } from "../types/agent";
 
 import { Step } from "./Step";
 import { generateRouteId } from "../utils/id";
@@ -24,6 +25,8 @@ export class Route<TContext = unknown, TData = unknown> {
   public readonly id: string;
   public readonly title: string;
   public readonly description?: string;
+  public readonly identity?: Template<TContext, TData>;
+  public readonly personality?: string;
   public readonly conditions: Template<TContext, TData>[];
   public readonly domains?: string[];
   public readonly rules: Template<TContext, TData>[];
@@ -40,8 +43,11 @@ export class Route<TContext = unknown, TData = unknown> {
     | string
     | RouteTransitionConfig<TContext, TData>
     | RouteCompletionHandler<TContext, TData>;
+  public readonly hooks?: RouteLifecycleHooks<TContext, TData>;
   private routingExtrasSchema?: StructuredSchema;
   private guidelines: Guideline<TContext>[] = [];
+  private terms: Term<TContext>[] = [];
+  private capabilities: Capability[] = [];
   private knowledgeBase: Record<string, unknown> = {};
 
   constructor(options: RouteOptions<TContext, TData>) {
@@ -49,6 +55,8 @@ export class Route<TContext = unknown, TData = unknown> {
     this.id = options.id || generateRouteId(options.title);
     this.title = options.title;
     this.description = options.description;
+    this.identity = options.identity;
+    this.personality = options.personality;
     this.conditions = options.conditions || [];
     this.domains = options.domains;
     this.rules = options.rules || [];
@@ -64,6 +72,7 @@ export class Route<TContext = unknown, TData = unknown> {
     this.schema = options.schema;
     this.initialData = options.initialData;
     this.onComplete = options.onComplete;
+    this.hooks = options.hooks;
 
     // Initialize knowledge base
     if (options.knowledgeBase) {
@@ -74,6 +83,20 @@ export class Route<TContext = unknown, TData = unknown> {
     if (options.guidelines) {
       options.guidelines.forEach((guideline) => {
         this.createGuideline(guideline);
+      });
+    }
+
+    // Initialize terms from options
+    if (options.terms) {
+      options.terms.forEach((term) => {
+        this.createTerm(term);
+      });
+    }
+
+    // Initialize capabilities from options
+    if (options.capabilities) {
+      options.capabilities.forEach((capability) => {
+        this.createCapability(capability);
       });
     }
 
@@ -117,10 +140,44 @@ export class Route<TContext = unknown, TData = unknown> {
   }
 
   /**
+   * Create a term for the route's domain glossary
+   */
+  createTerm(term: Term<TContext>): this {
+    this.terms.push(term);
+    return this;
+  }
+
+  /**
+   * Create a capability for this route
+   */
+  createCapability(capability: Capability): this {
+    const capabilityWithId = {
+      ...capability,
+      id: capability.id || `capability_${this.id}_${this.capabilities.length}`,
+    };
+    this.capabilities.push(capabilityWithId);
+    return this;
+  }
+
+  /**
    * Get all guidelines for this route
    */
   getGuidelines(): Guideline<TContext>[] {
     return [...this.guidelines];
+  }
+
+  /**
+   * Get all terms for this route
+   */
+  getTerms(): Term<TContext>[] {
+    return [...this.terms];
+  }
+
+  /**
+   * Get all capabilities for this route
+   */
+  getCapabilities(): Capability[] {
+    return [...this.capabilities];
   }
 
   /**
@@ -244,6 +301,40 @@ export class Route<TContext = unknown, TData = unknown> {
     }
 
     return lines.join("\n");
+  }
+
+  /**
+   * Handle data updates for this route, calling the onDataUpdate hook if configured
+   * @param data - New collected data
+   * @param previousCollected - Previously collected data
+   * @returns Modified data after hook processing, or original data if no hook
+   */
+  async handleDataUpdate(
+    data: Partial<TData>,
+    previousCollected: Partial<TData>
+  ): Promise<Partial<TData>> {
+    // Call route-specific onDataUpdate hook if configured
+    if (this.hooks?.onDataUpdate) {
+      return await this.hooks.onDataUpdate(data, previousCollected);
+    }
+
+    // Return original data if no hook
+    return data;
+  }
+
+  /**
+   * Handle context updates for this route, calling the onContextUpdate hook if configured
+   * @param newContext - New context
+   * @param previousContext - Previous context
+   */
+  async handleContextUpdate(
+    newContext: TContext,
+    previousContext: TContext
+  ): Promise<void> {
+    // Call route-specific onContextUpdate hook if configured
+    if (this.hooks?.onContextUpdate) {
+      await this.hooks.onContextUpdate(newContext, previousContext);
+    }
   }
 
   /**

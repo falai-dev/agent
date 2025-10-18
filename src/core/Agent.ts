@@ -227,7 +227,7 @@ export class Agent<TContext = unknown> {
 
   /**
    * Update the agent's context
-   * Triggers the onContextUpdate lifecycle hook if configured
+   * Triggers both agent-level and route-specific onContextUpdate lifecycle hooks if configured
    */
   async updateContext(updates: Partial<TContext>): Promise<void> {
     const previousContext = this.context;
@@ -238,7 +238,20 @@ export class Agent<TContext = unknown> {
       ...(updates as Record<string, unknown>),
     } as TContext;
 
-    // Trigger lifecycle hook if configured
+    // Trigger route-specific lifecycle hook if configured and session has current route
+    if (this.currentSession?.currentRoute) {
+      const currentRoute = this.routes.find(
+        (r) => r.id === this.currentSession!.currentRoute?.id
+      );
+      if (
+        currentRoute?.hooks?.onContextUpdate &&
+        previousContext !== undefined
+      ) {
+        await currentRoute.handleContextUpdate(this.context, previousContext);
+      }
+    }
+
+    // Trigger agent-level lifecycle hook if configured
     if (this.options.hooks?.onContextUpdate && previousContext !== undefined) {
       await this.options.hooks.onContextUpdate(this.context, previousContext);
     }
@@ -246,7 +259,7 @@ export class Agent<TContext = unknown> {
 
   /**
    * Update collected data in session with lifecycle hook support
-   * Triggers the onDataUpdate lifecycle hook if configured
+   * Triggers both agent-level and route-specific onDataUpdate lifecycle hooks if configured
    * @internal
    */
   private async updateData<TData = unknown>(
@@ -261,7 +274,20 @@ export class Agent<TContext = unknown> {
       ...collectedUpdate,
     };
 
-    // Trigger lifecycle hook if configured
+    // Trigger route-specific lifecycle hook if configured and session has a current route
+    if (session.currentRoute) {
+      const currentRoute = this.routes.find(
+        (r) => r.id === session.currentRoute?.id
+      );
+      if (currentRoute?.hooks?.onDataUpdate) {
+        newCollected = await currentRoute.handleDataUpdate(
+          newCollected,
+          previousCollected
+        );
+      }
+    }
+
+    // Trigger agent-level lifecycle hook if configured
     if (this.options.hooks?.onDataUpdate) {
       newCollected = (await this.options.hooks.onDataUpdate(
         newCollected,
@@ -492,6 +518,16 @@ export class Agent<TContext = unknown> {
         history,
         lastMessage: lastUserMessage,
         agentOptions: this.options,
+        // Combine agent and route properties according to the specified logic
+        combinedGuidelines: [
+          ...this.getGuidelines(),
+          ...selectedRoute.getGuidelines(),
+        ],
+        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedCapabilities: [
+          ...this.getCapabilities(),
+          ...selectedRoute.getCapabilities(),
+        ],
         context: effectiveContext,
         session,
       });
@@ -613,6 +649,16 @@ export class Agent<TContext = unknown> {
         history,
         lastMessage: lastUserMessage,
         agentOptions: this.options,
+        // Combine agent and route properties according to the specified logic
+        combinedGuidelines: [
+          ...this.getGuidelines(),
+          ...selectedRoute.getGuidelines(),
+        ],
+        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedCapabilities: [
+          ...this.getCapabilities(),
+          ...selectedRoute.getCapabilities(),
+        ],
         context: effectiveContext,
         session,
       });
@@ -950,6 +996,16 @@ export class Agent<TContext = unknown> {
         history,
         lastMessage: lastUserMessage,
         agentOptions: this.options,
+        // Combine agent and route properties according to the specified logic
+        combinedGuidelines: [
+          ...this.getGuidelines(),
+          ...selectedRoute.getGuidelines(),
+        ],
+        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedCapabilities: [
+          ...this.getCapabilities(),
+          ...selectedRoute.getCapabilities(),
+        ],
         context: effectiveContext,
         session,
       });
@@ -1038,6 +1094,16 @@ export class Agent<TContext = unknown> {
         history,
         lastMessage: lastUserMessage,
         agentOptions: this.options,
+        // Combine agent and route properties according to the specified logic
+        combinedGuidelines: [
+          ...this.getGuidelines(),
+          ...selectedRoute.getGuidelines(),
+        ],
+        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedCapabilities: [
+          ...this.getCapabilities(),
+          ...selectedRoute.getCapabilities(),
+        ],
         context: effectiveContext,
         session,
       });

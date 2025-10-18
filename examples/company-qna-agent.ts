@@ -249,6 +249,25 @@ const companyInfoRoute = agent.createRoute({
     "How many employees",
     "Where is the headquarters",
   ],
+  // Route-specific knowledge base for company information
+  knowledgeBase: {
+    company: {
+      name: "Acme Corporation",
+      founded: "1985",
+      headquarters: "San Francisco, CA",
+      employees: "2,500+",
+      mission:
+        "To build software that makes businesses more efficient and people more productive",
+    },
+    history: {
+      founding: "Founded in 1985 by tech entrepreneurs",
+      milestones: [
+        "IPO in 1998",
+        "Acquired 3 companies in 2010s",
+        "Expanded to 20 countries by 2020",
+      ],
+    },
+  },
   // NO schema - stepless Q&A route
   // Just use initial step with prompt for response generation
 });

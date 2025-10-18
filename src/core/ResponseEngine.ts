@@ -20,6 +20,10 @@ export interface BuildResponsePromptParams<
   history: Event[];
   lastMessage: string;
   agentOptions?: AgentOptions<TContext>;
+  // Combined properties from agent and route
+  combinedGuidelines?: Guideline<TContext>[];
+  combinedTerms?: Term<TContext>[];
+  combinedCapabilities?: Capability[];
   context?: TContext;
   session?: SessionState<TData>;
 }
@@ -78,13 +82,28 @@ export class ResponseEngine<TContext = unknown> {
       history,
       lastMessage,
       agentOptions,
+      combinedGuidelines,
+      combinedTerms,
+      combinedCapabilities,
       context,
       session,
     } = params;
     const templateContext = { context, session, history };
     const pc = new PromptComposer(templateContext);
-    if (agentOptions) {
-      await pc.addAgentMeta(agentOptions);
+
+    // Create combined agent options with route overrides
+    let effectiveAgentOptions = agentOptions;
+    if (agentOptions && (route.identity || route.personality)) {
+      // Route identity and personality override agent versions
+      effectiveAgentOptions = {
+        ...agentOptions,
+        ...(route.identity && { identity: route.identity }),
+        ...(route.personality && { personality: route.personality }),
+      };
+    }
+
+    if (effectiveAgentOptions) {
+      await pc.addAgentMeta(effectiveAgentOptions);
     }
     await pc.addInstruction(
       `Route: ${route.title}${
@@ -108,6 +127,22 @@ export class ResponseEngine<TContext = unknown> {
       agentOptions?.knowledgeBase,
       route.getKnowledgeBase()
     );
+
+    // Add combined guidelines (agent + route)
+    if (combinedGuidelines && combinedGuidelines.length > 0) {
+      await pc.addGuidelines(combinedGuidelines);
+    }
+
+    // Add combined terms (agent + route)
+    if (combinedTerms && combinedTerms.length > 0) {
+      await pc.addGlossary(combinedTerms);
+    }
+
+    // Add combined capabilities (agent + route)
+    if (combinedCapabilities && combinedCapabilities.length > 0) {
+      await pc.addCapabilities(combinedCapabilities);
+    }
+
     await pc.addInteractionHistory(history);
     await pc.addLastMessage(lastMessage);
     await pc.addInstruction(

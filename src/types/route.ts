@@ -25,9 +25,37 @@ export interface StepRef {
 }
 
 /**
- * Forward declare Guideline for circular dependency
+ * Forward declare Guideline, Term, and Capability for circular dependency
  */
-import type { Guideline } from "./agent";
+import type { Guideline, Term, Capability } from "./agent";
+
+/**
+ * Route lifecycle hooks for managing route-specific data and behavior
+ */
+export interface RouteLifecycleHooks<TContext = unknown, TData = unknown> {
+  /**
+   * Called after collected data is updated for this route (from AI response or tool execution)
+   * Useful for validation, enrichment, or persistence of route-specific collected data
+   * Return modified collected data or the same data to keep it unchanged
+   *
+   * Unlike Agent-level onDataUpdate, this only triggers for data changes in this specific route.
+   */
+  onDataUpdate?: (
+    data: Partial<TData>,
+    previousCollected: Partial<TData>
+  ) => Partial<TData> | Promise<Partial<TData>>;
+
+  /**
+   * Called after context is updated via updateContext() when this route is active
+   * Useful for route-specific context reactions, validation, or side effects
+   *
+   * Unlike Agent-level onContextUpdate, this only triggers when this specific route is active.
+   */
+  onContextUpdate?: (
+    newContext: TContext,
+    previousContext: TContext
+  ) => void | Promise<void>;
+}
 
 /**
  * Route transition configuration when route completes
@@ -65,10 +93,18 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   title: string;
   /** Description of what this route accomplishes */
   description?: string;
+  /** Optional identity prompt defining the agent's role and persona for this route */
+  identity?: Template<TContext, TData>;
+  /** Optional personality prompt defining the agent's communication style for this route */
+  personality?: string;
   /** Conditions that activate this route */
   conditions?: Template<TContext, TData>[];
   /** Initial guidelines for this route */
   guidelines?: Guideline<TContext>[];
+  /** Initial terms for the route's domain glossary */
+  terms?: Term<TContext>[];
+  /** Initial capabilities for this route */
+  capabilities?: Capability[];
   /** Domain names that are allowed in this route (undefined = all domains) */
   domains?: string[];
   /** Absolute rules the agent must follow in this route */
@@ -138,6 +174,10 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
     | string
     | RouteTransitionConfig<TContext, TData>
     | RouteCompletionHandler<TContext, TData>;
+  /**
+   * Route lifecycle hooks
+   */
+  hooks?: RouteLifecycleHooks<TContext, TData>;
   /** Knowledge base specific to this route containing any JSON structure the AI should know */
   knowledgeBase?: Record<string, unknown>;
 }

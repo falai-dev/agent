@@ -22,6 +22,7 @@ interface AgentOptions<TContext = unknown> {
   // Optional metadata
   description?: string;
   goal?: string;
+  personality?: string; // Optional personality prompt defining communication style
   context?: TContext;
 
   // Optional current session for convenience methods
