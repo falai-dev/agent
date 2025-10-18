@@ -137,6 +137,13 @@ export class Agent<TContext = unknown> {
   }
 
   /**
+   * Get agent identity
+   */
+  get identity(): string | undefined {
+    return this.options.identity;
+  }
+
+  /**
    * Create a new route (journey)
    * @template TData - Type of data collected throughout the route
    */
@@ -411,6 +418,7 @@ export class Agent<TContext = unknown> {
           goal: this.options.goal,
           description: this.options.description,
           personality: this.options.personality,
+          identity: this.options.identity,
         },
         provider: this.options.provider,
         context: effectiveContext,
@@ -578,13 +586,13 @@ export class Agent<TContext = unknown> {
       // Create a temporary step for completion message generation using endStep configuration
       const completionStep = new Step<TContext>(
         selectedRoute.id,
-        endStepSpec.instructions ||
+        endStepSpec.prompt ||
           "Summarize what was accomplished and confirm completion",
         endStepSpec.id || END_ROUTE_ID,
         endStepSpec.collect,
         undefined,
         endStepSpec.requires,
-        endStepSpec.instructions ||
+        endStepSpec.prompt ||
           "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
       );
 
@@ -608,6 +616,7 @@ export class Agent<TContext = unknown> {
           goal: this.options.goal,
           description: this.options.description,
           personality: this.options.personality,
+          identity: this.options.identity,
         }
       );
 
@@ -690,6 +699,7 @@ export class Agent<TContext = unknown> {
           name: this.options.name,
           goal: this.options.goal,
           description: this.options.description,
+          identity: this.options.identity,
         })
         .addPersonality(this.options.personality)
         .addInteractionHistory(history)
@@ -871,6 +881,7 @@ export class Agent<TContext = unknown> {
           goal: this.options.goal,
           description: this.options.description,
           personality: this.options.personality,
+          identity: this.options.identity,
         },
         provider: this.options.provider,
         context: effectiveContext,
@@ -1010,13 +1021,13 @@ export class Agent<TContext = unknown> {
       // Create a temporary step for completion message generation using endStep configuration
       const completionStep = new Step<TContext>(
         selectedRoute.id,
-        endStepSpec.instructions ||
+        endStepSpec.prompt ||
           "Summarize what was accomplished and confirm completion",
         endStepSpec.id || END_ROUTE_ID,
         endStepSpec.collect,
         undefined,
         endStepSpec.requires,
-        endStepSpec.instructions ||
+        endStepSpec.prompt ||
           "Summarize what was accomplished and confirm completion based on the conversation history and collected data"
       );
 

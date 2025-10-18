@@ -135,22 +135,22 @@ agent.createRoute<{ title: string; date: string; description: string }>({
   },
   steps: [
     {
-      instructions: "What is the title of the meeting?",
+      prompt: "What is the title of the meeting?",
       collect: ["title"],
     },
     {
-      instructions: "When would you like to schedule it?",
+      prompt: "When would you like to schedule it?",
       collect: ["date"],
     },
     {
-      instructions: "Any description for the meeting?",
+      prompt: "Any description for the meeting?",
       collect: ["description"],
     },
     {
       tool: scheduleEventTool,
     },
     {
-      instructions: "The meeting has been scheduled.",
+      prompt: "The meeting has been scheduled.",
     },
   ],
 });

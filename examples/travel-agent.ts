@@ -189,6 +189,8 @@ async function createTravelAgent() {
     description:
       "A knowledgeable travel agent who helps book flights, answer travel questions, and manage reservations.",
     goal: "Help customers book travel and manage their reservations",
+    identity:
+      "I am Walker, your friendly and knowledgeable travel companion. I've helped thousands of travelers find their perfect journeys and I'm here to make your travel dreams come true with expert guidance and personalized recommendations.",
     provider: provider,
     context: {
       customerId: "test-123",
@@ -275,7 +277,7 @@ async function createTravelAgent() {
 
   // Build the route flow with data extraction and smart step progression
   const askDestination = flightBookingRoute.initialStep.nextStep({
-    instructions: "Ask about the destination",
+    prompt: "Ask about the destination",
     collect: ["destination"],
     skipIf: (data) => !!data.destination,
     condition: "Customer needs to specify their travel destination",
@@ -288,7 +290,7 @@ async function createTravelAgent() {
   });
 
   const askDates = enrichDestination.nextStep({
-    instructions: "Ask about preferred travel dates",
+    prompt: "Ask about preferred travel dates",
     collect: ["departureDate"],
     skipIf: (data) => !!data.departureDate,
     requires: ["destination"],
@@ -296,7 +298,7 @@ async function createTravelAgent() {
   });
 
   const askPassengers = askDates.nextStep({
-    instructions: "Ask for number of passengers",
+    prompt: "Ask for number of passengers",
     collect: ["passengers"],
     skipIf: (data) => !!data.passengers,
     requires: ["destination", "departureDate"],
@@ -310,13 +312,13 @@ async function createTravelAgent() {
   });
 
   const presentFlights = searchFlightsStep.nextStep({
-    instructions: "Present available flights and ask which one works for them",
+    prompt: "Present available flights and ask which one works for them",
     condition: "Flight search complete, present options to customer",
   });
 
   // Happy path: customer selects a flight
   const confirmBooking = presentFlights.nextStep({
-    instructions: "Confirm booking details before proceeding",
+    prompt: "Confirm booking details before proceeding",
     collect: ["cabinClass", "urgency"], // Additional optional data
     condition: "Customer interested in a flight, confirm booking details",
   });
@@ -327,7 +329,7 @@ async function createTravelAgent() {
   });
 
   const provideConfirmation = bookFlightStep.nextStep({
-    instructions: "Provide confirmation number and booking summary",
+    prompt: "Provide confirmation number and booking summary",
     condition: "Booking completed successfully",
   });
 
@@ -373,7 +375,7 @@ async function createTravelAgent() {
   });
 
   const askConfirmation = bookingStatusRoute.initialStep.nextStep({
-    instructions: "Ask for the confirmation number or booking reference",
+    prompt: "Ask for the confirmation number or booking reference",
     collect: ["confirmationNumber"],
     skipIf: (data) => !!data.confirmationNumber,
     condition:
@@ -387,7 +389,7 @@ async function createTravelAgent() {
   });
 
   const provideStatus = checkStatus.nextStep({
-    instructions: "Provide booking status and relevant information",
+    prompt: "Provide booking status and relevant information",
     condition: "Booking status retrieved successfully",
   });
 
@@ -422,20 +424,18 @@ async function createTravelAgent() {
   });
 
   const askFeedbackRating = feedbackRoute.initialStep.nextStep({
-    instructions:
-      "Ask for overall rating from 1 to 5 for the booking experience",
+    prompt: "Ask for overall rating from 1 to 5 for the booking experience",
     collect: ["rating"],
     skipIf: (data) => !!data.rating,
   });
 
   const askRecommendation = askFeedbackRating.nextStep({
-    instructions:
-      "Ask if they would recommend our service to a friend (yes/no)",
+    prompt: "Ask if they would recommend our service to a friend (yes/no)",
     collect: ["recommendToFriend"],
   });
 
   const thankForFeedback = askRecommendation.nextStep({
-    instructions: "Thank them for their feedback and wish them a great trip!",
+    prompt: "Thank them for their feedback and wish them a great trip!",
   });
 
   thankForFeedback.nextStep({ step: END_ROUTE });

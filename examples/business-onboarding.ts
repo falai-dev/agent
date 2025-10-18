@@ -379,6 +379,8 @@ async function createBusinessOnboardingAgent(
     description:
       "A specialized assistant that helps businesses set up intelligent conversation routes for their customers.",
     goal: "Collect comprehensive business information and create personalized conversation routes",
+    identity:
+      "I am the Business Onboarding Assistant, your expert guide to setting up intelligent customer conversation systems. With years of experience helping businesses automate their customer interactions, I'm here to make your setup process smooth and effective.",
     provider: provider,
     context: {
       userId,
@@ -418,7 +420,7 @@ async function createBusinessOnboardingAgent(
     description: "Complete onboarding process to configure personalized routes",
     conditions: ["User is starting the onboarding process"],
     endStep: {
-      instructions:
+      prompt:
         "🎉 Perfect! Setup complete! Your WhatsApp assistant is ready and will use all this information to automatically serve your customers. If you have any questions or need adjustments, just let me know!",
     },
   });
@@ -430,7 +432,7 @@ async function createBusinessOnboardingAgent(
 
   // Step 0: Welcome
   const welcome = onboardingRoute.initialStep.nextStep({
-    instructions: `Hello ${userName}! 👋 I'm your setup assistant. I'll help you configure your WhatsApp assistant by collecting practical information about your business. ${
+    prompt: `Hello ${userName}! 👋 I'm your setup assistant. I'll help you configure your WhatsApp assistant by collecting practical information about your business. ${
       initialData.business?.businessName
         ? `I see your company is "${initialData.business.businessName}".`
         : ""
@@ -439,7 +441,7 @@ async function createBusinessOnboardingAgent(
 
   // Step 1: Business basics - Ask
   const askBusiness = welcome.nextStep({
-    instructions:
+    prompt:
       initialData.business?.businessName &&
       initialData.business?.businessDescription &&
       initialData.business?.businessSector
@@ -457,7 +459,7 @@ async function createBusinessOnboardingAgent(
 
   // Step 2: Products/Services - Ask
   const askProducts = saveBusiness.nextStep({
-    instructions:
+    prompt:
       "Perfect! Now tell me: what are the main products or services you offer? And who is your target audience? (e.g., 'We sell women's clothing and accessories for women aged 25-45')",
   });
 
@@ -469,13 +471,13 @@ async function createBusinessOnboardingAgent(
 
   // Step 3: Location - Branch point
   const askLocation = saveProducts.nextStep({
-    instructions:
+    prompt:
       "Great! Do you have a physical store or in-person service location? (answer 'yes' or 'no')",
   });
 
   // Step 3a: Physical store path
   const askPhysicalLocation = askLocation.nextStep({
-    instructions:
+    prompt:
       "I see! Since you have a physical presence, I need the complete address (street, number, city, and step) and business hours. This is important for your assistant to inform customers. (e.g., 'José Silva Street, 123, São Paulo - SP - Mon to Fri: 9am to 6pm')",
     condition: "User has a physical store",
   });
@@ -487,7 +489,7 @@ async function createBusinessOnboardingAgent(
 
   // Step 3b: Online-only path
   const askOnlineLocation = askLocation.nextStep({
-    instructions:
+    prompt:
       "Perfect! Since it's online only, please share your main website or social media where customers can find you? And what are your support hours? (e.g., 'www.example.com - 24/7 support' or 'Instagram @mycompany - Mon to Fri: 9am-6pm')",
     condition: "User does not have a physical store",
   });
@@ -499,7 +501,7 @@ async function createBusinessOnboardingAgent(
 
   // Step 4: Contact info (convergence point for physical stores)
   const askContact = savePhysicalLocation.nextStep({
-    instructions:
+    prompt:
       "Do you also have a website or social media? If yes, which one? (if not, you can skip by saying 'I don't have one')",
   });
 
@@ -510,7 +512,7 @@ async function createBusinessOnboardingAgent(
 
   // Step 5: Payment info (convergence point from both paths)
   const askPayment = saveContact.nextStep({
-    instructions:
+    prompt:
       "Now about payment: do you sell products/services that customers pay for? If yes, what payment methods do you accept? If you accept Pix, provide the key and type (CPF, CNPJ, email, phone). Do you offer installments? (e.g., 'Pix CPF: 12345678900, Credit card up to 12x, Bank slip' - or say 'not applicable' if you don't sell)",
   });
 
@@ -524,7 +526,7 @@ async function createBusinessOnboardingAgent(
 
   // Step 6: Suggest automatic routes
   const suggestRoutes = savePayment.nextStep({
-    instructions:
+    prompt:
       "Perfect! Now I'll create the essential routes. Based on what you told me, I'll automatically create:\n\n1. **Products and Services** - for when they ask what you offer\n2. **Pricing and Quotes** - for questions about prices\n3. **Payment Information** - payment methods and installments\n4. **Location and Contact** - address, website, and hours\n\nThese are the most important routes for any business. I'll create them automatically with the information you provided. Sound good?",
   });
 
@@ -541,13 +543,13 @@ async function createBusinessOnboardingAgent(
 
   // Step 8: Summary and options
   const summary = reviewData.nextStep({
-    instructions:
+    prompt:
       "Done! ✅ I've configured everything:\n\n✓ Business information\n✓ Products/services and target audience\n✓ Location and contact\n✓ Payment methods\n✓ Essential conversation routes\n\nYour assistant is ready! It will use this information to automatically respond when customers ask. Do you want to add any custom routes or is everything good?",
   });
 
   // Step 9a: Add more routes
   const askCustomRoute = summary.nextStep({
-    instructions:
+    prompt:
       "Got it! Tell me about this additional route: what's the title, what kind of questions should it answer, and what keywords do customers use? (e.g., 'Warranty and Exchange - answers about warranty, exchange, and returns - keywords: warranty, exchange, return')",
     condition: "User wants to add more routes",
   });
@@ -577,20 +579,19 @@ async function createBusinessOnboardingAgent(
     steps: [
       {
         id: "ask_rating",
-        instructions:
-          "How would you rate your onboarding experience? (1-5 stars)",
+        prompt: "How would you rate your onboarding experience? (1-5 stars)",
       },
       {
         id: "ask_liked_most",
-        instructions: "What did you like most about the process?",
+        prompt: "What did you like most about the process?",
       },
       {
         id: "ask_improve",
-        instructions: "Is there anything we could improve?",
+        prompt: "Is there anything we could improve?",
       },
       {
         id: "thank_you",
-        instructions: "Thank you for your feedback! It helps us improve. 🙏",
+        prompt: "Thank you for your feedback! It helps us improve. 🙏",
       },
     ],
   });
@@ -601,23 +602,22 @@ async function createBusinessOnboardingAgent(
     description: "Same flow using traditional chaining",
     conditions: ["User wants manual feedback flow"],
     endStep: {
-      instructions: "Thank you for your feedback! It helps us improve. 🙏",
+      prompt: "Thank you for your feedback! It helps us improve. 🙏",
     },
   });
 
   manualFeedbackRoute.initialStep
     .nextStep({
       id: "ask_rating",
-      instructions:
-        "How would you rate your onboarding experience? (1-5 stars)",
+      prompt: "How would you rate your onboarding experience? (1-5 stars)",
     })
     .nextStep({
       id: "ask_liked_most",
-      instructions: "What did you like most about the process?",
+      prompt: "What did you like most about the process?",
     })
     .nextStep({
       id: "ask_improve",
-      instructions: "Is there anything we could improve?",
+      prompt: "Is there anything we could improve?",
       condition: "User wants to provide feedback",
     })
     .nextStep({ step: END_ROUTE }); // Uses route-level endStep

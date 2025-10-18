@@ -73,8 +73,10 @@ export interface AgentOptions<TContext = unknown> {
   description?: string;
   /** The agent's primary goal or objective */
   goal?: string;
-  /** Optional personality/tone instructions used in prompts */
+  /** Optional personality/tone prompt used in prompts */
   personality?: string;
+  /** Optional identity prompt defining the agent's self-concept and role */
+  identity?: string;
   /** Enable debug logging */
   debug?: boolean;
   /** Default context data available to the agent */

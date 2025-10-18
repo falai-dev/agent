@@ -53,7 +53,7 @@ Anthropic's Claude models are known for their exceptional reasoning, analysis, a
 
 - Step-of-the-art reasoning and analysis
 - 200K context window
-- Excellent at following complex instructions
+- Excellent at following complex prompt
 - Strong coding and writing capabilities
 
 #### Installation

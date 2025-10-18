@@ -169,7 +169,7 @@ agent.createRoute({
   description: "Answers user questions",
   conditions: ["User needs help or asks a question"],
   initialStep: {
-    instructions: "Answer the user's question helpfully",
+    prompt: "Answer the user's question helpfully",
   },
 });
 
@@ -246,25 +246,25 @@ const bookingRoute = agent.createRoute<HotelBookingData>({
   conditions: ["User wants to book a hotel"],
   schema,
   endStep: {
-    instructions: "Confirm the booking details warmly and thank the user",
+    prompt: "Confirm the booking details warmly and thank the user",
   },
 });
 
 // 5️⃣ Build the flow to collect data step-by-step
 const askHotel = bookingRoute.initialStep.nextStep({
-  instructions: "Ask which hotel they want to book",
+  prompt: "Ask which hotel they want to book",
   collect: ["hotelName"],
   skipIf: (data) => !!data.hotelName, // Skip if we already have it
 });
 
 const askDate = askHotel.nextStep({
-  instructions: "Ask for the booking date",
+  prompt: "Ask for the booking date",
   collect: ["date"],
   skipIf: (data) => !!data.date,
 });
 
 const askGuests = askDate.nextStep({
-  instructions: "Ask for the number of guests",
+  prompt: "Ask for the number of guests",
   collect: ["guests"],
   skipIf: (data) => !!data.guests,
 });

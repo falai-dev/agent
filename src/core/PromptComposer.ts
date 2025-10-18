@@ -11,11 +11,13 @@ export class PromptComposer<TContext = unknown> {
     name: string;
     goal?: string;
     description?: string;
+    identity?: string;
   }): this {
     const lines: string[] = [];
     lines.push(`Agent: ${agent.name}`);
     if (agent.goal) lines.push(`Goal: ${agent.goal}`);
     if (agent.description) lines.push(`Description: ${agent.description}`);
+    if (agent.identity) lines.push(`Identity: ${agent.identity}`);
     this.parts.push(lines.join("\n"));
     return this;
   }
@@ -23,6 +25,13 @@ export class PromptComposer<TContext = unknown> {
   addPersonality(personality?: string): this {
     if (personality && personality.trim().length) {
       this.parts.push(`Personality: ${personality.trim()}`);
+    }
+    return this;
+  }
+
+  addIdentity(identity?: string): this {
+    if (identity && identity.trim().length) {
+      this.parts.push(`Identity: ${identity.trim()}`);
     }
     return this;
   }

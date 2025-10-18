@@ -246,7 +246,7 @@ const companyInfoRoute = agent.createRoute({
     "Where is the headquarters",
   ],
   // NO schema - stepless Q&A route
-  // Just use initial step with instructions for response generation
+  // Just use initial step with prompt for response generation
 });
 
 // Initial step: Answer from knowledge base (no data collecting needed)
@@ -299,7 +299,7 @@ const fetchNews = newsRoute.initialStep.nextStep({
 });
 
 const shareNews = fetchNews.nextStep({
-  instructions: "Share the latest company news from context",
+  prompt: "Share the latest company news from context",
 });
 
 // Route 5: General FAQ Search (uses tool)
@@ -319,7 +319,7 @@ const searchFaqs = faqRoute.initialStep.nextStep({
 });
 
 const provideFaqAnswer = searchFaqs.nextStep({
-  instructions: "Provide answer based on FAQ search results",
+  prompt: "Provide answer based on FAQ search results",
 });
 
 // Route 6: Fallback (generic response)
@@ -359,7 +359,7 @@ const feedbackRoute = agent.createRoute<FeedbackData>({
     required: ["rating", "comments"],
   },
   endStep: {
-    instructions:
+    prompt:
       "Thank the user warmly for their valuable feedback and let them know we appreciate their time",
   },
 });
@@ -367,20 +367,20 @@ const feedbackRoute = agent.createRoute<FeedbackData>({
 feedbackRoute.initialStep
   .nextStep({
     id: "ask_rating",
-    instructions:
+    prompt:
       "I'd love to hear your feedback. On a scale of 1 to 5, how would you rate your experience with me today?",
     collect: ["rating"],
   })
   .nextStep({
     id: "ask_comments",
-    instructions:
+    prompt:
       "Thanks for the rating! Do you have any specific comments or suggestions?",
     collect: ["comments"],
     requires: ["rating"],
   })
   .nextStep({
     id: "ask_permission",
-    instructions:
+    prompt:
       "Thank you for the detailed feedback. Would it be okay if our team contacted you for more details?",
     collect: ["contactPermission"],
     requires: ["comments"],
@@ -553,7 +553,7 @@ async function processFeedback(data: Partial<FeedbackData>) {
 
 /*
  * 1. NO STEP MACHINES REQUIRED
- *    - Just use the initial step with a instructions description
+ *    - Just use the initial step with a prompt description
  *    - No collect, no skipIf, no step transitions
  *    - Perfect for stepless question-answering
  *

@@ -126,7 +126,7 @@ const route = agent.createRoute<YourDataType>({
 
 // Define steps
 route.initialStep.nextStep({
-  instructions: "Collect data",
+  prompt: "Collect data",
   collect: ["field1", "field2"],
 });
 

@@ -10,7 +10,7 @@ Start here if you're new to the framework:
 
 ### [Getting Started Guide](./GETTING_STARTED.md)
 
-Build your first AI agent in 5 minutes with step-by-step instructions.
+Build your first AI agent in 5 minutes with step-by-step prompt.
 
 **Topics:** Installation, first agent, basic routes, data extraction, session step
 

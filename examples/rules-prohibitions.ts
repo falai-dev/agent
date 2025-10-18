@@ -105,18 +105,18 @@ const techSupportRoute = agent
   .find((r) => r.title === "Technical Support")!;
 techSupportRoute.initialStep
   .nextStep({
-    instructions: "Provide step-by-step technical assistance.",
+    prompt: "Provide step-by-step technical assistance.",
   })
   .nextStep({
-    instructions: "Ask for a rating of the support provided (1-5).",
+    prompt: "Ask for a rating of the support provided (1-5).",
     collect: ["feedbackRating"],
   })
   .nextStep({
-    instructions: "Ask for any additional comments.",
+    prompt: "Ask for any additional comments.",
     collect: ["feedbackComments"],
   })
   .nextStep({
-    instructions: "Thank the user for their feedback.",
+    prompt: "Thank the user for their feedback.",
   })
   .nextStep({ step: END_ROUTE });
 
@@ -237,18 +237,18 @@ async function demonstrateRulesAndProhibitions() {
     .find((r) => r.title === "Technical Support")!;
   techSupportRoute.initialStep
     .nextStep({
-      instructions: "Provide step-by-step technical assistance.",
+      prompt: "Provide step-by-step technical assistance.",
     })
     .nextStep({
-      instructions: "Ask for a rating of the support provided (1-5).",
+      prompt: "Ask for a rating of the support provided (1-5).",
       collect: ["feedbackRating"],
     })
     .nextStep({
-      instructions: "Ask for any additional comments.",
+      prompt: "Ask for any additional comments.",
       collect: ["feedbackComments"],
     })
     .nextStep({
-      instructions: "Thank the user for their feedback.",
+      prompt: "Thank the user for their feedback.",
     })
     .nextStep({ step: END_ROUTE });
 

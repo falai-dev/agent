@@ -255,7 +255,7 @@ async function streamingWithRoutes() {
   });
 
   supportRoute.initialStep.nextStep({
-    instructions: "Understand the user's product question",
+    prompt: "Understand the user's product question",
   });
 
   // Create a feedback route
@@ -276,15 +276,15 @@ async function streamingWithRoutes() {
     },
     steps: [
       {
-        instructions: "How would you rate your support experience from 1 to 5?",
+        prompt: "How would you rate your support experience from 1 to 5?",
         collect: ["rating"],
       },
       {
-        instructions: "Thanks for the rating! Any other comments?",
+        prompt: "Thanks for the rating! Any other comments?",
         collect: ["comments"],
       },
       {
-        instructions: "We appreciate your feedback!",
+        prompt: "We appreciate your feedback!",
       },
     ],
   });

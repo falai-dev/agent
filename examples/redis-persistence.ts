@@ -130,24 +130,24 @@ async function example() {
   // Step flow
   ticketRoute.initialStep
     .nextStep({
-      instructions: "Ask what the issue is",
+      prompt: "Ask what the issue is",
       collect: ["issue", "category"],
       skipIf: (data) => !!data.issue && !!data.category,
     })
     .nextStep({
-      instructions: "Ask for priority",
+      prompt: "Ask for priority",
       collect: ["priority"],
       skipIf: (data) => !!data.priority,
       requires: ["issue", "category"],
     })
     .nextStep({
-      instructions: "Ask for detailed description",
+      prompt: "Ask for detailed description",
       collect: ["description"],
       skipIf: (data) => !!data.description,
       requires: ["issue", "category"],
     })
     .nextStep({
-      instructions: "Confirm and create ticket",
+      prompt: "Confirm and create ticket",
       requires: ["issue", "category", "description"],
     })
     .nextStep({ step: END_ROUTE });
@@ -318,7 +318,7 @@ async function highThroughputExample() {
 
   chatRoute.initialStep
     .nextStep({
-      instructions: "Chat and extract topic/sentiment",
+      prompt: "Chat and extract topic/sentiment",
       collect: ["topic", "sentiment"],
     })
     .nextStep({ step: END_ROUTE });
@@ -392,11 +392,11 @@ async function sessionRecoveryExample() {
 
   orderRoute.initialStep
     .nextStep({
-      instructions: "Ask what to order",
+      prompt: "Ask what to order",
       collect: ["productId", "quantity"],
     })
     .nextStep({
-      instructions: "Ask for shipping address",
+      prompt: "Ask for shipping address",
       collect: ["shippingAddress"],
     })
     .nextStep({ step: END_ROUTE });

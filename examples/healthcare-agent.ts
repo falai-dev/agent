@@ -106,6 +106,8 @@ async function createHealthcareAgent() {
   const agent = new Agent<HealthcareContext>({
     name: "Healthcare Agent",
     description: "Is empathetic and calming to the patient.",
+    identity:
+      "I am the Healthcare Agent, a compassionate AI assistant dedicated to providing excellent patient care. With deep knowledge of medical procedures and a focus on patient comfort, I'm here to help you navigate your healthcare journey with empathy and expertise.",
     provider: provider,
     context: {
       patientId: "patient-123",
@@ -171,7 +173,7 @@ async function createHealthcareAgent() {
 
   // Step 1: Collect appointment reason
   const collectReason = schedulingRoute.initialStep.nextStep({
-    instructions: "Ask what the patient needs an appointment for",
+    prompt: "Ask what the patient needs an appointment for",
     collect: ["appointmentReason"],
     skipIf: (data) => !!data.appointmentReason,
     condition: "Patient hasn't specified reason for appointment yet",
@@ -179,7 +181,7 @@ async function createHealthcareAgent() {
 
   // Step 2: Check urgency and show available slots
   const checkUrgency = collectReason.nextStep({
-    instructions: "Check if this is urgent and show available slots",
+    prompt: "Check if this is urgent and show available slots",
     collect: ["urgency"],
     skipIf: (data) => !!data.urgency,
     requires: ["appointmentReason"],
@@ -192,19 +194,19 @@ async function createHealthcareAgent() {
 
   // Step 3: Present available times
   const presentTimes = showSlots.nextStep({
-    instructions: "List available times and ask which one works for them",
+    prompt: "List available times and ask which one works for them",
   });
 
   // Step 4: Collect preferred time and date
   const collectPreferences = presentTimes.nextStep({
-    instructions: "Collect preferred time and date",
+    prompt: "Collect preferred time and date",
     collect: ["preferredTime", "preferredDate"],
     skipIf: (data) => !!data.preferredTime && !!data.preferredDate,
   });
 
   // Step 5: Confirm details and schedule
   const confirmDetails = collectPreferences.nextStep({
-    instructions: "Confirm the details with the patient before scheduling",
+    prompt: "Confirm the details with the patient before scheduling",
     collect: ["appointmentType"],
     skipIf: (data) => !!data.appointmentType,
     requires: ["appointmentReason", "preferredTime", "preferredDate"],
@@ -217,7 +219,7 @@ async function createHealthcareAgent() {
   });
 
   const confirmation = schedule.nextStep({
-    instructions: "Confirm the appointment has been scheduled",
+    prompt: "Confirm the appointment has been scheduled",
   });
 
   confirmation.nextStep({
@@ -231,14 +233,13 @@ async function createHealthcareAgent() {
   });
 
   laterSlots.nextStep({
-    instructions: "List later times and ask if any of them works",
+    prompt: "List later times and ask if any of them works",
   });
 
   // If no times work at all, end route
   laterSlots
     .nextStep({
-      instructions:
-        "Ask the patient to call the office to schedule an appointment",
+      prompt: "Ask the patient to call the office to schedule an appointment",
     })
     .nextStep({ step: END_ROUTE });
 
@@ -275,14 +276,14 @@ async function createHealthcareAgent() {
 
   // Step 1: Collect test information
   const collectTestInfo = labResultsRoute.initialStep.nextStep({
-    instructions: "Ask what type of test results they want to see",
+    prompt: "Ask what type of test results they want to see",
     collect: ["testType"],
     skipIf: (data) => !!data.testType,
   });
 
   // Step 2: Optional: collect test date
   const collectTestDate = collectTestInfo.nextStep({
-    instructions: "Ask for the test date if they remember it",
+    prompt: "Ask for the test date if they remember it",
     collect: ["testDate"],
     skipIf: (data) => !!data.testDate,
     requires: ["testType"],
@@ -296,7 +297,7 @@ async function createHealthcareAgent() {
 
   // Step 4: Present results based on status
   const presentResults = getResults.nextStep({
-    instructions: "Present the lab results and explain what they mean",
+    prompt: "Present the lab results and explain what they mean",
   });
 
   presentResults.nextStep({ step: END_ROUTE });
@@ -334,20 +335,19 @@ async function createHealthcareAgent() {
   });
 
   const askRating = satisfactionRoute.initialStep.nextStep({
-    instructions:
+    prompt:
       "Ask for overall satisfaction rating from 1 to 5 with the scheduling experience",
     collect: ["rating"],
     skipIf: (data) => !!data.rating,
   });
 
   const askComments = askRating.nextStep({
-    instructions:
-      "Ask if they have any additional comments or feedback (optional)",
+    prompt: "Ask if they have any additional comments or feedback (optional)",
     collect: ["comments"],
   });
 
   const thankYou = askComments.nextStep({
-    instructions:
+    prompt:
       "Thank them for their feedback and confirm their appointment details one more time",
   });
 

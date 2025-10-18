@@ -125,12 +125,12 @@ const bookingRoute = agent.createRoute<BookingData>({
 bookingRoute.initialStep
   .nextStep({
     id: "collect_details", // ✅ Custom step ID for easier tracking
-    instructions: "Collect booking details",
+    prompt: "Collect booking details",
     collect: ["destination", "date", "passengers"],
   })
   .nextStep({
     id: "confirm_booking", // ✅ Custom step ID
-    instructions: "Confirm all details",
+    prompt: "Confirm all details",
     requires: ["destination", "date", "passengers"],
   });
 

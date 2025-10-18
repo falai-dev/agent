@@ -97,7 +97,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   steps?: TransitionSpec<TContext, TData>[];
   /**
    * Configure the initial step (optional)
-   * Accepts full TransitionSpec configuration (id, instructions, collect, skipIf, etc.)
+   * Accepts full TransitionSpec configuration (id, prompt, collect, skipIf, etc.)
    * Note: tool and step properties are ignored for initial step
    */
   initialStep?: Omit<
@@ -107,7 +107,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   /**
    * Configure the end step (optional)
    * Defines what happens when the route completes (reaches END_ROUTE)
-   * Can include instructions for completion message, tool for final actions, etc.
+   * Can include prompt for completion message, tool for final actions, etc.
    * Note: step, condition, skipIf properties are ignored for end step
    */
   endStep?: Omit<
@@ -161,7 +161,7 @@ export interface TransitionSpec<TContext = unknown, TData = unknown> {
   /** Custom ID for this step (optional - will generate deterministic ID if not provided) */
   id?: string;
   /** Transition to a chat state with this description */
-  instructions?: string;
+  prompt?: string;
   /** Transition to execute a tool */
   tool?: // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ToolRef<TContext, any[], any, TData> | InlineToolHandler<TContext, TData>;

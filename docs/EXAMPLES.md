@@ -99,12 +99,12 @@ Production-ready business onboarding with advanced patterns:
 ```typescript
 // Branching based on business type
 const askPhysicalLocation = askLocation.nextStep({
-  instructions: "Get physical store address",
+  prompt: "Get physical store address",
   condition: "User has a physical store",
 });
 
 const askOnlineLocation = askLocation.nextStep({
-  instructions: "Get website and online support hours",
+  prompt: "Get website and online support hours",
   condition: "User does not have a physical store",
 });
 ```

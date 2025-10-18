@@ -19,7 +19,7 @@ export class Step<TContext = unknown, TData = unknown> {
   public collectFields?: string[];
   public skipIf?: (data: Partial<TData>) => boolean;
   public requires?: string[];
-  public instructions?: string;
+  public prompt?: string;
 
   constructor(
     public readonly routeId: string,
@@ -28,14 +28,14 @@ export class Step<TContext = unknown, TData = unknown> {
     collectFields?: string[],
     skipIf?: (data: Partial<TData>) => boolean,
     requires?: string[],
-    instructions?: string
+    prompt?: string
   ) {
     // Use provided ID or generate a deterministic one
     this.id = customId || generateStepId(routeId, description);
     this.collectFields = collectFields;
     this.skipIf = skipIf;
     this.requires = requires;
-    this.instructions = instructions;
+    this.prompt = prompt;
   }
 
   /**
@@ -47,7 +47,7 @@ export class Step<TContext = unknown, TData = unknown> {
     collectFields?: string[];
     skipIf?: (data: Partial<TData>) => boolean;
     requires?: string[];
-    instructions?: string;
+    prompt?: string;
   }): this {
     if (config.description !== undefined) {
       this.description = config.description;
@@ -61,8 +61,8 @@ export class Step<TContext = unknown, TData = unknown> {
     if (config.requires !== undefined) {
       this.requires = config.requires;
     }
-    if (config.instructions !== undefined) {
-      this.instructions = config.instructions;
+    if (config.prompt !== undefined) {
+      this.prompt = config.prompt;
     }
     return this;
   }
@@ -70,7 +70,7 @@ export class Step<TContext = unknown, TData = unknown> {
   /**
    * Create a transition from this step to another
    *
-   * @param spec - Transition specification (instructions, tool, or direct step)
+   * @param spec - Transition specification (prompt, tool, or direct step)
    * @returns TransitionResult that supports chaining
    */
   nextStep(
@@ -81,7 +81,7 @@ export class Step<TContext = unknown, TData = unknown> {
       const endTransition = new Transition<TContext, TData>(this.getRef(), {
         step: END_ROUTE,
         condition: spec.condition,
-        instructions: spec.instructions,
+        prompt: spec.prompt,
       });
       this.transitions.push(endTransition);
 
@@ -97,15 +97,15 @@ export class Step<TContext = unknown, TData = unknown> {
       return this.createStepRefWithTransition(spec.step);
     }
 
-    // Create new target step for instructions or tool
+    // Create new target step for prompt or tool
     const targetStep = new Step<TContext, TData>(
       this.routeId,
-      spec.instructions,
+      spec.prompt,
       spec.id, // Use custom ID if provided
       spec.collect,
       spec.skipIf,
       spec.requires,
-      spec.instructions
+      spec.prompt
     );
     const transition = new Transition<TContext, TData>(this.getRef(), spec);
     transition.setTarget(targetStep);

@@ -29,7 +29,7 @@ A **Step** represents a specific step or moment in a conversation. Each step can
 ```typescript
 // Example: A step that asks for user's name
 const askName = route.initialStep.nextStep({
-  instructions: "What's your name?",
+  prompt: "What's your name?",
   collect: ["firstName", "lastName"],
 });
 ```
@@ -53,19 +53,19 @@ Chat states present a message and optionally collect data:
 ```typescript
 // Simple chat state
 const welcome = route.initialStep.nextStep({
-  instructions: "Welcome! How can I help you today?",
+  prompt: "Welcome! How can I help you today?",
 });
 
 // Chat state with data collecting
 const askDestination = welcome.nextStep({
-  instructions: "Where would you like to fly?",
+  prompt: "Where would you like to fly?",
   collect: ["destination"],
 });
 
 // Chat state with custom ID
 const askDates = askDestination.nextStep({
   id: "ask_travel_dates",
-  instructions: "When would you like to depart?",
+  prompt: "When would you like to depart?",
   collect: ["departureDate"],
 });
 ```
@@ -127,7 +127,7 @@ const route = agent.createRoute({
   title: "Booking",
   initialStep: {
     id: "welcome",
-    instructions: "Welcome to our booking system!",
+    prompt: "Welcome to our booking system!",
     collect: ["intention"],
   },
 });
@@ -147,7 +147,7 @@ You can configure any step after creation:
 
 ```typescript
 const askName = route.initialStep.nextStep({
-  instructions: "What's your name?",
+  prompt: "What's your name?",
 });
 
 // Later, reconfigure it
@@ -195,7 +195,7 @@ interface TransitionSpec<TData = unknown> {
   id?: string;
 
   // Chat state description
-  instructions?: string;
+  prompt?: string;
 
   // Tool to execute
   tool?: ToolRef;
@@ -223,15 +223,15 @@ interface TransitionSpec<TData = unknown> {
 // Linear flow
 route.initialStep
   .nextStep({
-    instructions: "Step 1",
+    prompt: "Step 1",
     collect: ["field1"],
   })
   .nextStep({
-    instructions: "Step 2",
+    prompt: "Step 2",
     collect: ["field2"],
   })
   .nextStep({
-    instructions: "Step 3",
+    prompt: "Step 3",
     collect: ["field3"],
   })
   .nextStep({ step: END_ROUTE });
@@ -241,25 +241,25 @@ route.initialStep
 
 ```typescript
 const askType = route.initialStep.nextStep({
-  instructions: "Are you booking a flight or hotel?",
+  prompt: "Are you booking a flight or hotel?",
   collect: ["bookingType"],
 });
 
 // Branch 1: Flight booking
 const flightFlow = askType.nextStep({
-  instructions: "Let's book your flight",
+  prompt: "Let's book your flight",
   condition: "User selected flight",
 });
 
 // Branch 2: Hotel booking
 const hotelFlow = askType.nextStep({
-  instructions: "Let's book your hotel",
+  prompt: "Let's book your hotel",
   condition: "User selected hotel",
 });
 
 // Both branches can converge later
 const payment = flightFlow.nextStep({
-  instructions: "Let's process payment",
+  prompt: "Let's process payment",
 });
 
 hotelFlow.nextStep({ step: payment }); // Converge to payment
@@ -285,13 +285,13 @@ const route = agent.createRoute<UserData>({ ... });
 
 // Collect single field
 const askName = route.initialStep.nextStep({
-  instructions: "What's your first name?",
+  prompt: "What's your first name?",
   collect: ["firstName"],
 });
 
 // Collect multiple fields at once
 const askContact = askName.nextStep({
-  instructions: "Please provide your email and phone number",
+  prompt: "Please provide your email and phone number",
   collect: ["email", "phone"],
 });
 ```
@@ -327,7 +327,7 @@ const route = agent.createRoute<UserData>({
 
 // AI will extract and validate according to schema
 const askInfo = route.initialStep.nextStep({
-  instructions: "Please provide your name, email, and age",
+  prompt: "Please provide your name, email, and age",
   collect: ["firstName", "email", "age"],
 });
 ```
@@ -338,14 +338,14 @@ Use `skipIf` to avoid re-asking for data:
 
 ```typescript
 const askDestination = route.initialStep.nextStep({
-  instructions: "Where would you like to go?",
+  prompt: "Where would you like to go?",
   collect: ["destination"],
   // Skip if we already have the destination
   skipIf: (data) => !!data.destination,
 });
 
 const askDates = askDestination.nextStep({
-  instructions: "When would you like to travel?",
+  prompt: "When would you like to travel?",
   collect: ["departureDate", "returnDate"],
   // Skip if we have both dates
   skipIf: (data) => !!data.departureDate && !!data.returnDate,
@@ -363,14 +363,14 @@ Control when steps should be bypassed:
 ```typescript
 // Skip if data already exists
 const askEmail = route.initialStep.nextStep({
-  instructions: "What's your email?",
+  prompt: "What's your email?",
   collect: ["email"],
   skipIf: (data) => !!data.email,
 });
 
 // Skip based on business logic
 const askShipping = askEmail.nextStep({
-  instructions: "What's your shipping address?",
+  prompt: "What's your shipping address?",
   collect: ["shippingAddress"],
   // Skip if user selected digital product
   skipIf: (data) => data.productType === "digital",
@@ -378,7 +378,7 @@ const askShipping = askEmail.nextStep({
 
 // Skip based on multiple conditions
 const askBilling = askShipping.nextStep({
-  instructions: "What's your billing address?",
+  prompt: "What's your billing address?",
   collect: ["billingAddress"],
   // Skip if billing same as shipping, or already provided
   skipIf: (data) =>
@@ -405,7 +405,7 @@ const processPayment = selectFlight.nextStep({
 
 // Multiple prerequisites
 const generateInvoice = processPayment.nextStep({
-  instructions: "Here's your invoice",
+  prompt: "Here's your invoice",
   requires: ["paymentConfirmation", "customerEmail", "bookingReference"],
 });
 ```
@@ -416,25 +416,25 @@ AI-evaluated conditions for step selection:
 
 ```typescript
 const askIssue = route.initialStep.nextStep({
-  instructions: "What seems to be the problem?",
+  prompt: "What seems to be the problem?",
   collect: ["issueDescription"],
 });
 
 // Technical support path
 const technicalHelp = askIssue.nextStep({
-  instructions: "Let me help with your technical issue",
+  prompt: "Let me help with your technical issue",
   condition: "Issue is technical in nature",
 });
 
 // Billing support path
 const billingHelp = askIssue.nextStep({
-  instructions: "Let me help with your billing issue",
+  prompt: "Let me help with your billing issue",
   condition: "Issue is related to billing or payments",
 });
 
 // General inquiry path
 const generalHelp = askIssue.nextStep({
-  instructions: "Let me help with your question",
+  prompt: "Let me help with your question",
   condition: "Issue is a general inquiry",
 });
 ```
@@ -449,7 +449,7 @@ Present information and collect data:
 
 ```typescript
 const chat = route.initialStep.nextStep({
-  instructions: "What would you like to know?",
+  prompt: "What would you like to know?",
   collect: ["question"],
 });
 ```
@@ -512,7 +512,7 @@ const bookingRoute = agent.createRoute({
 
   // Configure end step behavior
   endStep: {
-    instructions: "Confirm booking and thank the user!",
+    prompt: "Confirm booking and thank the user!",
     tool: sendConfirmationEmail, // Execute final actions
     collect: ["finalConfirmation"], // Collect last data
   },
@@ -529,7 +529,7 @@ finalStep.nextStep({
 ```typescript
 // Override endStep for this specific path
 finalStep.nextStep({
-  instructions: "Special completion message for VIP users!",
+  prompt: "Special completion message for VIP users!",
   step: END_ROUTE,
 });
 ```
@@ -550,7 +550,7 @@ finalStep.nextStep({
 ```typescript
 endStep: {
   // Completion message instruction
-  instructions?: string;
+  prompt?: string;
 
   // Execute final actions (emails, database updates, etc.)
   tool?: ToolRef;
@@ -591,7 +591,7 @@ const notifyTeam = defineTool("notify_team", async ({ data }) => {
 const bookingRoute = agent.createRoute({
   endStep: {
     tool: notifyTeam, // Runs when route completes
-    instructions: "Booking complete! Our team has been notified.",
+    prompt: "Booking complete! Our team has been notified.",
   },
 });
 ```
@@ -600,7 +600,7 @@ const bookingRoute = agent.createRoute({
 
 - ✅ Configure once at route level (DRY principle)
 - ✅ Can be overridden per-transition if needed
-- ✅ Supports full step capabilities: `instructions`, `tool`, `collect`, `requires`
+- ✅ Supports full step capabilities: `prompt`, `tool`, `collect`, `requires`
 - ✅ Automatically generates message if not configured
 - ✅ Executes before `onComplete` route transitions
 
@@ -612,12 +612,12 @@ const bookingRoute = agent.createRoute({
 
 ```typescript
 const askItems = route.initialStep.nextStep({
-  instructions: "What items would you like to add to your cart?",
+  prompt: "What items would you like to add to your cart?",
   collect: ["newItem"],
 });
 
 const confirmMore = askItems.nextStep({
-  instructions: "Would you like to add more items?",
+  prompt: "Would you like to add more items?",
   collect: ["addMore"],
 });
 
@@ -629,7 +629,7 @@ confirmMore.nextStep({
 
 // Or continue to checkout
 const checkout = confirmMore.nextStep({
-  instructions: "Let's proceed to checkout",
+  prompt: "Let's proceed to checkout",
   condition: "User is done adding items",
 });
 ```
@@ -644,14 +644,13 @@ const processPayment = route.initialStep.nextStep({
 
 // Success path
 const paymentSuccess = processPayment.nextStep({
-  instructions: "Payment successful! Here's your receipt",
+  prompt: "Payment successful! Here's your receipt",
   condition: "Payment was successful",
 });
 
 // Failure path
 const paymentFailed = processPayment.nextStep({
-  instructions:
-    "Payment failed. Would you like to try a different payment method?",
+  prompt: "Payment failed. Would you like to try a different payment method?",
   collect: ["retryPayment"],
   condition: "Payment failed",
 });
@@ -668,25 +667,25 @@ paymentFailed.nextStep({
 ```typescript
 // Start with basic info
 const askBasic = route.initialStep.nextStep({
-  instructions: "Let's start with the basics. What's your name?",
+  prompt: "Let's start with the basics. What's your name?",
   collect: ["name"],
 });
 
 // Reveal more options
 const askPreferences = askBasic.nextStep({
-  instructions: "Great! Now, would you like to customize your experience?",
+  prompt: "Great! Now, would you like to customize your experience?",
   collect: ["wantsCustomization"],
 });
 
 // Only ask detailed questions if user wants customization
 const askDetailed = askPreferences.nextStep({
-  instructions: "Tell me about your preferences...",
+  prompt: "Tell me about your preferences...",
   collect: ["theme", "notifications", "language"],
   skipIf: (data) => data.wantsCustomization === false,
 });
 
 const finish = askDetailed.nextStep({
-  instructions: "All set! Your account is ready",
+  prompt: "All set! Your account is ready",
 });
 
 // Direct path if no customization
@@ -700,7 +699,7 @@ askPreferences.nextStep({
 
 ```typescript
 const askAge = route.initialStep.nextStep({
-  instructions: "How old are you?",
+  prompt: "How old are you?",
   collect: ["age"],
 });
 
@@ -711,7 +710,7 @@ const validateAge = askAge.nextStep({
 
 // Valid age
 const proceed = validateAge.nextStep({
-  instructions: "Great! Let's continue",
+  prompt: "Great! Let's continue",
   condition: "Age is valid",
 });
 
@@ -726,18 +725,18 @@ validateAge.nextStep({
 
 ```typescript
 const askQuestion = route.initialStep.nextStep({
-  instructions: "What would you like to know?",
+  prompt: "What would you like to know?",
   collect: ["question"],
 });
 
 // Different responses based on user type
 const premiumResponse = askQuestion.nextStep({
-  instructions: "As a premium member, here's detailed information...",
+  prompt: "As a premium member, here's detailed information...",
   condition: "User has premium account",
 });
 
 const basicResponse = askQuestion.nextStep({
-  instructions: "Here's the basic information. Upgrade for more details!",
+  prompt: "Here's the basic information. Upgrade for more details!",
   condition: "User has basic account",
 });
 ```
@@ -794,7 +793,7 @@ anotherStep.nextStep({ step: stepRef });
 
 ### ✅ Do's
 
-- **Use descriptive instructions** - Clear prompts for better UX
+- **Use descriptive prompt** - Clear prompts for better UX
 - **Define collect fields** - Explicit data extraction
 - **Use skipIf for efficiency** - Avoid redundant questions
 - **Set requires** - Prevent premature execution
@@ -821,18 +820,18 @@ anotherStep.nextStep({ step: stepRef });
 ```typescript
 // ❌ Problem: Required data missing
 const step = prev.nextStep({
-  instructions: "Do something",
+  prompt: "Do something",
   requires: ["field1", "field2"], // Missing field2
 });
 
 // ✅ Solution: Ensure required data is collected first
 const collectData = prev.nextStep({
-  instructions: "Collect data",
+  prompt: "Collect data",
   collect: ["field1", "field2"],
 });
 
 const step = collectData.nextStep({
-  instructions: "Do something",
+  prompt: "Do something",
   requires: ["field1", "field2"], // Now available
 });
 ```
@@ -842,13 +841,13 @@ const step = collectData.nextStep({
 ```typescript
 // ❌ Problem: skipIf always returns true
 const step = prev.nextStep({
-  instructions: "Ask something",
+  prompt: "Ask something",
   skipIf: (data) => true, // Always skips!
 });
 
 // ✅ Solution: Use proper condition
 const step = prev.nextStep({
-  instructions: "Ask something",
+  prompt: "Ask something",
   skipIf: (data) => !!data.field, // Only skip if field exists
 });
 ```
@@ -858,13 +857,13 @@ const step = prev.nextStep({
 ```typescript
 // ❌ Problem: Forgot to specify collect
 const step = prev.nextStep({
-  instructions: "What's your name?",
+  prompt: "What's your name?",
   // Missing collect!
 });
 
 // ✅ Solution: Add collect fields
 const step = prev.nextStep({
-  instructions: "What's your name?",
+  prompt: "What's your name?",
   collect: ["firstName", "lastName"],
 });
 ```

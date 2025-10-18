@@ -184,7 +184,7 @@ const searchFlights = defineTool<MyContext, [], void, FlightData>(
 // Add tool to step machine
 const searchStep = bookingRoute.initialStep
   .nextStep({
-    instructions: "Extract travel details",
+    prompt: "Extract travel details",
     collect: ["destination", "departureDate", "passengers"],
   })
   .nextStep({
@@ -200,7 +200,7 @@ Create intelligent flows with code-based logic:
 ```typescript
 // Step machine with smart bypassing and data validation
 const askDestination = bookingRoute.initialStep.nextStep({
-  instructions: "Ask where they want to fly",
+  prompt: "Ask where they want to fly",
   collect: ["destination"],
   skipIf: (data) => !!data.destination, // Skip if already have destination
 });
@@ -211,20 +211,20 @@ const enrichDestination = askDestination.nextStep({
 });
 
 const askDates = enrichDestination.nextStep({
-  instructions: "Ask about travel dates",
+  prompt: "Ask about travel dates",
   collect: ["departureDate"],
   skipIf: (data) => !!data.departureDate,
   requires: ["destination"], // Must have destination first
 });
 
 const askPassengers = askDates.nextStep({
-  instructions: "How many passengers?",
+  prompt: "How many passengers?",
   collect: ["passengers"],
   skipIf: (data) => !!data.passengers,
 });
 
 const presentFlights = askPassengers.nextStep({
-  instructions: "Present available flights from search results",
+  prompt: "Present available flights from search results",
 });
 ```
 

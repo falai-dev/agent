@@ -139,24 +139,24 @@ async function example() {
   // Step flow
   complaintRoute.initialStep
     .nextStep({
-      instructions: "Understand the complaint",
+      prompt: "Understand the complaint",
       collect: ["category", "severity", "description"],
       skipIf: (data) => !!data.description,
     })
     .nextStep({
-      instructions: "Identify affected service",
+      prompt: "Identify affected service",
       collect: ["affectedService"],
       skipIf: (data) => !!data.affectedService,
       requires: ["description"],
     })
     .nextStep({
-      instructions: "Ask for desired resolution",
+      prompt: "Ask for desired resolution",
       collect: ["requestedResolution"],
       skipIf: (data) => !!data.requestedResolution,
       requires: ["category", "description"],
     })
     .nextStep({
-      instructions: "Propose solution and close complaint",
+      prompt: "Propose solution and close complaint",
       requires: ["category", "description"],
     })
     .nextStep({ step: END_ROUTE });
@@ -359,7 +359,7 @@ async function analyticsExample() {
   });
 
   ticketRoute.initialStep.nextStep({
-    instructions: "Analyze and categorize ticket",
+    prompt: "Analyze and categorize ticket",
     collect: ["ticketType", "priority", "tags"],
   });
 

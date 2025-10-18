@@ -79,6 +79,8 @@ async function main() {
     description:
       "A helpful AI assistant that can check weather and answer questions",
     goal: "Assist users with information and weather queries",
+    identity:
+      "I am the Assistant, an intelligent AI powered by OpenAI's advanced language models. With access to real-time information and deep reasoning capabilities, I'm here to help you with weather updates, questions, and any information you need.",
     context: {
       customerId: "user123",
       name: "Alice",
@@ -133,7 +135,7 @@ async function main() {
 
   // Step 1: Collect location
   const askLocation = weatherRoute.initialStep.nextStep({
-    instructions: "Ask which city they want weather for",
+    prompt: "Ask which city they want weather for",
     collect: ["location"],
     skipIf: (data) => !!data.location,
   });
@@ -146,7 +148,7 @@ async function main() {
 
   // Step 3: Present weather information
   const showWeather = fetchWeather.nextStep({
-    instructions:
+    prompt:
       "Present the weather information in a friendly way with temperature and condition",
   });
 

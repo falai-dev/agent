@@ -49,6 +49,7 @@ export class RoutingEngine<TContext = unknown> {
       goal?: string;
       description?: string;
       personality?: string;
+      identity?: string;
     };
     provider: AiProvider;
     context: TContext;
@@ -411,6 +412,7 @@ export class RoutingEngine<TContext = unknown> {
       goal?: string;
       description?: string;
       personality?: string;
+      identity?: string;
     };
     provider: AiProvider;
     context: TContext;
@@ -608,6 +610,7 @@ export class RoutingEngine<TContext = unknown> {
       goal?: string;
       description?: string;
       personality?: string;
+      identity?: string;
     }
   ): string {
     const pc = new PromptComposer();
@@ -618,12 +621,16 @@ export class RoutingEngine<TContext = unknown> {
         name: agentMeta?.name || "Agent",
         description: agentMeta?.description,
         goal: agentMeta?.goal,
+        identity: agentMeta?.identity,
       });
     }
 
     const personality =
       agentMeta?.personality || "Tone: brief, natural, 1-2 short sentences.";
     pc.addPersonality(personality);
+    if (agentMeta?.identity) {
+      pc.addIdentity(agentMeta.identity);
+    }
 
     // Add route context
     pc.addInstruction(
@@ -680,7 +687,7 @@ export class RoutingEngine<TContext = unknown> {
       `Available Steps to Transition To:\n${stepDescriptions.join("\n\n")}`
     );
 
-    // Add decision instructions
+    // Add decision prompt
     pc.addInstruction(
       [
         "Task: Decide which step to transition to based on:",

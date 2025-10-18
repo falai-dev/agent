@@ -93,8 +93,8 @@ export class Transition<TContext = unknown, TData = unknown> {
   describe(): string {
     const parts: string[] = [];
 
-    if (this.spec.instructions) {
-      parts.push(`chat: "${this.spec.instructions}"`);
+    if (this.spec.prompt) {
+      parts.push(`chat: "${this.spec.prompt}"`);
     }
     if (this.spec.tool) {
       parts.push(`tool: ${this.spec.tool.name}`);

@@ -57,7 +57,7 @@ async function main() {
     },
     // Configure completion message at route level
     endStep: {
-      instructions:
+      prompt:
         "Confirm the booking with a summary of the hotel, date, and number of guests. Be enthusiastic!",
     },
     // Option 1: Simple string
@@ -77,24 +77,24 @@ async function main() {
   });
 
   const askHotel = bookingRoute.initialStep.nextStep({
-    instructions: "Ask which hotel they want to book",
+    prompt: "Ask which hotel they want to book",
     collect: ["hotelName"],
     skipIf: (data) => !!data.hotelName,
   });
 
   const askDate = askHotel.nextStep({
-    instructions: "Ask for the booking date",
+    prompt: "Ask for the booking date",
     collect: ["date"],
     skipIf: (data) => !!data.date,
   });
 
   const askGuests = askDate.nextStep({
-    instructions: "Ask for the number of guests",
+    prompt: "Ask for the number of guests",
     collect: ["guests"],
     skipIf: (data) => !!data.guests,
   });
 
-  // No need to specify instructions here - using route-level endStep configuration
+  // No need to specify prompt here - using route-level endStep configuration
   askGuests.nextStep({
     step: END_ROUTE,
   });
@@ -114,23 +114,23 @@ async function main() {
     },
     // Configure completion message for feedback route
     endStep: {
-      instructions:
+      prompt:
         "Thank the user warmly for their feedback and let them know their input is valuable",
     },
   });
 
   const askRating = feedbackRoute.initialStep.nextStep({
-    instructions: "Ask for rating from 1 to 5",
+    prompt: "Ask for rating from 1 to 5",
     collect: ["rating"],
     skipIf: (data) => !!data.rating,
   });
 
   const askComments = askRating.nextStep({
-    instructions: "Ask for any additional comments (optional)",
+    prompt: "Ask for any additional comments (optional)",
     collect: ["comments"],
   });
 
-  // No need to specify instructions here - using route-level endStep configuration
+  // No need to specify prompt here - using route-level endStep configuration
   askComments.nextStep({
     step: END_ROUTE,
   });

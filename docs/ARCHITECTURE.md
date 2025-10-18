@@ -109,7 +109,7 @@ Use TypeScript functions for deterministic flow control AND text conditions for 
 // Step with smart bypassing based on collected data
 const askDestination = route.initialStep.nextStep({
   id: "ask_destination", // Optional: custom step ID
-  instructions: "Ask where they want to fly",
+  prompt: "Ask where they want to fly",
   collect: ["destination"],
   skipIf: (data) => !!data.destination, // Code-based condition!
   condition: "Customer hasn't specified destination yet", // Text condition for AI
@@ -117,7 +117,7 @@ const askDestination = route.initialStep.nextStep({
 
 const askDate = askDestination.nextStep({
   id: "ask_date", // Optional: custom step ID for easier tracking
-  instructions: "Ask about travel dates",
+  prompt: "Ask about travel dates",
   collect: ["departureDate"],
   skipIf: (data) => !!data.departureDate,
   requires: ["destination"], // Prerequisites
@@ -133,7 +133,7 @@ You can optionally provide custom IDs for steps to make them easier to track and
 ```typescript
 const confirmBooking = askDate.nextStep({
   id: "confirm_booking", // ✅ Custom ID instead of auto-generated
-  instructions: "Confirm all booking details",
+  prompt: "Confirm all booking details",
   requires: ["destination", "departureDate", "passengers"],
 });
 ```
@@ -372,7 +372,7 @@ const bookingRoute = agent.createRoute<BookingData>({
 
 bookingRoute.initialStep
   .nextStep({
-    instructions: "Ask destination",
+    prompt: "Ask destination",
     collect: ["destination"],
     skipIf: (data) => !!data.destination,
   })
@@ -381,7 +381,7 @@ bookingRoute.initialStep
     requires: ["destination"],
   })
   .nextStep({
-    instructions: "Ask dates",
+    prompt: "Ask dates",
     collect: ["dates"],
     skipIf: (data) => !!data.dates,
   });
@@ -399,7 +399,7 @@ const qnaRoute = agent.createRoute({
 });
 
 // Just use initial step
-qnaRoute.initialStep.instructions = "Answer from knowledge base";
+qnaRoute.initialStep.prompt = "Answer from knowledge base";
 ```
 
 ### Mixed Architecture

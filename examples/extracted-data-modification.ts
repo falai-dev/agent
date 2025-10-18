@@ -310,7 +310,7 @@ const bookingRoute = agent.createRoute<FlightData>({
 
 // Step 1: Collect destination
 const collectDestination = bookingRoute.initialStep.nextStep({
-  instructions: "Ask where they want to fly",
+  prompt: "Ask where they want to fly",
   collect: ["destination"],
   skipIf: (data) => !!data.destination,
 });
@@ -323,7 +323,7 @@ const enrichDestination = collectDestination.nextStep({
 
 // Step 3: Collect date
 const collectDate = enrichDestination.nextStep({
-  instructions: "Ask when they want to depart",
+  prompt: "Ask when they want to depart",
   collect: ["departureDate"],
   skipIf: (data) => !!data.departureDate,
 });
@@ -336,7 +336,7 @@ const validateDate = collectDate.nextStep({
 
 // Step 5: Collect passengers
 const collectPassengers = validateDate.nextStep({
-  instructions: "Ask how many passengers",
+  prompt: "Ask how many passengers",
   collect: ["passengers"],
   skipIf: (data) => !!data.passengers,
 });
@@ -350,12 +350,12 @@ const searchFlights = collectPassengers.nextStep({
 
 // Step 7: Present results
 const presentResults = searchFlights.nextStep({
-  instructions: "Present available flights to the user",
+  prompt: "Present available flights to the user",
 });
 
 // Step 8: Confirm booking
 const confirmBooking = presentResults.nextStep({
-  instructions: "Ask user to confirm the booking",
+  prompt: "Ask user to confirm the booking",
   requires: ["destinationCode", "departureDateParsed", "passengers"],
 });
 

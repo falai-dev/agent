@@ -165,40 +165,40 @@ async function example() {
   onboardingRoute.initialStep
     .nextStep({
       id: "ask_name",
-      instructions: "Ask for full name",
+      prompt: "Ask for full name",
       collect: ["fullName"],
       skipIf: (data) => !!data.fullName,
     })
     .nextStep({
       id: "ask_email",
-      instructions: "Ask for email address",
+      prompt: "Ask for email address",
       collect: ["email"],
       skipIf: (data) => !!data.email,
     })
     .nextStep({
       id: "ask_company",
-      instructions: "Ask for company name",
+      prompt: "Ask for company name",
       collect: ["companyName"],
       skipIf: (data) => !!data.companyName,
     })
     .nextStep({
       id: "ask_phone",
-      instructions: "Ask for phone number (optional)",
+      prompt: "Ask for phone number (optional)",
       collect: ["phoneNumber"],
     })
     .nextStep({
       id: "ask_industry",
-      instructions: "Ask for industry",
+      prompt: "Ask for industry",
       collect: ["industry"],
     })
     .nextStep({
       id: "confirm_details",
-      instructions: "Confirm all details",
+      prompt: "Confirm all details",
       requires: ["fullName", "email", "companyName"],
     })
     .nextStep({
       id: "complete_onboarding",
-      instructions:
+      prompt:
         "Thank you! Your account is set up. You will receive a confirmation email shortly.",
     })
     .nextStep({ step: END_ROUTE });
@@ -519,7 +519,7 @@ async function advancedExample() {
 
   route.initialStep.nextStep({
     id: "collect_all",
-    instructions: "Collect all information",
+    prompt: "Collect all information",
     collect: ["fullName", "email", "companyName", "phoneNumber"],
   });
 

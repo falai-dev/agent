@@ -205,7 +205,7 @@ const route = agent.createRoute<FlightData>({
 ```typescript
 // Step with code-based logic (no fuzzy LLM conditions!)
 const askDestination = route.initialStep.nextStep({
-  instructions: "Ask where they want to fly",
+  prompt: "Ask where they want to fly",
   collect: ["destination"],
   skipIf: (data) => !!data.destination, // Skip if already have destination
 });
@@ -216,7 +216,7 @@ const enrichDestination = askDestination.nextStep({
 });
 
 const askDates = enrichDestination.nextStep({
-  instructions: "Ask about travel dates",
+  prompt: "Ask about travel dates",
   collect: ["departureDate"],
   skipIf: (data) => !!data.departureDate,
   requires: ["destination"], // Must have destination first
@@ -228,7 +228,7 @@ const validateDate = askDates.nextStep({
 });
 
 const askPassengers = validateDate.nextStep({
-  instructions: "How many passengers?",
+  prompt: "How many passengers?",
   collect: ["passengers"],
   skipIf: (data) => !!data.passengers,
 });

@@ -310,21 +310,21 @@ const onboardingRoute = agent.createRoute<OnboardingData>({
 // Build steps with skipIf conditions
 const welcome = onboardingRoute.initialStep.nextStep({
   id: "ask_name",
-  instructions: "What's your name?",
+  prompt: "What's your name?",
   collect: ["name"],
   skipIf: (data) => !!data.name, // Skip if name already collected
 });
 
 const askEmail = welcome.nextStep({
   id: "ask_email",
-  instructions: "What's your email?",
+  prompt: "What's your email?",
   collect: ["email"],
   skipIf: (data) => !!data.email, // Skip if email already collected
 });
 
 const complete = askEmail.nextStep({
   id: "complete",
-  instructions: "All done! Thank you.",
+  prompt: "All done! Thank you.",
 });
 
 complete.nextStep({ step: END_ROUTE });
@@ -524,7 +524,7 @@ interface RouteOptions<TData = unknown> {
   // NEW: Configure the initial step
   initialStep?: {
     id?: string;              // Custom ID for the initial step
-    instructions?: string;       // Description for the initial step
+    prompt?: string;       // Description for the initial step
     collect?: string[];        // Fields to collect in the initial step
     skipIf?: (data: Partial<TData>) => boolean;  // Skip condition
     requires?: string[];  // Required data prerequisites
@@ -610,7 +610,7 @@ Creates a transition from this step and returns a chainable result.
 
 ```typescript
 interface TransitionSpec<TData = unknown> {
-  instructions?: string; // Transition to a chat interaction
+  prompt?: string; // Transition to a chat interaction
   tool?: ToolRef; // Transition to execute a tool
   step?: StepRef | symbol; // Transition to specific step or END_ROUTE
 
@@ -666,14 +666,14 @@ const flightRoute = agent.createRoute<FlightData>({
 
 // Approach 1: Step-by-step with data extraction and text conditions
 const askDestination = flightRoute.initialStep.nextStep({
-  instructions: "Ask where they want to fly",
+  prompt: "Ask where they want to fly",
   collect: ["destination"],
   skipIf: (data) => !!data.destination, // Skip if already have destination
   condition: "Customer hasn't specified destination yet", // AI-evaluated condition
 });
 
 const askDates = askDestination.nextStep({
-  instructions: "Ask about travel dates",
+  prompt: "Ask about travel dates",
   collect: ["departureDate"],
   skipIf: (data) => !!data.departureDate,
   requires: ["destination"], // Must have destination first
@@ -681,7 +681,7 @@ const askDates = askDestination.nextStep({
 });
 
 const askPassengers = askDates.nextStep({
-  instructions: "How many passengers?",
+  prompt: "How many passengers?",
   collect: ["passengers"],
   skipIf: (data) => !!data.passengers,
 });
@@ -693,11 +693,11 @@ console.log(askDestination.routeId); // Route ID
 // Approach 2: Fluent chaining for linear flows
 flightRoute.initialStep
   .nextStep({
-    instructions: "Extract travel details",
+    prompt: "Extract travel details",
     collect: ["destination", "departureDate", "passengers"],
   })
   .nextStep({
-    instructions: "Present available flights",
+    prompt: "Present available flights",
   })
   .nextStep({ step: END_ROUTE });
 
@@ -725,7 +725,7 @@ route.initialStep.configure({
 });
 
 // Or configure any step
-const askName = route.initialStep.nextStep({ instructions: "Ask for name" });
+const askName = route.initialStep.nextStep({ prompt: "Ask for name" });
 askName.configure({
   collectFields: ["firstName", "lastName"],
 });
@@ -2088,7 +2088,7 @@ Symbol marking the end of a conversation route. Use this when building routes to
 import { END_ROUTE } from "@falai/agent";
 
 const thankYou = askEmail.nextStep({
-  instructions: "Thank you for your information!",
+  prompt: "Thank you for your information!",
 });
 
 // Mark the end of the route

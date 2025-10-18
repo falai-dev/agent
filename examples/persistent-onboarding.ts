@@ -266,14 +266,14 @@ async function createPersistentOnboardingAgent(sessionId: string) {
       required: ["businessName", "businessDescription"],
     },
     endStep: {
-      instructions:
+      prompt:
         "Summarize all collected information warmly and confirm onboarding is complete",
     },
   });
 
   // Step 1: Collect business name and description
   const collectBusinessInfo = onboardingRoute.initialStep.nextStep({
-    instructions: "Ask for business name and a brief description",
+    prompt: "Ask for business name and a brief description",
     collect: ["businessName", "businessDescription"],
     skipIf: (data) => !!data.businessName && !!data.businessDescription,
     condition: "Need to collect basic business information first",
@@ -288,7 +288,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
 
   // Step 3: Collect industry
   const collectIndustry = saveBusiness.nextStep({
-    instructions: "Ask what industry the business operates in",
+    prompt: "Ask what industry the business operates in",
     collect: ["industry"],
     skipIf: (data) => !!data.industry,
   });
@@ -301,7 +301,7 @@ async function createPersistentOnboardingAgent(sessionId: string) {
 
   // Step 5: Collect contact email
   const collectContact = saveIndustryStep.nextStep({
-    instructions: "Ask for their contact email",
+    prompt: "Ask for their contact email",
     collect: ["contactEmail"],
     skipIf: (data) => !!data.contactEmail,
   });

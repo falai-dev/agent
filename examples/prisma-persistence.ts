@@ -146,14 +146,14 @@ async function example() {
   // Step flow with smart data collecting and custom IDs
   const askDestination = flightRoute.initialStep.nextStep({
     id: "ask_destination", // Custom step ID for easier tracking
-    instructions: "Ask where they want to fly",
+    prompt: "Ask where they want to fly",
     collect: ["destination"],
     skipIf: (data) => !!data.destination,
   });
 
   const askDates = askDestination.nextStep({
     id: "ask_dates", // Custom step ID
-    instructions: "Ask about travel dates",
+    prompt: "Ask about travel dates",
     collect: ["departureDate", "returnDate"],
     skipIf: (data) => !!data.departureDate,
     requires: ["destination"],
@@ -161,7 +161,7 @@ async function example() {
 
   const askPassengers = askDates.nextStep({
     id: "ask_passengers", // Custom step ID
-    instructions: "Ask how many passengers",
+    prompt: "Ask how many passengers",
     collect: ["passengers"],
     skipIf: (data) => !!data.passengers,
     requires: ["destination", "departureDate"],
@@ -169,7 +169,7 @@ async function example() {
 
   const askCabinClass = askPassengers.nextStep({
     id: "ask_cabin_class", // Custom step ID
-    instructions: "Ask about cabin class preference",
+    prompt: "Ask about cabin class preference",
     collect: ["cabinClass"],
     skipIf: (data) => !!data.cabinClass,
     requires: ["destination", "departureDate", "passengers"],
@@ -177,7 +177,7 @@ async function example() {
 
   const confirmBooking = askCabinClass.nextStep({
     id: "confirm_booking", // Custom step ID
-    instructions: "Present options and confirm booking details",
+    prompt: "Present options and confirm booking details",
     requires: ["destination", "departureDate", "passengers", "cabinClass"],
   });
 
@@ -444,26 +444,26 @@ async function advancedExample() {
 
   onboardingRoute.initialStep
     .nextStep({
-      instructions: "Welcome and ask for name",
+      prompt: "Welcome and ask for name",
       collect: ["fullName"],
       skipIf: (data) => !!data.fullName,
     })
     .nextStep({
-      instructions: "Ask for email",
+      prompt: "Ask for email",
       collect: ["email"],
       skipIf: (data) => !!data.email,
     })
     .nextStep({
-      instructions: "Ask for phone number (optional)",
+      prompt: "Ask for phone number (optional)",
       collect: ["phoneNumber"],
     })
     .nextStep({
-      instructions: "Ask for country",
+      prompt: "Ask for country",
       collect: ["country"],
       skipIf: (data) => !!data.country,
     })
     .nextStep({
-      instructions: "Confirm and complete onboarding",
+      prompt: "Confirm and complete onboarding",
     })
     .nextStep({ step: END_ROUTE });
 
@@ -544,11 +544,11 @@ async function quickStart() {
 
   contactRoute.initialStep
     .nextStep({
-      instructions: "Collect all information",
+      prompt: "Collect all information",
       collect: ["name", "email", "message"],
     })
     .nextStep({
-      instructions: "Confirm submission",
+      prompt: "Confirm submission",
     })
     .nextStep({ step: END_ROUTE });
 

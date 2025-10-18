@@ -49,6 +49,7 @@ export class ResponseEngine<TContext = unknown> {
       goal?: string;
       description?: string;
       personality?: string;
+      identity?: string;
     }
   ): string {
     const pc = new PromptComposer();
@@ -57,18 +58,22 @@ export class ResponseEngine<TContext = unknown> {
         name: agentMeta?.name || "Agent",
         goal: agentMeta?.goal,
         description: agentMeta?.description,
+        identity: agentMeta?.identity,
       });
     const personality =
       agentMeta?.personality || "Tone: brief, natural, 1-2 short sentences.";
     pc.addPersonality(personality);
+    if (agentMeta?.identity) {
+      pc.addIdentity(agentMeta.identity);
+    }
     pc.addInstruction(
       `Route: ${route.title}${
         route.description ? ` — ${route.description}` : ""
       }`
     );
-    if (currentStep.instructions) {
+    if (currentStep.prompt) {
       pc.addInstruction(
-        `Guideline for your response (adapt to the conversation):\n${currentStep.instructions}`
+        `Guideline for your response (adapt to the conversation):\n${currentStep.prompt}`
       );
     }
     if (rules.length) pc.addInstruction(`Rules:\n- ${rules.join("\n- ")}`);

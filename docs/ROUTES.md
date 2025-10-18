@@ -130,8 +130,7 @@ const bookingRoute = agent.createRoute<FlightData>({
   // Configure the initial step
   initialStep: {
     id: "welcome_step",
-    instructions:
-      "Welcome! I'll help you book a flight. Where would you like to go?",
+    prompt: "Welcome! I'll help you book a flight. Where would you like to go?",
     collect: ["destination"],
     skipIf: (data) => !!data.destination,
   },
@@ -166,7 +165,7 @@ initialStep: {
   id?: string;
 
   // Description/prompt for the initial step
-  instructions?: string;
+  prompt?: string;
 
   // Fields to extract in this step
   collect?: string[];
@@ -196,7 +195,7 @@ const bookingRoute = agent.createRoute<FlightData>({
   // Configure what happens when route completes
   endStep: {
     // Custom completion message
-    instructions: "Confirm the booking details and thank the user warmly!",
+    prompt: "Confirm the booking details and thank the user warmly!",
 
     // Optional: Execute final actions (like sending confirmation emails)
     tool: sendConfirmationEmail,
@@ -232,9 +231,9 @@ lastStep.nextStep({
   step: END_ROUTE,
 });
 
-// OR override with custom instructions for this specific transition
+// OR override with custom prompt for this specific transition
 lastStep.nextStep({
-  instructions: "Special completion message for this path!",
+  prompt: "Special completion message for this path!",
   step: END_ROUTE,
 });
 ```
@@ -244,7 +243,7 @@ lastStep.nextStep({
 ```typescript
 endStep: {
   // Completion message instruction (RECOMMENDED)
-  instructions?: string;
+  prompt?: string;
 
   // Execute final tools/actions before completion
   tool?: ToolRef;
@@ -267,7 +266,7 @@ If you don't configure `endStep`, a smart default is used:
 ```typescript
 // Default endStep behavior:
 {
-  instructions: "Summarize what was accomplished and confirm completion based on the conversation history and collected data";
+  prompt: "Summarize what was accomplished and confirm completion based on the conversation history and collected data";
 }
 ```
 
@@ -292,7 +291,7 @@ const bookingRoute = agent.createRoute({
 
   endStep: {
     tool: sendConfirmation, // Executes when route completes
-    instructions: "Your booking is complete! Confirmation email sent.",
+    prompt: "Your booking is complete! Confirmation email sent.",
   },
 });
 ```
@@ -301,7 +300,7 @@ const bookingRoute = agent.createRoute({
 
 - ✅ `endStep` is configured once at the route level (DRY principle)
 - ✅ Can be overridden per-transition if needed
-- ✅ Supports full step capabilities: `instructions`, `tool`, `collect`, `requires`
+- ✅ Supports full step capabilities: `prompt`, `tool`, `collect`, `requires`
 - ✅ Falls back to smart default if not configured
 
 ---
@@ -382,22 +381,22 @@ const feedbackRoute = agent.createRoute({
   steps: [
     {
       id: "ask_rating",
-      instructions: "How would you rate your experience? (1-5 stars)",
+      prompt: "How would you rate your experience? (1-5 stars)",
       collect: ["rating"],
     },
     {
       id: "ask_liked",
-      instructions: "What did you like most?",
+      prompt: "What did you like most?",
       collect: ["likedMost"],
     },
     {
       id: "ask_improve",
-      instructions: "What could we improve?",
+      prompt: "What could we improve?",
       collect: ["improvements"],
     },
     {
       id: "thank_you",
-      instructions: "Thank you for your feedback! 🙏",
+      prompt: "Thank you for your feedback! 🙏",
     },
   ],
 });
@@ -547,25 +546,25 @@ const supportRoute = agent.createRoute<SupportData>({
 
 // Ask issue type
 const askIssueType = supportRoute.initialStep.nextStep({
-  instructions: "What type of issue are you experiencing?",
+  prompt: "What type of issue are you experiencing?",
   collect: ["issueType"],
 });
 
 // Branch 1: Technical issues
 const technicalFlow = askIssueType.nextStep({
-  instructions: "Let me help with your technical issue...",
+  prompt: "Let me help with your technical issue...",
   condition: "Issue type is technical",
 });
 
 // Branch 2: Billing issues
 const billingFlow = askIssueType.nextStep({
-  instructions: "Let me help with your billing issue...",
+  prompt: "Let me help with your billing issue...",
   condition: "Issue type is billing",
 });
 
 // Branch 3: General inquiries
 const generalFlow = askIssueType.nextStep({
-  instructions: "Let me help with your inquiry...",
+  prompt: "Let me help with your inquiry...",
   condition: "Issue type is general",
 });
 ```
@@ -587,19 +586,19 @@ const checkoutRoute = agent.createRoute<CheckoutData>({
 
 // Skip login if user already has account
 const login = checkoutRoute.initialStep.nextStep({
-  instructions: "Please log in or continue as guest",
+  prompt: "Please log in or continue as guest",
   collect: ["hasAccount", "email"],
   skipIf: (data) => data.hasAccount === true,
 });
 
 // Skip billing address if same as shipping
 const shippingAddress = login.nextStep({
-  instructions: "What's your shipping address?",
+  prompt: "What's your shipping address?",
   collect: ["shippingAddress"],
 });
 
 const billingAddress = shippingAddress.nextStep({
-  instructions: "Is your billing address the same as shipping?",
+  prompt: "Is your billing address the same as shipping?",
   collect: ["billingAddress"],
   skipIf: (data) => data.billingAddress !== undefined,
 });
@@ -653,7 +652,7 @@ const bookingRoute = agent.createRoute<FlightData>({
 
 // Collect data
 const collectDetails = bookingRoute.initialStep.nextStep({
-  instructions: "Where and when would you like to fly?",
+  prompt: "Where and when would you like to fly?",
   collect: ["destination", "departureDate", "passengers"],
 });
 
@@ -665,7 +664,7 @@ const searchStep = collectDetails.nextStep({
 
 // Present results
 const presentFlights = searchStep.nextStep({
-  instructions: "Here are available flights based on your search",
+  prompt: "Here are available flights based on your search",
 });
 ```
 
@@ -688,17 +687,17 @@ const onboardingRoute = agent.createRoute<OnboardingData>({
 });
 
 const askName = onboardingRoute.initialStep.nextStep({
-  instructions: "What's your name?",
+  prompt: "What's your name?",
   collect: ["name"],
 });
 
 const askEmail = askName.nextStep({
-  instructions: "What's your email?",
+  prompt: "What's your email?",
   collect: ["email"],
 });
 
 const thankYou = askEmail.nextStep({
-  instructions: "Thank you! Your profile is complete.",
+  prompt: "Thank you! Your profile is complete.",
 });
 
 // End the route
@@ -913,25 +912,25 @@ const bookingRoute = agent.createRoute<BookingData>({
 });
 
 const askHotel = bookingRoute.initialStep.nextStep({
-  instructions: "Ask which hotel",
+  prompt: "Ask which hotel",
   collect: ["hotelName"],
   skipIf: (e) => !!e.hotelName,
 });
 
 const askDate = askHotel.nextStep({
-  instructions: "Ask for date",
+  prompt: "Ask for date",
   collect: ["date"],
   skipIf: (e) => !!e.date,
 });
 
 const askGuests = askDate.nextStep({
-  instructions: "Ask for guests",
+  prompt: "Ask for guests",
   collect: ["guests"],
   skipIf: (e) => !!e.guests,
 });
 
 askGuests.nextStep({
-  instructions: "Confirm booking",
+  prompt: "Confirm booking",
   step: END_ROUTE,
 });
 
@@ -950,12 +949,12 @@ const feedbackRoute = agent.createRoute<FeedbackData>({
 });
 
 const askRating = feedbackRoute.initialStep.nextStep({
-  instructions: "Ask for rating 1-5",
+  prompt: "Ask for rating 1-5",
   collect: ["rating"],
 });
 
 askRating.nextStep({
-  instructions: "Thank user",
+  prompt: "Thank user",
   step: END_ROUTE,
 });
 
@@ -995,19 +994,19 @@ const onboardingRoute = agent.createRoute<OnboardingData>({
 });
 
 const askName = onboardingRoute.initialStep.nextStep({
-  instructions: "What's your name?",
+  prompt: "What's your name?",
   collect: ["name"],
   skipIf: (data) => !!data.name, // Skip if name exists
 });
 
 const askEmail = askName.nextStep({
-  instructions: "What's your email?",
+  prompt: "What's your email?",
   collect: ["email"],
   skipIf: (data) => !!data.email, // Skip if email exists
 });
 
 const complete = askEmail.nextStep({
-  instructions: "All done!",
+  prompt: "All done!",
 });
 
 complete.nextStep({ step: END_ROUTE });

@@ -219,19 +219,19 @@ const routes: RouteOptions[] = [
     steps: [
       {
         id: "ask_appointment_type",
-        instructions:
+        prompt:
           "What type of appointment do you need? (checkup, consultation, or followup)",
         collect: ["appointmentType"],
       },
       {
         id: "ask_date_time",
-        instructions: "When would you like to come in?",
+        prompt: "When would you like to come in?",
         collect: ["preferredDate", "preferredTime"],
         requires: ["appointmentType"],
       },
       {
         id: "ask_symptoms",
-        instructions: "Are you experiencing any symptoms?",
+        prompt: "Are you experiencing any symptoms?",
         collect: ["symptoms"],
       },
       {
@@ -241,7 +241,7 @@ const routes: RouteOptions[] = [
       },
       {
         id: "final_confirmation",
-        instructions:
+        prompt:
           "Your appointment is confirmed. You will receive a notification shortly.",
       },
     ],

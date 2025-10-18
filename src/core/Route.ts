@@ -53,16 +53,16 @@ export class Route<TContext = unknown, TData = unknown> {
     this.prohibitions = options.prohibitions || ([] as string[]);
     this.initialStep = new Step<TContext, TData>(
       this.id,
-      options.initialStep?.instructions || "Initial step",
+      options.initialStep?.prompt || "Initial step",
       options.initialStep?.id,
       options.initialStep?.collect,
       options.initialStep?.skipIf,
       options.initialStep?.requires,
-      options.initialStep?.instructions
+      options.initialStep?.prompt
     );
     // Store endStep spec (will be used when route completes)
     this.endStepSpec = options.endStep || {
-      instructions:
+      prompt:
         "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
     };
     this.routingExtrasSchema = options.routingExtrasSchema;
