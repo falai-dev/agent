@@ -14,24 +14,31 @@ export class PromptComposer<TContext = unknown> {
     identity?: string;
   }): this {
     const lines: string[] = [];
-    lines.push(`Agent: ${agent.name}`);
-    if (agent.goal) lines.push(`Goal: ${agent.goal}`);
-    if (agent.description) lines.push(`Description: ${agent.description}`);
-    if (agent.identity) lines.push(`Identity: ${agent.identity}`);
+    lines.push("## Agent");
+    lines.push(`**Name:** ${agent.name}`);
+    if (agent.goal) {
+      lines.push(`**Goal:** ${agent.goal}`);
+    }
+    if (agent.description) {
+      lines.push(`**Description:** ${agent.description}`);
+    }
+    if (agent.identity) {
+      lines.push(`**Identity:** ${agent.identity}`);
+    }
     this.parts.push(lines.join("\n"));
     return this;
   }
 
   addPersonality(personality?: string): this {
     if (personality && personality.trim().length) {
-      this.parts.push(`Personality: ${personality.trim()}`);
+      this.parts.push(`## Personality\n\n${personality.trim()}`);
     }
     return this;
   }
 
   addIdentity(identity?: string): this {
     if (identity && identity.trim().length) {
-      this.parts.push(`Identity: ${identity.trim()}`);
+      this.parts.push(`## Identity\n\n${identity.trim()}`);
     }
     return this;
   }
@@ -42,36 +49,37 @@ export class PromptComposer<TContext = unknown> {
 
   addScoringRules(): this {
     this.parts.push(
-      [
-        "Scoring rules:",
+      `## Scoring Rules\n\n${[
         "- 90-100: explicit keywords + clear intent",
         "- 70-89: strong contextual evidence + relevant keywords",
         "- 50-69: moderate relevance",
         "- 30-49: weak connection or ambiguous",
         "- 0-29: minimal/none",
         "Return ONLY JSON matching the provided schema. Include scores for ALL routes.",
-      ].join("\n")
+      ].join("\n")}`
     );
     return this;
   }
 
   addInstruction(text: string): this {
-    if (text) this.parts.push(text);
+    if (text) this.parts.push(`## Instruction\n\n${text}`);
     return this;
   }
 
   addInteractionHistory(history: Event[], note?: string): this {
     const recent = history
       .slice(-10)
-      .map((e) => JSON.stringify(e))
+      .map((e) => `- ${JSON.stringify(e)}`)
       .join("\n");
-    const header = note ? `${note}\n` : "";
-    this.parts.push(`${header}Recent conversation events:\n${recent}`);
+    const header = note ? `${note}\n\n` : "";
+    this.parts.push(
+      `## Interaction History\n\n${header}Recent conversation events:\n\n${recent}`
+    );
     return this;
   }
 
   addLastMessage(message: string): this {
-    this.parts.push(`Last user message:\n${message}`);
+    this.parts.push(`## Last Message\n\n${message}`);
     return this;
   }
 
@@ -79,13 +87,13 @@ export class PromptComposer<TContext = unknown> {
     if (!terms.length) return this;
     const text = terms
       .map(
-        (t, i) =>
-          `${i + 1}) ${t.name}${
+        (t, _i) =>
+          `- **${t.name}**${
             t.synonyms?.length ? ` (synonyms: ${t.synonyms.join(", ")})` : ""
           }: ${t.description}`
       )
       .join("\n");
-    this.parts.push(`Glossary:\n${text}`);
+    this.parts.push(`## Glossary\n\n${text}`);
     return this;
   }
 
@@ -97,19 +105,19 @@ export class PromptComposer<TContext = unknown> {
         const cond = g.condition
           ? `When ${g.condition}, then ${g.action}`
           : g.action;
-        return `Guideline #${i + 1}) ${cond}`;
+        return `- Guideline #${i + 1}: ${cond}`;
       })
       .join("\n");
-    this.parts.push(`Guidelines:\n${text}`);
+    this.parts.push(`## Guidelines\n\n${text}`);
     return this;
   }
 
   addCapabilities(capabilities: Capability[]): this {
     if (!capabilities.length) return this;
     const text = capabilities
-      .map((c, i) => `Capability ${i + 1}: ${c.title}\n${c.description}`)
+      .map((c, i) => `### Capability ${i + 1}: ${c.title}\n\n${c.description}`)
       .join("\n\n");
-    this.parts.push(`Capabilities:\n${text}`);
+    this.parts.push(`## Capabilities\n\n${text}`);
     return this;
   }
 
@@ -118,31 +126,39 @@ export class PromptComposer<TContext = unknown> {
     const text = routes
       .map((r, i) => {
         const conditions = r.conditions.length
-          ? `\n  Triggered when: ${r.conditions.join(" OR ")}`
+          ? `\n\n  **Triggered when:** ${r.conditions.join(" OR ")}`
           : "";
-        const desc = r.description ? `\n  ${r.description}` : "";
+        const desc = r.description
+          ? `\n\n  **Description:** ${r.description}`
+          : "";
         const rules = r.getRules();
         const prohibitions = r.getProhibitions();
         const rulesInfo = rules.length
-          ? `\n  RULES: ${rules.map((x, idx) => `${idx + 1}. ${x}`).join("; ")}`
+          ? `\n\n  **Rules:**\n  ${rules
+              .map((x, _idx) => `  - ${x}`)
+              .join("\n  ")}`
           : "";
         const prohibitionsInfo = prohibitions.length
-          ? `\n  PROHIBITIONS: ${prohibitions
-              .map((x, idx) => `${idx + 1}. ${x}`)
-              .join("; ")}`
+          ? `\n\n  **Prohibitions:**\n  ${prohibitions
+              .map((x, _idx) => `  - ${x}`)
+              .join("\n  ")}`
           : "";
-        return `${i + 1}) ${
+        return `### Route ${i + 1}: ${
           r.title
         }${desc}${conditions}${rulesInfo}${prohibitionsInfo}`;
       })
       .join("\n\n");
-    this.parts.push(`Available routes:\n${text}`);
+    this.parts.push(`## Available Routes\n\n${text}`);
     return this;
   }
 
   addDirectives(directives?: string[]): this {
     if (!directives?.length) return this;
-    this.parts.push(`Address concisely:\n- ${directives.join("\n- ")}`);
+    this.parts.push(
+      `## Directives\n\nAddress concisely:\n\n${directives
+        .map((d) => `- ${d}`)
+        .join("\n")}`
+    );
     return this;
   }
 
