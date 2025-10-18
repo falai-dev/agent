@@ -292,7 +292,7 @@ export class OpenRouterProvider implements AiProvider {
       if (input.parameters?.jsonSchema) {
         const response = await this.client.responses.parse({
           model,
-          prompt: input.prompt,
+          instructions: input.prompt,
           input: "",
           reasoning: {
             effort: input.parameters?.reasoning?.effort || "low",
