@@ -624,7 +624,7 @@ interface RouteOptions<TData = unknown> {
   title: string;            // Route title
   description?: string;     // Route description
   identity?: string;        // Optional identity prompt defining the agent's role and persona for this route
-  personality?: string;     // Optional personality prompt defining the agent's communication style for this route
+  personality?: Template;   // Optional personality prompt defining the agent's communication style for this route
   conditions?: string[];    // Conditions that activate this route
   guidelines?: Guideline[]; // Initial guidelines for this route
   terms?: Term[];          // Initial terms for the route's domain glossary

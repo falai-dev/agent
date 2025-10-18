@@ -75,7 +75,7 @@ export interface AgentOptions<TContext = unknown> {
   /** The agent's primary goal or objective */
   goal?: string;
   /** Optional personality/tone prompt used in prompts */
-  personality?: string;
+  personality?: Template<TContext>;
   /** Optional identity prompt defining the agent's self-concept and role */
   identity?: Template<TContext>;
   /** Enable debug logging */

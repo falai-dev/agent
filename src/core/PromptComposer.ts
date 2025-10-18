@@ -30,7 +30,12 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
       );
     }
     if (agent.personality) {
-      lines.push(`**Personality:** ${agent.personality}`);
+      lines.push(
+        `**Personality:** ${await render(
+          agent.personality,
+          this.renderContext
+        )}`
+      );
     }
     this.parts.push(lines.join("\n"));
     return this;

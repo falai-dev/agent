@@ -26,7 +26,7 @@ export class Route<TContext = unknown, TData = unknown> {
   public readonly title: string;
   public readonly description?: string;
   public readonly identity?: Template<TContext, TData>;
-  public readonly personality?: string;
+  public readonly personality?: Template<TContext, TData>;
   public readonly conditions: Template<TContext, TData>[];
   public readonly domains?: string[];
   public readonly rules: Template<TContext, TData>[];

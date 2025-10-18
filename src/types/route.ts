@@ -96,7 +96,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   /** Optional identity prompt defining the agent's role and persona for this route */
   identity?: Template<TContext, TData>;
   /** Optional personality prompt defining the agent's communication style for this route */
-  personality?: string;
+  personality?: Template<TContext, TData>;
   /** Conditions that activate this route */
   conditions?: Template<TContext, TData>[];
   /** Initial guidelines for this route */

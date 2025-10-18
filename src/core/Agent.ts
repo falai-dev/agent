@@ -93,9 +93,11 @@ export class Agent<TContext = unknown> {
       }
     }
 
-    // Initialize from options
+    // Initialize from options - use create methods for consistency
     if (options.terms) {
-      this.terms = [...options.terms];
+      options.terms.forEach((term) => {
+        this.createTerm(term);
+      });
     }
 
     if (options.guidelines) {
@@ -523,7 +525,10 @@ export class Agent<TContext = unknown> {
           ...this.getGuidelines(),
           ...selectedRoute.getGuidelines(),
         ],
-        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedTerms: this.mergeTerms(
+          this.getTerms(),
+          selectedRoute.getTerms()
+        ),
         combinedCapabilities: [
           ...this.getCapabilities(),
           ...selectedRoute.getCapabilities(),
@@ -654,7 +659,10 @@ export class Agent<TContext = unknown> {
           ...this.getGuidelines(),
           ...selectedRoute.getGuidelines(),
         ],
-        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedTerms: this.mergeTerms(
+          this.getTerms(),
+          selectedRoute.getTerms()
+        ),
         combinedCapabilities: [
           ...this.getCapabilities(),
           ...selectedRoute.getCapabilities(),
@@ -1001,7 +1009,10 @@ export class Agent<TContext = unknown> {
           ...this.getGuidelines(),
           ...selectedRoute.getGuidelines(),
         ],
-        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedTerms: this.mergeTerms(
+          this.getTerms(),
+          selectedRoute.getTerms()
+        ),
         combinedCapabilities: [
           ...this.getCapabilities(),
           ...selectedRoute.getCapabilities(),
@@ -1099,7 +1110,10 @@ export class Agent<TContext = unknown> {
           ...this.getGuidelines(),
           ...selectedRoute.getGuidelines(),
         ],
-        combinedTerms: [...this.getTerms(), ...selectedRoute.getTerms()],
+        combinedTerms: this.mergeTerms(
+          this.getTerms(),
+          selectedRoute.getTerms()
+        ),
         combinedCapabilities: [
           ...this.getCapabilities(),
           ...selectedRoute.getCapabilities(),
@@ -1267,6 +1281,33 @@ export class Agent<TContext = unknown> {
    */
   getDomainRegistry(): DomainRegistry {
     return this.domainRegistry;
+  }
+
+  /**
+   * Merge terms with route-specific taking precedence on conflicts
+   * @private
+   */
+  private mergeTerms(
+    agentTerms: Term<TContext>[],
+    routeTerms: Term<TContext>[]
+  ): Term<TContext>[] {
+    const merged = new Map<string, Term<TContext>>();
+
+    // Add agent terms first
+    agentTerms.forEach((term) => {
+      const name =
+        typeof term.name === "string" ? term.name : term.name.toString();
+      merged.set(name, term);
+    });
+
+    // Add route terms (these take precedence)
+    routeTerms.forEach((term) => {
+      const name =
+        typeof term.name === "string" ? term.name : term.name.toString();
+      merged.set(name, term);
+    });
+
+    return Array.from(merged.values());
   }
 
   /**
