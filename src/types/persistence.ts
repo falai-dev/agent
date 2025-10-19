@@ -4,6 +4,7 @@
  */
 
 import type { Event, MessageRole } from "./history";
+import type { SessionState } from "./session";
 
 /**
  * Session status enum
@@ -13,19 +14,42 @@ export type SessionStatus = "active" | "completed" | "abandoned";
 /**
  * Base session data structure
  */
-export interface SessionData {
+export interface SessionData<TData = Record<string, unknown>> {
   id: string;
   userId?: string;
   agentName?: string;
   status: SessionStatus;
   currentRoute?: string;
   currentStep?: string;
-  collectedData?: Record<string, unknown>;
+  collectedData?: CollectedStateData<TData>;
   messageCount?: number;
   lastMessageAt?: Date;
   completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Data for creating a new session (subset of SessionData)
+ */
+export type CreateSessionData<TData = Record<string, unknown>> = Omit<
+  SessionData<TData>,
+  "id" | "createdAt" | "updatedAt"
+> & {
+  id?: string;
+};
+
+/**
+ * Structure for data collected during a session that needs to be persisted.
+ * This is a subset of SessionState, stored within SessionData.
+ */
+export interface CollectedStateData<TData = Record<string, unknown>> {
+  data: Partial<TData>;
+  dataByRoute: Record<string, Partial<TData>>;
+  routeHistory: SessionState<TData>["routeHistory"];
+  currentRouteTitle?: string;
+  currentStepDescription?: string;
+  metadata: SessionState<TData>["metadata"];
 }
 
 /**
@@ -48,36 +72,34 @@ export interface MessageData {
  * Repository interface for sessions
  * Implement this interface with your database of choice
  */
-export interface SessionRepository {
+export interface SessionRepository<TData = Record<string, unknown>> {
   /**
    * Create a new session
    */
-  create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData>;
+  create(data: CreateSessionData<TData>): Promise<SessionData<TData>>;
 
   /**
    * Find session by ID
    */
-  findById(id: string): Promise<SessionData | null>;
+  findById(id: string): Promise<SessionData<TData> | null>;
 
   /**
    * Find active session by user ID
    */
-  findActiveByUserId(userId: string): Promise<SessionData | null>;
+  findActiveByUserId(userId: string): Promise<SessionData<TData> | null>;
 
   /**
    * Find all sessions for a user
    */
-  findByUserId(userId: string, limit?: number): Promise<SessionData[]>;
+  findByUserId(userId: string, limit?: number): Promise<SessionData<TData>[]>;
 
   /**
    * Update session
    */
   update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null>;
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null>;
 
   /**
    * Update session status
@@ -86,15 +108,15 @@ export interface SessionRepository {
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null>;
+  ): Promise<SessionData<TData> | null>;
 
   /**
    * Update collected data
    */
   updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null>;
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null>;
 
   /**
    * Update current route and step
@@ -103,12 +125,12 @@ export interface SessionRepository {
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null>;
+  ): Promise<SessionData<TData> | null>;
 
   /**
    * Increment message count
    */
-  incrementMessageCount(id: string): Promise<SessionData | null>;
+  incrementMessageCount(id: string): Promise<SessionData<TData> | null>;
 
   /**
    * Delete session
@@ -161,11 +183,11 @@ export interface MessageRepository {
  * Persistence adapter interface
  * Implement this to create adapters for different databases
  */
-export interface PersistenceAdapter {
+export interface PersistenceAdapter<TData = Record<string, unknown>> {
   /**
    * Session repository
    */
-  readonly sessionRepository: SessionRepository;
+  readonly sessionRepository: SessionRepository<TData>;
 
   /**
    * Message repository
@@ -187,11 +209,11 @@ export interface PersistenceAdapter {
 /**
  * Configuration for persistence
  */
-export interface PersistenceConfig {
+export interface PersistenceConfig<TData = Record<string, unknown>> {
   /**
    * Persistence adapter instance (e.g., PrismaAdapter)
    */
-  adapter: PersistenceAdapter;
+  adapter: PersistenceAdapter<TData>;
 
   /**
    * Whether to auto-save messages (default: true)
@@ -208,10 +230,10 @@ export interface PersistenceConfig {
 /**
  * Options for creating a session
  */
-export interface CreateSessionOptions {
+export interface CreateSessionOptions<TData = Record<string, unknown>> {
   userId?: string;
   agentName?: string;
-  initialData?: Record<string, unknown>;
+  initialData?: Partial<TData>;
 }
 
 /**

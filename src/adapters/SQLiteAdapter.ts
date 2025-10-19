@@ -10,7 +10,10 @@ import type {
   MessageData,
   SessionStatus,
   PersistenceAdapter,
+  CollectedStateData,
+  CreateSessionData,
 } from "../types";
+import { createSessionId } from "../utils";
 
 /**
  * SQLite database interface - matches better-sqlite3
@@ -68,8 +71,10 @@ export interface SQLiteAdapterOptions {
  * });
  * ```
  */
-export class SQLiteAdapter implements PersistenceAdapter {
-  public readonly sessionRepository: SessionRepository;
+export class SQLiteAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
+  public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private db: SqliteDatabase;
 
@@ -79,7 +84,10 @@ export class SQLiteAdapter implements PersistenceAdapter {
     const sessionTable = options.tables?.sessions || "agent_sessions";
     const messageTable = options.tables?.messages || "agent_messages";
 
-    this.sessionRepository = new SQLiteSessionRepository(this.db, sessionTable);
+    this.sessionRepository = new SQLiteSessionRepository<TData>(
+      this.db,
+      sessionTable
+    );
     this.messageRepository = new SQLiteMessageRepository(this.db, messageTable);
   }
 
@@ -145,16 +153,16 @@ export class SQLiteAdapter implements PersistenceAdapter {
 /**
  * SQLite Session Repository
  */
-class SQLiteSessionRepository implements SessionRepository {
+class SQLiteSessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
   constructor(private db: SqliteDatabase, private tableName: string) {}
 
-  create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData> {
-    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
+    const id = data.id || createSessionId();
     const now = new Date();
 
-    const session: SessionData = {
+    const session: SessionData<TData> = {
       ...data,
       id,
       status: data.status || "active",
@@ -183,7 +191,7 @@ class SQLiteSessionRepository implements SessionRepository {
     return Promise.resolve(session);
   }
 
-  findById(id: string): Promise<SessionData | null> {
+  findById(id: string): Promise<SessionData<TData> | null> {
     const stmt = this.db.prepare(
       `SELECT * FROM ${this.tableName} WHERE id = ?`
     );
@@ -191,7 +199,7 @@ class SQLiteSessionRepository implements SessionRepository {
     return Promise.resolve(row ? this.deserializeSession(row) : null);
   }
 
-  findActiveByUserId(userId: string): Promise<SessionData | null> {
+  findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     const stmt = this.db.prepare(
       `SELECT * FROM ${this.tableName} 
        WHERE user_id = ? AND status = 'active'
@@ -202,7 +210,7 @@ class SQLiteSessionRepository implements SessionRepository {
     return Promise.resolve(row ? this.deserializeSession(row) : null);
   }
 
-  findByUserId(userId: string, limit = 100): Promise<SessionData[]> {
+  findByUserId(userId: string, limit = 100): Promise<SessionData<TData>[]> {
     const stmt = this.db.prepare(
       `SELECT * FROM ${this.tableName} 
        WHERE user_id = ?
@@ -215,8 +223,8 @@ class SQLiteSessionRepository implements SessionRepository {
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
     const fields: string[] = [];
     const values: unknown[] = [];
 
@@ -270,14 +278,14 @@ class SQLiteSessionRepository implements SessionRepository {
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, { status, completedAt });
   }
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, { collectedData });
   }
 
@@ -285,14 +293,14 @@ class SQLiteSessionRepository implements SessionRepository {
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, {
       currentRoute: route,
       currentStep: step,
     });
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
     const stmt = this.db.prepare(
       `UPDATE ${this.tableName}
        SET message_count = message_count + 1,
@@ -314,7 +322,7 @@ class SQLiteSessionRepository implements SessionRepository {
     return Promise.resolve(result.changes > 0);
   }
 
-  private deserializeSession(row: Record<string, unknown>): SessionData {
+  private deserializeSession(row: Record<string, unknown>): SessionData<TData> {
     return {
       id: row.id as string,
       userId: (row.user_id as string) || undefined,
@@ -323,7 +331,9 @@ class SQLiteSessionRepository implements SessionRepository {
       currentRoute: (row.current_route as string) || undefined,
       currentStep: (row.current_step as string) || undefined,
       collectedData: row.collected_data
-        ? (JSON.parse(row.collected_data as string) as Record<string, unknown>)
+        ? (JSON.parse(
+            row.collected_data as string
+          ) as CollectedStateData<TData>)
         : undefined,
       messageCount: (row.message_count as number) || 0,
       lastMessageAt: row.last_message_at

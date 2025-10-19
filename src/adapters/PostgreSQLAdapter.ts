@@ -4,6 +4,7 @@
  */
 
 import type {
+  CollectedStateData,
   SessionRepository,
   MessageRepository,
   SessionData,
@@ -76,8 +77,10 @@ export interface PostgreSQLAdapterOptions {
  * });
  * ```
  */
-export class PostgreSQLAdapter implements PersistenceAdapter {
-  public readonly sessionRepository: SessionRepository;
+export class PostgreSQLAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
+  public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private client: PgClient;
 
@@ -87,7 +90,7 @@ export class PostgreSQLAdapter implements PersistenceAdapter {
     const sessionTable = options.tables?.sessions || "agent_sessions";
     const messageTable = options.tables?.messages || "agent_messages";
 
-    this.sessionRepository = new PostgreSQLSessionRepository(
+    this.sessionRepository = new PostgreSQLSessionRepository<TData>(
       this.client,
       sessionTable
     );
@@ -155,16 +158,21 @@ export class PostgreSQLAdapter implements PersistenceAdapter {
 /**
  * PostgreSQL Session Repository
  */
-class PostgreSQLSessionRepository implements SessionRepository {
+class PostgreSQLSessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
   constructor(private client: PgClient, private tableName: string) {}
 
   async create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData> {
-    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    data: Omit<SessionData<TData>, "createdAt" | "updatedAt"> & {
+      id?: string;
+    }
+  ): Promise<SessionData<TData>> {
+    const id =
+      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const now = new Date();
 
-    const result = await this.client.query<SessionData>(
+    const result = await this.client.query<SessionData<TData>>(
       `INSERT INTO ${this.tableName} 
        (id, user_id, agent_name, status, collected_data, message_count, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -184,8 +192,8 @@ class PostgreSQLSessionRepository implements SessionRepository {
     return result.rows[0];
   }
 
-  async findById(id: string): Promise<SessionData | null> {
-    const result = await this.client.query<SessionData>(
+  async findById(id: string): Promise<SessionData<TData> | null> {
+    const result = await this.client.query<SessionData<TData>>(
       `SELECT * FROM ${this.tableName} WHERE id = $1`,
       [id]
     );
@@ -193,8 +201,8 @@ class PostgreSQLSessionRepository implements SessionRepository {
     return result.rows[0] || null;
   }
 
-  async findActiveByUserId(userId: string): Promise<SessionData | null> {
-    const result = await this.client.query<SessionData>(
+  async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
+    const result = await this.client.query<SessionData<TData>>(
       `SELECT * FROM ${this.tableName} 
        WHERE user_id = $1 AND status = 'active'
        ORDER BY created_at DESC
@@ -205,8 +213,11 @@ class PostgreSQLSessionRepository implements SessionRepository {
     return result.rows[0] || null;
   }
 
-  async findByUserId(userId: string, limit = 100): Promise<SessionData[]> {
-    const result = await this.client.query<SessionData>(
+  async findByUserId(
+    userId: string,
+    limit = 100
+  ): Promise<SessionData<TData>[]> {
+    const result = await this.client.query<SessionData<TData>>(
       `SELECT * FROM ${this.tableName} 
        WHERE user_id = $1
        ORDER BY created_at DESC
@@ -219,8 +230,8 @@ class PostgreSQLSessionRepository implements SessionRepository {
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
     const fields: string[] = [];
     const values: unknown[] = [];
     let paramIndex = 1;
@@ -259,7 +270,7 @@ class PostgreSQLSessionRepository implements SessionRepository {
 
     values.push(id);
 
-    const result = await this.client.query<SessionData>(
+    const result = await this.client.query<SessionData<TData>>(
       `UPDATE ${this.tableName} 
        SET ${fields.join(", ")}
        WHERE id = $${paramIndex}
@@ -274,14 +285,14 @@ class PostgreSQLSessionRepository implements SessionRepository {
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, { status, completedAt });
   }
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, { collectedData });
   }
 
@@ -289,15 +300,15 @@ class PostgreSQLSessionRepository implements SessionRepository {
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, {
       currentRoute: route,
       currentStep: step,
     });
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
-    const result = await this.client.query<SessionData>(
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
+    const result = await this.client.query<SessionData<TData>>(
       `UPDATE ${this.tableName}
        SET message_count = message_count + 1,
            last_message_at = NOW(),

@@ -32,12 +32,15 @@
  * ```
  */
 
+import { cloneDeep } from "@utils/clone";
 import type {
   PersistenceAdapter,
   SessionRepository,
   MessageRepository,
   SessionData,
   MessageData,
+  CollectedStateData,
+  CreateSessionData,
 } from "../types";
 
 /**
@@ -137,8 +140,10 @@ export interface OpenSearchAdapterOptions {
  * Stores sessions and messages as documents in OpenSearch indices.
  * Compatible with OpenSearch 1.x, 2.x and Elasticsearch 7.x.
  */
-export class OpenSearchAdapter implements PersistenceAdapter {
-  readonly sessionRepository: SessionRepository;
+export class OpenSearchAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
+  readonly sessionRepository: SessionRepository<TData>;
   readonly messageRepository: MessageRepository;
 
   private readonly client: OpenSearchClient;
@@ -157,7 +162,7 @@ export class OpenSearchAdapter implements PersistenceAdapter {
     this.autoCreateIndices = options.autoCreateIndices ?? true;
     this.refresh = options.refresh ?? false;
 
-    this.sessionRepository = new OpenSearchSessionRepository(
+    this.sessionRepository = new OpenSearchSessionRepository<TData>(
       this.client,
       this.sessionIndex,
       this.refresh
@@ -242,36 +247,41 @@ export class OpenSearchAdapter implements PersistenceAdapter {
 /**
  * OpenSearch-based session repository implementation
  */
-class OpenSearchSessionRepository implements SessionRepository {
+class OpenSearchSessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
   constructor(
     private client: OpenSearchClient,
     private index: string,
     private refresh: boolean | "wait_for"
   ) {}
 
-  async create(
-    data: Omit<SessionData, "id" | "createdAt">
-  ): Promise<SessionData> {
-    const id = `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  async create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
+    const id =
+      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const now = new Date();
 
-    const session: SessionData = {
-      id,
+    const session: SessionData<TData> = {
       ...data,
+      id,
+      status: data.status || "active",
+      messageCount: data.messageCount || 0,
       createdAt: now,
+      updatedAt: now,
     };
+    const clonedSession = cloneDeep(session);
 
     await this.client.index({
       index: this.index,
       id,
-      body: this.serializeSession(session),
-      refresh: this.refresh,
+      body: clonedSession as unknown as Record<string, unknown>,
+      refresh: true, // Refresh to make the document immediately available for search
     });
 
     return session;
   }
 
-  async findById(id: string): Promise<SessionData | null> {
+  async findById(id: string): Promise<SessionData<TData> | null> {
     try {
       const response = await this.client.get({
         index: this.index,
@@ -287,7 +297,7 @@ class OpenSearchSessionRepository implements SessionRepository {
     }
   }
 
-  async findActiveByUserId(userId: string): Promise<SessionData | null> {
+  async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     const response = await this.client.search({
       index: this.index,
       body: {
@@ -309,7 +319,10 @@ class OpenSearchSessionRepository implements SessionRepository {
     return this.deserializeSession(hits[0]._source);
   }
 
-  async findByUserId(userId: string, limit = 100): Promise<SessionData[]> {
+  async findByUserId(
+    userId: string,
+    limit = 100
+  ): Promise<SessionData<TData>[]> {
     const response = await this.client.search({
       index: this.index,
       body: {
@@ -328,8 +341,8 @@ class OpenSearchSessionRepository implements SessionRepository {
 
   async update(
     id: string,
-    updates: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
+    updates: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
     const doc: Record<string, unknown> = {
       ...updates,
       updatedAt: new Date().toISOString(),
@@ -355,9 +368,9 @@ class OpenSearchSessionRepository implements SessionRepository {
 
   async updateStatus(
     id: string,
-    status: SessionData["status"],
+    status: SessionData<TData>["status"],
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     const doc: Record<string, unknown> = {
       status,
       updatedAt: new Date().toISOString(),
@@ -379,8 +392,8 @@ class OpenSearchSessionRepository implements SessionRepository {
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
     await this.client.update({
       index: this.index,
       id,
@@ -400,7 +413,7 @@ class OpenSearchSessionRepository implements SessionRepository {
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     const doc: Record<string, unknown> = {
       updatedAt: new Date().toISOString(),
     };
@@ -422,7 +435,7 @@ class OpenSearchSessionRepository implements SessionRepository {
     return await this.findById(id);
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
     const session = await this.findById(id);
     if (!session) {
       return null;
@@ -462,25 +475,16 @@ class OpenSearchSessionRepository implements SessionRepository {
     }
   }
 
-  private serializeSession(session: SessionData): Record<string, unknown> {
-    return {
-      ...session,
-      createdAt: session.createdAt.toISOString(),
-      updatedAt: session.updatedAt?.toISOString(),
-      completedAt: session.completedAt?.toISOString(),
-    };
-  }
-
-  private deserializeSession(doc: Record<string, unknown>): SessionData {
+  private deserializeSession(doc: Record<string, unknown>): SessionData<TData> {
     return {
       id: doc.id as string,
       userId: doc.userId as string | undefined,
       agentName: doc.agentName as string | undefined,
-      status: doc.status as SessionData["status"],
+      status: doc.status as SessionData<TData>["status"],
       currentRoute: doc.currentRoute as string | undefined,
       currentStep: doc.currentStep as string | undefined,
-      collectedData: doc.collectedData as Record<string, unknown> | undefined,
-      messageCount: doc.messageCount as number | undefined,
+      collectedData: doc.collectedData as CollectedStateData<TData> | undefined,
+      messageCount: (doc.messageCount as number) || 0,
       createdAt: new Date(doc.createdAt as string),
       updatedAt: new Date(doc.updatedAt as string),
       lastMessageAt: doc.lastMessageAt

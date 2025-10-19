@@ -15,6 +15,8 @@ import type {
   Event,
   SessionState,
   History,
+  PersistenceAdapter,
+  CollectedStateData,
 } from "../types";
 import { createSession, sessionStepToData, sessionDataToStep } from "../utils";
 import { convertMessagesToHistory } from "./Events";
@@ -23,12 +25,12 @@ import { convertMessagesToHistory } from "./Events";
  * Manager for handling persistence operations
  * Provides a clean interface for optional database persistence
  */
-export class PersistenceManager {
-  private config: PersistenceConfig;
-  private sessionRepository: SessionRepository;
+export class PersistenceManager<TData = Record<string, unknown>> {
+  private config: PersistenceConfig<TData>;
+  private sessionRepository: SessionRepository<TData>;
   private messageRepository: MessageRepository;
 
-  constructor(config: PersistenceConfig) {
+  constructor(config: PersistenceConfig<TData>) {
     this.config = {
       autoSave: true,
       ...config,
@@ -40,14 +42,21 @@ export class PersistenceManager {
   /**
    * Create a new session
    */
-  async createSession(options: CreateSessionOptions): Promise<SessionData> {
+  async createSession(
+    options: CreateSessionOptions<TData>
+  ): Promise<SessionData<TData>> {
     const userId = options.userId || this.config.userId;
 
     return await this.sessionRepository.create({
       userId,
       agentName: options.agentName,
       status: "active",
-      collectedData: options.initialData || {},
+      collectedData: {
+        data: options.initialData || {},
+        dataByRoute: {},
+        routeHistory: [],
+        metadata: {},
+      },
       messageCount: 0,
     });
   }
@@ -55,14 +64,14 @@ export class PersistenceManager {
   /**
    * Get session by ID
    */
-  async getSession(sessionId: string): Promise<SessionData | null> {
+  async getSession(sessionId: string): Promise<SessionData<TData> | null> {
     return await this.sessionRepository.findById(sessionId);
   }
 
   /**
    * Find active session for a user
    */
-  async findActiveSession(userId?: string): Promise<SessionData | null> {
+  async findActiveSession(userId?: string): Promise<SessionData<TData> | null> {
     const effectiveUserId = userId || this.config.userId;
     if (!effectiveUserId) {
       throw new Error(
@@ -78,7 +87,7 @@ export class PersistenceManager {
   async getUserSessions(
     userId?: string,
     limit?: number
-  ): Promise<SessionData[]> {
+  ): Promise<SessionData<TData>[]> {
     const effectiveUserId = userId || this.config.userId;
     if (!effectiveUserId) {
       throw new Error(
@@ -95,7 +104,7 @@ export class PersistenceManager {
     sessionId: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return await this.sessionRepository.updateStatus(
       sessionId,
       status,
@@ -108,8 +117,8 @@ export class PersistenceManager {
    */
   async updateCollectedData(
     sessionId: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
     return await this.sessionRepository.updateCollectedData(
       sessionId,
       collectedData
@@ -123,7 +132,7 @@ export class PersistenceManager {
     sessionId: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return await this.sessionRepository.updateRouteStep(sessionId, route, step);
   }
 
@@ -192,14 +201,14 @@ export class PersistenceManager {
   /**
    * Complete a session
    */
-  async completeSession(sessionId: string): Promise<SessionData | null> {
+  async completeSession(sessionId: string): Promise<SessionData<TData> | null> {
     return await this.updateSessionStatus(sessionId, "completed", new Date());
   }
 
   /**
    * Abandon a session
    */
-  async abandonSession(sessionId: string): Promise<SessionData | null> {
+  async abandonSession(sessionId: string): Promise<SessionData<TData> | null> {
     return await this.updateSessionStatus(sessionId, "abandoned");
   }
 
@@ -222,25 +231,42 @@ export class PersistenceManager {
    * Save SessionState to database
    * Converts SessionState to SessionData and persists it
    */
-  async saveSessionState<TData = Record<string, unknown>>(
+  async saveSessionState(
     sessionId: string,
     sessionStep: SessionState<TData>
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     const persistenceData = sessionStepToData(sessionStep);
 
-    return await this.sessionRepository.update(sessionId, {
-      currentRoute: persistenceData.currentRoute,
-      currentStep: persistenceData.currentStep,
-      collectedData: persistenceData.collectedData,
-      lastMessageAt: new Date(),
-    });
+    // First try to find existing session
+    const existingSession = await this.sessionRepository.findById(sessionId);
+
+    if (existingSession) {
+      // Update existing session
+      return await this.sessionRepository.update(sessionId, {
+        currentRoute: persistenceData.currentRoute,
+        currentStep: persistenceData.currentStep,
+        collectedData: persistenceData.collectedData,
+        lastMessageAt: new Date(),
+      });
+    } else {
+      // Create new session if it doesn't exist
+      return await this.sessionRepository.create({
+        id: sessionId,
+        userId: this.config.userId,
+        status: "active",
+        currentRoute: persistenceData.currentRoute,
+        currentStep: persistenceData.currentStep,
+        collectedData: persistenceData.collectedData,
+        messageCount: 0,
+      });
+    }
   }
 
   /**
    * Load SessionState from database
    * Converts SessionData to SessionState
    */
-  async loadSessionState<TData = Record<string, unknown>>(
+  async loadSessionState(
     sessionId: string
   ): Promise<SessionState<TData> | null> {
     const sessionData = await this.sessionRepository.findById(sessionId);
@@ -249,11 +275,8 @@ export class PersistenceManager {
       return null;
     }
 
-    const stepData = sessionDataToStep<TData>(sessionId, {
-      currentRoute: sessionData.currentRoute,
-      currentStep: sessionData.currentStep,
-      collectedData: sessionData.collectedData,
-    });
+    // Reconstruct SessionState from SessionData
+    const sessionState = sessionDataToStep<TData>(sessionId, sessionData);
 
     // Create a full session step with the loaded data
     const session = createSession<TData>(sessionId, {
@@ -263,18 +286,27 @@ export class PersistenceManager {
 
     return {
       ...session,
-      ...stepData,
+      ...sessionState,
+      metadata: {
+        ...session.metadata,
+        ...sessionState.metadata,
+      },
     };
+  }
+
+  /**
+   * Get the underlying adapter
+   */
+  getAdapter(): PersistenceAdapter<TData> {
+    return this.config.adapter;
   }
 
   /**
    * Create session with SessionState support
    * Returns both SessionData and initialized SessionState
    */
-  async createSessionWithStep<TData = Record<string, unknown>>(
-    options: CreateSessionOptions
-  ): Promise<{
-    sessionData: SessionData;
+  async createSessionWithStep(options: CreateSessionOptions<TData>): Promise<{
+    sessionData: SessionData<TData>;
     sessionStep: SessionState<TData>;
   }> {
     const sessionData = await this.createSession(options);
@@ -287,7 +319,7 @@ export class PersistenceManager {
 
     // If initial data was provided, merge it as collected data
     if (options.initialData) {
-      sessionStep.data = options.initialData as Partial<TData>;
+      sessionStep.data = options.initialData;
     }
 
     return { sessionData, sessionStep };

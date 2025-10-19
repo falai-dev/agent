@@ -20,7 +20,8 @@ import type {
   SessionData,
   MessageData,
   SessionStatus,
-} from "../../src/types/persistence";
+  CollectedStateData,
+} from "../../src/types";
 import { Agent, GeminiProvider, createSession } from "../../src";
 
 /**
@@ -34,11 +35,12 @@ class InMemoryStorage {
 
   // Session operations
   createSession(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
+    data: Omit<SessionData, "createdAt" | "updatedAt"> & {
+      id?: string;
+    }
   ): SessionData {
-    const id = `session_${Date.now()}_${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
+    const id =
+      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const session: SessionData = {
       ...data,
       id,
@@ -95,14 +97,17 @@ class InMemoryStorage {
 
   updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): SessionData | null {
+    collectedData: CollectedStateData<Record<string, unknown>>
+  ): SessionData<Record<string, unknown>> | null {
     const existing = this.sessions.get(id);
     if (!existing) return null;
 
-    const updated = {
+    const updated: SessionData<Record<string, unknown>> = {
       ...existing,
-      collectedData: { ...existing.collectedData, ...collectedData },
+      collectedData: {
+        ...(existing.collectedData || {}),
+        ...collectedData,
+      },
       updatedAt: new Date(),
     };
     this.sessions.set(id, updated);
@@ -243,67 +248,101 @@ class InMemoryStorage {
 /**
  * Custom Session Repository implementation
  */
-class CustomSessionRepository implements SessionRepository {
+class CustomSessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
   constructor(private storage: InMemoryStorage) {}
 
   async create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData> {
-    return Promise.resolve(this.storage.createSession(data));
+    data: Omit<SessionData<TData>, "createdAt" | "updatedAt"> & {
+      id?: string;
+    }
+  ): Promise<SessionData<TData>> {
+    return Promise.resolve(
+      this.storage.createSession({
+        ...data,
+        id:
+          data.id ||
+          `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      }) as SessionData<TData>
+    );
   }
 
-  async findById(id: string): Promise<SessionData | null> {
-    return Promise.resolve(this.storage.getSession(id));
+  async findById(id: string): Promise<SessionData<TData> | null> {
+    return Promise.resolve(
+      this.storage.getSession(id) as SessionData<TData> | null
+    );
   }
 
-  async findActiveByUserId(userId: string): Promise<SessionData | null> {
+  async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     const sessions = this.storage.getSessionsByUserId(userId);
-    return Promise.resolve(sessions.find((s) => s.status === "active") || null);
+    return Promise.resolve(
+      (sessions.find((s) => s.status === "active") as SessionData<TData>) ||
+        null
+    );
   }
 
-  async findByUserId(userId: string, limit = 50): Promise<SessionData[]> {
+  async findByUserId(
+    userId: string,
+    limit = 50
+  ): Promise<SessionData<TData>[]> {
     const sessions = this.storage.getSessionsByUserId(userId);
     return Promise.resolve(
       sessions
         .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
-        .slice(0, limit)
+        .slice(0, limit) as SessionData<TData>[]
     );
   }
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
-    return Promise.resolve(this.storage.updateSession(id, data));
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
+    return Promise.resolve(
+      this.storage.updateSession(id, data) as SessionData<TData> | null
+    );
   }
 
   async updateStatus(
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return Promise.resolve(
-      this.storage.updateSessionStatus(id, status, completedAt)
+      this.storage.updateSessionStatus(
+        id,
+        status,
+        completedAt
+      ) as SessionData<TData> | null
     );
   }
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
-    return Promise.resolve(this.storage.updateCollectedData(id, collectedData));
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
+    return Promise.resolve(
+      this.storage.updateCollectedData(
+        id,
+        collectedData
+      ) as SessionData<TData> | null
+    );
   }
 
   async updateRouteStep(
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
-    return Promise.resolve(this.storage.updateRouteStep(id, route, step));
+  ): Promise<SessionData<TData> | null> {
+    return Promise.resolve(
+      this.storage.updateRouteStep(id, route, step) as SessionData<TData> | null
+    );
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
-    return Promise.resolve(this.storage.incrementMessageCount(id));
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
+    return Promise.resolve(
+      this.storage.incrementMessageCount(id) as SessionData<TData> | null
+    );
   }
 
   async delete(id: string): Promise<boolean> {
@@ -359,14 +398,16 @@ class CustomMessageRepository implements MessageRepository {
  * This adapter demonstrates how to implement a custom persistence layer.
  * Replace the InMemoryStorage with actual database calls for production use.
  */
-export class CustomAdapter implements PersistenceAdapter {
+export class CustomAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
   private storage = new InMemoryStorage();
 
-  readonly sessionRepository: SessionRepository;
+  readonly sessionRepository: SessionRepository<TData>;
   readonly messageRepository: MessageRepository;
 
   constructor() {
-    this.sessionRepository = new CustomSessionRepository(this.storage);
+    this.sessionRepository = new CustomSessionRepository<TData>(this.storage);
     this.messageRepository = new CustomMessageRepository(this.storage);
   }
 

@@ -13,6 +13,7 @@ export {
 // Session management
 export {
   createSession,
+  createSessionId,
   enterRoute,
   enterStep,
   mergeCollected,
@@ -28,6 +29,9 @@ export {
   renderTemplateObject,
   formatKnowledgeBase,
 } from "./template";
+
+// Cloning utilities
+export { cloneDeep } from "./clone";
 
 // Event utilities
 export { getLastMessageFromHistory } from "./event";

@@ -9,13 +9,14 @@
  * - Compatible with Elasticsearch 7.x
  */
 
-import { convertHistoryMessage } from "@core/Events";
+import { convertHistoryMessage } from "../../src/core/Events";
 import {
   Agent,
   GeminiProvider,
   OpenSearchAdapter,
   END_ROUTE,
   MessageRole,
+  HistoryItem,
 } from "../../src";
 
 // @ts-expect-error - Client is not typed
@@ -64,7 +65,7 @@ async function example() {
   const userId = "user_123";
 
   // Create adapter
-  const adapter = new OpenSearchAdapter(client, {
+  const adapter = new OpenSearchAdapter<ConversationContext>(client, {
     indices: {
       sessions: "agent_sessions",
       messages: "agent_messages",
@@ -165,19 +166,18 @@ async function example() {
   if (!persistence) return;
 
   // Create session with step
-  const { sessionData, sessionStep } =
-    await persistence.createSessionWithStep<ComplaintData>({
-      userId,
-      agentName: "Customer Service Agent",
-      initialData: {
-        severity: "medium",
-      },
-    });
+  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
+    userId,
+    agentName: "Customer Service Agent",
+    initialData: {
+      severity: "medium",
+    },
+  });
 
   console.log("✨ Session created in OpenSearch:", sessionData.id);
 
   // Conversation flow
-  const history = [];
+  const history: HistoryItem[] = [];
   let session = sessionStep;
 
   // Turn 1
@@ -249,9 +249,7 @@ async function example() {
 
   // Load session from OpenSearch
   console.log("\n--- Loading Session from OpenSearch ---");
-  const loadedSession = await persistence.loadSessionState<ComplaintData>(
-    sessionData.id
-  );
+  const loadedSession = await persistence.loadSessionState(sessionData.id);
 
   console.log("📥 Loaded session:", {
     currentRoute: loadedSession?.currentRoute?.title,
@@ -314,7 +312,7 @@ async function analyticsExample() {
     auth: { username: "admin", password: "admin" },
   });
 
-  const adapter = new OpenSearchAdapter(client, {
+  const adapter = new OpenSearchAdapter<ConversationContext>(client, {
     indices: {
       sessions: "support_sessions",
       messages: "support_messages",
@@ -330,7 +328,7 @@ async function analyticsExample() {
     tags: string[];
   }
 
-  const agent = new Agent({
+  const agent = new Agent<ConversationContext>({
     name: "Support Analyzer",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
@@ -369,7 +367,7 @@ async function analyticsExample() {
   // Create multiple sessions
   for (let i = 0; i < 3; i++) {
     const { sessionData, sessionStep } =
-      await persistence.createSessionWithStep<TicketData>({
+      await persistence.createSessionWithStep({
         userId: "analyst_001",
         agentName: "Support Analyzer",
       });
@@ -439,10 +437,10 @@ async function timeSeriesExample() {
     auth: { username: "admin", password: "admin" },
   });
 
-  const adapter = new OpenSearchAdapter(client);
+  const adapter = new OpenSearchAdapter<ConversationContext>(client);
   await adapter.initialize();
 
-  new Agent({
+  new Agent<ConversationContext>({
     name: "Metrics Agent",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,

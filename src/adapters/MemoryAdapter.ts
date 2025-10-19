@@ -4,13 +4,16 @@
  */
 
 import type {
-  SessionRepository,
-  MessageRepository,
-  SessionData,
+  CollectedStateData,
   MessageData,
-  SessionStatus,
+  MessageRepository,
   PersistenceAdapter,
+  SessionData,
+  SessionRepository,
+  SessionStatus,
+  CreateSessionData,
 } from "../types";
+import { cloneDeep } from "../utils/clone";
 
 /**
  * Memory Adapter - Provider-style API for in-memory persistence
@@ -35,17 +38,19 @@ import type {
  * });
  * ```
  */
-export class MemoryAdapter implements PersistenceAdapter {
-  public readonly sessionRepository: SessionRepository;
+export class MemoryAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
+  public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
-  private sessions: Map<string, SessionData>;
+  private sessions: Map<string, SessionData<TData>>;
   private messages: Map<string, MessageData>;
 
   constructor() {
     this.sessions = new Map();
     this.messages = new Map();
 
-    this.sessionRepository = new MemorySessionRepository(this.sessions);
+    this.sessionRepository = new MemorySessionRepository<TData>(this.sessions);
     this.messageRepository = new MemoryMessageRepository(this.messages);
   }
 
@@ -61,7 +66,7 @@ export class MemoryAdapter implements PersistenceAdapter {
    * Get data snapshot (useful for debugging)
    */
   getSnapshot(): {
-    sessions: SessionData[];
+    sessions: SessionData<TData>[];
     messages: MessageData[];
   } {
     return {
@@ -74,16 +79,17 @@ export class MemoryAdapter implements PersistenceAdapter {
 /**
  * Memory Session Repository
  */
-class MemorySessionRepository implements SessionRepository {
-  constructor(private sessions: Map<string, SessionData>) {}
+class MemorySessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
+  constructor(private sessions: Map<string, SessionData<TData>>) {}
 
-  async create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData> {
-    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
+    const id =
+      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const now = new Date();
 
-    const session: SessionData = {
+    const session: SessionData<TData> = {
       ...data,
       id,
       status: data.status || "active",
@@ -92,16 +98,16 @@ class MemorySessionRepository implements SessionRepository {
       updatedAt: now,
     };
 
-    this.sessions.set(id, session);
-    return Promise.resolve(session);
+    this.sessions.set(id, cloneDeep(session));
+    return Promise.resolve(cloneDeep(session));
   }
 
-  async findById(id: string): Promise<SessionData | null> {
-    const session = this.sessions.get(id) || null;
-    return Promise.resolve(session);
+  findById(id: string): Promise<SessionData<TData> | null> {
+    const session = this.sessions.get(id);
+    return Promise.resolve(session ? cloneDeep(session) : null);
   }
 
-  async findActiveByUserId(userId: string): Promise<SessionData | null> {
+  async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     const sessions = Array.from(this.sessions.values())
       .filter((s) => s.userId === userId && s.status === "active")
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -109,7 +115,10 @@ class MemorySessionRepository implements SessionRepository {
     return Promise.resolve(sessions[0] || null);
   }
 
-  async findByUserId(userId: string, limit = 100): Promise<SessionData[]> {
+  async findByUserId(
+    userId: string,
+    limit = 100
+  ): Promise<SessionData<TData>[]> {
     const sessions = Array.from(this.sessions.values())
       .filter((s) => s.userId === userId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
@@ -119,55 +128,74 @@ class MemorySessionRepository implements SessionRepository {
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
     const existing = this.sessions.get(id);
     if (!existing) return null;
 
-    const updated: SessionData = {
+    const updated: SessionData<TData> = {
       ...existing,
       ...data,
       updatedAt: new Date(),
     };
 
-    this.sessions.set(id, updated);
-    return Promise.resolve(updated);
+    this.sessions.set(id, cloneDeep(updated));
+    return Promise.resolve(cloneDeep(updated));
   }
 
   async updateStatus(
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
-    return await this.update(id, { status, completedAt });
+  ): Promise<SessionData<TData> | null> {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.status = status;
+      if (completedAt) {
+        session.completedAt = completedAt;
+      }
+      this.sessions.set(id, cloneDeep(session));
+      return Promise.resolve(cloneDeep(session));
+    }
+    return Promise.resolve(null);
   }
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
-    return await this.update(id, { collectedData });
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.collectedData = collectedData;
+      this.sessions.set(id, cloneDeep(session));
+      return Promise.resolve(cloneDeep(session));
+    }
+    return Promise.resolve(null);
   }
 
   async updateRouteStep(
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
-    return await this.update(id, {
-      currentRoute: route,
-      currentStep: step,
-    });
+  ): Promise<SessionData<TData> | null> {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.currentRoute = route;
+      session.currentStep = step;
+      this.sessions.set(id, cloneDeep(session));
+      return Promise.resolve(cloneDeep(session));
+    }
+    return Promise.resolve(null);
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
     const session = this.sessions.get(id);
-    if (!session) return null;
-
-    return await this.update(id, {
-      messageCount: (session.messageCount || 0) + 1,
-      lastMessageAt: new Date(),
-    });
+    if (session) {
+      session.messageCount = (session.messageCount || 0) + 1;
+      this.sessions.set(id, cloneDeep(session));
+      return Promise.resolve(cloneDeep(session));
+    }
+    return Promise.resolve(null);
   }
 
   async delete(id: string): Promise<boolean> {

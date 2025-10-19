@@ -22,6 +22,7 @@ export interface ExecuteToolParams<TContext = unknown, TData = unknown> {
   updateContext: (updates: Partial<TContext>) => Promise<void>;
   history: Event[];
   data?: Partial<TData>;
+  toolArguments?: Record<string, unknown>;
 }
 
 export interface ExecuteToolsParams<TContext = unknown, TData = unknown> {
@@ -40,7 +41,8 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
   async executeTool(
     params: ExecuteToolParams<TContext, TData>
   ): Promise<ToolExecutionResult> {
-    const { tool, context, updateContext, history, data } = params;
+    const { tool, context, updateContext, history, data, toolArguments } =
+      params;
     try {
       // Build tool context with collected data
       const toolContext: ToolContext<TContext, TData> = {
@@ -51,7 +53,7 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
       };
 
       // Execute tool
-      const result = await tool.handler(toolContext);
+      const result = await tool.handler(toolContext, toolArguments);
 
       // Return execution result
       return {

@@ -2,7 +2,7 @@
  * Agent-related type definitions
  */
 
-import type { AiProvider } from "./ai";
+import type { AgentStructuredResponse, AiProvider } from "./ai";
 import type { Tool } from "./tool";
 import type { RouteOptions } from "./route";
 import type { PersistenceConfig } from "./persistence";
@@ -144,4 +144,20 @@ export interface GuidelineMatch<TContext = unknown> {
   guideline: Guideline<TContext>;
   /** Explanation of why this guideline was matched */
   rationale?: string;
+}
+
+export interface AgentResponseStreamChunk {
+  delta: string;
+  accumulated: string;
+  done: boolean;
+  session?: SessionState;
+  toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+  isRouteComplete?: boolean;
+  metadata?: {
+    model?: string;
+    tokensUsed?: number;
+    finishReason?: string;
+    [key: string]: unknown;
+  };
+  structured?: AgentStructuredResponse;
 }

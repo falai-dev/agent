@@ -1,9 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "ESNext",
+    "module": "ES2020",
     "lib": ["ES2020", "DOM"],
     "moduleResolution": "bundler",
+    "types": ["@types/bun"],
     "rootDir": "./",
     "outDir": "./dist",
     "baseUrl": "./src",
@@ -27,8 +28,9 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "downlevelIteration": true
   },
-  "include": ["src/**/*", "tests/**/*", "examples/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests/**/*"]
 }

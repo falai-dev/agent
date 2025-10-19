@@ -96,7 +96,7 @@ async function example() {
     },
     // ✨ Just pass the adapter - that's it!
     persistence: {
-      adapter: new PrismaAdapter({ prisma }),
+      adapter: new PrismaAdapter<ConversationContext>({ prisma }),
       autoSave: true, // Auto-saves session step after each response
       userId,
     },
@@ -196,14 +196,13 @@ async function example() {
   /**
    * Create or find a session - New Pattern!
    */
-  const sessionResult =
-    await persistence.createSessionWithStep<FlightBookingData>({
-      userId,
-      agentName: "Travel Assistant",
-      initialData: {
-        cabinClass: "economy", // Default value
-      },
-    });
+  const sessionResult = await persistence.createSessionWithStep({
+    userId,
+    agentName: "Travel Assistant",
+    initialData: {
+      cabinClass: "economy", // Default value
+    },
+  });
 
   let session = sessionResult.sessionStep;
   const dbSessionId = sessionResult.sessionData.id;
@@ -324,9 +323,7 @@ async function example() {
    * Load session step from database (demonstrates persistence)
    */
   console.log("\n--- Loading Session from Database ---");
-  const loadedSession = await persistence.loadSessionState<FlightBookingData>(
-    dbSessionId
-  );
+  const loadedSession = await persistence.loadSessionState(dbSessionId);
 
   console.log("📥 Loaded session step:", {
     currentRoute: loadedSession?.currentRoute?.title,
@@ -389,7 +386,10 @@ async function advancedExample() {
     // Lifecycle hooks for session step enrichment
     hooks: {
       // Enrich collected data before saving
-      onDataUpdate: async (data: OnboardingData, previous: OnboardingData) => {
+      onDataUpdate: async (
+        data: Partial<OnboardingData>,
+        previous: Partial<OnboardingData>
+      ) => {
         console.log("🔄 Collected data updated:", { data, previous });
 
         // Normalize phone numbers
@@ -402,7 +402,7 @@ async function advancedExample() {
           console.warn("⚠️ Invalid email detected");
         }
 
-        return Promise.resolve(data);
+        return Promise.resolve(data as OnboardingData);
       },
 
       // Update context when session step changes
@@ -415,7 +415,7 @@ async function advancedExample() {
       },
     },
     persistence: {
-      adapter: new PrismaAdapter({ prisma }),
+      adapter: new PrismaAdapter<UserContext>({ prisma }),
       autoSave: true,
       userId,
     },
@@ -465,11 +465,10 @@ async function advancedExample() {
   const persistence = agent.getPersistenceManager()!;
 
   // Create session with step
-  const { sessionData, sessionStep } =
-    await persistence.createSessionWithStep<OnboardingData>({
-      userId,
-      agentName: "Onboarding Assistant",
-    });
+  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
+    userId,
+    agentName: "Onboarding Assistant",
+  });
 
   console.log("✨ Created onboarding session:", sessionData.id);
 
@@ -514,9 +513,9 @@ async function quickStart() {
       model: "models/gemini-2.5-flash",
     }),
     persistence: {
-      adapter: new PrismaAdapter({ prisma }),
-      userId: "user_789",
+      adapter: new PrismaAdapter<ContactFormData>({ prisma }),
       autoSave: true, // ✨ Automatically saves session step!
+      userId: "user_789",
     },
   });
 
@@ -547,11 +546,10 @@ async function quickStart() {
   const persistence = agent.getPersistenceManager()!;
 
   // Create session with step support
-  const { sessionData, sessionStep } =
-    await persistence.createSessionWithStep<ContactFormData>({
-      userId: "user_789",
-      agentName: "Support Agent",
-    });
+  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
+    userId: "user_789",
+    agentName: "Support Agent",
+  });
 
   // Chat!
   const response = await agent.respond({

@@ -4,12 +4,14 @@
  */
 
 import type {
-  SessionRepository,
-  MessageRepository,
-  SessionData,
   MessageData,
-  SessionStatus,
+  MessageRepository,
   PersistenceAdapter,
+  SessionData,
+  SessionRepository,
+  SessionStatus,
+  CollectedStateData,
+  CreateSessionData,
 } from "../types";
 
 /**
@@ -98,8 +100,10 @@ export interface MongoAdapterOptions {
  * });
  * ```
  */
-export class MongoAdapter implements PersistenceAdapter {
-  public readonly sessionRepository: SessionRepository;
+export class MongoAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
+  public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private client: MongoClient;
   private db: MongoDatabase;
@@ -111,7 +115,7 @@ export class MongoAdapter implements PersistenceAdapter {
     const sessionCollection = options.collections?.sessions || "agent_sessions";
     const messageCollection = options.collections?.messages || "agent_messages";
 
-    this.sessionRepository = new MongoSessionRepository(
+    this.sessionRepository = new MongoSessionRepository<TData>(
       this.db.collection(sessionCollection)
     );
 
@@ -128,16 +132,18 @@ export class MongoAdapter implements PersistenceAdapter {
 /**
  * MongoDB Session Repository
  */
-class MongoSessionRepository implements SessionRepository {
-  constructor(private collection: MongoCollection<SessionData>) {}
+class MongoSessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
+  constructor(private collection: MongoCollection<SessionData<TData>>) {}
 
-  async create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData> {
+  async create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
     const now = new Date();
-    const session: SessionData = {
+    const session: SessionData<TData> = {
       ...data,
-      id: `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      id:
+        data.id ||
+        `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       status: data.status || "active",
       messageCount: data.messageCount || 0,
       createdAt: now,
@@ -148,15 +154,18 @@ class MongoSessionRepository implements SessionRepository {
     return session;
   }
 
-  async findById(id: string): Promise<SessionData | null> {
+  async findById(id: string): Promise<SessionData<TData> | null> {
     return await this.collection.findOne({ id });
   }
 
-  async findActiveByUserId(userId: string): Promise<SessionData | null> {
+  async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     return await this.collection.findOne({ userId, status: "active" });
   }
 
-  async findByUserId(userId: string, limit = 100): Promise<SessionData[]> {
+  async findByUserId(
+    userId: string,
+    limit = 100
+  ): Promise<SessionData<TData>[]> {
     return await this.collection
       .find({ userId })
       .sort({ createdAt: -1 })
@@ -166,8 +175,8 @@ class MongoSessionRepository implements SessionRepository {
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
     const result = await this.collection.updateOne(
       { id },
       { $set: { ...data, updatedAt: new Date() } }
@@ -181,7 +190,7 @@ class MongoSessionRepository implements SessionRepository {
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     const updateData: Record<string, unknown> = {
       status,
       updatedAt: new Date(),
@@ -201,8 +210,8 @@ class MongoSessionRepository implements SessionRepository {
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, { collectedData });
   }
 
@@ -210,14 +219,14 @@ class MongoSessionRepository implements SessionRepository {
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return await this.update(id, {
       currentRoute: route,
       currentStep: step,
     });
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
     const result = await this.collection.updateOne(
       { id },
       {

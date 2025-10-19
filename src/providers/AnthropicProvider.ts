@@ -554,7 +554,7 @@ export class AnthropicProvider implements AiProvider {
         promptTokens: inputTokens,
         completionTokens: outputTokens,
       },
-      structured,
-    } as GenerateMessageStreamChunk<TStructured>;
+      structured: structured as TStructured,
+    };
   }
 }

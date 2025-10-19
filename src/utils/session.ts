@@ -1,4 +1,6 @@
+import { cloneDeep } from "./clone";
 import type { SessionState } from "../types/session";
+import type { CollectedStateData } from "../types/persistence";
 
 /**
  * Helper to create a new session
@@ -9,8 +11,11 @@ export function createSession<TData = Record<string, unknown>>(
   sessionId?: string,
   metadata?: SessionState<TData>["metadata"]
 ): SessionState<TData> {
+  const id =
+    sessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
   return {
-    id: sessionId,
+    id,
     data: {},
     dataByRoute: {},
     routeHistory: [],
@@ -20,6 +25,21 @@ export function createSession<TData = Record<string, unknown>>(
       lastUpdatedAt: new Date(),
     },
   };
+}
+
+/**
+ * Helper to create a new session ID
+ */
+export function createSessionId(): string {
+  return `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+/**
+ * Clones a session to prevent mutation
+ */
+export function cloneSession<TData>(
+  session: SessionState<TData>
+): SessionState<TData> {
+  return cloneDeep(session);
 }
 
 /**
@@ -53,7 +73,7 @@ export function enterRoute<TData = Record<string, unknown>>(
   }
 
   // Load collected data for new route (if resuming) or start fresh
-  const newCollected = (dataByRoute[routeId] as Partial<TData>) || {};
+  const newCollected = dataByRoute[routeId] || {};
 
   // Enter new route
   const now = new Date();
@@ -143,14 +163,14 @@ export function sessionStepToData<TData = Record<string, unknown>>(
 ): {
   currentRoute?: string;
   currentStep?: string;
-  collectedData: Record<string, unknown>;
+  collectedData: CollectedStateData<TData>;
 } {
   return {
     currentRoute: session.currentRoute?.id,
     currentStep: session.currentStep?.id,
     collectedData: {
-      data: session.data,
-      dataByRoute: session.dataByRoute, // Include per-route data
+      data: session.data || {},
+      dataByRoute: session.dataByRoute || {}, // Include per-route data
       routeHistory: session.routeHistory,
       currentRouteTitle: session.currentRoute?.title,
       currentStepDescription: session.currentStep?.description,
@@ -170,34 +190,37 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
   data: {
     currentRoute?: string;
     currentStep?: string;
-    collectedData?: Record<string, unknown>;
+    collectedData?: CollectedStateData<TData>;
   }
 ): SessionState<TData> {
-  const collectedData = data.collectedData || {};
+  const collectedData: CollectedStateData<TData> = data.collectedData || {
+    data: {},
+    dataByRoute: {},
+    routeHistory: [],
+    metadata: {},
+    currentRouteTitle: undefined,
+    currentStepDescription: undefined,
+  };
 
   return {
     id: sessionId,
     currentRoute: data.currentRoute
       ? {
           id: data.currentRoute,
-          title:
-            (collectedData.currentRouteTitle as string) || data.currentRoute,
+          title: collectedData.currentRouteTitle || data.currentRoute,
           enteredAt: new Date(),
         }
       : undefined,
     currentStep: data.currentStep
       ? {
           id: data.currentStep,
-          description:
-            (collectedData.currentStepDescription as string) || undefined,
+          description: collectedData.currentStepDescription || undefined,
           enteredAt: new Date(),
         }
       : undefined,
-    data: (collectedData.data as Partial<TData>) || {},
-    dataByRoute:
-      (collectedData.dataByRoute as Record<string, Partial<unknown>>) || {}, // Restore per-route data
-    routeHistory:
-      (collectedData.routeHistory as SessionState<TData>["routeHistory"]) || [],
-    metadata: (collectedData.metadata as SessionState<TData>["metadata"]) || {},
+    data: collectedData.data || {},
+    dataByRoute: collectedData.dataByRoute || {},
+    routeHistory: collectedData.routeHistory || [],
+    metadata: collectedData.metadata || {},
   };
 }

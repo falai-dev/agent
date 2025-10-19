@@ -20,7 +20,7 @@ export interface PendingTransition {
  */
 export interface SessionState<TData = unknown> {
   /** Unique session identifier (useful for persistence) */
-  id?: string;
+  id: string;
 
   /** Current route the conversation is in */
   currentRoute?: {
@@ -47,7 +47,7 @@ export interface SessionState<TData = unknown> {
    * Persists data when switching between routes
    * Allows resuming incomplete routes where they left off
    */
-  dataByRoute?: Record<string, Partial<unknown>>;
+  dataByRoute?: Record<string, Partial<TData>>;
 
   /** History of routes visited in this session */
   routeHistory: Array<{

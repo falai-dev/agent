@@ -4,13 +4,15 @@
  */
 
 import type {
-  SessionRepository,
-  MessageRepository,
-  SessionData,
   MessageData,
-  SessionStatus,
+  MessageRepository,
   PersistenceAdapter,
+  SessionData,
+  SessionRepository,
+  SessionStatus,
+  CollectedStateData,
 } from "../types";
+import { createSessionId } from "../utils";
 
 /**
  * Redis client interface - matches ioredis/redis clients
@@ -72,8 +74,10 @@ export interface RedisAdapterOptions {
  * });
  * ```
  */
-export class RedisAdapter implements PersistenceAdapter {
-  public readonly sessionRepository: SessionRepository;
+export class RedisAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
+  public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private redis: RedisClient;
   private keyPrefix: string;
@@ -86,7 +90,7 @@ export class RedisAdapter implements PersistenceAdapter {
     this.sessionTTL = options.sessionTTL || 7 * 24 * 60 * 60; // 7 days
     this.messageTTL = options.messageTTL || 30 * 24 * 60 * 60; // 30 days
 
-    this.sessionRepository = new RedisSessionRepository(
+    this.sessionRepository = new RedisSessionRepository<TData>(
       this.redis,
       this.keyPrefix,
       this.sessionTTL
@@ -107,7 +111,9 @@ export class RedisAdapter implements PersistenceAdapter {
 /**
  * Redis Session Repository
  */
-class RedisSessionRepository implements SessionRepository {
+class RedisSessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
   constructor(
     private redis: RedisClient,
     private keyPrefix: string,
@@ -123,11 +129,13 @@ class RedisSessionRepository implements SessionRepository {
   }
 
   async create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData> {
-    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    data: Omit<SessionData<TData>, "createdAt" | "updatedAt"> & {
+      id?: string;
+    }
+  ): Promise<SessionData<TData>> {
+    const id = data.id || createSessionId();
     const now = new Date();
-    const session: SessionData = {
+    const session: SessionData<TData> = {
       ...data,
       id,
       createdAt: now,
@@ -150,18 +158,18 @@ class RedisSessionRepository implements SessionRepository {
     return session;
   }
 
-  async findById(id: string): Promise<SessionData | null> {
+  async findById(id: string): Promise<SessionData<TData> | null> {
     const data = await this.redis.get(this.getKey(id));
     if (!data) return null;
     try {
-      return JSON.parse(data) as SessionData;
+      return JSON.parse(data) as SessionData<TData>;
     } catch (error) {
       console.error(`Error parsing session data for id ${id}:`, error);
       return null;
     }
   }
 
-  async findActiveByUserId(userId: string): Promise<SessionData | null> {
+  async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     const sessionIds = await this.redis.hgetall(this.getUserKey(userId));
 
     for (const sessionId of Object.keys(sessionIds)) {
@@ -174,9 +182,12 @@ class RedisSessionRepository implements SessionRepository {
     return null;
   }
 
-  async findByUserId(userId: string, limit = 100): Promise<SessionData[]> {
+  async findByUserId(
+    userId: string,
+    limit = 100
+  ): Promise<SessionData<TData>[]> {
     const sessionIds = await this.redis.hgetall(this.getUserKey(userId));
-    const sessions: SessionData[] = [];
+    const sessions: SessionData<TData>[] = [];
 
     for (const sessionId of Object.keys(sessionIds).slice(0, limit)) {
       const session = await this.findById(sessionId);
@@ -186,18 +197,19 @@ class RedisSessionRepository implements SessionRepository {
     }
 
     return sessions.sort(
-      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
 
-    const updated: SessionData = {
+    const updated: SessionData<TData> = {
       ...existing,
       ...data,
       updatedAt: new Date(),
@@ -212,14 +224,14 @@ class RedisSessionRepository implements SessionRepository {
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return this.update(id, { status, completedAt });
   }
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
     return this.update(id, { collectedData });
   }
 
@@ -227,11 +239,11 @@ class RedisSessionRepository implements SessionRepository {
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     return this.update(id, { currentRoute: route, currentStep: step });
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
     const session = await this.findById(id);
     if (!session) return null;
 

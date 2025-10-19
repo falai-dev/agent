@@ -15,6 +15,7 @@ import {
   RedisAdapter,
   END_ROUTE,
   MessageRole,
+  type HistoryItem,
 } from "../../src";
 // @ts-expect-error - Redis is not typed
 import Redis from "ioredis";
@@ -79,7 +80,7 @@ async function example() {
     },
     // ✨ Redis adapter with custom options
     persistence: {
-      adapter: new RedisAdapter({
+      adapter: new RedisAdapter<ChatContext>({
         redis,
         keyPrefix: "support:", // Custom prefix
         sessionTTL: 24 * 60 * 60, // 24 hours
@@ -155,14 +156,13 @@ async function example() {
   if (!persistence) return;
 
   // Create session with step support
-  const { sessionData, sessionStep } =
-    await persistence.createSessionWithStep<SupportTicketData>({
-      userId,
-      agentName: "Support Assistant",
-      initialData: {
-        priority: "medium", // Default priority
-      },
-    });
+  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
+    userId,
+    agentName: "Support Assistant",
+    initialData: {
+      priority: "medium", // Default priority
+    },
+  });
 
   console.log("✨ Session created in Redis:", sessionData.id);
   console.log("📊 Initial step:", {
@@ -170,7 +170,7 @@ async function example() {
   });
 
   // Turn 1: User provides issue
-  const history = [];
+  const history: HistoryItem[] = [];
   let session = sessionStep;
 
   const message1 = {
@@ -249,9 +249,7 @@ async function example() {
 
   // Load session step from Redis (demonstrates persistence)
   console.log("\n--- Loading Session from Redis ---");
-  const loadedSession = await persistence.loadSessionState<SupportTicketData>(
-    sessionData.id
-  );
+  const loadedSession = await persistence.loadSessionState(sessionData.id);
 
   console.log("📥 Loaded session:", {
     currentRoute: loadedSession?.currentRoute?.title,
@@ -277,7 +275,7 @@ async function example() {
 async function highThroughputExample() {
   const redis = new Redis();
 
-  const agent = new Agent({
+  const agent = new Agent<QuickChatData>({
     name: "Chat Bot",
     description: "Fast chat responses",
     provider: new GeminiProvider({
@@ -285,7 +283,7 @@ async function highThroughputExample() {
       model: "models/gemini-2.5-flash",
     }),
     persistence: {
-      adapter: new RedisAdapter({
+      adapter: new RedisAdapter<QuickChatData>({
         redis,
         keyPrefix: "chat:",
         sessionTTL: 60 * 60, // 1 hour for quick chats
@@ -325,11 +323,10 @@ async function highThroughputExample() {
   const persistence = agent.getPersistenceManager()!;
 
   // Create session
-  const { sessionData, sessionStep } =
-    await persistence.createSessionWithStep<QuickChatData>({
-      userId: "user_456",
-      agentName: "Chat Bot",
-    });
+  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
+    userId: "user_456",
+    agentName: "Chat Bot",
+  });
 
   // Quick chat interaction
   const response = await agent.respond({
@@ -363,14 +360,14 @@ async function highThroughputExample() {
 async function sessionRecoveryExample() {
   const redis = new Redis();
 
-  const agent = new Agent({
+  const agent = new Agent<OrderData>({
     name: "Order Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
     persistence: {
-      adapter: new RedisAdapter({ redis }),
+      adapter: new RedisAdapter<OrderData>({ redis }),
       autoSave: true,
       userId: "user_789",
     },
@@ -403,11 +400,10 @@ async function sessionRecoveryExample() {
   const persistence = agent.getPersistenceManager()!;
 
   // Start a new session
-  const { sessionData, sessionStep } =
-    await persistence.createSessionWithStep<OrderData>({
-      userId: "user_789",
-      agentName: "Order Assistant",
-    });
+  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
+    userId: "user_789",
+    agentName: "Order Assistant",
+  });
 
   const sessionId = sessionData.id;
 
@@ -432,9 +428,7 @@ async function sessionRecoveryExample() {
   console.log("\n--- User Reconnects ---");
 
   // Load session from Redis
-  const recoveredSession = await persistence.loadSessionState<OrderData>(
-    sessionId
-  );
+  const recoveredSession = await persistence.loadSessionState(sessionId);
 
   console.log("📥 Recovered session step:", {
     currentRoute: recoveredSession?.currentRoute?.title,

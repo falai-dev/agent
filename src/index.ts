@@ -108,15 +108,20 @@ export type {
   StructuredSchema,
   SessionData,
   MessageData,
+  CollectedStateData,
   SessionStatus,
   SessionRepository,
   MessageRepository,
   PersistenceConfig,
   CreateSessionOptions,
   SaveMessageOptions,
+  AgentResponseStreamChunk,
   Role,
   HistoryItem,
   History,
+  PersistenceAdapter,
+  Template,
+  TemplateContext,
 } from "./types";
 export { CompositionMode, EventKind, MessageRole } from "./types";
 export { createSession, enterRoute, enterStep, mergeCollected } from "./utils";

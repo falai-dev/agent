@@ -10,6 +10,10 @@ import type {
   MessageData,
   SessionStatus,
   PersistenceAdapter,
+  CollectedStateData,
+  MessageRole,
+  Event,
+  CreateSessionData,
 } from "../types";
 
 /**
@@ -115,8 +119,10 @@ export interface PrismaAdapterOptions {
  * });
  * ```
  */
-export class PrismaAdapter implements PersistenceAdapter {
-  public readonly sessionRepository: SessionRepository;
+export class PrismaAdapter<TData = Record<string, unknown>>
+  implements PersistenceAdapter<TData>
+{
+  public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private prisma: PrismaClient;
   private options: Required<Omit<PrismaAdapterOptions, "fieldMappings">> & {
@@ -137,7 +143,7 @@ export class PrismaAdapter implements PersistenceAdapter {
     };
 
     // Initialize repositories
-    this.sessionRepository = new PrismaSessionRepository(
+    this.sessionRepository = new PrismaSessionRepository<TData>(
       this.prisma,
       this.options.tables.sessions!,
       this.options.fieldMappings?.sessions
@@ -191,15 +197,17 @@ export class PrismaAdapter implements PersistenceAdapter {
  * Prisma Session Repository
  * Internal implementation - users should use PrismaAdapter instead
  */
-class PrismaSessionRepository implements SessionRepository {
+class PrismaSessionRepository<TData = Record<string, unknown>>
+  implements SessionRepository<TData>
+{
   private prisma: PrismaClient;
   private tableName: string;
-  private fieldMap: Partial<Record<keyof SessionData, string>>;
+  private fieldMap: Partial<Record<keyof SessionData<TData>, string>>;
 
   constructor(
     prismaClient: PrismaClient,
     tableName: string,
-    fieldMappings?: Partial<Record<keyof SessionData, string>>
+    fieldMappings?: Partial<Record<keyof SessionData<TData>, string>>
   ) {
     this.prisma = prismaClient;
     this.tableName = tableName;
@@ -212,7 +220,7 @@ class PrismaSessionRepository implements SessionRepository {
   private mapFields(data: Record<string, unknown>): Record<string, unknown> {
     const mapped: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
-      const mappedKey = this.fieldMap[key as keyof SessionData] || key;
+      const mappedKey = this.fieldMap[key as keyof SessionData<TData>] || key;
       mapped[mappedKey] = value;
     }
     return mapped;
@@ -221,8 +229,8 @@ class PrismaSessionRepository implements SessionRepository {
   /**
    * Map custom schema field names back to our standard field names
    */
-  private unmapFields(data: Record<string, unknown>): SessionData {
-    if (!data) return data as SessionData;
+  private unmapFields(data: Record<string, unknown>): SessionData<TData> {
+    if (!data) throw new Error("Data cannot be null");
 
     const reverseMap: Record<string, string> = {};
     for (const [standardKey, customKey] of Object.entries(this.fieldMap)) {
@@ -235,31 +243,48 @@ class PrismaSessionRepository implements SessionRepository {
       unmapped[unmappedKey] = value;
     }
 
-    return unmapped as unknown as SessionData;
+    // Construct proper SessionData object
+    return {
+      id: unmapped.id as string,
+      userId: unmapped.userId as string | undefined,
+      agentName: unmapped.agentName as string | undefined,
+      status: unmapped.status as "active" | "completed" | "abandoned",
+      currentRoute: unmapped.currentRoute as string | undefined,
+      currentStep: unmapped.currentStep as string | undefined,
+      collectedData: unmapped.collectedData as CollectedStateData<TData>,
+      messageCount: unmapped.messageCount as number | undefined,
+      lastMessageAt: unmapped.lastMessageAt as Date | undefined,
+      completedAt: unmapped.completedAt as Date | undefined,
+      createdAt: unmapped.createdAt as Date,
+      updatedAt: unmapped.updatedAt as Date,
+    };
   }
 
   private getModel(): PrismaModel {
     return this.prisma[this.tableName] as PrismaModel;
   }
 
-  async create(
-    data: Omit<SessionData, "id" | "createdAt" | "updatedAt">
-  ): Promise<SessionData> {
-    const mapped = this.mapFields(data as Record<string, unknown>);
+  async create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
+    const mapped = this.mapFields({
+      ...data,
+      id:
+        data.id ||
+        `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    });
     const result = await this.getModel().create({
       data: mapped,
     });
     return this.unmapFields(result);
   }
 
-  async findById(id: string): Promise<SessionData | null> {
+  async findById(id: string): Promise<SessionData<TData> | null> {
     const result = await this.getModel().findUnique({
       where: { [this.fieldMap.id || "id"]: id },
     });
     return result ? this.unmapFields(result) : null;
   }
 
-  async findActiveByUserId(userId: string): Promise<SessionData | null> {
+  async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     const result = await this.getModel().findFirst({
       where: {
         [this.fieldMap.userId || "userId"]: userId,
@@ -272,7 +297,10 @@ class PrismaSessionRepository implements SessionRepository {
     return result ? this.unmapFields(result) : null;
   }
 
-  async findByUserId(userId: string, limit = 100): Promise<SessionData[]> {
+  async findByUserId(
+    userId: string,
+    limit = 100
+  ): Promise<SessionData<TData>[]> {
     const results = await this.getModel().findMany({
       where: {
         [this.fieldMap.userId || "userId"]: userId,
@@ -287,8 +315,8 @@ class PrismaSessionRepository implements SessionRepository {
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData, "id" | "createdAt">>
-  ): Promise<SessionData | null> {
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+  ): Promise<SessionData<TData> | null> {
     const mapped = this.mapFields(data as Record<string, unknown>);
     const result = await this.getModel().update({
       where: { [this.fieldMap.id || "id"]: id },
@@ -304,7 +332,7 @@ class PrismaSessionRepository implements SessionRepository {
     id: string,
     status: SessionStatus,
     completedAt?: Date
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     const data: Record<string, unknown> = {
       [this.fieldMap.status || "status"]: status,
       [this.fieldMap.updatedAt || "updatedAt"]: new Date(),
@@ -321,8 +349,8 @@ class PrismaSessionRepository implements SessionRepository {
 
   async updateCollectedData(
     id: string,
-    collectedData: Record<string, unknown>
-  ): Promise<SessionData | null> {
+    collectedData: CollectedStateData<TData>
+  ): Promise<SessionData<TData> | null> {
     const result = await this.getModel().update({
       where: { [this.fieldMap.id || "id"]: id },
       data: {
@@ -337,7 +365,7 @@ class PrismaSessionRepository implements SessionRepository {
     id: string,
     route?: string,
     step?: string
-  ): Promise<SessionData | null> {
+  ): Promise<SessionData<TData> | null> {
     const data: Record<string, unknown> = {
       [this.fieldMap.updatedAt || "updatedAt"]: new Date(),
     };
@@ -354,7 +382,7 @@ class PrismaSessionRepository implements SessionRepository {
     return this.unmapFields(result);
   }
 
-  async incrementMessageCount(id: string): Promise<SessionData | null> {
+  async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
     const result = await this.getModel().update({
       where: { [this.fieldMap.id || "id"]: id },
       data: {
@@ -413,7 +441,7 @@ class PrismaMessageRepository implements MessageRepository {
    * Map custom schema field names back to our standard field names
    */
   private unmapFields(data: Record<string, unknown>): MessageData {
-    if (!data) return data as MessageData;
+    if (!data) throw new Error("Data cannot be null");
 
     const reverseMap: Record<string, string> = {};
     for (const [standardKey, customKey] of Object.entries(this.fieldMap)) {
@@ -426,7 +454,21 @@ class PrismaMessageRepository implements MessageRepository {
       unmapped[unmappedKey] = value;
     }
 
-    return unmapped as unknown as MessageData;
+    // Construct proper MessageData object
+    return {
+      id: unmapped.id as string,
+      sessionId: unmapped.sessionId as string,
+      userId: unmapped.userId as string | undefined,
+      role: unmapped.role as MessageRole,
+      content: unmapped.content as string,
+      route: unmapped.route as string | undefined,
+      step: unmapped.step as string | undefined,
+      toolCalls: unmapped.toolCalls as
+        | Array<{ toolName: string; arguments: Record<string, unknown> }>
+        | undefined,
+      event: unmapped.event as Event | undefined,
+      createdAt: unmapped.createdAt as Date,
+    };
   }
 
   private getModel(): PrismaModel {

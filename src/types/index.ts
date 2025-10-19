@@ -8,6 +8,7 @@ export type {
   Term,
   Guideline,
   GuidelineMatch,
+  AgentResponseStreamChunk,
   ContextLifecycleHooks,
   ContextProvider,
 } from "./agent";
@@ -29,6 +30,7 @@ export type {
   History,
 } from "./history";
 export { EventKind, MessageRole } from "./history";
+export * from "./history";
 
 // Route types
 export type {
@@ -43,6 +45,7 @@ export type {
   RouteTransitionConfig,
   RouteLifecycleHooks,
 } from "./route";
+export * from "./route";
 
 // Session types
 export type { SessionState, PendingTransition } from "./session";
@@ -65,6 +68,7 @@ export type { StructuredSchema } from "./schema";
 
 // Routing types
 export type { RoutingDecision } from "./routing";
+export * from "./routing";
 
 // Persistence types
 export type {
@@ -76,8 +80,11 @@ export type {
   PersistenceAdapter,
   PersistenceConfig,
   CreateSessionOptions,
+  CreateSessionData,
   SaveMessageOptions,
+  CollectedStateData,
 } from "./persistence";
+export * from "./persistence";
 
 // Template types
 export type { Template, TemplateContext } from "./template";

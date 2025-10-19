@@ -12,7 +12,7 @@ import type { Step } from "./Step";
 import { PromptComposer } from "./PromptComposer";
 import { getLastMessageFromHistory } from "../utils/event";
 import { logger } from "../utils/logger";
-import { render } from "@utils/template";
+import { render } from "../utils/template";
 import { END_ROUTE_ID } from "../constants";
 
 export interface CandidateStep<TContext = unknown, TData = unknown> {

@@ -19,6 +19,7 @@ import type {
 
 import { Step } from "./Step";
 import { generateRouteId } from "../utils/id";
+import { END_ROUTE } from "../constants";
 
 /**
  * Represents a conversational route/journey
@@ -61,7 +62,24 @@ export class Route<TContext = unknown, TData = unknown> {
     this.conditions = options.conditions || [];
     this.rules = options.rules || [];
     this.prohibitions = options.prohibitions || [];
-    this.initialStep = new Step<TContext, TData>(this.id, options.initialStep);
+
+    // Handle initial step logic
+    let initialStepOptions = options.initialStep;
+    let stepsToChain: StepOptions<TContext, TData>[] = [];
+
+    if (options.steps && options.steps.length > 0) {
+      // If steps are provided but no initialStep, use first step as initial
+      if (!options.initialStep) {
+        initialStepOptions = options.steps[0];
+        stepsToChain = options.steps.slice(1);
+      } else {
+        // Both initialStep and steps provided - chain steps after initial
+        stepsToChain = options.steps;
+      }
+    }
+
+    this.initialStep = new Step<TContext, TData>(this.id, initialStepOptions);
+
     // Store endStep spec (will be used when route completes)
     this.endStepSpec = options.endStep || {
       prompt:
@@ -101,8 +119,8 @@ export class Route<TContext = unknown, TData = unknown> {
     }
 
     // Build sequential steps if provided
-    if (options.steps && options.steps.length > 0) {
-      this.buildSequentialSteps(options.steps);
+    if (stepsToChain.length > 0) {
+      this.buildSequentialSteps(stepsToChain);
     }
   }
 
@@ -111,20 +129,18 @@ export class Route<TContext = unknown, TData = unknown> {
    * @private
    */
   private buildSequentialSteps(
-    steps: Array<StepOptions<TContext, TData>>
+    steps: Array<StepOptions<TContext, TData> | typeof END_ROUTE>
   ): void {
-    // Import END_ROUTE dynamically to avoid circular dependency
-    const END_ROUTE = Symbol.for("END_ROUTE");
-
     let currentStep: StepResult<TContext, TData> =
       this.initialStep.asStepResult();
 
     for (const step of steps) {
-      currentStep = currentStep.nextStep(step);
+      if (step === END_ROUTE) {
+        currentStep.nextStep({ step: END_ROUTE });
+      } else {
+        currentStep = currentStep.nextStep(step);
+      }
     }
-
-    // End the route
-    currentStep.nextStep({ step: END_ROUTE });
   }
 
   /**
@@ -217,6 +233,10 @@ export class Route<TContext = unknown, TData = unknown> {
    */
   getResponseOutputSchema(): StructuredSchema | undefined {
     return this.responseOutputSchema;
+  }
+
+  getSteps(): Step<TContext, TData>[] {
+    return this.getAllSteps();
   }
 
   /**
