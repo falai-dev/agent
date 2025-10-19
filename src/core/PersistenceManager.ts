@@ -252,7 +252,8 @@ export class PersistenceManager<TData = Record<string, unknown>> {
       // Create new session if it doesn't exist
       return await this.sessionRepository.create({
         id: sessionId,
-        userId: this.config.userId,
+        userId:
+          persistenceData.collectedData.metadata?.userId || this.config.userId,
         status: "active",
         currentRoute: persistenceData.currentRoute,
         currentStep: persistenceData.currentStep,

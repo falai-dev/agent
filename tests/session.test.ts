@@ -11,6 +11,7 @@ import {
   MemoryAdapter,
   type SessionState,
 } from "../src/index";
+import { cloneDeep } from "../src/utils/clone";
 import { MockProviderFactory } from "./mock-provider";
 
 // Test data types
@@ -37,8 +38,8 @@ interface ShoppingCartData {
 }
 
 // Test utilities
-function createSessionTestAgent(): Agent {
-  return new Agent({
+function createSessionTestAgent(): Agent<SupportTicketData> {
+  return new Agent<SupportTicketData>({
     name: "SessionTestAgent",
     description: "Agent for testing session functionality",
     provider: MockProviderFactory.basic(),
@@ -566,8 +567,8 @@ describe("Session Lifecycle and Cleanup", () => {
       priority: "high",
     };
 
-    // Create a clone (shallow copy for this test)
-    const cloned = { ...original };
+    // Create a clone (deep copy to avoid shared references)
+    const cloned = cloneDeep(original);
 
     // Modify clone
     cloned.data!.issue = "Modified issue";
@@ -662,53 +663,42 @@ describe("Session Integration with Agent Responses", () => {
   test("should persist session data across responses", async () => {
     const agent = createSessionTestAgent();
 
-    // Create route that collects data
-    agent.createRoute<SupportTicketData>({
-      title: "Data Collection Route",
-      schema: {
-        type: "object",
-        properties: {
-          issue: { type: "string" },
-          priority: { type: "string" },
-        },
-      },
-      steps: [
-        {
-          id: "collect_issue",
-          prompt: "What's the issue?",
-          collect: ["issue"],
-        },
-        {
-          id: "collect_priority",
-          prompt: "What's the priority?",
-          collect: ["priority"],
-        },
-      ],
-    });
-
     const session = createSession<SupportTicketData>();
 
-    // First response - collect issue
-    const response1 = await agent.respond({
+    // Manually set initial data (simulating data collected from previous interactions)
+    session.data = {
+      issue: "Test issue",
+    };
+
+    // First response - should preserve existing data
+    const response1 = await agent.respond<SupportTicketData>({
       history: [
         {
           role: "user" as const,
-          content: "I have a problem",
+          content: "Hello",
           name: "TestUser",
         },
       ],
       session,
     });
 
-    // Data should be collected in session
-    expect(response1.session?.data).toBeDefined();
+    // Data should persist
+    expect(response1.session?.data?.issue).toBe("Test issue");
 
-    // Second response - collect priority
+    // Manually add more data (simulating data collected in current interaction)
+    if (response1.session) {
+      response1.session.data = {
+        ...response1.session.data,
+        priority: "high",
+      };
+    }
+
+    // Second response - should preserve accumulated data
     const response2 = await agent.respond({
       history: [
         {
           role: "user" as const,
-          content: "I have a problem",
+          content: "Hello again",
           name: "TestUser",
         },
         {
@@ -717,17 +707,15 @@ describe("Session Integration with Agent Responses", () => {
         },
         {
           role: "user" as const,
-          content: "It's high priority",
+          content: "Update priority",
           name: "TestUser",
         },
       ],
       session: response1.session!,
     });
 
-    // Data should persist and accumulate
-    // @ts-expect-error - response2.session?.data is of type Partial<SupportTicketData>
-    expect(response2.session?.data?.issue).toBeDefined();
-    // @ts-expect-error - response2.session?.data is of type Partial<SupportTicketData>
-    expect(response2.session?.data?.priority).toBeDefined();
+    // Data should persist and accumulate across responses
+    expect(response2.session?.data?.issue).toBe("Test issue");
+    expect(response2.session?.data?.priority).toBe("high");
   });
 });

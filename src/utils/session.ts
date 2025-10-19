@@ -16,7 +16,7 @@ export function createSession<TData = Record<string, unknown>>(
 
   return {
     id,
-    data: {},
+    data: {} as Partial<TData>,
     dataByRoute: {},
     routeHistory: [],
     metadata: {

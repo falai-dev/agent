@@ -146,11 +146,18 @@ export interface GuidelineMatch<TContext = unknown> {
   rationale?: string;
 }
 
-export interface AgentResponseStreamChunk {
+export interface AgentResponse<TData = Record<string, unknown>> {
+  message: string;
+  session?: SessionState<TData>;
+  toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+  isRouteComplete?: boolean;
+}
+
+export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
   delta: string;
   accumulated: string;
   done: boolean;
-  session?: SessionState;
+  session?: SessionState<TData>;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   isRouteComplete?: boolean;
   metadata?: {

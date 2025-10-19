@@ -26,14 +26,14 @@ export interface SessionState<TData = unknown> {
   currentRoute?: {
     id: string;
     title: string;
-    enteredAt: Date;
+    enteredAt?: Date;
   };
 
   /** Current step within the route */
   currentStep?: {
     id: string;
     description?: string;
-    enteredAt: Date;
+    enteredAt?: Date;
   };
 
   /**
@@ -52,7 +52,7 @@ export interface SessionState<TData = unknown> {
   /** History of routes visited in this session */
   routeHistory: Array<{
     routeId: string;
-    enteredAt: Date;
+    enteredAt?: Date;
     exitedAt?: Date;
     completed: boolean;
   }>;

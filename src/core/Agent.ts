@@ -15,6 +15,7 @@ import type {
   StepRef,
   History,
   AgentResponseStreamChunk,
+  AgentResponse,
   StructuredSchema,
 } from "../types";
 import { EventKind, MessageRole } from "../types/history";
@@ -305,13 +306,13 @@ export class Agent<TContext = unknown> {
   /**
    * Generate a response based on history and context as a stream
    */
-  async *respondStream(params: {
+  async *respondStream<TData = Record<string, unknown>>(params: {
     history: History;
     step?: StepRef;
-    session?: SessionState;
+    session?: SessionState<TData>;
     contextOverride?: Partial<TContext>;
     signal?: AbortSignal;
-  }): AsyncGenerator<AgentResponseStreamChunk> {
+  }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
     const { history: simpleHistory, signal } = params;
     const history = normalizeHistory(simpleHistory);
 
@@ -894,18 +895,13 @@ export class Agent<TContext = unknown> {
   /**
    * Generate a response based on history and context
    */
-  async respond(params: {
+  async respond<TData = Record<string, unknown>>(params: {
     history: History;
     step?: StepRef;
-    session?: SessionState;
+    session?: SessionState<TData>;
     contextOverride?: Partial<TContext>;
     signal?: AbortSignal;
-  }): Promise<{
-    message: string;
-    session?: SessionState;
-    toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-    isRouteComplete?: boolean;
-  }> {
+  }): Promise<AgentResponse<TData>> {
     const { history: simpleHistory, contextOverride, signal } = params;
     const history = normalizeHistory(simpleHistory);
 

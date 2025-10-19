@@ -9,6 +9,7 @@ export type {
   Guideline,
   GuidelineMatch,
   AgentResponseStreamChunk,
+  AgentResponse,
   ContextLifecycleHooks,
   ContextProvider,
 } from "./agent";
