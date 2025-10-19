@@ -1,22 +1,21 @@
-# Session Step & Data Management
+# Context & Session Management
 
 ## Overview
 
-The `@falai/agent` framework provides **session step management** for tracking conversation progress, collected data, and user intent across multiple turns. This enables sophisticated data-driven conversations with intelligent step progression.
+The `@falai/agent` framework provides **automatic session management** through the integrated `SessionManager` class, tracking conversation progress, collected data, and user intent across multiple turns. This enables sophisticated data-driven conversations with zero boilerplate code.
 
 ---
 
-## 🎯 Session Step: The Foundation
+## 🎯 Automatic Session Management
 
-Session step tracks three key aspects of a conversation:
+The `SessionManager` automatically tracks three key aspects of a conversation:
 
 1. **Current Route** - Which conversation flow the user is in
 2. **Current Step** - Where in the flow they currently are
 3. **Collected data** - Structured data collected so far
+4. **Conversation History** - Complete message history within the session
 
 ```typescript
-import { createSession, SessionState, type Tool } from "@falai/agent";
-
 // Define your data extraction type
 interface FlightData {
   destination: string;
@@ -25,60 +24,64 @@ interface FlightData {
   cabinClass: "economy" | "business" | "first";
 }
 
-// Initialize session step
-let session = createSession<FlightData>();
+// Agent with automatic session management
+const agent = new Agent({
+  name: "Travel Agent",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  persistence: { adapter: new PrismaAdapter({ prisma }) },
+  sessionId: "user-123" // Automatically loads or creates session
+});
 
-// Session starts empty
-console.log(session.currentRoute); // undefined
-console.log(session.currentStep); // undefined
-console.log(session.data); // {}
+// Simple conversation - session managed automatically
+const response = await agent.respond("I want to book a flight to Paris");
 
-// Use in conversation
-const response = await agent.respond({ history, session });
-
-// Session updated with progress and collected data
-console.log(response.session?.currentRoute?.title); // "Book Flight"
-console.log(response.session?.currentStep?.id); // "ask_destination"
-console.log(response.session?.data); // { destination: "Paris", ... }
+// Access session information
+console.log(agent.session.id); // "user-123"
+console.log(agent.session.getData<FlightData>()); // { destination: "Paris", ... }
+console.log(agent.session.getHistory()); // Conversation history
 ```
 
-**Benefits of Session Step:**
+**Benefits of Automatic Session Management:**
 
+- **Zero Boilerplate** - No manual session creation or persistence code
 - **Always-On Routing** - Users can change their mind mid-conversation
-- **Data Persistence** - Collected data survives across turns
+- **Data Persistence** - Collected data automatically saved and restored
 - **Context Awareness** - Router sees current progress and collected data
-- **Step Recovery** - Resume conversations from any point
+- **History Management** - Conversation history automatically maintained
+- **Server-Friendly** - Perfect for stateless server environments
 
 ---
 
-## 🔄 Session Step Helpers
+## 🔄 SessionManager API
 
-### Creating and Managing Sessions
+### Session Operations
 
 ```typescript
-import {
-  createSession,
-  enterRoute,
-  enterStep,
-  mergeCollected,
-  type SessionState,
-} from "@falai/agent";
+// Access the session manager
+const sessionManager = agent.session;
 
-// Create a new session
-let session = createSession<FlightData>();
+// Get or create session (works for existing, new, or auto-generated IDs)
+await sessionManager.getOrCreate("user-123");
+await sessionManager.getOrCreate(); // Auto-generates ID
 
-// Enter a route (when routing decides to switch)
-session = enterRoute(session, "book_flight", "Book Flight");
-
-// Enter a step (when progressing through the flow)
-session = enterStep(session, "ask_destination", "Ask where they want to fly");
-
-// Merge collected data (when AI extracts new information)
-session = mergeCollected(session, {
+// Data management
+const data = sessionManager.getData<FlightData>();
+await sessionManager.setData({
   destination: "Paris",
   departureDate: "2025-10-15",
   passengers: 2,
 });
+
+// History management
+await sessionManager.addMessage("user", "I want to book a flight");
+await sessionManager.addMessage("assistant", "Where would you like to go?");
+const history = sessionManager.getHistory();
+sessionManager.clearHistory();
+
+// Session operations
+await sessionManager.save(); // Manual save (auto-saves on addMessage)
+await sessionManager.delete();
+const newSession = await sessionManager.reset(true); // Preserve history
 ```
 
 ### Session Step Structure

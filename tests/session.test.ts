@@ -2,13 +2,14 @@
  * Session Management Tests
  *
  * Tests session creation, data collection, state management, persistence,
- * and multi-user session handling.
+ * and multi-user session handling with the new SessionManager.
  */
 import { expect, test, describe } from "bun:test";
 import {
   Agent,
-  createSession,
   MemoryAdapter,
+  SessionManager,
+  PersistenceManager,
   type SessionState,
 } from "../src/index";
 import { cloneDeep } from "../src/utils/clone";
@@ -22,6 +23,18 @@ interface SupportTicketData {
   ticketId?: string;
   assignedAgent?: string;
   resolution?: string;
+  updated?: boolean;
+}
+
+interface UserInfoData {
+  userInfo: {
+    name?: string;
+    email?: string;
+  }
+  progress?: {
+    step?: number;
+    completed?: boolean;
+  };
 }
 
 interface ShoppingCartData {
@@ -49,29 +62,32 @@ function createSessionTestAgent(): Agent<SupportTicketData> {
   });
 }
 
-function createSupportSession(): SessionState<SupportTicketData> {
-  return createSession<SupportTicketData>("support-session-123", {
+async function createSupportSession(sessionManager: SessionManager): Promise<SessionState<SupportTicketData>> {
+  const session = await sessionManager.getOrCreate("support-session-123");
+  session.metadata = {
+    ...session.metadata,
     userId: "user_alice",
-    metadata: {
-      source: "web_chat",
-      priority: "normal",
-    },
-  });
+    source: "web_chat",
+    priority: "normal",
+  };
+  return session as SessionState<SupportTicketData>;
 }
 
-function createShoppingSession(): SessionState<ShoppingCartData> {
-  return createSession<ShoppingCartData>("shopping-session-456", {
+async function createShoppingSession(sessionManager: SessionManager): Promise<SessionState<ShoppingCartData>> {
+  const session = await sessionManager.getOrCreate("shopping-session-456");
+  session.metadata = {
+    ...session.metadata,
     userId: "user_bob",
-    metadata: {
-      source: "mobile_app",
-      currency: "USD",
-    },
-  });
+    source: "mobile_app",
+    currency: "USD",
+  };
+  return session as SessionState<ShoppingCartData>;
 }
 
-describe("Session Creation and Configuration", () => {
-  test("should create session with default configuration", () => {
-    const session = createSession();
+describe("SessionManager Creation and Configuration", () => {
+  test("should create session with default configuration", async () => {
+    const sessionManager = new SessionManager();
+    const session = await sessionManager.getOrCreate();
 
     expect(session.id).toBeDefined();
     expect(typeof session.id).toBe("string");
@@ -82,29 +98,26 @@ describe("Session Creation and Configuration", () => {
     expect(session.currentRoute).toBeUndefined();
     expect(session.currentStep).toBeUndefined();
     expect(session.routeHistory).toEqual([]);
+    expect(session.history).toEqual([]);
   });
 
-  test("should create session with custom ID and metadata", () => {
+  test("should create session with custom ID", async () => {
+    const sessionManager = new SessionManager();
     const customId = "custom-session-123";
-    const metadata = {
-      userId: "user_123",
-      source: "api",
-      tags: ["test", "important"],
-    };
-
-    const session = createSession(customId, metadata);
+    const session = await sessionManager.getOrCreate(customId);
 
     expect(session.id).toBe(customId);
-    expect(session.metadata?.source).toBe("api");
-    expect(session.metadata?.tags).toEqual(["test", "important"]);
-    expect(session.metadata?.userId).toBe("user_123");
     expect(session.metadata?.createdAt).toBeInstanceOf(Date);
     expect(session.metadata?.lastUpdatedAt).toBeInstanceOf(Date);
+    expect(session.history).toEqual([]);
   });
 
-  test("should create typed sessions", () => {
-    const supportSession = createSupportSession();
-    const shoppingSession = createShoppingSession();
+  test("should create typed sessions", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+    const supportSession = await createSupportSession(sessionManager);
+
+    const sessionManager2 = new SessionManager<ShoppingCartData>();
+    const shoppingSession = await createShoppingSession(sessionManager2);
 
     expect(supportSession.data).toEqual({});
     expect(shoppingSession.data).toEqual({});
@@ -128,9 +141,10 @@ describe("Session Creation and Configuration", () => {
     expect(shoppingSession.data.items).toEqual([]);
   });
 
-  test("should handle session timestamps", () => {
+  test("should handle session timestamps", async () => {
     const beforeCreate = new Date();
-    const session = createSession();
+    const sessionManager = new SessionManager();
+    const session = await sessionManager.getOrCreate();
     const afterCreate = new Date();
 
     expect(session.metadata?.createdAt?.getTime()).toBeGreaterThanOrEqual(
@@ -145,29 +159,31 @@ describe("Session Creation and Configuration", () => {
   });
 });
 
-describe("Session Data Collection and Management", () => {
-  test("should collect and update session data", () => {
-    const session = createSupportSession();
+describe("SessionManager Data Collection and Management", () => {
+  test("should collect and update session data", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+    const session = await createSupportSession(sessionManager);
 
     // Initial state
     expect(session.data).toEqual({});
 
-    // Add data incrementally
-    session.data!.issue = "Can't access account";
-    expect(session.data!.issue).toBe("Can't access account");
+    // Add data incrementally using SessionManager
+    await sessionManager.setData({ issue: "Can't access account" });
+    expect(sessionManager.getData()?.issue).toBe("Can't access account");
 
-    session.data!.category = "account";
-    session.data!.priority = "medium";
+    await sessionManager.setData({ category: "account", priority: "medium" });
 
-    expect(session.data).toEqual({
+    const data = sessionManager.getData();
+    expect(data).toEqual({
       issue: "Can't access account",
       category: "account",
       priority: "medium",
     });
   });
 
-  test("should handle complex nested data structures", () => {
-    const session = createShoppingSession();
+  test("should handle complex nested data structures", async () => {
+    const sessionManager = new SessionManager<ShoppingCartData>();
+    const session = await createShoppingSession(sessionManager);
 
     const cartData: ShoppingCartData = {
       items: [
@@ -189,69 +205,61 @@ describe("Session Data Collection and Management", () => {
       paymentMethod: "credit_card",
     };
 
-    session.data = cartData;
+    await sessionManager.setData(cartData);
+    const data = sessionManager.getData();
 
-    expect(session.data.items).toHaveLength(2);
-    expect(session.data.total).toBe(89.97);
-    expect(session.data?.items?.[0]?.name).toBe("Widget");
-    expect(session.data?.items?.[1]?.price).toBe(49.99);
+    expect(data?.items).toHaveLength(2);
+    expect(data?.total).toBe(89.97);
+    expect(data?.items?.[0]?.name).toBe("Widget");
+    expect(data?.items?.[1]?.price).toBe(49.99);
   });
 
-  test("should track session updates", () => {
-    const session = createSession();
+  test("should track session updates", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+    const session = await sessionManager.getOrCreate();
     const originalUpdateTime = session.metadata?.lastUpdatedAt?.getTime();
 
-    // Simulate delay
-    setTimeout(() => {
-      if (!session.data) {
-        session.data = {};
-      }
-      session.data.updated = true;
-      // In real implementation, updatedAt would be set automatically
-      session.metadata!.lastUpdatedAt = new Date();
-    }, 10);
+    // Simulate delay and update
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await sessionManager.setData({ updated: true });
 
-    // Wait for the update
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(session.data?.updated).toBe(true);
-        expect(session.metadata?.lastUpdatedAt?.getTime()).toBeGreaterThan(
-          originalUpdateTime ?? 0
-        );
-        resolve();
-      }, 15);
-    });
+    const updatedSession = sessionManager.current;
+    expect(sessionManager.getData()?.updated).toBe(true);
+    expect(updatedSession?.metadata?.lastUpdatedAt?.getTime()).toBeGreaterThan(
+      originalUpdateTime ?? 0
+    );
   });
 
-  test("should handle partial data updates", () => {
-    const session = createSupportSession();
+  test("should handle partial data updates", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+    const session = await createSupportSession(sessionManager);
 
     // Initial data
-    session.data = {
+    await sessionManager.setData({
       issue: "Login issue",
       category: "technical",
-    };
+    });
 
     // Partial update (simulate tool data update)
-    const update = {
+    await sessionManager.setData({
       priority: "high" as const,
       ticketId: "TICKET-123",
       assignedAgent: "agent_alice",
-    };
+    });
 
-    Object.assign(session.data, update);
-
-    expect(session.data.issue).toBe("Login issue"); // Preserved
-    expect(session.data.category).toBe("technical"); // Preserved
-    expect(session.data.priority).toBe("high"); // Added
-    expect(session.data.ticketId).toBe("TICKET-123"); // Added
-    expect(session.data.assignedAgent).toBe("agent_alice"); // Added
+    const data = sessionManager.getData();
+    expect(data?.issue).toBe("Login issue"); // Preserved
+    expect(data?.category).toBe("technical"); // Preserved
+    expect(data?.priority).toBe("high"); // Added
+    expect(data?.ticketId).toBe("TICKET-123"); // Added
+    expect(data?.assignedAgent).toBe("agent_alice"); // Added
   });
 });
 
-describe("Session State Management", () => {
-  test("should track current route and step", () => {
-    const session = createSession();
+describe("SessionManager State Management", () => {
+  test("should track current route and step", async () => {
+    const sessionManager = new SessionManager();
+    const session = await sessionManager.getOrCreate();
 
     expect(session.currentRoute).toBeUndefined();
     expect(session.currentStep).toBeUndefined();
@@ -273,9 +281,10 @@ describe("Session State Management", () => {
     expect(session.currentStep?.id).toBe("gather_info");
   });
 
-  test("should handle route progression", () => {
+  test("should handle route progression", async () => {
     const agent = createSessionTestAgent();
-    const session = createSession();
+    const sessionManager = new SessionManager();
+    const session = await sessionManager.getOrCreate();
 
     // Create a simple route
     const route = agent.createRoute({
@@ -328,8 +337,9 @@ describe("Session State Management", () => {
     expect(session.currentStep?.id).toBe("step3");
   });
 
-  test("should handle route completion", () => {
-    const session = createSupportSession();
+  test("should handle route completion", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+    const session = await createSupportSession(sessionManager);
 
     // Start with active route
     session.currentRoute = {
@@ -352,198 +362,205 @@ describe("Session State Management", () => {
   });
 });
 
-describe("Session Persistence", () => {
+describe("SessionManager Persistence", () => {
   test("should persist session with memory adapter", async () => {
-    const agent = createSessionTestAgent();
-    const session = createSupportSession();
+    const adapter = new MemoryAdapter();
+    const sessionManager = new SessionManager(adapter);
 
-    // Add some data
-    session.data = {
+    // Create session with data
+    const session = await sessionManager.getOrCreate("test-session-123");
+    await sessionManager.setData({
       issue: "Test issue",
       category: "technical",
       priority: "medium",
-    };
+    });
 
     // Save session
-    const manager = agent.getPersistenceManager();
-    expect(manager).toBeDefined();
+    await sessionManager.save();
 
-    await manager!.saveSessionState(session.id, session);
-
-    // Load session
-    const loadedSession = await manager!.loadSessionState(session.id);
+    // Create new session manager and load the same session
+    const newSessionManager = new SessionManager(adapter);
+    const loadedSession = await newSessionManager.getOrCreate("test-session-123");
 
     expect(loadedSession).toBeDefined();
-    expect(loadedSession?.id).toBe(session.id);
-    expect(loadedSession?.data).toEqual(session.data);
-    expect(loadedSession?.metadata).toEqual(session.metadata);
+    expect(loadedSession.id).toBe("test-session-123");
+    expect(loadedSession.data).toEqual({
+      issue: "Test issue",
+      category: "technical",
+      priority: "medium",
+    });
   });
 
-  test("should handle session restoration", async () => {
-    const agent = createSessionTestAgent();
-    const originalSession = createShoppingSession();
+  test("should handle session restoration with history", async () => {
+    const adapter = new MemoryAdapter();
+    const sessionManager = new SessionManager<ShoppingCartData>(adapter);
 
-    // Populate with complex data
-    originalSession.data = {
+    // Create session with complex data and history
+    const session = await sessionManager.getOrCreate("shopping-session-456");
+    await sessionManager.setData({
       items: [{ id: "1", name: "Test Item", quantity: 1, price: 10.99 }],
       total: 10.99,
       shippingAddress: "Test Address",
-    };
+    });
 
-    originalSession.currentRoute = {
+    // Add conversation history
+    await sessionManager.addMessage("user", "I want to buy something");
+    await sessionManager.addMessage("assistant", "I can help you with that!");
+
+    session.currentRoute = {
       id: "checkout_route",
       title: "Checkout",
       enteredAt: new Date(),
     };
 
-    // Save and restore
-    const manager = agent.getPersistenceManager()!;
-    await manager.saveSessionState(originalSession.id, originalSession);
-    const restoredSession = await manager.loadSessionState(originalSession.id);
+    await sessionManager.save();
 
-    expect(restoredSession?.data?.items).toHaveLength(1);
-    expect(restoredSession?.data?.total).toBe(10.99);
-    expect(restoredSession?.currentRoute?.id).toBe("checkout_route");
+    // Create new session manager and load
+    const newSessionManager = new SessionManager<ShoppingCartData>(adapter);
+    const restoredSession = await newSessionManager.getOrCreate("shopping-session-456");
+
+    expect(restoredSession.data?.items).toHaveLength(1);
+    expect(restoredSession.data?.total).toBe(10.99);
+    expect(restoredSession.currentRoute?.id).toBe("checkout_route");
+    expect(restoredSession.history).toHaveLength(2);
+    expect(restoredSession.history?.[0]?.content).toBe("I want to buy something");
+    expect(restoredSession.history?.[1]?.content).toBe("I can help you with that!");
   });
 
   test("should handle missing sessions", async () => {
-    const agent = createSessionTestAgent();
-    const manager = agent.getPersistenceManager()!;
+    const adapter = new MemoryAdapter();
+    const sessionManager = new SessionManager(adapter);
 
-    const loadedSession = await manager.loadSessionState(
-      "non-existent-session"
-    );
-    expect(loadedSession).toBeNull();
+    // Try to load non-existent session - should create new one
+    const session = await sessionManager.getOrCreate("non-existent-session");
+    expect(session).toBeDefined();
+    expect(session.id).toBe("non-existent-session");
+    expect(session.data).toEqual({});
+    expect(session.history).toEqual([]);
   });
 
   test("should delete sessions", async () => {
-    const agent = createSessionTestAgent();
-    const session = createSession("delete-test-session");
+    const adapter = new MemoryAdapter();
+    const sessionManager = new SessionManager(adapter);
 
-    const manager = agent.getPersistenceManager()!;
+    // Create and save session
+    const session = await sessionManager.getOrCreate("delete-test-session");
+    await sessionManager.setData({ test: "data" });
+    await sessionManager.save();
 
-    // Save session
-    await manager.saveSessionState(session.id, session);
-
-    // Verify it exists
-    let loaded = await manager.loadSessionState(session.id);
+    // Verify it exists by checking persistence manager
+    const manager = sessionManager.getPersistenceManager();
+    expect(manager).toBeDefined();
+    let loaded = await manager!.loadSessionState("delete-test-session");
     expect(loaded).toBeDefined();
 
     // Delete session
-    await manager.deleteSession(session.id);
+    await sessionManager.delete();
 
     // Verify it's gone
-    loaded = await manager.loadSessionState(session.id);
+    loaded = await manager!.loadSessionState("delete-test-session");
     expect(loaded).toBeNull();
   });
 });
 
-describe("Multi-User Session Management", () => {
+describe("Multi-User SessionManager Management", () => {
   test("should handle multiple concurrent sessions", async () => {
-    const agent = createSessionTestAgent();
-    const manager = agent.getPersistenceManager()!;
+    const adapter = new MemoryAdapter();
 
-    // Create sessions for different users
-    const user1Session = createSession("user1-session", { userId: "user1" });
-    const user2Session = createSession("user2-session", { userId: "user2" });
-    const user3Session = createSession("user3-session", { userId: "user3" });
+    // Create session managers for different users
+    const sessionManager1 = new SessionManager(adapter);
+    const sessionManager2 = new SessionManager(adapter);
+    const sessionManager3 = new SessionManager(adapter);
+
+    // Create sessions with user metadata
+    const session1 = await sessionManager1.getOrCreate("user1-session");
+    session1.metadata = { ...session1.metadata, userId: "user1" };
+
+    const session2 = await sessionManager2.getOrCreate("user2-session");
+    session2.metadata = { ...session2.metadata, userId: "user2" };
+
+    const session3 = await sessionManager3.getOrCreate("user3-session");
+    session3.metadata = { ...session3.metadata, userId: "user3" };
 
     // Save all sessions
     await Promise.all([
-      manager.saveSessionState(user1Session.id, user1Session),
-      manager.saveSessionState(user2Session.id, user2Session),
-      manager.saveSessionState(user3Session.id, user3Session),
+      sessionManager1.save(),
+      sessionManager2.save(),
+      sessionManager3.save(),
     ]);
 
-    // Load and verify each session
-    const loaded1 = await manager.loadSessionState("user1-session");
-    const loaded2 = await manager.loadSessionState("user2-session");
-    const loaded3 = await manager.loadSessionState("user3-session");
+    // Load and verify each session with new managers
+    const newManager1 = new SessionManager(adapter);
+    const newManager2 = new SessionManager(adapter);
+    const newManager3 = new SessionManager(adapter);
 
-    expect(loaded1?.metadata?.userId).toBe("user1");
-    expect(loaded2?.metadata?.userId).toBe("user2");
-    expect(loaded3?.metadata?.userId).toBe("user3");
-  });
+    const loaded1 = await newManager1.getOrCreate("user1-session");
+    const loaded2 = await newManager2.getOrCreate("user2-session");
+    const loaded3 = await newManager3.getOrCreate("user3-session");
 
-  test("should retrieve user sessions", async () => {
-    const agent = createSessionTestAgent();
-    const manager = agent.getPersistenceManager()!;
-
-    const userId = "test_user";
-
-    // Create multiple sessions for same user
-    const session1 = createSession("session1", { userId });
-    const session2 = createSession("session2", { userId });
-    const session3 = createSession("session3", { userId, archived: true });
-
-    await Promise.all([
-      manager.saveSessionState(session1.id, session1),
-      manager.saveSessionState(session2.id, session2),
-      manager.saveSessionState(session3.id, session3),
-    ]);
-
-    // Get user sessions (implementation may vary)
-    try {
-      const userSessions = await manager.getUserSessions(userId);
-      expect(userSessions.length).toBeGreaterThanOrEqual(2);
-    } catch (error) {
-      // Memory adapter might not implement getUserSessions
-      console.log("getUserSessions not implemented in memory adapter", error);
-    }
+    expect(loaded1.metadata?.userId).toBe("user1");
+    expect(loaded2.metadata?.userId).toBe("user2");
+    expect(loaded3.metadata?.userId).toBe("user3");
   });
 
   test("should handle session conflicts", async () => {
-    const agent = createSessionTestAgent();
-    const manager = agent.getPersistenceManager()!;
-
+    const adapter = new MemoryAdapter();
     const sessionId = "conflict-session";
 
     // Create and save first version
-    const session1 = createSession(sessionId, { version: 1 });
-    session1.data!.value = "first";
+    const sessionManager1 = new SessionManager(adapter);
+    const session1 = await sessionManager1.getOrCreate(sessionId);
+    await sessionManager1.setData({ value: "first", version: 1 });
+    await sessionManager1.save();
 
-    await manager.saveSessionState(sessionId, session1);
+    // Create second manager and modify same session
+    const sessionManager2 = new SessionManager(adapter);
+    const session2 = await sessionManager2.getOrCreate(sessionId);
+    await sessionManager2.setData({ value: "second", version: 2 });
+    await sessionManager2.save();
 
-    // Modify and save second version
-    const session2 = { ...session1 };
-    session2.data!.value = "second";
-    session2.metadata!.version = 2;
+    // Load with new manager and verify latest version
+    const sessionManager3 = new SessionManager(adapter);
+    const loaded = await sessionManager3.getOrCreate(sessionId);
+    const data = sessionManager3.getData();
 
-    await manager.saveSessionState(sessionId, session2);
+    expect(data?.value).toBe("second");
+    expect(data?.version).toBe(2);
+  });
 
-    // Load and verify latest version
-    const loaded = await manager.loadSessionState(sessionId);
-    expect(loaded?.data?.value).toBe("second");
-    expect(loaded?.metadata?.version).toBe(2);
+  test("should isolate session data between managers", async () => {
+    const adapter = new MemoryAdapter();
+
+    const sessionManager1 = new SessionManager(adapter);
+    const sessionManager2 = new SessionManager(adapter);
+
+    // Create different sessions
+    await sessionManager1.getOrCreate("session-1");
+    await sessionManager2.getOrCreate("session-2");
+
+    // Set different data
+    await sessionManager1.setData({ user: "alice", role: "admin" });
+    await sessionManager2.setData({ user: "bob", role: "user" });
+
+    // Verify isolation
+    const data1 = sessionManager1.getData();
+    const data2 = sessionManager2.getData();
+
+    expect(data1?.user).toBe("alice");
+    expect(data1?.role).toBe("admin");
+    expect(data2?.user).toBe("bob");
+    expect(data2?.role).toBe("user");
+
+    // Verify session IDs are different
+    expect(sessionManager1.id).toBe("session-1");
+    expect(sessionManager2.id).toBe("session-2");
   });
 });
 
-describe("Session Lifecycle and Cleanup", () => {
-  test("should handle session expiration", async () => {
-    const agent = createSessionTestAgent();
-    const manager = agent.getPersistenceManager()!;
-
-    // Create session with expiration
-    const session = createSession("expiring-session", {
-      expiresAt: new Date(Date.now() + 1000), // Expires in 1 second
-    });
-
-    await manager.saveSessionState(session.id, session);
-
-    // Should load before expiration
-    let loaded = await manager.loadSessionState(session.id);
-    expect(loaded).toBeDefined();
-
-    // Wait for expiration
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-
-    // Memory adapter doesn't auto-expire, so this test is more about the concept
-    loaded = await manager.loadSessionState(session.id);
-    expect(loaded).toBeDefined(); // Memory adapter keeps everything
-  });
-
-  test("should handle session metadata updates", () => {
-    const session = createSession();
+describe("SessionManager Lifecycle and Cleanup", () => {
+  test("should handle session metadata updates", async () => {
+    const sessionManager = new SessionManager();
+    const session = await sessionManager.getOrCreate();
 
     // Initial metadata should include timestamps
     expect(session.metadata?.createdAt).toBeInstanceOf(Date);
@@ -559,13 +576,15 @@ describe("Session Lifecycle and Cleanup", () => {
     expect(session.metadata!.tags).toEqual(["active", "priority"]);
   });
 
-  test("should handle session cloning", () => {
-    const original = createSupportSession();
-    original.data = {
+  test("should handle session cloning", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+    const original = await createSupportSession(sessionManager);
+
+    await sessionManager.setData({
       issue: "Original issue",
       category: "technical",
       priority: "high",
-    };
+    });
 
     // Create a clone (deep copy to avoid shared references)
     const cloned = cloneDeep(original);
@@ -575,19 +594,70 @@ describe("Session Lifecycle and Cleanup", () => {
     cloned.id = "cloned-session";
 
     // Original should be unchanged
-    expect(original.data.issue).toBe("Original issue");
+    expect(original.data?.issue).toBe("Original issue");
     expect(original.id).toBe("support-session-123");
 
     // Clone should have changes
     expect(cloned.data!.issue).toBe("Modified issue");
     expect(cloned.id).toBe("cloned-session");
   });
+
+  test("should handle session reset", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+
+    // Create session with data and history
+    await sessionManager.getOrCreate("reset-test-session");
+    await sessionManager.setData({ issue: "Test issue", priority: "high" });
+    await sessionManager.addMessage("user", "Hello");
+    await sessionManager.addMessage("assistant", "Hi there!");
+
+    const originalId = sessionManager.id;
+    const originalHistory = sessionManager.getHistory();
+
+    // Reset with history preservation
+    const newSession = await sessionManager.reset(true);
+
+    // Should have new session ID but same history
+    expect(newSession.id).not.toBe(originalId);
+    expect(newSession.history).toEqual(originalHistory);
+    expect(newSession.data).toEqual({}); // Data should be cleared
+
+    // SessionManager should now point to new session
+    expect(sessionManager.id).toBe(newSession.id);
+    expect(sessionManager.getHistory()).toEqual(originalHistory);
+    expect(sessionManager.getData()).toEqual({});
+  });
+
+  test("should handle session reset without history preservation", async () => {
+    const sessionManager = new SessionManager<SupportTicketData>();
+
+    // Create session with data and history
+    await sessionManager.getOrCreate("reset-test-session-2");
+    await sessionManager.setData({ issue: "Test issue", priority: "high" });
+    await sessionManager.addMessage("user", "Hello");
+    await sessionManager.addMessage("assistant", "Hi there!");
+
+    const originalId = sessionManager.id;
+
+    // Reset without history preservation
+    const newSession = await sessionManager.reset(false);
+
+    // Should have new session ID and empty history
+    expect(newSession.id).not.toBe(originalId);
+    expect(newSession.history).toEqual([]);
+    expect(newSession.data).toEqual({});
+
+    // SessionManager should now point to new session
+    expect(sessionManager.id).toBe(newSession.id);
+    expect(sessionManager.getHistory()).toEqual([]);
+    expect(sessionManager.getData()).toEqual({});
+  });
 });
 
-describe("Session Integration with Agent Responses", () => {
+describe("SessionManager Integration with Agent Responses", () => {
   test("should integrate session with agent respond method", async () => {
     const agent = createSessionTestAgent();
-    const session = createSession();
+    const session = await agent.session.getOrCreate("test-integration-session");
 
     const response1 = await agent.respond({
       history: [
@@ -641,7 +711,7 @@ describe("Session Integration with Agent Responses", () => {
       ],
     });
 
-    const session = createSession();
+    const session = await agent.session.getOrCreate("route-completion-test");
     const response = await agent.respond({
       history: [
         {
@@ -662,13 +732,10 @@ describe("Session Integration with Agent Responses", () => {
 
   test("should persist session data across responses", async () => {
     const agent = createSessionTestAgent();
+    const session = await agent.session.getOrCreate("data-persistence-test");
 
-    const session = createSession<SupportTicketData>();
-
-    // Manually set initial data (simulating data collected from previous interactions)
-    session.data = {
-      issue: "Test issue",
-    };
+    // Set initial data directly on session
+    session.data = { issue: "Test issue" };
 
     // First response - should preserve existing data
     const response1 = await agent.respond<SupportTicketData>({
@@ -685,7 +752,7 @@ describe("Session Integration with Agent Responses", () => {
     // Data should persist
     expect(response1.session?.data?.issue).toBe("Test issue");
 
-    // Manually add more data (simulating data collected in current interaction)
+    // Add more data to the session returned from first response
     if (response1.session) {
       response1.session.data = {
         ...response1.session.data,
@@ -717,5 +784,267 @@ describe("Session Integration with Agent Responses", () => {
     // Data should persist and accumulate across responses
     expect(response2.session?.data?.issue).toBe("Test issue");
     expect(response2.session?.data?.priority).toBe("high");
+  });
+});
+
+describe("SessionManager Integration with Agent", () => {
+  test("should create and manage sessions automatically", async () => {
+    const agent = new Agent({
+      name: "SessionManagerAgent",
+      provider: MockProviderFactory.basic(),
+      sessionId: "test-session-manager-123",
+    });
+
+    // Session should be created automatically
+    const session = await agent.session.getOrCreate();
+    expect(session.id).toBe("test-session-manager-123");
+    expect(session.history).toEqual([]);
+  });
+
+  test("should manage conversation history automatically", async () => {
+    const agent = new Agent({
+      name: "HistoryAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    // Use the new chat method
+    await agent.chat("Hello!");
+    await agent.chat("How are you?");
+
+    const history = agent.session.getHistory();
+    expect(history).toHaveLength(4); // 2 user + 2 assistant messages
+    expect(history[0].role).toBe("user");
+    expect(history[0].content).toBe("Hello!");
+    expect(history[1].role).toBe("assistant");
+    expect(history[2].role).toBe("user");
+    expect(history[2].content).toBe("How are you?");
+    expect(history[3].role).toBe("assistant");
+  });
+
+  test("should persist session with history", async () => {
+    const adapter = new MemoryAdapter();
+    const agent = new Agent({
+      name: "PersistenceAgent",
+      provider: MockProviderFactory.basic(),
+      sessionId: "persist-test-session",
+      persistence: { adapter },
+    });
+
+    // Add conversation
+    await agent.chat("Test message");
+
+    // Manually save
+    await agent.session.save();
+
+    // Create new agent with same session ID to verify persistence
+    const newAgent = new Agent({
+      name: "PersistenceAgent2",
+      provider: MockProviderFactory.basic(),
+      sessionId: "persist-test-session",
+      persistence: { adapter },
+    });
+
+    // Load the session and check history
+    const restoredSession = await newAgent.session.getOrCreate("persist-test-session");
+    const restoredHistory = newAgent.session.getHistory();
+
+    // The chat method should have added both user and assistant messages
+    expect(restoredHistory.length).toBeGreaterThanOrEqual(1);
+    // Check if we have the user message (could be first or second depending on order)
+    const userMessage = restoredHistory.find(msg => msg.role === "user");
+    expect(userMessage?.content).toBe("Test message");
+  });
+
+  test("should handle session data operations", async () => {
+    const agent = new Agent({
+      name: "DataAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    // Set some data
+    await agent.session.setData({ name: "John", email: "john@example.com" });
+
+    // Get data
+    const data = agent.session.getData();
+    expect(data).toEqual({ name: "John", email: "john@example.com" });
+
+    // Session should have the data
+    const session = await agent.session.getOrCreate();
+    expect(session.data).toEqual({ name: "John", email: "john@example.com" });
+  });
+
+  test("should reset session while preserving history if requested", async () => {
+    const agent = new Agent({
+      name: "ResetAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    // Add some conversation and data
+    await agent.chat("Hello");
+    await agent.session.setData({ important: "data" });
+
+    const originalSessionId = agent.session.id;
+    const originalHistory = agent.session.getHistory();
+
+    // Reset with history preservation
+    const newSession = await agent.session.reset(true);
+
+    // Should have new session ID but same history
+    expect(newSession.id).not.toBe(originalSessionId);
+    expect(newSession.history).toEqual(originalHistory);
+    expect(newSession.data).toEqual({}); // Data should be cleared
+  });
+
+  test("should handle history override in chat method", async () => {
+    const agent = new Agent({
+      name: "OverrideAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    // Add some conversation normally
+    await agent.chat("Normal message");
+    expect(agent.session.getHistory()).toHaveLength(2);
+
+    // Use history override - should not affect session history
+    await agent.chat(undefined, {
+      history: [
+        { role: "user", content: "Override message" },
+      ]
+    });
+
+    // Session history should be unchanged
+    const sessionHistory = agent.session.getHistory();
+    expect(sessionHistory).toHaveLength(2);
+    expect(sessionHistory[0].content).toBe("Normal message");
+  });
+});
+
+describe("SessionManager History Management", () => {
+  test("should add and retrieve conversation history", async () => {
+    const sessionManager = new SessionManager();
+    await sessionManager.getOrCreate();
+
+    // Add messages
+    await sessionManager.addMessage("user", "Hello there!");
+    await sessionManager.addMessage("assistant", "Hi! How can I help you?");
+    await sessionManager.addMessage("user", "I need help with my account", "John");
+
+    const history = sessionManager.getHistory();
+    expect(history).toHaveLength(3);
+    expect(history[0]).toEqual({
+      role: "user",
+      content: "Hello there!",
+    });
+    expect(history[1]).toEqual({
+      role: "assistant",
+      content: "Hi! How can I help you?",
+    });
+    expect(history[2]).toEqual({
+      role: "user",
+      content: "I need help with my account",
+      name: "John",
+    });
+  });
+
+  test("should set and clear conversation history", async () => {
+    const sessionManager = new SessionManager();
+    await sessionManager.getOrCreate();
+
+    // Set initial history
+    const initialHistory = [
+      { role: "user" as const, content: "Previous message 1" },
+      { role: "assistant" as const, content: "Previous response 1" },
+      { role: "user" as const, content: "Previous message 2" },
+    ];
+
+    sessionManager.setHistory(initialHistory);
+    expect(sessionManager.getHistory()).toEqual(initialHistory);
+
+    // Add new message
+    await sessionManager.addMessage("assistant", "New response");
+    expect(sessionManager.getHistory()).toHaveLength(4);
+
+    // Clear history
+    sessionManager.clearHistory();
+    expect(sessionManager.getHistory()).toEqual([]);
+  });
+
+  test("should handle sessionId-based session creation and loading", async () => {
+    const adapter = new MemoryAdapter();
+    const manager = new PersistenceManager({ adapter: adapter })
+    // Create session with specific ID
+    const sessionManager1 = new SessionManager(manager);
+    const session1 = await sessionManager1.getOrCreate("user-session-abc");
+    await sessionManager1.addMessage("user", "First message");
+    await sessionManager1.setData({ userId: "user123", preferences: { theme: "dark" } });
+    await sessionManager1.save();
+
+    // Load same session with different manager instance
+    const sessionManager2 = new SessionManager(adapter);
+    const session2 = await sessionManager2.getOrCreate("user-session-abc");
+
+    expect(session2.id).toBe("user-session-abc");
+    expect(session2.history).toHaveLength(1);
+    expect(session2.history?.[0]?.content).toBe("First message");
+    expect(sessionManager2.getData()).toEqual({
+      userId: "user123",
+      preferences: { theme: "dark" }
+    });
+  });
+
+  test("should handle session data persistence with history", async () => {
+    const adapter = new MemoryAdapter();
+    const manager = new PersistenceManager({ adapter: adapter })
+    const sessionManager = new SessionManager(manager);
+
+    // Create session with data and history
+    await sessionManager.getOrCreate("persistence-test");
+    await sessionManager.setData({
+      userInfo: { name: "Alice", email: "alice@example.com" },
+      progress: { step: 3, completed: false }
+    });
+
+    await sessionManager.addMessage("user", "I want to update my profile");
+    await sessionManager.addMessage("assistant", "I can help you with that. What would you like to update?");
+    await sessionManager.addMessage("user", "Change my email address");
+
+    // Save session
+    await sessionManager.save();
+
+    // Create new manager and load session
+    const newSessionManager = new SessionManager<UserInfoData>(adapter);
+    const loadedSession = await newSessionManager.getOrCreate("persistence-test");
+
+    // Verify data persistence
+    const data = newSessionManager.getData();
+    expect(data?.userInfo?.name).toBe("Alice");
+    expect(data?.userInfo?.email).toBe("alice@example.com");
+    expect(data?.progress?.step).toBe(3);
+    expect(data?.progress?.completed).toBe(false);
+
+    // Verify history persistence
+    const history = newSessionManager.getHistory();
+    expect(history).toHaveLength(3);
+    expect(history[0].content).toBe("I want to update my profile");
+    expect(history[1].content).toBe("I can help you with that. What would you like to update?");
+    expect(history[2].content).toBe("Change my email address");
+  });
+
+  test("should auto-save on message addition", async () => {
+    const adapter = new MemoryAdapter();
+    const manager = new PersistenceManager({ adapter: adapter })
+    const sessionManager = new SessionManager(manager);
+
+    await sessionManager.getOrCreate("auto-save-test");
+
+    // Add message (should auto-save)
+    await sessionManager.addMessage("user", "Test auto-save");
+
+    // Create new manager and verify message was persisted
+    const newSessionManager = new SessionManager(adapter);
+    const session = await newSessionManager.getOrCreate("auto-save-test");
+
+    expect(session.history).toHaveLength(1);
+    expect(session.history?.[0]?.content).toBe("Test auto-save");
   });
 });

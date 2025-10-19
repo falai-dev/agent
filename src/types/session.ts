@@ -2,6 +2,8 @@
  * Session step types for tracking conversation progress
  */
 
+import type { History } from "./history";
+
 /**
  * Pending route transition information
  */
@@ -50,7 +52,7 @@ export interface SessionState<TData = unknown> {
   dataByRoute?: Record<string, Partial<TData>>;
 
   /** History of routes visited in this session */
-  routeHistory: Array<{
+  routeHistory?: Array<{
     routeId: string;
     enteredAt?: Date;
     exitedAt?: Date;
@@ -62,6 +64,12 @@ export interface SessionState<TData = unknown> {
    * Set when a route completes with onComplete handler
    */
   pendingTransition?: PendingTransition;
+
+  /**
+   * Conversation history managed by the session
+   * Contains the full conversation between user and assistant
+   */
+  history?: History;
 
   /** Session metadata */
   metadata?: {

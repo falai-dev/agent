@@ -9,7 +9,7 @@
  * - Context management
  */
 
-import { Agent, createSession, type Guideline, type Term } from "../src/index";
+import { Agent, type Guideline, type Term } from "../src/index";
 import {
   MockProvider,
   MockProviderFactory,
@@ -201,7 +201,7 @@ async function testAgentResponseGeneration() {
 
   await runTest("should generate basic response", async () => {
     const agent = createTestAgent();
-    const session = createSession();
+    const session = await agent.session.getOrCreate();
 
     const history = [
       {
@@ -230,7 +230,7 @@ async function testAgentResponseGeneration() {
   await runTest("should handle provider errors gracefully", async () => {
     const errorProvider = MockProviderFactory.withError("Test error");
     const agent = createTestAgent(errorProvider);
-    const session = createSession();
+    const session = await agent.session.getOrCreate();
 
     const history = [
       {
@@ -253,7 +253,7 @@ async function testAgentResponseGeneration() {
 
   await runTest("should maintain session state across responses", async () => {
     const agent = createTestAgent();
-    let session = createSession();
+    let session = await agent.session.getOrCreate();
 
     // First interaction
     const response1 = await agent.respond({
@@ -300,7 +300,7 @@ async function testAgentResponseGeneration() {
 
   await runTest("should handle context in responses", async () => {
     const agent = createTestAgent();
-    const session = createSession();
+    const session = await agent.session.getOrCreate();
 
     const history = [
       {
@@ -318,6 +318,27 @@ async function testAgentResponseGeneration() {
       "Response message should be defined"
     );
     assert(response.session !== undefined, "Session should be defined");
+  });
+
+  await runTest("should use new chat method for simplified conversations", async () => {
+    const agent = createTestAgent();
+
+    // Use the new chat method
+    const response1 = await agent.chat("Hello!");
+    assert(response1.message !== undefined, "First response should be defined");
+
+    const response2 = await agent.chat("How are you?");
+    assert(response2.message !== undefined, "Second response should be defined");
+
+    // Check that history is managed automatically
+    const history = agent.session.getHistory();
+    assert(history.length === 4, "Should have 4 messages in history"); // 2 user + 2 assistant
+    assertEqual(history[0].role, "user", "First message should be from user");
+    assertEqual(history[0].content, "Hello!", "First message content should match");
+    assertEqual(history[1].role, "assistant", "Second message should be from assistant");
+    assertEqual(history[2].role, "user", "Third message should be from user");
+    assertEqual(history[2].content, "How are you?", "Third message content should match");
+    assertEqual(history[3].role, "assistant", "Fourth message should be from assistant");
   });
 }
 
@@ -342,11 +363,12 @@ async function testAgentGuidelinesAndTerms() {
 
     agent.createGuideline(guideline);
     assert(agent.getGuidelines().length === 1, "Should have 1 guideline");
-    assertDeepEqual(
-      agent.getGuidelines()[0],
-      guideline,
-      "Guideline should match"
-    );
+    
+    const createdGuideline = agent.getGuidelines()[0];
+    assert(createdGuideline.condition === guideline.condition, "Condition should match");
+    assert(createdGuideline.action === guideline.action, "Action should match");
+    assert(createdGuideline.enabled === guideline.enabled, "Enabled should match");
+    assert(typeof createdGuideline.id === "string", "Should have auto-generated ID");
   });
 
   await runTest("should manage terms", () => {

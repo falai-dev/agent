@@ -84,6 +84,8 @@ export interface AgentOptions<TContext = unknown> {
   context?: TContext;
   /** Optional current session for convenience methods */
   session?: SessionState;
+  /** Optional sessionId to load or create - managed by SessionManager */
+  sessionId?: string;
   /** Context provider function for always-fresh context (alternative to static context) */
   contextProvider?: ContextProvider<TContext>;
   /** Lifecycle hooks for context management */

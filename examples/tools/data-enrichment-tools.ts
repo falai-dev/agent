@@ -11,7 +11,6 @@
 
 import {
   Agent,
-  createSession,
   END_ROUTE,
   OpenAIProvider,
   type Tool,
@@ -378,26 +377,26 @@ finalizeBooking.nextStep({ step: END_ROUTE });
 // ==============================================================================
 
 async function main() {
-  const session = createSession<FlightData>();
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   // Turn 1: User provides everything at once
-  const history = [
-    {
-      role: "user" as const,
-      content: "I want to fly to Paris tomorrow with 2 passengers",
-    },
-  ];
+  await agent.session.addMessage("user", "I want to fly to Paris tomorrow with 2 passengers");
 
-  const response = await agent.respond({ history, session });
+  const response = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
 
   console.log("\n=== RESPONSE ===");
   console.log("Message:", response.message);
-  console.log("Data:", response.session?.data);
+  console.log("Data:", agent.session.getData<FlightData>());
   console.log("Context:", agent["context"]);
+
+  await agent.session.addMessage("assistant", response.message);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Flight booking complete!");
-    await sendBookingConfirmation(response.session?.data);
+    await sendBookingConfirmation(agent.session.getData<FlightData>());
   }
 
   /*

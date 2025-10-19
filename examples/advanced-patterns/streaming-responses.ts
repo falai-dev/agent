@@ -11,7 +11,6 @@ import {
   AnthropicProvider,
   OpenAIProvider,
   GeminiProvider,
-  createSession,
 } from "../../src/index";
 
 // Custom context type
@@ -70,12 +69,17 @@ async function streamingWithAnthropic() {
     console.log("📤 Streaming response from Claude...\n");
     console.log("Response: ");
 
-    // Initialize session step for streaming conversation
-    let session = createSession();
+    // Session is automatically managed by the agent
+    console.log("✨ Session ready:", agent.session.id);
 
-    // Use respondStream for real-time streaming with session step
+    // Add user message to session history
+    await agent.session.addMessage("user", "What's the weather like today?");
+
+    // Use respondStream for real-time streaming with session history
     let fullMessage = "";
-    for await (const chunk of agent.respondStream({ history, session })) {
+    for await (const chunk of agent.respondStream({ 
+      history: agent.session.getHistory() 
+    })) {
       // chunk.delta contains the new text
       // chunk.accumulated contains the full text so far
       // chunk.done indicates if this is the final chunk
@@ -91,12 +95,13 @@ async function streamingWithAnthropic() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Data:`, chunk.session?.data || "None");
+        console.log(`   - Data:`, agent.session.getData() || "None");
         console.log(`   - Tool Calls: ${chunk.toolCalls?.length || 0}`);
 
         console.log(`   - Full Message: ${fullMessage}`);
-        // Update session with progress
-        session = chunk.session!;
+        
+        // Add assistant response to session history
+        await agent.session.addMessage("assistant", fullMessage);
       }
     }
   } catch (error) {
@@ -140,10 +145,15 @@ async function streamingWithOpenAI() {
     console.log("📤 Streaming response from OpenAI...\n");
     console.log("Response: ");
 
-    // Initialize session step for streaming conversation
-    let session = createSession();
+    // Session is automatically managed by the agent
+    console.log("✨ Session ready:", agent.session.id);
 
-    for await (const chunk of agent.respondStream({ history, session })) {
+    // Add user message to session history
+    await agent.session.addMessage("user", "What's the weather like today?");
+
+    for await (const chunk of agent.respondStream({ 
+      history: agent.session.getHistory() 
+    })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
       }
@@ -153,10 +163,10 @@ async function streamingWithOpenAI() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Data:`, chunk.session?.data || "None");
+        console.log(`   - Data:`, agent.session.getData() || "None");
 
-        // Update session with progress
-        session = chunk.session!;
+        // Add assistant response to session history
+        await agent.session.addMessage("assistant", chunk.accumulated || "");
       }
     }
   } catch (error) {
@@ -200,10 +210,15 @@ async function streamingWithGemini() {
     console.log("📤 Streaming response from Gemini...\n");
     console.log("Response: ");
 
-    // Initialize session step for streaming conversation
-    let session = createSession();
+    // Session is automatically managed by the agent
+    console.log("✨ Session ready:", agent.session.id);
 
-    for await (const chunk of agent.respondStream({ history, session })) {
+    // Add user message to session history
+    await agent.session.addMessage("user", "What are the key differences between REST and GraphQL?");
+
+    for await (const chunk of agent.respondStream({ 
+      history: agent.session.getHistory() 
+    })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
       }
@@ -213,10 +228,10 @@ async function streamingWithGemini() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Data:`, chunk.session?.data || "None");
+        console.log(`   - Data:`, agent.session.getData() || "None");
 
-        // Update session with progress
-        session = chunk.session!;
+        // Add assistant response to session history
+        await agent.session.addMessage("assistant", chunk.accumulated || "");
       }
     }
   } catch (error) {
@@ -299,10 +314,15 @@ async function streamingWithRoutes() {
     console.log("📤 Streaming response with route detection...\n");
     console.log("Response: ");
 
-    // Initialize session step for streaming conversation
-    let session = createSession();
+    // Session is automatically managed by the agent
+    console.log("✨ Session ready:", agent.session.id);
 
-    for await (const chunk of agent.respondStream({ history, session })) {
+    // Add user message to session history
+    await agent.session.addMessage("user", "How do I reset my password?");
+
+    for await (const chunk of agent.respondStream({ 
+      history: agent.session.getHistory() 
+    })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
       }
@@ -313,14 +333,14 @@ async function streamingWithRoutes() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Data:`, chunk.session?.data || "None");
+        console.log(`   - Data:`, agent.session.getData() || "None");
 
         // Check for route completion
         if (chunk.isRouteComplete) {
           console.log("\n✅ Route complete!");
           if (chunk.session?.currentRoute?.title === "Collect Feedback") {
             await logFeedback(
-              agent.getData(chunk.session?.id) as {
+              agent.session.getData() as {
                 rating: number;
                 comments: string;
               }
@@ -328,8 +348,7 @@ async function streamingWithRoutes() {
           }
         }
 
-        // Update session with progress
-        session = chunk.session!;
+        // Session is automatically updated by the agent
       }
     }
   } catch (error) {
@@ -379,12 +398,14 @@ async function streamingWithAbortSignal() {
     console.log("📤 Streaming response (will abort after 3s)...\n");
     console.log("Response: ");
 
-    // Initialize session step for streaming conversation
-    let session = createSession();
+    // Session is automatically managed by the agent
+    console.log("✨ Session ready:", agent.session.id);
+
+    // Add user message to session history
+    await agent.session.addMessage("user", "Tell me a very long story about space exploration.");
 
     for await (const chunk of agent.respondStream({
-      history,
-      session,
+      history: agent.session.getHistory(),
       signal: abortController.signal,
     })) {
       if (chunk.delta) {
@@ -397,10 +418,12 @@ async function streamingWithAbortSignal() {
         console.log(
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
-        console.log(`   - Data:`, chunk.session?.data || "None");
+        console.log(`   - Data:`, agent.session.getData() || "None");
 
-        // Update session with progress
-        session = chunk.session!;
+        // Add assistant response to session history
+        await agent.session.addMessage("assistant", chunk.accumulated || "");
+
+        // Session is automatically updated by the agent
 
         clearTimeout(timeout);
       }

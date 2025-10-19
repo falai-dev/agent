@@ -15,7 +15,6 @@
 import {
   Agent,
   GeminiProvider,
-  createSession,
   MemoryAdapter,
   type Tool,
 } from "../../src/index";
@@ -28,6 +27,12 @@ interface OrderData {
   preferredColor?: string;
   urgentDelivery: boolean;
   orderId?: string;
+}
+
+interface OrderContext {
+  userId: string;
+  userName: string;
+  isVip: boolean;
 }
 
 interface PaymentData {
@@ -222,262 +227,156 @@ agent.createRoute<PaymentData>({
   onComplete: "Order Complete", // End conversation when payment is complete
 });
 
-// Demonstration of session management across multiple turns
+// Demonstration of automatic session management
 async function demonstrateSessionManagement() {
-  console.log("=== Session Management Demo ===\n");
+  console.log("=== Automatic Session Management Demo ===\n");
 
-  // Turn 1: Start order process
+  // Create agent with automatic session management
+  const sessionAgent = new Agent({
+    name: "OrderBot",
+    description: "A bot that handles multi-step order processing",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+    persistence: {
+      adapter: new MemoryAdapter(),
+    },
+    sessionId: "user-alice-123", // Automatically creates/loads this session
+  });
+
+  // Copy routes to the session agent
+  agent.getRoutes().forEach(route => {
+    sessionAgent.createRoute(route);
+  });
+
+  // Turn 1: Start order process - simple message API
   console.log("Turn 1: Starting order process");
   console.log("User: Hi, I'm Alice and I want to buy a laptop");
 
-  const response1 = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "Hi, I'm Alice and I want to buy a laptop",
-        name: "Alice",
-      },
-    ],
-  });
+  const response1 = await sessionAgent.chat("Hi, I'm Alice and I want to buy a laptop");
 
   console.log("Bot:", response1.message);
-  console.log(
-    "Session data:",
-    JSON.stringify(
-      response1.session?.data as Partial<OrderData | PaymentData>,
-      null,
-      2
-    )
-  );
-  console.log("Current route:", response1.session?.currentRoute?.title);
-  console.log("Current step:", response1.session?.currentStep?.id);
+  console.log("Session ID:", sessionAgent.session.id);
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<OrderData>(), null, 2));
+  console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
 
-  // Turn 2: Provide budget
+  // Turn 2: Provide budget - session automatically maintained
   console.log("Turn 2: Providing budget");
   console.log("User: My budget is $1500");
 
-  const response2 = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "Hi, I'm Alice and I want to buy a laptop",
-        name: "Alice",
-      },
-      {
-        role: "assistant",
-        content: response1.message,
-      },
-      {
-        role: "user",
-        content: "My budget is $1500",
-        name: "Alice",
-      },
-    ],
-    session: response1.session,
-  });
+  const response2 = await sessionAgent.chat("My budget is $1500");
 
   console.log("Bot:", response2.message);
-  console.log(
-    "Session data:",
-    JSON.stringify(
-      response2.session?.data as Partial<OrderData | PaymentData>,
-      null,
-      2
-    )
-  );
-  console.log("Current route:", response2.session?.currentRoute?.title);
-  console.log("Current step:", response2.session?.currentStep?.id);
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<OrderData>(), null, 2));
+  console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
 
-  // Turn 3: Complete order details and trigger transition
+  // Turn 3: Complete order details - session automatically updated
   console.log("Turn 3: Completing order and transitioning to payment");
   console.log("User: I want black color and urgent delivery please");
 
-  const response3 = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "Hi, I'm Alice and I want to buy a laptop",
-        name: "Alice",
-      },
-      {
-        role: "assistant",
-        content: response1.message,
-      },
-      {
-        role: "user",
-        content: "My budget is $1500",
-        name: "Alice",
-      },
-      {
-        role: "assistant",
-        content: response2.message,
-      },
-      {
-        role: "user",
-        content: "I want black color and urgent delivery please",
-        name: "Alice",
-      },
-    ],
-    session: response2.session,
-  });
+  const response3 = await sessionAgent.chat("I want black color and urgent delivery please");
 
   console.log("Bot:", response3.message);
-  console.log(
-    "Session data:",
-    JSON.stringify(
-      response3.session?.data as Partial<OrderData | PaymentData>,
-      null,
-      2
-    )
-  );
-  console.log("Current route:", response3.session?.currentRoute?.title);
-  console.log("Current step:", response3.session?.currentStep?.id);
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<OrderData>(), null, 2));
   console.log("Route complete:", response3.isRouteComplete);
+  console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
 
-  // Turn 4: Process payment in new route
+  // Turn 4: Process payment - automatic route transition
   console.log("Turn 4: Processing payment in transitioned route");
   console.log("User: I'll pay with credit card, amount is $1599");
 
-  const response4 = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "Hi, I'm Alice and I want to buy a laptop",
-        name: "Alice",
-      },
-      {
-        role: "assistant",
-        content: response1.message,
-      },
-      {
-        role: "user",
-        content: "My budget is $1500",
-        name: "Alice",
-      },
-      {
-        role: "assistant",
-        content: response2.message,
-      },
-      {
-        role: "user",
-        content: "I want black color and urgent delivery please",
-        name: "Alice",
-      },
-      {
-        role: "assistant",
-        content: response3.message,
-      },
-      {
-        role: "user",
-        content: "I'll pay with credit card, amount is $1599",
-        name: "Alice",
-      },
-    ],
-    session: response3.session,
-  });
+  const response4 = await sessionAgent.chat("I'll pay with credit card, amount is $1599");
 
   console.log("Bot:", response4.message);
-  console.log(
-    "Session data:",
-    JSON.stringify(
-      response4.session?.data as Partial<OrderData | PaymentData>,
-      null,
-      2
-    )
-  );
-  console.log("Current route:", response4.session?.currentRoute?.title);
-  console.log("Current step:", response4.session?.currentStep?.id);
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<PaymentData>(), null, 2));
   console.log("Route complete:", response4.isRouteComplete);
+  console.log("Final history length:", sessionAgent.session.getHistory().length);
 }
 
-// Demonstrate session persistence and restoration
+// Demonstrate automatic session persistence and restoration
 async function demonstrateSessionPersistence() {
-  console.log("\n=== Session Persistence Demo ===\n");
+  console.log("\n=== Automatic Session Persistence Demo ===\n");
 
-  // Create a session manually for demonstration
-  const sessionId = "demo-session-123";
-  const initialSession = createSession<OrderData>(sessionId, {
-    createdAt: new Date(),
-    userId: "user_alice",
+  // Create agent with specific sessionId for demonstration
+  const sessionId = "demo-session-456";
+  const persistentAgent = new Agent<OrderContext>({
+    name: "Order Assistant",
+    description: "Help customers place orders with automatic persistence",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+    context: {
+      userId: "user_alice",
+      userName: "Alice",
+      isVip: false,
+    },
+    persistence: {
+      adapter: new MemoryAdapter(),
+      autoSave: true, // Automatic persistence
+    },
+    sessionId, // Agent automatically loads or creates this session
   });
 
-  console.log("Created session:", sessionId);
-
-  // Use the session in conversation
-  const response1 = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "I want to buy a phone for $800",
-        name: "Alice",
-      },
-    ],
-    session: initialSession,
+  // Copy routes to the persistent agent
+  agent.getRoutes().forEach(route => {
+    persistentAgent.createRoute(route);
   });
+
+  console.log("Session ready:", persistentAgent.session.id);
+
+  // Start conversation - session automatically managed
+  const response1 = await persistentAgent.chat("I want to buy a phone for $800");
 
   console.log("After first interaction:");
-  console.log(
-    "Session data:",
-    JSON.stringify(
-      response1.session?.data as Partial<OrderData | PaymentData>,
-      null,
-      2
-    )
-  );
+  console.log("🤖 Agent:", response1.message);
+  console.log("Session data:", JSON.stringify(persistentAgent.session.getData<OrderData>(), null, 2));
+  console.log("History length:", persistentAgent.session.getHistory().length);
+  console.log("Session automatically saved to persistence ✓");
 
-  // Simulate session persistence (in real app, this would auto-save)
-  if (agent.hasPersistence() && response1.session?.id) {
-    await agent
-      .getPersistenceManager()
-      ?.saveSessionState(response1.session.id, response1.session);
-    console.log("Session saved to persistence");
-  }
+  // Simulate server restart - create new agent instance with same sessionId
+  console.log("\n🔄 Simulating server restart - creating new agent instance...");
 
-  // Simulate restoring session later (e.g., user returns after some time)
-  console.log("\nRestoring session...");
-  let restoredSession;
-  if (agent.hasPersistence() && sessionId) {
-    restoredSession = await agent
-      .getPersistenceManager()
-      ?.loadSessionState(sessionId);
-    console.log("Session restored from persistence");
-    console.log(
-      "Restored data:",
-      JSON.stringify(restoredSession?.data, null, 2)
-    );
-  }
+  const restoredAgent = new Agent<OrderContext>({
+    name: "Order Assistant",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+    context: {
+      userId: "user_alice",
+      userName: "Alice",
+      isVip: false,
+    },
+    persistence: {
+      adapter: new MemoryAdapter(), // Same adapter instance for demo
+      autoSave: true,
+    },
+    sessionId, // Same sessionId - automatically loads existing session
+  });
 
-  // Continue conversation with restored session
-  if (restoredSession) {
-    const response2 = await agent.respond({
-      history: [
-        {
-          role: "user",
-          content: "I want to buy a phone for $800",
-          name: "Alice",
-        },
-        {
-          role: "assistant",
-          content: response1.message,
-        },
-        {
-          role: "user",
-          content: "Actually, make it urgent delivery",
-          name: "Alice",
-        },
-      ],
-      session: restoredSession,
-    });
+  // Copy routes to the restored agent
+  agent.getRoutes().forEach(route => {
+    restoredAgent.createRoute(route);
+  });
 
-    console.log("\nAfter continuing with restored session:");
-    console.log(
-      "Session data:",
-      JSON.stringify(response2.session?.data, null, 2)
-    );
-  }
+  console.log("Session automatically restored:");
+  console.log("- Session ID:", restoredAgent.session.id);
+  console.log("- History length:", restoredAgent.session.getHistory().length);
+  console.log("- Restored data:", JSON.stringify(restoredAgent.session.getData<OrderData>(), null, 2));
+
+  // Continue conversation seamlessly
+  const response2 = await restoredAgent.chat("Actually, make it urgent delivery");
+
+  console.log("\nAfter continuing with restored session:");
+  console.log("🤖 Agent:", response2.message);
+  console.log("Session data:", JSON.stringify(restoredAgent.session.getData<OrderData>(), null, 2));
+  console.log("History length:", restoredAgent.session.getHistory().length);
+  console.log("Session automatically saved again ✓");
 }
 
 // Run demonstrations

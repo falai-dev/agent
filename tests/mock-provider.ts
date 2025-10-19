@@ -25,6 +25,8 @@ export interface MockProviderConfig {
   delayMs?: number;
   /** Whether to throw errors for testing error handling */
   shouldThrowError?: boolean;
+  /** Error message to throw when shouldThrowError is true */
+  errorMessage?: string;
   /** Custom structured response data */
   structuredResponse?: AgentStructuredResponse;
   /** Model name to report */
@@ -59,6 +61,7 @@ export class MockProvider implements AiProvider {
       supportsStreaming: true,
       delayMs: 10,
       shouldThrowError: false,
+      errorMessage: "Mock provider error for testing",
       structuredResponse: {
         message: MOCK_RESPONSES.GREETING,
         route: null,
@@ -85,7 +88,7 @@ export class MockProvider implements AiProvider {
 
     // Simulate error conditions
     if (this.config.shouldThrowError) {
-      throw new Error("Mock provider error for testing");
+      throw new Error(this.config.errorMessage);
     }
 
     return {
@@ -110,7 +113,7 @@ export class MockProvider implements AiProvider {
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Simulate error conditions
     if (this.config.shouldThrowError) {
-      throw new Error("Mock provider streaming error for testing");
+      throw new Error(this.config.errorMessage);
     }
 
     const words = this.config.responseMessage.split(" ");
@@ -171,6 +174,7 @@ export class MockProvider implements AiProvider {
       supportsStreaming: true,
       delayMs: 10,
       shouldThrowError: false,
+      errorMessage: "Mock provider error for testing",
       structuredResponse: {
         message: MOCK_RESPONSES.GREETING,
         route: null,
@@ -215,6 +219,7 @@ export const MockProviderFactory = {
   withError(errorMessage = "Mock error"): MockProvider {
     return new MockProvider({
       shouldThrowError: true,
+      errorMessage: errorMessage,
       responseMessage: errorMessage,
     });
   },

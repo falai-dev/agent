@@ -29,6 +29,10 @@ export type {
   Role,
   HistoryItem,
   History,
+  UserHistoryItem,
+  AssistantHistoryItem,
+  SystemHistoryItem,
+  ToolHistoryItem,
 } from "./history";
 export { EventKind, MessageRole } from "./history";
 export * from "./history";

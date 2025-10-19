@@ -1,23 +1,22 @@
 /**
- * Example: Custom Database Integration (Manual Session Step Management)
+ * Example: Custom Database Integration with New Session Management
  *
- * This example shows how to manually manage session step when using your own
- * database structure instead of the built-in persistence adapters.
+ * This example shows how to integrate with existing database schemas
+ * while leveraging the new SessionManager for simplified session handling.
  *
- * Use this approach if you:
- * - Have an existing database schema you want to integrate with
- * - Need custom data structures beyond what adapters provide
- * - Want full control over database operations
+ * Key patterns demonstrated:
+ * - Using SessionManager with custom database schemas
+ * - Converting between SessionManager and custom database formats
+ * - Maintaining backward compatibility with existing systems
+ * - Session recovery and continuation patterns
  */
 
 import {
   Agent,
   GeminiProvider,
-  createSession,
   SessionState,
   END_ROUTE,
   History,
-  MessageRole,
 } from "../../src";
 
 /**
@@ -29,14 +28,14 @@ interface CustomDatabaseSession {
   userId: string;
   currentRoute?: string;
   currentStep?: string;
-  collectedData?: {
-    data?: Record<string, unknown>;
-    dataByRoute?: Record<string, Partial<unknown>>;
-    routeHistory?: unknown[];
-    currentRouteTitle?: string;
-    currentStepDescription?: string;
-    metadata?: Record<string, unknown>;
-  };
+  collectedData?: Record<string, unknown>;
+  conversationHistory?: Array<{
+    role: string;
+    content: string;
+    name?: string;
+    timestamp?: string;
+  }>;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,7 +44,7 @@ interface CustomDatabaseMessage {
   id: string;
   sessionId: string;
   userId: string;
-  role: MessageRole;
+  role: string;
   content: string;
   route?: string;
   step?: string;
@@ -123,8 +122,9 @@ interface OnboardingData {
 async function example() {
   const db = new CustomDatabase();
   const userId = "user_123";
+  const sessionId = "session_user123_onboarding";
 
-  // Create agent
+  // Create agent with SessionManager (no persistence adapter)
   const agent = new Agent({
     name: "Onboarding Assistant",
     description: "Help new customers get started",
@@ -133,7 +133,7 @@ async function example() {
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
-    // NOTE: No persistence adapter - we handle it manually!
+    // No persistence - we'll sync manually with our database
   });
 
   // Create onboarding route
@@ -200,273 +200,229 @@ async function example() {
     .nextStep({ step: END_ROUTE });
 
   /**
-   * Create or load session from your custom database
+   * Load or create session in your custom database
    */
-  let dbSession = db.findSession("existing_session_id");
+  let dbSession = db.findSession(sessionId);
 
   if (!dbSession) {
     // Create new session in your database
     dbSession = db.createSession({
       userId,
       collectedData: {},
+      conversationHistory: [],
     });
     console.log("✨ Created new database session:", dbSession.id);
-  }
-
-  /**
-   * Convert database session to agent SessionState
-   */
-  let agentSession: SessionState<OnboardingData>;
-
-  if (dbSession.currentRoute && dbSession.collectedData) {
-    // Restore existing session from database
-    console.log("📥 Restoring session from database...");
-
-    agentSession = {
-      currentRoute: {
-        id: dbSession.currentRoute,
-        title:
-          dbSession.collectedData?.currentRouteTitle || dbSession.currentRoute,
-        enteredAt: new Date(),
-      },
-      currentStep: dbSession.currentStep
-        ? {
-            id: dbSession.currentStep,
-            description: dbSession.collectedData?.currentStepDescription,
-            enteredAt: new Date(),
-          }
-        : undefined,
-      data: (dbSession.collectedData?.data as Partial<OnboardingData>) || {},
-      dataByRoute:
-        (dbSession.collectedData?.dataByRoute as Record<
-          string,
-          Partial<OnboardingData>
-        >) || {},
-      routeHistory:
-        (dbSession.collectedData
-          ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
-      metadata: {
-        sessionId: dbSession.id,
-        userId,
-        createdAt: dbSession.createdAt,
-        lastUpdatedAt: dbSession.updatedAt,
-        ...(dbSession.collectedData?.metadata as Record<string, unknown>),
-      },
-    };
-
-    console.log("✅ Session restored:", {
-      sessionId: agentSession.metadata?.sessionId,
-      currentRoute: agentSession.currentRoute?.title,
-      currentStep: agentSession.currentStep?.id,
-      data: agentSession.data,
-    });
   } else {
-    // Create new session step
-    console.log("🆕 Creating new session step...");
-
-    agentSession = createSession<OnboardingData>(dbSession.id, {
-      sessionId: dbSession.id,
-      userId,
-      createdAt: dbSession.createdAt,
-    });
+    console.log("📥 Found existing database session:", dbSession.id);
   }
 
   /**
-   * Simulate conversation
+   * Sync database session with SessionManager
    */
-  const history: History = [];
+  // Create or load session in SessionManager
+  const sessionState = await agent.session.getOrCreate(dbSession.id);
 
-  // Turn 1: User provides name and email
-  console.log("\n--- Turn 1 ---");
-  const userMessage1 = {
-    role: "user" as const,
-    content: "Hi! I'm John Smith and my email is john@acme.com",
-    name: "User",
-  };
-  history.push(userMessage1);
+  // Restore conversation history from database
+  if (dbSession.conversationHistory && dbSession.conversationHistory.length > 0) {
+    const history = dbSession.conversationHistory.map(msg => {
+      if (msg.role === 'user') {
+        return {
+          role: 'user' as const,
+          content: msg.content,
+          name: msg.name,
+        };
+      } else {
+        return {
+          role: 'assistant' as const,
+          content: msg.content,
+        };
+      }
+    });
+    agent.session.setHistory(history);
+    console.log(`📜 Restored ${history.length} messages from database`);
+  }
 
-  // Save user message to database
-  db.createMessage({
-    sessionId: dbSession.id,
-    userId,
-    role: MessageRole.USER,
-    content: userMessage1.content,
+  // Restore collected data from database
+  if (dbSession.collectedData) {
+    await agent.session.setData(dbSession.collectedData);
+    console.log("📊 Restored session data from database");
+  }
+
+  console.log("✅ Session synchronized:", {
+    sessionId: agent.session.id,
+    historyLength: agent.session.getHistory().length,
+    data: agent.session.getData<OnboardingData>(),
   });
 
+  /**
+   * Simulate conversation with automatic sync
+   */
+  console.log("\n--- Turn 1 ---");
+  
+  // Add user message to SessionManager
+  await agent.session.addMessage("user", "Hi! I'm John Smith and my email is john@acme.com", "User");
+
   const response1 = await agent.respond({
-    history,
-    session: agentSession,
+    history: agent.session.getHistory(),
   });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Data so far:", response1.session?.data);
+  console.log("📊 Data collected:", agent.session.getData<OnboardingData>());
 
-  // Save agent message to database
-  db.createMessage({
-    sessionId: dbSession.id,
-    userId,
-    role: MessageRole.ASSISTANT,
-    content: response1.message,
-    route: response1.session?.currentRoute?.id,
-    step: response1.session?.currentStep?.id,
-  });
+  // Add agent response to SessionManager
+  await agent.session.addMessage("assistant", response1.message);
 
-  // Manually save session step back to database
-  db.updateSession(dbSession.id, {
-    currentRoute: response1.session?.currentRoute?.id,
-    currentStep: response1.session?.currentStep?.id,
-    collectedData: {
-      data: response1.session?.data,
-      routeHistory: response1.session?.routeHistory,
-      currentRouteTitle: response1.session?.currentRoute?.title,
-      currentStepDescription: response1.session?.currentStep?.description,
-      metadata: response1.session?.metadata,
-    },
-  });
-
-  console.log("💾 Session saved to database");
-
-  // Update session for next turn
-  agentSession = response1.session!;
+  // Sync SessionManager state back to your database
+  await syncSessionToDatabase(agent, db, dbSession.id, userId);
+  console.log("💾 Session synced to custom database");
 
   // Turn 2: User provides company
   console.log("\n--- Turn 2 ---");
-  history.push({
-    role: "user" as const,
-    content: "I work for Acme Corporation",
-    name: "User",
-  });
-
-  db.createMessage({
-    sessionId: dbSession.id,
-    userId,
-    role: MessageRole.USER,
-    content: "I work for Acme Corporation",
-  });
+  
+  await agent.session.addMessage("user", "I work for Acme Corporation", "User");
 
   const response2 = await agent.respond({
-    history,
-    session: agentSession,
+    history: agent.session.getHistory(),
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Data so far:", response2.session?.data);
+  console.log("📊 Data collected:", agent.session.getData<OnboardingData>());
 
-  db.createMessage({
-    sessionId: dbSession.id,
-    userId,
-    role: MessageRole.ASSISTANT,
-    content: response2.message,
-    route: response2.session?.currentRoute?.id,
-    step: response2.session?.currentStep?.id,
-  });
+  await agent.session.addMessage("assistant", response2.message);
 
-  // Save session step
-  db.updateSession(dbSession.id, {
-    currentRoute: response2.session?.currentRoute?.id,
-    currentStep: response2.session?.currentStep?.id,
-    collectedData: {
-      data: response2.session?.data,
-      routeHistory: response2.session?.routeHistory,
-      currentRouteTitle: response2.session?.currentRoute?.title,
-      currentStepDescription: response2.session?.currentStep?.description,
-      metadata: response2.session?.metadata,
-    },
-  });
-
-  console.log("💾 Session saved to database");
+  // Sync to database again
+  await syncSessionToDatabase(agent, db, dbSession.id, userId);
+  console.log("💾 Session synced to custom database");
 
   // Check for route completion
   if (response2.isRouteComplete) {
     console.log("\n✅ Onboarding Complete!");
-    // In a real app, you would now trigger the next steps,
-    // like sending a welcome email, creating an account, etc.
-    await processOnboarding(response2.session?.data);
+    await processOnboarding(agent.session.getData<OnboardingData>());
   }
 
   /**
-   * Demonstrate session recovery
+   * Demonstrate session recovery with new Agent instance
    */
-  console.log("\n--- Session Recovery ---");
-  console.log("Simulating app restart...\n");
+  console.log("\n--- Session Recovery (New Agent Instance) ---");
+  
+  // Create new agent instance (simulating app restart)
+  const newAgent = new Agent({
+    name: "Onboarding Assistant",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+  });
 
-  // Load session from database again
+  // Load session from database and sync to new SessionManager
   const reloadedDbSession = db.findSession(dbSession.id);
   if (!reloadedDbSession) throw new Error("Session not found");
 
-  // Reconstruct session step
-  const recoveredSession: SessionState<OnboardingData> = {
-    currentRoute: reloadedDbSession.currentRoute
-      ? {
-          id: reloadedDbSession.currentRoute,
-          title:
-            reloadedDbSession.collectedData?.currentRouteTitle ||
-            reloadedDbSession.currentRoute,
-          enteredAt: new Date(),
-        }
-      : undefined,
-    currentStep: reloadedDbSession.currentStep
-      ? {
-          id: reloadedDbSession.currentStep,
-          description: reloadedDbSession.collectedData?.currentStepDescription,
-          enteredAt: new Date(),
-        }
-      : undefined,
-    data:
-      (reloadedDbSession.collectedData?.data as Partial<OnboardingData>) || {},
-    dataByRoute:
-      (reloadedDbSession.collectedData?.dataByRoute as Record<
-        string,
-        Partial<OnboardingData>
-      >) || {},
-    routeHistory:
-      (reloadedDbSession.collectedData
-        ?.routeHistory as SessionState<OnboardingData>["routeHistory"]) || [],
-    metadata: {
-      sessionId: reloadedDbSession.id,
-      userId,
-      createdAt: reloadedDbSession.createdAt,
-      lastUpdatedAt: reloadedDbSession.updatedAt,
-    },
-  };
+  // Load session in new agent's SessionManager
+  await newAgent.session.getOrCreate(reloadedDbSession.id);
 
-  console.log("✅ Session recovered from database:", {
-    sessionId: recoveredSession.metadata?.sessionId,
-    currentRoute: recoveredSession.currentRoute?.title,
-    currentStep: recoveredSession.currentStep?.id,
-    data: recoveredSession.data,
+  // Restore history and data
+  if (reloadedDbSession.conversationHistory) {
+    const history = reloadedDbSession.conversationHistory.map(msg => {
+      if (msg.role === 'user') {
+        return {
+          role: 'user' as const,
+          content: msg.content,
+          name: msg.name,
+        };
+      } else {
+        return {
+          role: 'assistant' as const,
+          content: msg.content,
+        };
+      }
+    });
+    newAgent.session.setHistory(history);
+  }
+
+  if (reloadedDbSession.collectedData) {
+    await newAgent.session.setData(reloadedDbSession.collectedData);
+  }
+
+  console.log("✅ Session recovered in new agent:", {
+    sessionId: newAgent.session.id,
+    historyLength: newAgent.session.getHistory().length,
+    data: newAgent.session.getData<OnboardingData>(),
   });
 
-  // Load message history
-  const messages = db.getSessionMessages(dbSession.id);
-  console.log(`📜 Loaded ${messages.length} messages from history`);
+  // Continue conversation with recovered session
+  await newAgent.session.addMessage("user", "Can you confirm my details?");
+  
+  const confirmResponse = await newAgent.respond({
+    history: newAgent.session.getHistory(),
+  });
+  
+  console.log("🤖 Confirmation:", confirmResponse.message);
+  await newAgent.session.addMessage("assistant", confirmResponse.message);
 
   console.log("\n✅ Example complete!");
 }
 
 /**
+ * Helper function to sync SessionManager state to custom database
+ */
+async function syncSessionToDatabase(
+  agent: Agent,
+  db: CustomDatabase,
+  sessionId: string,
+  userId: string
+): Promise<void> {
+  const sessionData = agent.session.getData();
+  const history = agent.session.getHistory();
+
+  // Convert SessionManager history to database format
+  const conversationHistory = history.map(msg => ({
+    role: msg.role,
+    content: msg.role === 'assistant' ? (msg.content || '') : msg.content,
+    name: msg.role === 'user' ? msg.name : undefined,
+    timestamp: new Date().toISOString(),
+  }));
+
+  // Update database session
+  db.updateSession(sessionId, {
+    collectedData: sessionData,
+    conversationHistory,
+  });
+
+  // Save individual messages to database (if needed for your schema)
+  const existingMessages = db.getSessionMessages(sessionId);
+  const newMessages = history.slice(existingMessages.length);
+
+  for (const msg of newMessages) {
+    db.createMessage({
+      sessionId,
+      userId,
+      role: msg.role,
+      content: msg.content,
+    });
+  }
+}
+
+/**
  * Mock function to simulate processing the completed onboarding data.
- * @param data - The collected onboarding data.
  */
 async function processOnboarding(data: Partial<OnboardingData> | undefined) {
   console.log("\n🚀 Processing onboarding data...");
-  // Simulate creating a user account
   console.log(
     `   - Creating account for ${data?.fullName} at ${data?.companyName}`
   );
   await new Promise((resolve) => setTimeout(resolve, 1000));
-  // Simulate sending a welcome email
   console.log(`   - Sending welcome email to ${data?.email}`);
   await new Promise((resolve) => setTimeout(resolve, 1000));
   console.log("✨ Onboarding processed successfully!");
 }
 
 /**
- * Advanced Example: With validation hooks
+ * Advanced Example: SessionManager with Data Validation Hooks
  */
 async function advancedExample() {
   const db = new CustomDatabase();
-  const userId = "user_456";
+  const sessionId = "session_user456_smart_onboarding";
 
   const agent = new Agent({
     name: "Smart Onboarding",
@@ -495,7 +451,7 @@ async function advancedExample() {
   });
 
   const route = agent.createRoute<OnboardingData>({
-    title: "Onboarding",
+    title: "Smart Onboarding",
     schema: {
       type: "object",
       properties: {
@@ -516,46 +472,139 @@ async function advancedExample() {
 
   // Create database session
   const dbSession = db.createSession({
-    userId,
+    userId: "user_456",
     collectedData: {},
+    conversationHistory: [],
   });
 
-  // Create agent session
-  const agentSession = createSession<OnboardingData>(dbSession.id, {
-    userId,
-  });
+  // Load session in SessionManager
+  await agent.session.getOrCreate(dbSession.id);
 
-  // Simulate conversation
+  // Add user message and respond
+  await agent.session.addMessage(
+    "user",
+    "I'm Alice Johnson, alice@EXAMPLE.COM, working for TechCorp. Phone: (555) 123-4567",
+    "User"
+  );
+
   const response = await agent.respond({
-    history: [
-      {
-        role: "user" as const,
-        content:
-          "I'm Alice Johnson, alice@EXAMPLE.COM, working for TechCorp. Phone: (555) 123-4567",
-        name: "User",
-      },
-    ],
-    session: agentSession,
+    history: agent.session.getHistory(),
   });
 
   console.log("🤖 Agent:", response.message);
-  console.log("📊 Normalized data:", response.session?.data);
+  console.log("📊 Normalized data:", agent.session.getData<OnboardingData>());
   // Shows: { email: "alice@example.com", phoneNumber: "5551234567", ... }
 
-  // Save to database
-  db.updateSession(dbSession.id, {
-    currentRoute: response.session?.currentRoute?.id,
-    currentStep: response.session?.currentStep?.id,
-    collectedData: {
-      data: response.session?.data,
-      routeHistory: response.session?.routeHistory,
-      currentRouteTitle: response.session?.currentRoute?.title,
-      currentStepDescription: response.session?.currentStep?.description,
-      metadata: response.session?.metadata,
-    },
-  });
+  await agent.session.addMessage("assistant", response.message);
+
+  // Sync to custom database
+  await syncSessionToDatabase(agent, db, dbSession.id, "user_456");
 
   console.log("✅ Validated data saved to custom database!");
+}
+
+/**
+ * Server Endpoint Example: Express-style API with SessionManager
+ */
+async function serverEndpointExample() {
+  const db = new CustomDatabase();
+
+  // Simulate Express endpoint
+  async function handleChatRequest(req: {
+    sessionId?: string;
+    userId: string;
+    message: string;
+  }) {
+    const { sessionId, userId, message } = req;
+
+    // Create agent with sessionId (loads existing or creates new)
+    const agent = new Agent({
+      name: "Customer Support",
+      provider: new GeminiProvider({
+        apiKey: process.env.GEMINI_API_KEY!,
+        model: "models/gemini-2.5-flash",
+      }),
+    });
+
+    // Load or create session
+    const effectiveSessionId = sessionId || `session_${userId}_${Date.now()}`;
+    await agent.session.getOrCreate(effectiveSessionId);
+
+    // Try to load from database if session exists
+    const dbSession = db.findSession(effectiveSessionId);
+    if (dbSession && dbSession.conversationHistory) {
+      const history = dbSession.conversationHistory.map(msg => {
+        if (msg.role === 'user') {
+          return {
+            role: 'user' as const,
+            content: msg.content,
+            name: msg.name,
+          };
+        } else {
+          return {
+            role: 'assistant' as const,
+            content: msg.content,
+          };
+        }
+      });
+      agent.session.setHistory(history);
+
+      if (dbSession.collectedData) {
+        await agent.session.setData(dbSession.collectedData);
+      }
+    }
+
+    // Add user message and respond
+    await agent.session.addMessage("user", message);
+    
+    const response = await agent.respond({
+      history: agent.session.getHistory(),
+    });
+
+    await agent.session.addMessage("assistant", response.message);
+
+    // Sync back to database
+    if (!dbSession) {
+      db.createSession({
+        userId,
+        collectedData: agent.session.getData(),
+        conversationHistory: agent.session.getHistory().map(msg => ({
+          role: msg.role,
+          content: msg.role === 'assistant' ? (msg.content || '') : msg.content,
+          name: msg.role === 'user' ? msg.name : undefined,
+          timestamp: new Date().toISOString(),
+        })),
+      });
+    } else {
+      await syncSessionToDatabase(agent, db, effectiveSessionId, userId);
+    }
+
+    // Return API response
+    return {
+      message: response.message,
+      sessionId: agent.session.id,
+      isComplete: response.isRouteComplete,
+      data: agent.session.getData(),
+    };
+  }
+
+  // Simulate API calls
+  console.log("🌐 Simulating server endpoint calls...");
+
+  const response1 = await handleChatRequest({
+    userId: "user_789",
+    message: "I need help with my account",
+  });
+  console.log("📤 Response 1:", response1);
+
+  const response2 = await handleChatRequest({
+    sessionId: response1.sessionId,
+    userId: "user_789",
+    message: "I can't log in",
+  });
+  console.log("📤 Response 2:", response2);
+
+  console.log("✅ Server endpoint example complete!");
 }
 
 // Run the example
@@ -563,4 +612,4 @@ if (require.main === module) {
   example().catch(console.error);
 }
 
-export { example, advancedExample };
+export { example, advancedExample, serverEndpointExample };

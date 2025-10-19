@@ -152,117 +152,120 @@ async function example() {
     })
     .nextStep({ step: END_ROUTE });
 
-  const persistence = agent.getPersistenceManager();
-  if (!persistence) return;
+  // Session is automatically managed by the agent with Redis persistence
+  console.log("✨ Session ready:", agent.session.id);
 
-  // Create session with step support
-  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
-    userId,
-    agentName: "Support Assistant",
-    initialData: {
-      priority: "medium", // Default priority
-    },
-  });
+  // Set initial data
+  await agent.session.setData<SupportTicketData>({ priority: "medium" });
 
-  console.log("✨ Session created in Redis:", sessionData.id);
-  console.log("📊 Initial step:", {
-    data: sessionStep.data,
-  });
+  console.log("📊 Initial data:", agent.session.getData<SupportTicketData>());
 
   // Turn 1: User provides issue
-  const history: HistoryItem[] = [];
-  let session = sessionStep;
+  console.log("\n--- Turn 1 ---");
 
-  const message1 = {
-    role: "user" as const,
-    content:
-      "I can't log into my account, it's a technical issue and it's urgent!",
-    name: "Alice",
-  };
-  history.push(message1);
+  await agent.session.addMessage(
+    "user",
+    "I can't log into my account, it's a technical issue and it's urgent!",
+    "Alice"
+  );
+  const history = agent.session.getHistory();
 
   const response1 = await agent.respond({
     history,
-    session,
   });
 
-  console.log("\n--- Turn 1 ---");
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Collected data:", response1.session?.data);
 
-  // Save messages
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.USER,
-    content: message1.content,
-  });
-
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.ASSISTANT,
-    content: response1.message,
-    route: response1.session?.currentRoute?.id,
-    step: response1.session?.currentStep?.id,
-  });
-
-  session = response1.session!;
+  await agent.session.addMessage("assistant", response1.message);
+  console.log("📊 Collected data:", agent.session.getData<SupportTicketData>());
 
   // Turn 2: Provide more details
-  history.push({
-    role: "assistant" as const,
-    content: response1.message,
-  });
-
-  const message2 = {
-    role: "user" as const,
-    content:
-      "I keep getting 'Invalid credentials' error even though I reset my password",
-    name: "Alice",
-  };
-  history.push(message2);
+  console.log("\n--- Turn 2 ---");
+  
+  await agent.session.addMessage(
+    "user",
+    "I keep getting 'Invalid credentials' error even though I reset my password",
+    "Alice"
+  );
 
   const response2 = await agent.respond({
-    history,
-    session,
+    history: agent.session.getHistory(),
   });
 
-  console.log("\n--- Turn 2 ---");
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Collected data:", response2.session?.data);
+  console.log("📊 Collected data:", agent.session.getData<SupportTicketData>());
 
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.USER,
-    content: message2.content,
-  });
-
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.ASSISTANT,
-    content: response2.message,
-  });
+  await agent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Support ticket route complete!");
-    await fileSupportTicket(agent.getData(session.id) as SupportTicketData);
+    await fileSupportTicket(agent.session.getData<SupportTicketData>() as SupportTicketData);
   }
 
-  // Load session step from Redis (demonstrates persistence)
-  console.log("\n--- Loading Session from Redis ---");
-  const loadedSession = await persistence.loadSessionState(sessionData.id);
-
-  console.log("📥 Loaded session:", {
-    currentRoute: loadedSession?.currentRoute?.title,
-    data: loadedSession?.data,
+  // Demonstrate session recovery with new agent instance
+  console.log("\n--- Session Recovery Example ---");
+  const sessionId = agent.session.id;
+  
+  const recoveredAgent = new Agent<ChatContext>({
+    name: "Support Assistant",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+    context: {
+      userId,
+      userName: "Alice",
+      chatType: "support",
+    },
+    persistence: {
+      adapter: new RedisAdapter<ChatContext>({
+        redis,
+        keyPrefix: "support:",
+        sessionTTL: 24 * 60 * 60,
+        messageTTL: 7 * 24 * 60 * 60,
+      }),
+      autoSave: true,
+    },
+    sessionId, // Same sessionId - will load existing session
   });
 
-  // Get messages
-  const messages = await persistence.getSessionMessages(sessionData.id);
-  console.log(`\n💬 ${messages.length} messages in session`);
+  // Recreate the same route on recovered agent
+  recoveredAgent.createRoute<SupportTicketData>({
+    title: "Create Support Ticket",
+    description: "Help user create and track support tickets",
+    conditions: [
+      "User needs help with an issue",
+      "User wants to report a problem",
+      "User mentions support, help, or issue",
+    ],
+    schema: {
+      type: "object",
+      properties: {
+        issue: { type: "string", description: "Brief summary of the issue" },
+        category: {
+          type: "string",
+          enum: ["technical", "billing", "account", "other"],
+          description: "Issue category",
+        },
+        priority: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+          default: "medium",
+          description: "Issue priority",
+        },
+        description: { type: "string", description: "Detailed description of the issue" },
+      },
+      required: ["issue", "category", "description"],
+    },
+  });
 
-  // Complete session
-  await persistence.completeSession(sessionData.id);
-  console.log("✅ Session completed");
+  console.log("📥 Recovered session:", {
+    sessionId: recoveredAgent.session.id,
+    historyLength: recoveredAgent.session.getHistory().length,
+    data: recoveredAgent.session.getData<SupportTicketData>(),
+  });
+
+  console.log("✅ Session recovery complete!");
 
   // Cleanup
 
@@ -320,35 +323,27 @@ async function highThroughputExample() {
     })
     .nextStep({ step: END_ROUTE });
 
-  const persistence = agent.getPersistenceManager()!;
-
-  // Create session
-  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
-    userId: "user_456",
-    agentName: "Chat Bot",
-  });
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   // Quick chat interaction
+  await agent.session.addMessage("user", "I'm loving the new features you added!", "User");
+
   const response = await agent.respond({
-    history: [
-      {
-        role: "user" as const,
-        content: "I'm loving the new features you added!",
-        name: "User",
-      },
-    ],
-    session: sessionStep,
+    history: agent.session.getHistory(),
   });
 
   console.log("🤖 Response:", response.message);
-  console.log("📊 Data:", response.session?.data);
+  console.log("📊 Data:", agent.session.getData<QuickChatData>());
+
+  await agent.session.addMessage("assistant", response.message);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Chat analytics route complete!");
-    await logChatAnalytics(agent.getData(sessionData.id) as QuickChatData);
+    await logChatAnalytics(agent.session.getData<QuickChatData>() as QuickChatData);
   }
 
-  console.log("💾 Session step cached in Redis!");
+  console.log("💾 Session automatically saved to Redis!");
 
   await redis.quit();
 }
@@ -397,66 +392,61 @@ async function sessionRecoveryExample() {
     })
     .nextStep({ step: END_ROUTE });
 
-  const persistence = agent.getPersistenceManager()!;
-
-  // Start a new session
-  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
-    userId: "user_789",
-    agentName: "Order Assistant",
-  });
-
-  const sessionId = sessionData.id;
-
+  // Session is automatically managed by the agent
+  const sessionId = agent.session.id;
   console.log("✨ New order session:", sessionId);
 
   // First interaction
+  await agent.session.addMessage("user", "I want to order product ABC123, 2 units", "User");
+
   const response1 = await agent.respond({
-    history: [
-      {
-        role: "user" as const,
-        content: "I want to order product ABC123, 2 units",
-        name: "User",
-      },
-    ],
-    session: sessionStep,
+    history: agent.session.getHistory(),
   });
 
   console.log("🤖 Response:", response1.message);
-  console.log("📊 Data so far:", response1.session?.data);
+  console.log("📊 Data so far:", agent.session.getData<OrderData>());
+
+  await agent.session.addMessage("assistant", response1.message);
 
   // --- Simulate user disconnecting and reconnecting ---
   console.log("\n--- User Reconnects ---");
 
-  // Load session from Redis
-  const recoveredSession = await persistence.loadSessionState(sessionId);
-
-  console.log("📥 Recovered session step:", {
-    currentRoute: recoveredSession?.currentRoute?.title,
-    data: recoveredSession?.data,
+  // Create new agent instance with same sessionId (simulates reconnection)
+  const reconnectedAgent = new Agent<OrderData>({
+    name: "Order Assistant",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+    persistence: {
+      adapter: new RedisAdapter<OrderData>({ redis }),
+      autoSave: true,
+    },
+    sessionId, // Same sessionId - will load existing session
+    routes: [orderRoute],
   });
 
-  // Load message history
-  const history = await persistence.loadSessionHistory(sessionId);
-  console.log(`📜 Loaded ${history.length} messages from history`);
+  console.log("📥 Recovered session:", {
+    sessionId: reconnectedAgent.session.id,
+    historyLength: reconnectedAgent.session.getHistory().length,
+    data: reconnectedAgent.session.getData<OrderData>(),
+  });
 
   // Continue conversation
-  history.push({
-    role: "user" as const,
-    content: "Ship to 123 Main St, New York",
-    name: "User",
-  });
+  await reconnectedAgent.session.addMessage("user", "Ship to 123 Main St, New York", "User");
 
-  const response2 = await agent.respond({
-    history,
-    session: recoveredSession!,
+  const response2 = await reconnectedAgent.respond({
+    history: reconnectedAgent.session.getHistory(),
   });
 
   console.log("🤖 Response:", response2.message);
-  console.log("📊 Final collected data:", response2.session?.data);
+  console.log("📊 Final collected data:", reconnectedAgent.session.getData<OrderData>());
+
+  await reconnectedAgent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Order placement complete!");
-    await processOrder(agent.getData(sessionId) as unknown as OrderData);
+    await processOrder(reconnectedAgent.session.getData<OrderData>() as OrderData);
   }
 
   console.log("✅ Order complete with recovered session!");
@@ -466,15 +456,14 @@ async function sessionRecoveryExample() {
 
 /**
  * Mock function to file a support ticket.
- * @param data - The support ticket data.
  */
-async function fileSupportTicket(data: SupportTicketData) {
+async function fileSupportTicket(data: SupportTicketData | undefined) {
   console.log("\n" + "=".repeat(60));
   console.log("🎫 Filing Support Ticket...");
   console.log("=".repeat(60));
   console.log("Ticket Details:", JSON.stringify(data, null, 2));
   console.log(
-    `   - Filing ticket for issue: ${data.issue} with priority: ${data.priority}`
+    `   - Filing ticket for issue: ${data?.issue} with priority: ${data?.priority}`
   );
   await new Promise((resolve) => setTimeout(resolve, 1000));
   console.log("✨ Ticket filed successfully!");
@@ -496,14 +485,13 @@ async function logChatAnalytics(data: QuickChatData) {
 
 /**
  * Mock function to process an order.
- * @param data - The order data.
  */
-async function processOrder(data: OrderData) {
+async function processOrder(data: OrderData | undefined) {
   console.log("\n" + "=".repeat(60));
   console.log("📦 Processing Order...");
   console.log("=".repeat(60));
   console.log("Order Details:", JSON.stringify(data, null, 2));
-  console.log(`   - Processing order for product: ${data.productId}`);
+  console.log(`   - Processing order for product: ${data?.productId}`);
   await new Promise((resolve) => setTimeout(resolve, 1000));
   console.log("✨ Order processed successfully!");
 }

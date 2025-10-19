@@ -47,6 +47,7 @@ export interface CollectedStateData<TData = Record<string, unknown>> {
   data: Partial<TData>;
   dataByRoute: Record<string, Partial<TData>>;
   routeHistory: SessionState<TData>["routeHistory"];
+  history?: SessionState<TData>["history"];
   currentRouteTitle?: string;
   currentStepDescription?: string;
   metadata: SessionState<TData>["metadata"];

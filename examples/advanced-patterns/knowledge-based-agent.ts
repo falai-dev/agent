@@ -12,7 +12,6 @@
 
 import {
   Agent,
-  createSession,
   END_ROUTE,
   EventKind,
   MessageRole,
@@ -416,23 +415,24 @@ feedbackRoute.initialStep
 // ==============================================================================
 
 async function exampleConversations() {
-  const session = createSession();
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   // =========================================================================
   // Example 1: Simple company info question (stepless)
   // =========================================================================
   console.log("\n=== EXAMPLE 1: Company Info (Stepless Q&A) ===");
-  const history1 = [
-    {
-      role: "user" as const,
-      content: "How many employees does Acme have?",
-      name: "User",
-    },
-  ];
+  
+  await agent.session.addMessage("user", "How many employees does Acme have?", "User");
 
-  const response1 = await agent.respond({ history: history1, session });
+  const response1 = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
+  
   console.log("AI:", response1.message);
   console.log("Route:", response1.session?.currentRoute?.title);
+  
+  await agent.session.addMessage("assistant", response1.message);
 
   /*
    * ARCHITECTURE FLOW:

@@ -49,35 +49,42 @@ export interface Participant {
  */
 export type Role = "user" | "assistant" | "tool" | "system";
 
+export type UserHistoryItem = {
+  role: "user";
+  content: string;
+  name?: string;
+};
+
+export type AssistantHistoryItem = {
+  role: "assistant";
+  content: string | null;
+  tool_calls?: Array<{
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }>;
+};
+export type ToolHistoryItem = {
+  role: "tool";
+  tool_call_id: string;
+  name: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  content: any;
+};
+
+export type SystemHistoryItem = {
+  role: "system";
+  content: string;
+};
+
 /**
  * Simplified history item for developer-friendly API
  */
 export type HistoryItem =
-  | {
-      role: "user";
-      content: string;
-      name?: string;
-    }
-  | {
-      role: "assistant";
-      content: string | null;
-      tool_calls?: Array<{
-        id: string;
-        name: string;
-        arguments: Record<string, unknown>;
-      }>;
-    }
-  | {
-      role: "tool";
-      tool_call_id: string;
-      name: string;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      content: any;
-    }
-  | {
-      role: "system";
-      content: string;
-    };
+  | UserHistoryItem
+  | AssistantHistoryItem
+  | ToolHistoryItem
+  | SystemHistoryItem;
 
 /**
  * Simplified history array type

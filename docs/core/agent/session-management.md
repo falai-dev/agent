@@ -1,8 +1,8 @@
-# Architecture & Design Principles
+# Session Management
 
 ## Overview
 
-`@falai/agent` is built on a **schema-first, data-driven architecture** that prioritizes type safety, structured data extraction, and code-based step management over fuzzy LLM conditions. This creates predictable, maintainable, and efficient conversational AI agents.
+The `@falai/agent` framework provides **automatic session management** through the `SessionManager` class, eliminating the need for manual session creation, persistence, and state management. Sessions are automatically created, loaded, and saved, allowing developers to focus on building conversation logic rather than managing session lifecycle.
 
 ## Core Design Principles
 
@@ -46,65 +46,66 @@ const route = agent.createRoute<FlightData>({
 - **Predictability** - Same data structure every time
 - **Efficiency** - Extract multiple fields in one LLM call
 
-### 2. 📊 Session Step Management
+### 2. 🤖 Automatic Session Management
 
-Track conversation progress and collected data across turns:
-
-```typescript
-import {
-  createSession,
-  enterRoute,
-  enterStep,
-  mergeCollected,
-} from "@falai/agent";
-
-// Create session with optional metadata including session ID
-let session = createSession<FlightData>(sessionId, {
-  userId: "user_456",
-  createdAt: new Date(),
-});
-
-// Turn 1 - Extract data
-const response1 = await agent.respond({ history, session });
-session = response1.session!; // Updated with collected data
-
-// Turn 2 - User changes mind (always-on routing)
-const response2 = await agent.respond({ history, session: response1.session });
-session = response2.session!; // Route/step updated if user changed direction
-
-// Access session metadata
-console.log(session.metadata?.sessionId); // "unique-session-123"
-```
-
-**Session with Persistence:**
-
-When using persistence adapters, set the session ID from the database:
+Sessions are automatically managed through the `SessionManager` class integrated into every `Agent`:
 
 ```typescript
-// Create database session and in-memory session step
-const { sessionData, sessionStep } =
-  await persistence.createSessionWithStep<FlightData>({
-    userId: "user_123",
-    agentName: "Travel Agent",
-  });
-
-// sessionStep.metadata.sessionId is automatically set to sessionData.id
-console.log(sessionStep.metadata?.sessionId); // "cuid_from_database"
-
-// Use it in conversation
-const response = await agent.respond({
-  history,
-  session: sessionStep, // Auto-saves to database!
+// Server-side: Agent with automatic session management
+const agent = new Agent({
+  name: "Travel Agent",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  persistence: { adapter: new PrismaAdapter({ prisma }) },
+  sessionId: "user-123" // Automatically loads or creates this session
 });
+
+// Simple conversation - no manual session management
+const response1 = await agent.respond("I want to book a flight to Paris");
+console.log(agent.session.id); // Session ID
+console.log(agent.session.getData()); // Collected data
+
+// Continue conversation - session automatically maintained
+const response2 = await agent.respond("Make that Tokyo instead");
+// Session automatically updated with new data
 ```
 
-**Why?** Session step enables:
+**SessionManager API:**
 
+The `SessionManager` provides a clean API for session operations:
+
+```typescript
+// Access the session manager
+const sessionManager = agent.session;
+
+// Get or create session (works for existing, new, or auto-generated IDs)
+await sessionManager.getOrCreate("user-123");
+await sessionManager.getOrCreate(); // Auto-generates ID
+
+// History management
+await sessionManager.addMessage("user", "Hello");
+await sessionManager.addMessage("assistant", "Hi there!");
+const history = sessionManager.getHistory();
+sessionManager.clearHistory();
+
+// Data access
+const data = sessionManager.getData<FlightData>();
+await sessionManager.setData({ destination: "Paris" });
+
+// Session operations
+await sessionManager.save(); // Manual save (auto-saves on addMessage)
+await sessionManager.delete();
+const newSession = await sessionManager.reset(true); // Preserve history
+```
+
+**Why?** Automatic session management provides:
+
+- **Zero Boilerplate** - No manual session creation or persistence code
+- **Server-Friendly** - Perfect for stateless server environments
 - **Always-on Routing** - Users can change their mind mid-conversation
 - **Context Awareness** - Router sees current progress and collected data
-- **Data Persistence** - Collected data survives across turns
-- **Step Recovery** - Resume conversations from any point
-- **Session Tracking** - Track conversations via session ID in database
+- **Data Persistence** - Collected data automatically saved and restored
+- **History Management** - Conversation history automatically maintained
+- **Session Tracking** - Easy session identification for client/server communication
 
 ### 3. 🔧 Code-Based Step Logic + AI-Driven Transitions
 

@@ -118,10 +118,8 @@ const agent = new Agent<CustomerContext>({
     },
   },
 
-  // Optional initial session
-  session: createSession({
-    data: { onboardingComplete: false },
-  }),
+  // Optional sessionId for automatic session loading/creation
+  sessionId: "user-123", // Agent will automatically load or create this session
 
   // Optional persistence configuration
   persistence: {
@@ -254,66 +252,74 @@ await agent.updateContext({
 
 ## Session Management
 
-### Session Creation
+### Automatic Session Management
+
+Sessions are automatically managed through the integrated `SessionManager`:
 
 ```typescript
-import { createSession } from "@falai/agent";
-
-// Basic session
-const session = createSession();
-
-// Session with initial data
-const sessionWithData = createSession({
-  data: {
-    userName: "John",
-    step: 1,
-  },
+// Agent with automatic session management
+const agent = new Agent({
+  name: "Assistant",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  persistence: { adapter: new PrismaAdapter({ prisma }) },
+  sessionId: "user-123" // Automatically loads or creates this session
 });
 
-// Session with metadata
-const sessionWithMeta = createSession({
-  data: {},
-  metadata: {
-    source: "web_chat",
-    userAgent: "Chrome/91.0",
-  },
-});
+// Access session manager
+const sessionManager = agent.session;
+
+// Get or create session (handles existing, new, or auto-generated IDs)
+await sessionManager.getOrCreate("user-456");
+await sessionManager.getOrCreate(); // Auto-generates ID
+
+// Session data access
+const data = sessionManager.getData<MyDataType>();
+await sessionManager.setData({ field: "value" });
+
+// History management
+await sessionManager.addMessage("user", "Hello");
+const history = sessionManager.getHistory();
+sessionManager.clearHistory();
 ```
 
 ### Session Persistence
+
+Sessions are automatically persisted when using persistence adapters:
 
 ```typescript
 const agent = new Agent({
   persistence: {
     adapter: new RedisAdapter(redisClient),
-    autoSave: true, // Auto-save after each response
-    userId: "user_123",
+    autoSave: true, // Auto-save after each response (default)
   },
+  sessionId: "user-123" // Automatically loads from persistence
 });
 
-// Manual save
-await agent.persistence?.adapter.session.save(session.id, session);
+// Sessions are automatically saved after each message
+const response = await agent.respond("Hello");
+// Session state automatically persisted
 
-// Manual load
-const savedSession = await agent.persistence?.adapter.session.findById(
-  sessionId
-);
+// Manual session operations (if needed)
+await agent.session.save(); // Manual save
+await agent.session.delete(); // Delete session
+const newSession = await agent.session.reset(true); // Reset with history preserved
 ```
 
-### Convenience Methods
+### Session Access Methods
 
 ```typescript
-// Set current session for method convenience
-agent.setCurrentSession(session);
+// Access current session data
+const data = agent.session.getData<MyDataType>();
+await agent.session.setData({ field: "value" });
 
-// Get data without specifying session
-const data = agent.getData(); // Uses current session
+// Session information
+console.log(agent.session.id); // Current session ID
+console.log(agent.session.current); // Full session state
 
-// Get route-specific data
-const onboardingData = agent.getData("user-onboarding");
-
-// Clear session
-agent.clearCurrentSession();
+// History management
+const history = agent.session.getHistory();
+await agent.session.addMessage("user", "New message");
+agent.session.clearHistory();
 ```
 
 ## Route Management
@@ -400,24 +406,29 @@ const route = agent.createRoute({
 
 ## Response Generation
 
-### Synchronous Response
+### Simple Response API
 
 ```typescript
-const history = [
-  { kind: "message", source: "user", content: "How do I reset my password?" },
-];
-
-const response = await agent.respond({ history });
+// Simple message-based API (recommended)
+const response = await agent.respond("How do I reset my password?");
 console.log(response.message);
-console.log(response.session?.data); // Any collected data
+console.log(agent.session.getData()); // Any collected data
 console.log(response.toolCalls); // Any tool calls made
 console.log(response.isRouteComplete); // Whether route finished
+
+// Advanced usage with history override
+const response = await agent.respond("Hello", {
+  history: [
+    { role: "user", content: "Previous context" },
+    { role: "assistant", content: "I understand" }
+  ]
+});
 ```
 
 ### Streaming Response
 
 ```typescript
-const stream = agent.respondStream({ history });
+const stream = agent.respondStream("Tell me about your services");
 
 for await (const chunk of stream) {
   if (chunk.delta) {
@@ -425,7 +436,7 @@ for await (const chunk of stream) {
   }
 
   if (chunk.done) {
-    console.log("\nFinal session:", chunk.session);
+    console.log("\nSession ID:", agent.session.id);
     console.log("Tool calls:", chunk.toolCalls);
   }
 }
@@ -434,13 +445,11 @@ for await (const chunk of stream) {
 ### Response with Custom Context
 
 ```typescript
-const response = await agent.respond({
-  history,
+const response = await agent.respond("Hola", {
   contextOverride: {
     language: "es", // Override context for this response
     debug: true,
-  },
-  session: customSession, // Use specific session
+  }
 });
 ```
 

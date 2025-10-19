@@ -13,7 +13,6 @@
 import {
   Agent,
   GeminiProvider,
-  createSession,
   type Term,
   type Guideline,
   type Tool,
@@ -357,68 +356,50 @@ agent
 // Example usage with session management
 
 async function main() {
-  // Initialize session
-  let session = createSession<AppointmentData | LabData>();
-
-  // Create conversation history
-  const history: History = [
-    {
-      role: "user",
-      content: "Hi, I need to follow up on my recent visit",
-      name: "Alice",
-    },
-  ];
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   // Turn 1 - Agent responds and routes to appropriate flow
   console.log("🔄 Turn 1: Initial inquiry");
-  const response1 = await agent.respond({ history, session });
+  await agent.session.addMessage("user", "Hi, I need to follow up on my recent visit", "Alice");
+  
+  const response1 = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
+  
   console.log("🤖 Agent:", response1.message);
   console.log("🛤️  Route chosen:", response1.session?.currentRoute?.title);
 
-  // Session is updated with progress
-  session = response1.session!;
+  await agent.session.addMessage("assistant", response1.message);
 
   // Turn 2 - User provides more details
   console.log("\n🔄 Turn 2: Providing appointment details");
-  const history2: History = [
-    ...history,
-    {
-      role: "assistant",
-      content: response1.message,
-    },
-    {
-      role: "user",
-      content: "I need a checkup next Tuesday at 2 PM",
-      name: "Alice",
-    },
-  ];
+  await agent.session.addMessage("user", "I need a checkup next Tuesday at 2 PM", "Alice");
 
-  const response2 = await agent.respond({ history: history2, session });
+  const response2 = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
+  
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Collected data:", response2.session?.data);
+  console.log("📊 Collected data:", agent.session.getData<AppointmentData | LabData>());
   console.log("📍 Current step:", response2.session?.currentStep?.id);
 
-  session = response2.session!;
+  await agent.session.addMessage("assistant", response2.message);
 
   // Turn 3 - Continue the conversation flow
   console.log("\n🔄 Turn 3: Continuing appointment booking");
-  const history3: History = [
-    ...history2,
-    {
-      role: "assistant",
-      content: response2.message,
-    },
-    {
-      role: "user",
-      content: "I'm feeling a bit anxious about the visit",
-      name: "Alice",
-    },
-  ];
+  
+  await agent.session.addMessage("user", "I'm feeling a bit anxious about the visit", "Alice");
 
-  const response3 = await agent.respond({ history: history3, session });
+  const response3 = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
+  
   console.log("🤖 Agent:", response3.message);
-  console.log("📊 Updated data:", response3.session?.data);
+  console.log("📊 Updated data:", agent.session.getData<AppointmentData | LabData>());
   console.log("📍 Current step:", response3.session?.currentStep?.id);
+  
+  await agent.session.addMessage("assistant", response3.message);
 
   // Check for route completion
   if (response3.isRouteComplete && response3.session) {

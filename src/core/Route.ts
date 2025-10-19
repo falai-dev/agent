@@ -46,11 +46,11 @@ export class Route<TContext = unknown, TData = unknown> {
     | RouteTransitionConfig<TContext, TData>
     | RouteCompletionHandler<TContext, TData>;
   public readonly hooks?: RouteLifecycleHooks<TContext, TData>;
-  private routingExtrasSchema?: StructuredSchema;
-  private guidelines: Guideline<TContext>[] = [];
-  private terms: Term<TContext>[] = [];
-  private tools: Tool<TContext, unknown[], unknown, TData>[] = [];
-  private knowledgeBase: Record<string, unknown> = {};
+  public routingExtrasSchema?: StructuredSchema;
+  public guidelines: Guideline<TContext>[] = [];
+  public terms: Term<TContext>[] = [];
+  public tools: Tool<TContext, unknown[], unknown, TData>[] = [];
+  public knowledgeBase: Record<string, unknown> = {};
 
   constructor(options: RouteOptions<TContext, TData>) {
     // Use provided ID or generate a deterministic one from the title

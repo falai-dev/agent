@@ -204,12 +204,8 @@ agent.createRoute({
   ],
 });
 
-// Start chatting
-const response = await agent.respond({
-  history: [
-    createMessageEvent(EventSource.CUSTOMER, "Alice", "What can you do?"),
-  ],
-});
+// Start chatting - simple message-based API
+const response = await agent.respond("What can you do?");
 
 console.log(response.message);
 ```
@@ -367,16 +363,8 @@ agent.createRoute<HotelBookingData>({
   ],
 });
 
-// 5️⃣ Start conversing
-const response = await agent.respond({
-  history: [
-    createMessageEvent(
-      EventSource.CUSTOMER,
-      "Alice",
-      "I want to book a room at the Grand Hotel for 2 people."
-    ),
-  ],
-});
+// 5️⃣ Start conversing - simple message API
+const response = await agent.respond("I want to book a room at the Grand Hotel for 2 people.");
 
 // The agent sees that `hotelName` and `guests` are provided,
 // skips the first and third steps, and only asks for the date.
@@ -401,9 +389,7 @@ This creates a flexible and natural conversation, guided by a clear data structu
 **Streaming responses** for real-time UX:
 
 ```typescript
-for await (const chunk of agent.respondStream({
-  history: [createMessageEvent(EventSource.CUSTOMER, "Alice", "Hello")],
-})) {
+for await (const chunk of agent.respondStream("Hello")) {
   process.stdout.write(chunk.delta);
   if (chunk.done) {
     console.log("\nTool calls:", chunk.toolCalls);
@@ -411,20 +397,46 @@ for await (const chunk of agent.respondStream({
 }
 ```
 
-**Session step** for multi-turn conversations:
+**Automatic session management** for multi-turn conversations:
 
 ```typescript
-let session = createSession<MyData>();
-const response = await agent.respond({ history, session });
-session = response.session!; // Tracks progress across turns, you can use it to save the current step in your database
+// Server-side: Create agent with sessionId
+const agent = new Agent({
+  name: "Assistant",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  persistence: { adapter: new PrismaAdapter({ prisma }) },
+  sessionId: "user-123" // Automatically loads or creates session
+});
+
+// Simple conversation - no manual session management needed
+const response = await agent.respond("Hello, how are you?");
+console.log(response.message);
+console.log(agent.session.id); // Session ID for client
 ```
 
-**Database persistence** with any adapter:
+**Automatic session persistence** with any adapter:
 
 ```typescript
 import { PrismaAdapter } from "@falai/agent";
-const agent = new Agent({
-  persistence: { adapter: new PrismaAdapter({ prisma }) },
+
+// Server endpoint - sessions managed automatically
+app.post('/chat', async (req, res) => {
+  const { sessionId, message } = req.body;
+  
+  const agent = new Agent({
+    name: "ChatBot",
+    provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+    persistence: { adapter: new PrismaAdapter({ prisma }) },
+    sessionId // Automatically loads or creates this session
+  });
+  
+  const response = await agent.respond(message);
+  
+  res.json({
+    message: response.message,
+    sessionId: agent.session.id, // Return session ID to client
+    isComplete: response.isRouteComplete
+  });
 });
 ```
 
@@ -560,14 +572,14 @@ User Message + Session State
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 2. ROUTING + STEP SELECTION            │
+│ 2. ROUTING + STEP SELECTION             │
 │    • Evaluate routes (AI scoring)       │
 │    • Filter steps (skipIf, requires)    │
 │    • Select best route & step           │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 3. RESPONSE GENERATION                 │
+│ 3. RESPONSE GENERATION                  │
 │    • Build prompt with context/schema   │
 │    • Stream or generate AI response     │
 │    • Extract data via JSON Schema       │
@@ -575,7 +587,7 @@ User Message + Session State
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 4. POST-PROCESSING                     │
+│ 4. POST-PROCESSING                      │
 │    • Run finalize() functions           │
 │    • Update context/data (lifecycle)    │
 │    • Auto-save session                  │

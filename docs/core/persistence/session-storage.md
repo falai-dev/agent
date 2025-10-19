@@ -1,44 +1,54 @@
 # Session Storage & Persistence
 
-@falai/agent provides comprehensive session management and persistence capabilities, enabling conversation state to survive across requests and enabling complex multi-turn dialogues with structured data collection.
+@falai/agent provides **automatic session management** through the integrated `SessionManager` class, eliminating manual session lifecycle management while providing comprehensive persistence capabilities for conversation state and history.
 
 ## Overview
 
-The persistence system handles:
+The automatic session management system provides:
 
-- **Session State Management**: Track conversation progress, collected data, and route history
+- **Zero-Boilerplate Sessions**: Automatic session creation, loading, and persistence
+- **Built-in History Management**: Conversation history automatically maintained within sessions
 - **Multi-Adapter Support**: Choose from multiple database backends
-- **Automatic Persistence**: Auto-save session state after responses
-- **Data Recovery**: Resume conversations from persisted state
-- **Message History**: Store and retrieve conversation transcripts
+- **Server-Friendly Design**: Perfect for stateless server environments
+- **Automatic Persistence**: Sessions auto-saved after each interaction
 - **Type-Safe Operations**: Full TypeScript support with generics
 
-## Session State Structure
+## Enhanced Session State Structure
 
-Sessions store comprehensive conversation state:
+Sessions now include automatic conversation history management:
 
 ```typescript
 interface SessionState<TData = unknown> {
-  id?: string; // Session identifier
+  id: string; // Session identifier (always present)
   data: Partial<TData>; // Collected data from conversation
   dataByRoute: Record<string, Partial<TData>>; // Per-route data
   routeHistory: RouteHistoryEntry[]; // Route transition history
   currentRoute?: RouteRef; // Active route
   currentStep?: StepRef; // Active step
+  history?: History; // Automatic conversation history
   metadata?: SessionMetadata; // Timestamps and custom data
+}
+
+// History is automatically managed
+interface HistoryItem {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  name?: string;
+  timestamp?: string; // ISO string
 }
 ```
 
-### What Gets Persisted
+### What Gets Automatically Persisted
 
 - **Collected Data**: All information gathered via `collect` fields and schemas
 - **Conversation Progress**: Current route, step, and route history
-- **Message History**: Full conversation transcripts
+- **Conversation History**: Automatic message history within sessions
 - **Metadata**: Creation/update timestamps and custom fields
+- **Session State**: Complete session state after each interaction
 
 ## Quick Start
 
-### Basic Setup with Prisma
+### Automatic Session Management with Prisma
 
 ```typescript
 import { Agent, PrismaAdapter } from "@falai/agent";
@@ -46,22 +56,53 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const agent = new Agent({
-  name: "Customer Support",
-  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
-  persistence: {
-    adapter: new PrismaAdapter({ prisma }),
-    autoSave: true, // Auto-save after each response
-  },
+// Server endpoint with automatic session management
+app.post('/chat', async (req, res) => {
+  const { sessionId, message } = req.body;
+  
+  const agent = new Agent({
+    name: "Customer Support",
+    provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+    persistence: { adapter: new PrismaAdapter({ prisma }) },
+    sessionId // Automatically loads or creates this session
+  });
+  
+  const response = await agent.respond(message);
+  
+  res.json({
+    message: response.message,
+    sessionId: agent.session.id,
+    isComplete: response.isRouteComplete
+  });
 });
+```
 
-// Create a session
-const session = createSession();
-session.id = "session_123";
+### SessionManager API
 
-// Use in conversation
-const response = await agent.respond({ history, session });
-// Session state is automatically persisted
+The `SessionManager` provides a clean API for session operations:
+
+```typescript
+// Access the session manager
+const sessionManager = agent.session;
+
+// Get or create session (works for existing, new, or auto-generated IDs)
+await sessionManager.getOrCreate("user-123");
+await sessionManager.getOrCreate(); // Auto-generates ID
+
+// History management (automatically persisted)
+await sessionManager.addMessage("user", "Hello");
+await sessionManager.addMessage("assistant", "Hi there!");
+const history = sessionManager.getHistory();
+sessionManager.clearHistory();
+
+// Data access
+const data = sessionManager.getData<MyDataType>();
+await sessionManager.setData({ field: "value" });
+
+// Session operations
+await sessionManager.save(); // Manual save (auto-saves on addMessage)
+await sessionManager.delete();
+const newSession = await sessionManager.reset(true); // Preserve history
 ```
 
 ### Database Schema
@@ -106,102 +147,110 @@ model AgentMessage {
 }
 ```
 
-## Session Management
+## Advanced Session Management
 
-### Creating Sessions
+### Manual Session Operations
+
+While sessions are managed automatically, you can perform manual operations when needed:
 
 ```typescript
-import { createSession } from "@falai/agent";
+// Access session manager directly
+const sessionManager = agent.session;
 
-// Basic session
-const session = createSession();
+// Create session with specific ID
+await sessionManager.getOrCreate("custom-session-id");
 
-// Session with initial data
-const sessionWithData = createSession({
-  data: {
-    userName: "John",
-    preferences: { theme: "dark" },
-  },
+// Session data management
+await sessionManager.setData({
+  userName: "John",
+  preferences: { theme: "dark" },
 });
 
-// Session with metadata
-const sessionWithMeta = createSession({
-  data: {},
-  metadata: {
-    source: "web_chat",
-    userAgent: "Chrome/91.0",
-    customField: "value",
-  },
-});
+// Get current session data
+const data = sessionManager.getData<MyDataType>();
+console.log(data.userName); // "John"
+
+// Session information
+console.log(sessionManager.id); // Current session ID
+console.log(sessionManager.current); // Full session state
 ```
 
-### Session Operations
+### History Management
 
 ```typescript
-// Set session ID (typically from database)
-session.id = "session_123";
+// Add messages to history (automatically persisted)
+await sessionManager.addMessage("user", "Hello there");
+await sessionManager.addMessage("assistant", "Hi! How can I help?");
 
-// Update session data
-session.data.userName = "Jane";
-session.data.email = "jane@example.com";
+// Get conversation history
+const history = sessionManager.getHistory();
+console.log(history); // Array of HistoryItem objects
 
-// Track route progress
-session.currentRoute = { id: "onboarding", title: "User Onboarding" };
-session.currentStep = { id: "collect-info", routeId: "onboarding" };
+// Set entire history (for migration or testing)
+sessionManager.setHistory([
+  { role: "user", content: "Previous message" },
+  { role: "assistant", content: "Previous response" }
+]);
 
-// Add to route history
-session.routeHistory.push({
-  routeId: "onboarding",
-  enteredAt: new Date(),
-  completed: false,
-});
+// Clear history
+sessionManager.clearHistory();
 ```
 
 ## Persistence Configuration
 
-### Agent-Level Persistence
+### Automatic Persistence Setup
 
 ```typescript
 const agent = new Agent({
+  name: "Assistant",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
   persistence: {
     adapter: new PrismaAdapter({ prisma }),
-    autoSave: true, // Auto-save after responses
-    userId: "user_123", // Associate with user
+    autoSave: true, // Auto-save after each interaction (default)
   },
+  sessionId: "user-123" // Automatically loads or creates this session
 });
+
+// Sessions are automatically persisted - no manual save needed
+const response = await agent.respond("Hello");
 ```
 
-### Manual Persistence
+### Manual Session Operations (Advanced)
 
 ```typescript
-const persistence = agent.getPersistenceManager();
+// Access persistence manager if needed
+const persistence = agent.session.getPersistenceManager();
 
-// Save session manually
-await persistence.saveSessionState(session.id, session);
+// Manual save (usually not needed due to auto-save)
+await agent.session.save();
 
-// Load session
-const loadedSession = await persistence.loadSessionState(session.id);
+// Delete session
+await agent.session.delete();
 
-// Check persistence availability
-if (agent.hasPersistence()) {
-  // Persistence is configured
-}
+// Reset session (creates new session, optionally preserving history)
+const newSession = await agent.session.reset(true); // Preserve history
 ```
 
 ## Auto-Save Behavior
 
-When `autoSave: true`, sessions are automatically persisted:
+Sessions are automatically persisted after each interaction:
 
 ```typescript
 const agent = new Agent({
   persistence: {
     adapter: new RedisAdapter(redisClient),
-    autoSave: true,
+    autoSave: true, // Default behavior
   },
+  sessionId: "user-123"
 });
 
-const response = await agent.respond({ history, session });
-// Session state is automatically saved to Redis
+// Session automatically saved after each respond call
+const response = await agent.respond("Hello");
+// Session state automatically saved to Redis
+
+// History automatically saved when messages are added
+await agent.session.addMessage("user", "Follow-up question");
+// Automatically persisted
 ```
 
 ### What Gets Auto-Saved
@@ -209,21 +258,25 @@ const response = await agent.respond({ history, session });
 - **Collected Data**: All data from `collect` fields and schemas
 - **Route Progress**: Current route and step
 - **Route History**: Transition log
+- **Conversation History**: Complete message history within sessions
 - **Metadata**: Timestamps and custom fields
 
 ## Data Recovery & Resumption
 
-### Loading Sessions
+### Automatic Session Loading
 
 ```typescript
-// Load complete session state
-const session = await persistence.loadSessionState<BookingData>(sessionId);
+// Agent automatically loads existing session
+const agent = new Agent({
+  name: "Assistant",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  persistence: { adapter: new PrismaAdapter({ prisma }) },
+  sessionId: "existing-session-123" // Automatically loads this session
+});
 
-// Load conversation history
-const history = await persistence.loadSessionHistory(sessionId);
-
-// Resume conversation
-const response = await agent.respond({ history, session });
+// Session and history automatically restored
+const response = await agent.respond("Continue our conversation");
+console.log(agent.session.getHistory()); // Previous conversation history
 ```
 
 ### Session Queries
@@ -249,12 +302,14 @@ const session = await persistence.findSessionById(sessionId);
 const agent = new Agent({
   persistence: {
     adapter: new PrismaAdapter({ prisma }),
-    autoSave: true, // Also saves messages
+    autoSave: true, // Default - saves sessions and history
   },
+  sessionId: "user-123"
 });
 
-// Messages are automatically saved with session context
-const response = await agent.respond({ history, session });
+// Messages automatically saved as part of session history
+const response = await agent.respond("Hello");
+// Both session state and conversation history automatically persisted
 ```
 
 ### Manual Message Operations

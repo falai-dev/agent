@@ -8,7 +8,6 @@ import {
   type Tool,
   GeminiProvider,
   END_ROUTE,
-  createSession,
 } from "../../src";
 
 // ============================================================================
@@ -487,23 +486,20 @@ async function main() {
 
   console.log("=== MULTI-TURN CONVERSATION SIMULATION ===\n");
 
-  // Initialize session step for multi-turn conversation
-  let session = createSession<OnboardingData>();
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   // Turn 1: Start onboarding
   console.log("📱 Turn 1: User starts onboarding");
+  
+  await agent.session.addMessage("user", "Hi, I want to onboard my business", "Alice");
+  
   const response1 = await agent.respond({
-    history: [
-      {
-        role: "user" as const,
-        content: "Hi, I want to onboard my business",
-        name: "Alice",
-      },
-    ],
-    session,
+    history: agent.session.getHistory(),
   });
+  
   console.log("🤖 Bot:", response1.message);
-  console.log("📊 Data after turn 1:", response1.session?.data);
+  console.log("📊 Data after turn 1:", agent.session.getData<OnboardingData>());
   console.log("📊 Route:", response1.session?.currentRoute?.title);
 
   // Check route completion after turn 1
@@ -516,8 +512,7 @@ async function main() {
 
   console.log();
 
-  // Update session with progress
-  session = response1.session!;
+  await agent.session.addMessage("assistant", response1.message);
 
   // Turn 2: User provides business info
   console.log("📱 Turn 2: User provides business info");
@@ -626,9 +621,9 @@ async function main() {
 // ============================================================================
 
 /*
- * ✅ PATTERN 1: Session Step Management (Core v2 pattern)
- *    - createSession<T>(): Initialize typed session step
- *    - Pass session to respond() calls
+ * ✅ PATTERN 1: Session Management (New SessionManager pattern)
+ *    - agent.session: Automatic session management
+ *    - agent.session.addMessage(): Add messages to history
  *    - Session tracks collected data across turns
  *    - Always-on routing respects intent changes
  *

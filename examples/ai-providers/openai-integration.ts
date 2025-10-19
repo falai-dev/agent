@@ -8,7 +8,6 @@ import {
   OpenAIProvider,
   type Tool,
   userMessage,
-  createSession,
   END_ROUTE,
 } from "../../src";
 
@@ -155,18 +154,18 @@ async function main() {
   // Example conversation with session step management
   console.log("🤖 Starting OpenAI Agent Example\n");
 
-  // Initialize session step for multi-turn conversation
-  let session = createSession<WeatherData>();
-
-  // Build history
-  const history = [
-    userMessage("What's the weather like in San Francisco?", "Alice"),
-  ];
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   try {
-    // Turn 1: Process weather query with session step
-    console.log("📤 Processing with session step...");
-    const response = await agent.respond({ history, session });
+    // Turn 1: Process weather query with session management
+    console.log("📤 Processing with session management...");
+    
+    await agent.session.addMessage("user", "What's the weather like in San Francisco?", "Alice");
+    
+    const response = await agent.respond({ 
+      history: agent.session.getHistory() 
+    });
 
     console.log("\n✅ Agent Configuration:");
     console.log(`   AI Provider: ${openaiProvider.name}`);
@@ -178,18 +177,17 @@ async function main() {
     );
 
     console.log("\n💬 Conversation:");
-    console.log(`   Customer: ${history[0].content}`);
+    console.log(`   Customer: What's the weather like in San Francisco?`);
     console.log(`   Agent: ${response.message}`);
     console.log(`   Route: ${response.session?.currentRoute?.title}`);
-    console.log(`   Data:`, response.session?.data);
+    console.log(`   Data:`, agent.session.getData<WeatherData>());
 
-    // Update session with progress
-    session = response.session!;
+    await agent.session.addMessage("assistant", response.message);
 
     // Check for route completion
     if (response.isRouteComplete) {
       console.log("\n✅ Weather route complete!");
-      await logWeatherRequest(agent.getData(session.id) as WeatherData);
+      await logWeatherRequest(agent.session.getData<WeatherData>());
     }
 
     console.log("\n✨ Session step benefits:");

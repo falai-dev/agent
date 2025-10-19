@@ -20,7 +20,6 @@ import type {
 } from "../types";
 import { EventKind, MessageRole } from "../types/history";
 import {
-  createSession,
   enterRoute,
   enterStep,
   mergeCollected,
@@ -35,6 +34,7 @@ import {
 import { Route } from "./Route";
 import { Step } from "./Step";
 import { PersistenceManager } from "./PersistenceManager";
+import { SessionManager } from "./SessionManager";
 import { RoutingEngine } from "./RoutingEngine";
 import { ResponseEngine } from "./ResponseEngine";
 import { ToolExecutor } from "./ToolExecutor";
@@ -57,6 +57,9 @@ export class Agent<TContext = unknown> {
   private responsePipeline: ResponsePipeline<TContext>;
   private currentSession?: SessionState;
   private knowledgeBase: Record<string, unknown> = {};
+
+  /** Public session manager for easy session management */
+  public session: SessionManager<unknown>;
 
   constructor(private readonly options: AgentOptions<TContext>) {
     // Set log level based on debug option
@@ -136,6 +139,17 @@ export class Agent<TContext = unknown> {
     // Initialize knowledge base
     if (options.knowledgeBase) {
       this.knowledgeBase = { ...options.knowledgeBase };
+    }
+
+    // Initialize session manager
+    this.session = new SessionManager(this.persistenceManager);
+
+    // Store sessionId for later use in getOrCreate calls
+    if (options.sessionId) {
+      // The session will be loaded on first getOrCreate call
+      this.session.getOrCreate(options.sessionId).catch((err) => {
+        logger.error("Failed to start session", err);
+      });
     }
   }
 
@@ -925,7 +939,7 @@ export class Agent<TContext = unknown> {
     let session =
       cloneDeep(params.session) ||
       cloneDeep(this.currentSession) ||
-      createSession<TContext>();
+      (await this.session.getOrCreate());
 
     // PHASE 1: PREPARE - Execute prepare function if current step has one
     if (session.currentRoute && session.currentStep) {
@@ -1905,5 +1919,49 @@ export class Agent<TContext = unknown> {
     );
 
     return updatedSession;
+  }
+
+  /**
+   * Simplified respond method using SessionManager
+   * Automatically manages conversation history through the session
+   */
+  async chat<TData = Record<string, unknown>>(
+    message?: string,
+    options?: {
+      history?: History; // Optional: override session history for this response
+      contextOverride?: Partial<TContext>;
+      signal?: AbortSignal;
+    }
+  ): Promise<AgentResponse<TData>> {
+    // Determine which history to use
+    let history: History;
+    if (options?.history) {
+      // Use provided history for this response only
+      history = options.history;
+    } else {
+      // Add user message to session history if provided
+      if (message) {
+        await this.session.addMessage("user", message);
+      }
+      history = this.session.getHistory();
+    }
+
+    // Get or create session
+    const session = await this.session.getOrCreate();
+
+    // Use existing respond method with session-managed history
+    const result = await this.respond({
+      history,
+      session,
+      contextOverride: options?.contextOverride,
+      signal: options?.signal,
+    });
+
+    // Add agent response to session history (only if not using override history)
+    if (!options?.history) {
+      await this.session.addMessage("assistant", result.message);
+    }
+
+    return result as AgentResponse<TData>;
   }
 }

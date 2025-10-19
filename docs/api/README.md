@@ -257,87 +257,53 @@ interface RespondOutput {
 - Automatically merges new collected data with existing session data
 - **Per-route data preservation** - Collected data is organized by route ID, allowing users to switch routes without losing progress
 
-**Example with Persistence Adapters:**
+**Example with Automatic Session Management:**
 
 ```typescript
-import { createSession } from "@falai/agent";
-
-// Using built-in persistence adapters
-const { sessionData, sessionStep } =
-  await persistence.createSessionWithStep<FlightData>({
-    userId: "user_123",
-    agentName: "Travel Agent",
+// Server endpoint with automatic session management
+app.post('/chat', async (req, res) => {
+  const { sessionId, message } = req.body;
+  
+  const agent = new Agent({
+    name: "Travel Agent",
+    provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+    persistence: { adapter: new PrismaAdapter({ prisma }) },
+    sessionId // Automatically loads or creates this session
   });
-
-// Option 1: Set current session for convenience
-agent.setCurrentSession(sessionStep);
-
-const response = await agent.respond({
-  history,
-  // session: sessionStep, // No longer required!
-});
-
-// Use convenience methods without passing session
-const data = agent.getData();
-
-// Option 2: Still pass session explicitly if preferred
-const response2 = await agent.respond({
-  history,
-  session: sessionStep,
+  
+  const response = await agent.respond(message);
+  
+  res.json({
+    message: response.message,
+    sessionId: agent.session.id,
+    isComplete: response.isRouteComplete
+  });
 });
 ```
 
-**Example with Custom Database (Manual):**
+**SessionManager API:**
 
 ```typescript
-import { createSession, SessionState } from "@falai/agent";
+// Access session manager
+const sessionManager = agent.session;
 
-// Load from your custom database
-const dbSession = await yourDb.sessions.findOne({ id: sessionId });
+// Get or create session (works for existing, new, or auto-generated IDs)
+await sessionManager.getOrCreate("user-123");
+await sessionManager.getOrCreate(); // Auto-generates ID
 
-// Restore or create session step
-let agentSession: SessionState<YourDataType>;
+// Data access
+const data = sessionManager.getData<FlightData>();
+await sessionManager.setData({ destination: "Paris" });
 
-if (dbSession && dbSession.currentRoute && dbSession.collectedData) {
-  // Restore existing session from database
-  agentSession = {
-    currentRoute: {
-      id: dbSession.currentRoute,
-      title:
-        dbSession.collectedData?.currentRouteTitle || dbSession.currentRoute,
-      enteredAt: new Date(),
-    },
-    currentStep: dbSession.currentStep
-      ? {
-          id: dbSession.currentStep,
-          description: dbSession.collectedData?.currentStepDescription,
-          enteredAt: new Date(),
-        }
-      : undefined,
-    data: dbSession.collectedData?.data || {},
-    routeHistory: dbSession.collectedData?.routeHistory || [],
-    metadata: {
-      sessionId: dbSession.id,
-      createdAt: dbSession.createdAt,
-      lastUpdatedAt: new Date(),
-    },
-  };
-} else {
-  // Create new session
-  agentSession = createSession<YourDataType>({
-    sessionId: dbSession?.id || "new-session-id",
-  });
-}
+// History management
+await sessionManager.addMessage("user", "Hello");
+const history = sessionManager.getHistory();
+sessionManager.clearHistory();
 
-// Use session in conversation
-const response = await agent.respond({
-  history,
-  session: agentSession,
-});
-
-// Manually save to your database
-await yourDb.sessions.update({
-  id: dbSession.id,
+// Session operations
+await sessionManager.save(); // Manual save (auto-saves on addMessage)
+await sessionManager.delete();
+const newSession = await sessionManager.reset(true); // Preserve history
   currentRoute: response.session?.currentRoute?.id,
   currentStep: response.session?.currentStep?.id,
   collectedData: {
@@ -899,10 +865,16 @@ flightRoute.initialStep
   })
   .nextStep({ step: END_ROUTE });
 
-// Use with session step
-let session = createSession<FlightData>();
-const response = await agent.respond({ history, session });
-console.log(response.session?.data); // { destination: "Paris", ... }
+// Automatic session management
+const agent = new Agent({
+  name: "Travel Agent",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  persistence: { adapter: new PrismaAdapter({ prisma }) },
+  sessionId: "user-123" // Automatically loads or creates session
+});
+
+const response = await agent.respond("I want to book a flight to Paris");
+console.log(agent.session.getData<FlightData>()); // { destination: "Paris", ... }
 ```
 
 ##### `addGuideline(guideline: Guideline): void`

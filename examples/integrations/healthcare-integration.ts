@@ -8,7 +8,6 @@ import {
   type Tool,
   AnthropicProvider,
   END_ROUTE,
-  createSession,
 } from "../../src";
 
 // Context type
@@ -492,16 +491,8 @@ function createHealthcareAgent() {
 async function main() {
   const agent = createHealthcareAgent();
 
-  // Initialize session step for multi-turn conversation
-  let session = createSession<AppointmentData | LabResultsData>();
-
-  const history = [
-    {
-      role: "user" as const,
-      content: "Hi, I need to follow up on my visit",
-      name: "Patient",
-    },
-  ];
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   console.log("Agent:", agent.name);
   console.log("Description:", agent.description);
@@ -515,18 +506,22 @@ async function main() {
     console.log("\n" + route.describe());
   }
 
-  // Example conversation with session step
+  // Example conversation with session management
   console.log("\n=== EXAMPLE CONVERSATION ===");
 
   // Turn 1: Patient wants to follow up
-  const response1 = await agent.respond({ history, session });
+  await agent.session.addMessage("user", "Hi, I need to follow up on my visit", "Patient");
+  
+  const response1 = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
+  
   console.log("Patient: Hi, I need to follow up on my visit");
   console.log("Agent:", response1.message);
   console.log("Route:", response1.session?.currentRoute?.title);
-  console.log("Data:", response1.session?.data);
+  console.log("Data:", agent.session.getData<AppointmentData | LabResultsData>());
 
-  // Update session with progress
-  session = response1.session!;
+  await agent.session.addMessage("assistant", response1.message);
 
   // Turn 2: Patient specifies they want to schedule an appointment
   if (response1.session?.currentRoute?.title === "Schedule an Appointment") {

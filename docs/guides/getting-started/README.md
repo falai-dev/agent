@@ -90,14 +90,7 @@ const generalRoute = agent.createRoute({
 
 // Test your agent
 async function main() {
-  const response = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "Hello! Can you tell me about TypeScript?",
-      },
-    ],
-  });
+  const response = await agent.respond("Hello! Can you tell me about TypeScript?");
 
   console.log("🤖 Agent:", response.message);
 }
@@ -229,43 +222,29 @@ const checkAndBook = askBudget.nextStep({
 
 ```typescript
 async function testBookingAgent() {
-  // User provides partial information
-  const response1 = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "I want to go to Paris",
-        name: "Alice",
-      },
-    ],
+  // Create agent with automatic session management
+  const sessionAgent = new Agent({
+    name: "TravelAgent",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+    }),
+    sessionId: "user-alice", // Automatically manages this session
   });
+
+  // Copy the route to the session agent
+  sessionAgent.createRoute(bookingRoute.options);
+
+  // User provides partial information - simple message API
+  const response1 = await sessionAgent.respond("I want to go to Paris");
 
   console.log("Bot:", response1.message);
-  console.log("Collected:", response1.session?.data);
+  console.log("Collected:", sessionAgent.session.getData<BookingData>());
 
-  // User provides more details
-  const response2 = await agent.respond({
-    history: [
-      {
-        role: "user",
-        content: "I want to go to Paris",
-        name: "Alice",
-      },
-      {
-        role: "assistant",
-        content: response1.message,
-      },
-      {
-        role: "user",
-        content: "Next Friday, 2 people, $2000 budget",
-        name: "Alice",
-      },
-    ],
-    session: response1.session,
-  });
+  // User provides more details - session automatically maintained
+  const response2 = await sessionAgent.respond("Next Friday, 2 people, $2000 budget");
 
   console.log("Bot:", response2.message);
-  console.log("Final data:", response2.session?.data);
+  console.log("Final data:", sessionAgent.session.getData<BookingData>());
 }
 
 testBookingAgent();
@@ -298,36 +277,24 @@ const agent = new Agent({
   },
 });
 
-// Sessions are now automatically saved and restored
-const response1 = await agent.respond({
-  history: [
-    {
-      role: "user",
-      content: "Hello",
-    },
-  ],
-});
-// Session data is automatically persisted
-
-const response2 = await agent.respond({
-  history: [
-    {
-      role: "user",
-      content: "Hello",
-    },
-    {
-      role: "assistant",
-      content: response1.message,
-    },
-    {
-      role: "user",
-      content: "What's my name?",
-    },
-  ],
-  session: response1.session, // Session restored with previous context
+// Create agent with automatic session management and persistence
+const persistentAgent = new Agent({
+  name: "PersistentAgent",
+  provider: new GeminiProvider({
+    apiKey: process.env.GEMINI_API_KEY!,
+  }),
+  persistence: {
+    adapter: new MemoryAdapter(), // Or RedisAdapter, PrismaAdapter, etc.
+  },
+  sessionId: "user-123", // Automatically loads or creates this session
 });
 
-console.log(response2.message); // Agent remembers the conversation
+// Sessions are automatically saved and restored
+const response1 = await persistentAgent.respond("Hello, my name is Alice");
+// Session data automatically persisted
+
+const response2 = await persistentAgent.respond("What's my name?");
+console.log(response2.message); // Agent remembers: "Your name is Alice"
 ```
 
 ---

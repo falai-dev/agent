@@ -8,9 +8,9 @@
 export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
 export { Step } from "./core/Step";
-export { DomainRegistry } from "./core/DomainRegistry";
 export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
+export { SessionManager } from "./core/SessionManager";
 export { ToolExecutor } from "./core/ToolExecutor";
 export type { ToolExecutionResult } from "./core/ToolExecutor";
 
@@ -122,6 +122,10 @@ export type {
   PersistenceAdapter,
   Template,
   TemplateContext,
+  UserHistoryItem,
+  AssistantHistoryItem,
+  ToolHistoryItem,
+  SystemHistoryItem,
 } from "./types";
 export { CompositionMode, EventKind, MessageRole } from "./types";
 export { createSession, enterRoute, enterStep, mergeCollected } from "./utils";

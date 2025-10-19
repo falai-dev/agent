@@ -1,9 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 /**
- * Example: Using Prisma ORM for Persistence with Session Step
+ * Example: Using Prisma ORM for Persistence with New Session Management
  *
- * This example shows how to use @falai/agent with Prisma for automatic
- * session step persistence - with the new data-driven architecture!
+ * This example demonstrates the new automatic session management features:
+ * - Automatic session creation and loading with sessionId
+ * - Built-in conversation history management
+ * - Simplified server-side usage patterns
+ * - SessionManager API for direct session control
  */
 
 import {
@@ -11,8 +14,6 @@ import {
   GeminiProvider,
   PrismaAdapter,
   END_ROUTE,
-  HistoryItem,
-  MessageRole,
 } from "../../src";
 
 // @ts-expect-error - PrismaClient is not typed
@@ -77,11 +78,12 @@ async function example() {
   // Initialize Prisma client
   const prisma = new PrismaClient();
 
-  const userId = "user_123";
-
   /**
-   * Create Agent with Persistence - New Session-Based Pattern! ✨
+   * Server-Style Usage: Create Agent per request with sessionId
+   * This is the recommended pattern for server environments
    */
+  const sessionId = "session_user123_booking"; // Could be from request params
+
   const agent = new Agent<ConversationContext>({
     name: "Travel Assistant",
     description: "A helpful travel booking assistant",
@@ -91,15 +93,14 @@ async function example() {
       model: "models/gemini-2.5-flash",
     }),
     context: {
-      userId,
+      userId: "user_123",
       userName: "Alice",
     },
-    // ✨ Just pass the adapter - that's it!
     persistence: {
       adapter: new PrismaAdapter<ConversationContext>({ prisma }),
-      autoSave: true, // Auto-saves session step after each response
-      userId,
+      autoSave: true, // Auto-saves session after each response
     },
+    sessionId, // ✨ Agent will automatically load or create this session
   });
 
   /**
@@ -185,166 +186,105 @@ async function example() {
   confirmBooking.nextStep({ step: END_ROUTE });
 
   /**
-   * Get persistence manager from agent
+   * Session is automatically loaded/created by Agent constructor
+   * Access it through agent.session
    */
-  const persistence = agent.getPersistenceManager();
+  console.log("✨ Session ready:", agent.session.id);
+  console.log("📊 Session data:", agent.session.getData());
+  console.log("📜 Conversation history:", agent.session.getHistory().length, "messages");
 
-  if (!persistence) {
-    throw new Error("Persistence not configured");
+  // Set some initial data if this is a new session
+  if (!agent.session.getData<FlightBookingData>()?.cabinClass) {
+    await agent.session.setData<FlightBookingData>({ cabinClass: "economy" });
   }
 
   /**
-   * Create or find a session - New Pattern!
-   */
-  const sessionResult = await persistence.createSessionWithStep({
-    userId,
-    agentName: "Travel Assistant",
-    initialData: {
-      cabinClass: "economy", // Default value
-    },
-  });
-
-  let session = sessionResult.sessionStep;
-  const dbSessionId = sessionResult.sessionData.id;
-
-  console.log("✨ Created new session:", dbSessionId);
-  console.log("📊 Session metadata:", {
-    sessionId: session.metadata?.sessionId, // Same as dbSessionId
-    createdAt: session.metadata?.createdAt,
-  });
-  console.log("📊 Initial session step:", {
-    currentRoute: session.currentRoute,
-    data: session.data,
-  });
-
-  /**
-   * Load conversation history
-   */
-  const history = await persistence.loadSessionHistory(dbSessionId);
-  console.log(`📜 Loaded ${history.length} messages from history`);
-
-  /**
-   * Turn 1: User provides multiple fields at once
+   * Turn 1: Simple message-based conversation
+   * SessionManager automatically handles history and persistence
    */
   console.log("\n--- Turn 1 ---");
-  const userMessage1: HistoryItem = {
-    role: "user",
-    content: "I want to fly to Paris on June 15 with 2 people",
-    name: "Alice",
-  };
-
-  history.push(userMessage1);
-
+  
+  // Add user message to session history and get response
+  await agent.session.addMessage("user", "I want to fly to Paris on June 15 with 2 people", "Alice");
+  
   const response1 = await agent.respond({
-    history,
-    session, // Pass session step
+    history: agent.session.getHistory(), // Use session-managed history
   });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Session step after turn 1:", {
-    sessionId: response1.session?.metadata?.sessionId,
+  console.log("📊 Session after turn 1:", {
+    sessionId: agent.session.id,
     currentRoute: response1.session?.currentRoute?.title,
-    currentStepId: response1.session?.currentStep?.id, // Custom ID like "ask_destination"
-    currentStepDescription: response1.session?.currentStep?.description,
-    data: response1.session?.data,
+    currentStepId: response1.session?.currentStep?.id,
+    data: agent.session.getData<FlightBookingData>(),
   });
 
-  // Save user message
-  await persistence.saveMessage({
-    sessionId: dbSessionId,
-    userId,
-    role: MessageRole.USER,
-    content: userMessage1.content,
-  });
-
-  // Save agent message (session step is auto-saved by Agent!)
-  await persistence.saveMessage({
-    sessionId: dbSessionId,
-    userId,
-    role: MessageRole.ASSISTANT,
-    content: response1.message,
-    route: response1.session?.currentRoute?.id,
-    step: response1.session?.currentStep?.id,
-  });
-
-  // Update session for next turn
-  session = response1.session!;
+  // Add agent response to session history
+  await agent.session.addMessage("assistant", response1.message);
 
   /**
    * Turn 2: User changes their mind
    */
   console.log("\n--- Turn 2 ---");
-  const userMessage2 = {
-    role: "user" as const,
-    content: "Actually, make that Tokyo instead, and premium class",
-    name: "Alice",
-  };
-  history.push(userMessage2);
+  
+  await agent.session.addMessage("user", "Actually, make that Tokyo instead, and premium class", "Alice");
 
   const response2 = await agent.respond({
-    history,
-    session, // Pass updated session
+    history: agent.session.getHistory(),
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Session step after turn 2:", {
+  console.log("📊 Session after turn 2:", {
     currentRoute: response2.session?.currentRoute?.title,
     currentStep: response2.session?.currentStep?.id,
-    data: response2.session?.data,
+    data: agent.session.getData<FlightBookingData>(),
   });
 
-  // Save messages
-  await persistence.saveMessage({
-    sessionId: dbSessionId,
-    userId,
-    role: MessageRole.USER,
-    content: userMessage2.content,
-  });
-
-  await persistence.saveMessage({
-    sessionId: dbSessionId,
-    userId,
-    role: MessageRole.ASSISTANT,
-    content: response2.message,
-    route: response2.session?.currentRoute?.id,
-    step: response2.session?.currentStep?.id,
-  });
-
-  session = response2.session!;
+  await agent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Flight booking complete!");
-    await sendFlightConfirmation(
-      agent.getData(session.id) as FlightBookingData
-    );
+    await sendFlightConfirmation(agent.session.getData<FlightBookingData>());
   }
 
   /**
-   * Load session step from database (demonstrates persistence)
+   * Demonstrate session recovery - create new Agent instance with same sessionId
    */
-  console.log("\n--- Loading Session from Database ---");
-  const loadedSession = await persistence.loadSessionState(dbSessionId);
+  console.log("\n--- Session Recovery (New Agent Instance) ---");
+  
+  const newAgent = new Agent<ConversationContext>({
+    name: "Travel Assistant",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+    context: {
+      userId: "user_123",
+      userName: "Alice",
+    },
+    persistence: {
+      adapter: new PrismaAdapter<ConversationContext>({ prisma }),
+    },
+    sessionId, // Same sessionId - will load existing session
+  });
 
-  console.log("📥 Loaded session step:", {
-    currentRoute: loadedSession?.currentRoute?.title,
-    currentStep: loadedSession?.currentStep?.id,
-    data: loadedSession?.data,
+  console.log("📥 Recovered session:", {
+    sessionId: newAgent.session.id,
+    historyLength: newAgent.session.getHistory().length,
+    data: newAgent.session.getData<FlightBookingData>(),
   });
 
   /**
-   * Query sessions and messages
+   * Continue conversation with recovered session
    */
-  const userSessions = await persistence.getUserSessions(userId);
-  console.log(`\n👤 User has ${userSessions.length} total sessions`);
-
-  const messages = await persistence.getSessionMessages(dbSessionId);
-  console.log(`💬 Session has ${messages.length} messages`);
-
-  /**
-   * Complete the session
-   */
-  await persistence.completeSession(dbSessionId);
-  console.log("✅ Session completed");
+  await newAgent.session.addMessage("user", "Can you confirm my booking details?");
+  
+  const confirmResponse = await newAgent.respond({
+    history: newAgent.session.getHistory(),
+  });
+  
+  console.log("🤖 Confirmation:", confirmResponse.message);
+  await newAgent.session.addMessage("assistant", confirmResponse.message);
 
   /**
    * Cleanup
@@ -353,11 +293,11 @@ async function example() {
 }
 
 /**
- * Advanced Example: Session Step with Lifecycle Hooks
+ * Advanced Example: SessionManager with History Management
  */
 async function advancedExample() {
   const prisma = new PrismaClient();
-  const userId = "user_456";
+  const sessionId = "session_user456_onboarding";
 
   interface UserContext {
     userId: string;
@@ -376,21 +316,20 @@ async function advancedExample() {
       model: "models/gemini-2.5-flash",
     }),
     context: {
-      userId,
+      userId: "user_456",
       userName: "Bob",
       preferences: {
         currency: "USD",
         language: "en",
       },
     },
-    // Lifecycle hooks for session step enrichment
+    // Lifecycle hooks for data enrichment
     hooks: {
-      // Enrich collected data before saving
       onDataUpdate: async (
         data: Partial<OnboardingData>,
         previous: Partial<OnboardingData>
       ) => {
-        console.log("🔄 Collected data updated:", { data, previous });
+        console.log("🔄 Data updated:", { data, previous });
 
         // Normalize phone numbers
         if (data.phoneNumber) {
@@ -402,10 +341,9 @@ async function advancedExample() {
           console.warn("⚠️ Invalid email detected");
         }
 
-        return Promise.resolve(data as OnboardingData);
+        return data as OnboardingData;
       },
 
-      // Update context when session step changes
       onContextUpdate: async (
         newContext: UserContext,
         oldContext: UserContext
@@ -417,8 +355,8 @@ async function advancedExample() {
     persistence: {
       adapter: new PrismaAdapter<UserContext>({ prisma }),
       autoSave: true,
-      userId,
     },
+    sessionId,
   });
 
   // Create onboarding route
@@ -462,50 +400,57 @@ async function advancedExample() {
     })
     .nextStep({ step: END_ROUTE });
 
-  const persistence = agent.getPersistenceManager()!;
+  console.log("✨ Onboarding session ready:", agent.session.id);
 
-  // Create session with step
-  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
-    userId,
-    agentName: "Onboarding Assistant",
-  });
-
-  console.log("✨ Created onboarding session:", sessionData.id);
-
-  // Simulate conversation
-  const session = sessionStep;
+  // Demonstrate history override for context setting
+  const contextHistory = [
+    { role: "system" as const, content: "User is starting onboarding process" },
+    { role: "user" as const, content: "I'd like to create an account" },
+  ];
 
   const response = await agent.respond({
-    history: [],
-    session,
+    history: contextHistory, // Override session history for this response
   });
 
   console.log("🤖 Agent:", response.message);
-  console.log("📊 Data so far:", response.session?.data);
+  console.log("📊 Data collected:", agent.session.getData<OnboardingData>());
 
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    userId,
-    role: MessageRole.ASSISTANT,
-    content: response.message,
+  // Add to session history for future responses
+  await agent.session.addMessage("user", "I'd like to create an account");
+  await agent.session.addMessage("assistant", response.message);
+
+  // Continue with session-managed history
+  await agent.session.addMessage("user", "My name is Bob Johnson and email is bob@example.com");
+  
+  const response2 = await agent.respond({
+    history: agent.session.getHistory(),
   });
 
-  if (response.isRouteComplete) {
-    console.log("\n✅ Onboarding complete!");
-    await sendOnboardingEmail(agent.getData(sessionData.id) as OnboardingData);
-  }
+  console.log("🤖 Agent:", response2.message);
+  console.log("📊 Normalized data:", agent.session.getData<OnboardingData>());
+  // Shows normalized phone and email
 
-  console.log("✅ Session step automatically saved to database!");
+  if (response2.isRouteComplete) {
+    console.log("\n✅ Onboarding complete!");
+    await sendOnboardingEmail(agent.session.getData<OnboardingData>());
+  }
 
   await prisma.$disconnect();
 }
 
 /**
- * Minimal Example - Quick Start
+ * Minimal Example - Server Endpoint Pattern
  */
-async function quickStart() {
+async function serverEndpointExample() {
   const prisma = new PrismaClient();
 
+  // Simulate server endpoint receiving request
+  const requestData = {
+    sessionId: "session_user789_support", // From client
+    message: "I need help, my name is John and my email is john@example.com",
+  };
+
+  // Create agent with sessionId (loads existing or creates new)
   const agent = new Agent({
     name: "Support Agent",
     provider: new GeminiProvider({
@@ -514,9 +459,9 @@ async function quickStart() {
     }),
     persistence: {
       adapter: new PrismaAdapter<ContactFormData>({ prisma }),
-      autoSave: true, // ✨ Automatically saves session step!
-      userId: "user_789",
+      autoSave: true,
     },
+    sessionId: requestData.sessionId, // ✨ Automatic session management
   });
 
   // Create a simple contact form route
@@ -543,43 +488,36 @@ async function quickStart() {
     })
     .nextStep({ step: END_ROUTE });
 
-  const persistence = agent.getPersistenceManager()!;
-
-  // Create session with step support
-  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
-    userId: "user_789",
-    agentName: "Support Agent",
-  });
-
-  // Chat!
+  // Add user message and respond
+  await agent.session.addMessage("user", requestData.message);
+  
   const response = await agent.respond({
-    history: [
-      {
-        role: "user" as const,
-        content:
-          "I need help, my name is John and my email is john@example.com",
-        name: "User",
-      },
-    ],
-    session: sessionStep,
+    history: agent.session.getHistory(),
   });
 
-  console.log("✅ Response:", response.message);
-  console.log("📊 Data:", response.session?.data);
+  await agent.session.addMessage("assistant", response.message);
+
+  // Return response (like in a REST API)
+  const apiResponse = {
+    message: response.message,
+    sessionId: agent.session.id,
+    isComplete: response.isRouteComplete,
+    data: agent.session.getData<ContactFormData>(),
+  };
+
+  console.log("✅ API Response:", apiResponse);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Contact form submitted!");
-    await logContactForm(agent.getData(sessionData.id) as ContactFormData);
+    await logContactForm(agent.session.getData<ContactFormData>());
   }
 
-  console.log("💾 Session step auto-saved to Prisma!");
-
   await prisma.$disconnect();
+  return apiResponse;
 }
 
 /**
  * Mock function to send a flight confirmation email.
- * @param data - The flight booking data.
  */
 async function sendFlightConfirmation(
   data: Partial<FlightBookingData> | undefined
@@ -597,7 +535,6 @@ async function sendFlightConfirmation(
 
 /**
  * Mock function to send an onboarding email.
- * @param data - The onboarding data.
  */
 async function sendOnboardingEmail(data: Partial<OnboardingData> | undefined) {
   console.log("\n" + "=".repeat(60));
@@ -611,7 +548,6 @@ async function sendOnboardingEmail(data: Partial<OnboardingData> | undefined) {
 
 /**
  * Mock function to log a contact form submission.
- * @param data - The contact form data.
  */
 async function logContactForm(data: Partial<ContactFormData> | undefined) {
   console.log("\n" + "=".repeat(60));
@@ -628,4 +564,4 @@ if (require.main === module) {
   example().catch(console.error);
 }
 
-export { example, advancedExample, quickStart };
+export { example, advancedExample, serverEndpointExample };

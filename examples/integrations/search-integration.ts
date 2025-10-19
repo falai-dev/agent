@@ -9,19 +9,19 @@
  * - Compatible with Elasticsearch 7.x
  */
 
-import { convertHistoryMessage } from "../../src/core/Events";
 import {
   Agent,
   GeminiProvider,
   OpenSearchAdapter,
   END_ROUTE,
-  MessageRole,
-  HistoryItem,
 } from "../../src";
 
 // @ts-expect-error - Client is not typed
 import { Client } from "@opensearch-project/opensearch";
 
+const client = new Client({
+  url:{}
+})
 /**
  * Setup Steps:
  *
@@ -47,6 +47,17 @@ interface ComplaintData {
   description: string;
   affectedService?: string;
   requestedResolution?: string;
+}
+
+interface AnalyticsContext {
+  userId: string;
+  department: string;
+}
+
+interface TicketData {
+  ticketType: string;
+  priority: string;
+  tags: string[];
 }
 
 async function example() {
@@ -162,98 +173,106 @@ async function example() {
     })
     .nextStep({ step: END_ROUTE });
 
-  const persistence = agent.getPersistenceManager();
-  if (!persistence) return;
-
-  // Create session with step
-  const { sessionData, sessionStep } = await persistence.createSessionWithStep({
-    userId,
-    agentName: "Customer Service Agent",
-    initialData: {
-      severity: "medium",
-    },
-  });
-
-  console.log("✨ Session created in OpenSearch:", sessionData.id);
-
-  // Conversation flow
-  const history: HistoryItem[] = [];
-  let session = sessionStep;
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
+  
+  // Set initial data
+  await agent.session.setData<ComplaintData>({ severity: "medium" });
 
   // Turn 1
   console.log("\n--- Turn 1 ---");
-  const message1 = {
-    role: "user" as const,
-    content:
-      "I'm very upset! Your app keeps crashing when I try to make a payment. This is critical!",
-    name: "Alice",
-  };
-  history.push(message1);
+  
+  await agent.session.addMessage(
+    "user",
+    "I'm very upset! Your app keeps crashing when I try to make a payment. This is critical!",
+    "Alice"
+  );
 
-  const response1 = await agent.respond({ history, session });
+  const response1 = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Data:", response1.session?.data);
-
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.USER,
-    content: message1.content,
-    event: convertHistoryMessage({
-      role: MessageRole.USER,
-      content: message1.content,
-      name: message1.name,
-    }),
-  });
-
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.ASSISTANT,
-    content: response1.message,
-    route: response1.session?.currentRoute?.id,
-    step: response1.session?.currentStep?.id,
-  });
-
-  session = response1.session!;
+  console.log("📊 Data:", agent.session.getData<ComplaintData>());
+  
+  await agent.session.addMessage("assistant", response1.message);
 
   // Turn 2
   console.log("\n--- Turn 2 ---");
-  const message2 = {
-    role: "user" as const,
-    content: "It's the payment service. I want a full refund and compensation!",
-    name: "Alice",
-  };
-  history.push(message2);
+  
+  await agent.session.addMessage(
+    "user",
+    "It's the payment service. I want a full refund and compensation!",
+    "Alice"
+  );
 
-  const response2 = await agent.respond({ history, session });
+  const response2 = await agent.respond({ 
+    history: agent.session.getHistory() 
+  });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Data:", response2.session?.data);
+  console.log("📊 Data:", agent.session.getData<ComplaintData>());
 
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.USER,
-    content: message2.content,
-  });
-
-  await persistence.saveMessage({
-    sessionId: sessionData.id,
-    role: MessageRole.ASSISTANT,
-    content: response2.message,
-  });
+  await agent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Complaint route complete!");
-    await createSupportTicket(agent.getData(session.id) as ComplaintData);
+    await createSupportTicket(agent.session.getData<ComplaintData>() as ComplaintData);
   }
 
-  // Load session from OpenSearch
-  console.log("\n--- Loading Session from OpenSearch ---");
-  const loadedSession = await persistence.loadSessionState(sessionData.id);
+  // Demonstrate session recovery with new agent instance
+  console.log("\n--- Session Recovery Example ---");
+  const sessionId = agent.session.id;
+  
+  const recoveredAgent = new Agent<ConversationContext>({
+    name: "Customer Service Agent",
+    provider: new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY!,
+      model: "models/gemini-2.5-flash",
+    }),
+    context: {
+      userId,
+      userName: "Alice",
+      department: "customer_service",
+    },
+    persistence: {
+      adapter,
+      autoSave: true,
+    },
+    sessionId, // Same sessionId - will load existing session
+  });
 
-  console.log("📥 Loaded session:", {
-    currentRoute: loadedSession?.currentRoute?.title,
-    data: loadedSession?.data,
+  // Recreate the same route on recovered agent
+  recoveredAgent.createRoute<ComplaintData>({
+    title: "Handle Customer Complaint",
+    description: "Process and resolve customer complaints",
+    conditions: [
+      "User has a complaint",
+      "User reports an issue or problem",
+      "User is dissatisfied",
+    ],
+    schema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Complaint category" },
+        severity: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+          default: "medium",
+          description: "Severity level",
+        },
+        description: { type: "string", description: "Detailed complaint description" },
+        affectedService: { type: "string", description: "Which service is affected" },
+        requestedResolution: { type: "string", description: "What resolution the customer wants" },
+      },
+      required: ["category", "severity", "description"],
+    },
+  });
+
+  console.log("📥 Recovered session:", {
+    sessionId: recoveredAgent.session.id,
+    historyLength: recoveredAgent.session.getHistory().length,
+    data: recoveredAgent.session.getData<ComplaintData>(),
   });
 
   // Demonstrate full-text search
@@ -291,9 +310,6 @@ async function example() {
   });
 
   console.log("📊 Session statistics:", aggResults.body.aggregations);
-
-  // Complete session
-  await persistence.completeSession(sessionData.id);
   console.log("\n✅ Session completed and indexed!");
 
   // Cleanup
@@ -362,36 +378,54 @@ async function analyticsExample() {
     collect: ["ticketType", "priority", "tags"],
   });
 
-  const persistence = agent.getPersistenceManager()!;
-
-  // Create multiple sessions
+  // Create multiple sessions with different agents
   for (let i = 0; i < 3; i++) {
-    const { sessionData, sessionStep } =
-      await persistence.createSessionWithStep({
+    const sessionAgent = new Agent<AnalyticsContext>({
+      name: "Support Analyzer",
+      provider: new GeminiProvider({
+        apiKey: process.env.GEMINI_API_KEY!,
+        model: "models/gemini-2.5-flash",
+      }),
+      context: {
         userId: "analyst_001",
-        agentName: "Support Analyzer",
-      });
+        department: "support",
+      },
+      persistence: {
+        adapter: new OpenSearchAdapter<AnalyticsContext>(client),
+        autoSave: true,
+      },
+    });
 
-    const response = await agent.respond({
-      history: [
-        {
-          role: "user" as const,
-          content: `Support ticket ${i + 1}: ${
-            ["Billing issue", "Technical problem", "Feature request"][i]
-          }`,
-          name: "User",
+    // Create the ticket route on each agent
+    sessionAgent.createRoute<TicketData>({
+      title: "Analyze Support Ticket",
+      schema: {
+        type: "object",
+        properties: {
+          ticketType: { type: "string" },
+          priority: { type: "string" },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+          },
         },
-      ],
-      session: sessionStep,
+        required: ["ticketType", "priority"],
+      },
     });
 
-    await persistence.saveMessage({
-      sessionId: sessionData.id,
-      role: MessageRole.ASSISTANT,
-      content: response.message,
+    const ticketContent = `Support ticket ${i + 1}: ${
+      ["Billing issue", "Technical problem", "Feature request"][i]
+    }`;
+
+    await sessionAgent.session.addMessage("user", ticketContent, "User");
+
+    const response = await sessionAgent.respond({
+      history: sessionAgent.session.getHistory(),
     });
 
-    await persistence.completeSession(sessionData.id);
+    await sessionAgent.session.addMessage("assistant", response.message);
+
+    console.log(`✅ Processed ticket ${i + 1}: ${response.message}`);
   }
 
   // Search across all sessions
@@ -478,15 +512,14 @@ async function timeSeriesExample() {
 
 /**
  * Mock function to create a support ticket.
- * @param data - The complaint data from the completed route.
  */
-async function createSupportTicket(data: ComplaintData) {
+async function createSupportTicket(data: ComplaintData | undefined) {
   console.log("\n" + "=".repeat(60));
   console.log("🎫 Creating Support Ticket...");
   console.log("=".repeat(60));
   console.log("Ticket Details:", JSON.stringify(data, null, 2));
   console.log(
-    `   - Creating ticket for category: ${data.category} with severity: ${data.severity}`
+    `   - Creating ticket for category: ${data?.category} with severity: ${data?.severity}`
   );
   await new Promise((resolve) => setTimeout(resolve, 1000));
   console.log("✨ Ticket created successfully!");

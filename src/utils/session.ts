@@ -62,7 +62,7 @@ export function enterRoute<TData = Record<string, unknown>>(
   }
 
   // Exit current route if exists
-  const routeHistory = [...session.routeHistory];
+  const routeHistory = [...(session.routeHistory || [])];
   if (session.currentRoute) {
     const lastRouteIndex = routeHistory.findIndex(
       (r) => r.routeId === session.currentRoute?.id && !r.exitedAt
@@ -172,6 +172,7 @@ export function sessionStepToData<TData = Record<string, unknown>>(
       data: session.data || {},
       dataByRoute: session.dataByRoute || {}, // Include per-route data
       routeHistory: session.routeHistory,
+      history: session.history, // Include conversation history
       currentRouteTitle: session.currentRoute?.title,
       currentStepDescription: session.currentStep?.description,
       metadata: session.metadata,
@@ -197,6 +198,7 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
     data: {},
     dataByRoute: {},
     routeHistory: [],
+    history: [],
     metadata: {},
     currentRouteTitle: undefined,
     currentStepDescription: undefined,
@@ -221,6 +223,7 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
     data: collectedData.data || {},
     dataByRoute: collectedData.dataByRoute || {},
     routeHistory: collectedData.routeHistory || [],
+    history: collectedData.history || [],
     metadata: collectedData.metadata || {},
   };
 }

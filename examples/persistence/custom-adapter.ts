@@ -22,7 +22,7 @@ import type {
   SessionStatus,
   CollectedStateData,
 } from "../../src/types";
-import { Agent, GeminiProvider, createSession } from "../../src";
+import { Agent, GeminiProvider } from "../../src";
 
 /**
  * Simple in-memory storage for demonstration
@@ -474,36 +474,30 @@ async function demonstrateCustomAdapter() {
     },
   });
 
-  // Create a session
-  const session = createSession();
+  // Session is automatically managed by the agent
+  console.log("✨ Session ready:", agent.session.id);
 
   // First interaction
   console.log("\n💬 First interaction:");
+  
+  await agent.session.addMessage("user", "Hi, I need help booking a flight", "Alice");
+  
   const response1 = await agent.respond({
-    history: [
-      {
-        role: "user" as const,
-        content: "Hi, I need help booking a flight",
-        name: "Alice",
-      },
-    ],
-    session,
+    history: agent.session.getHistory(),
   });
 
   console.log(`Agent: ${response1.message}`);
-  console.log(`Session ID: ${response1.session?.id}`);
+  console.log(`Session ID: ${agent.session.id}`);
+
+  await agent.session.addMessage("assistant", response1.message);
 
   // Second interaction
   console.log("\n💬 Second interaction:");
+  
+  await agent.session.addMessage("user", "I want to fly to Paris next week", "Alice");
+  
   const response2 = await agent.respond({
-    history: [
-      {
-        role: "user" as const,
-        content: "I want to fly to Paris next week",
-        name: "Alice",
-      },
-    ],
-    session: response1.session,
+    history: agent.session.getHistory(),
   });
 
   console.log(`Agent: ${response2.message}`);
