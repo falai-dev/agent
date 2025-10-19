@@ -3,17 +3,12 @@
  * Support for optional database persistence (Prisma, etc.)
  */
 
-import type { Event } from "./history";
+import type { Event, MessageRole } from "./history";
 
 /**
  * Session status enum
  */
 export type SessionStatus = "active" | "completed" | "abandoned";
-
-/**
- * Message role enum
- */
-export type MessageRole = "user" | "agent" | "system";
 
 /**
  * Base session data structure

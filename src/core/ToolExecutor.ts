@@ -12,7 +12,7 @@ export interface ToolExecutionResult {
   success: boolean;
   data?: unknown;
   contextUpdate?: Record<string, unknown>;
-  collectedUpdate?: Record<string, unknown>;
+  dataUpdate?: Record<string, unknown>;
   error?: string;
 }
 
@@ -59,7 +59,7 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
         success: true,
         data: result.data,
         contextUpdate: result.contextUpdate,
-        collectedUpdate: result.collectedUpdate,
+        dataUpdate: result.dataUpdate,
       };
     } catch (error) {
       return {

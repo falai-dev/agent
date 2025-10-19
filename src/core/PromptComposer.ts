@@ -187,6 +187,28 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     return Promise.resolve(this);
   }
 
+  async addAvailableTools(
+    tools?: Array<{
+      id: string;
+      name?: string;
+      description?: string;
+      parameters?: unknown;
+    }>
+  ): Promise<this> {
+    if (!tools?.length) return this;
+
+    const renderedTools = tools.map((tool, i) => {
+      const toolName = tool.name || tool.id;
+      const desc = tool.description
+        ? `\n    Description: ${tool.description}`
+        : "";
+      return `### Tool ${i + 1}: ${toolName}${desc}`;
+    });
+
+    this.parts.push(`## Available Tools\n\n${renderedTools.join("\n\n")}`);
+    return Promise.resolve(this);
+  }
+
   async build(): Promise<string> {
     const prompt = this.parts.filter(Boolean).join("\n\n").trim();
     return Promise.resolve(prompt);

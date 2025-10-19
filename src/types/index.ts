@@ -23,8 +23,12 @@ export type {
   Participant,
   ToolResult as EventToolResult,
   ToolCall,
+  HistoryMessage,
+  Role,
+  HistoryItem,
+  History,
 } from "./history";
-export { EventKind, EventSource } from "./history";
+export { EventKind, MessageRole } from "./history";
 
 // Route types
 export type {
@@ -33,6 +37,8 @@ export type {
   StepRef,
   StepOptions,
   StepResult,
+  BranchSpec,
+  BranchResult,
   RouteCompletionHandler,
   RouteTransitionConfig,
   RouteLifecycleHooks,
@@ -65,7 +71,6 @@ export type {
   SessionData,
   MessageData,
   SessionStatus,
-  MessageRole,
   SessionRepository,
   MessageRepository,
   PersistenceAdapter,

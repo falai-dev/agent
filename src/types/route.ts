@@ -192,10 +192,16 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
   prompt?: Template<TContext, TData>;
   /** Tools available for AI to call in this step (by ID reference or inline definition) */
   tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
-  /** Programmatic function to run before AI responds */
-  prepare?: (context: TContext, data?: Partial<TData>) => void | Promise<void>;
-  /** Programmatic function to run after AI responds */
-  finalize?: (context: TContext, data?: Partial<TData>) => void | Promise<void>;
+  /** Programmatic function or tool to run before AI responds */
+  prepare?:
+    | string
+    | Tool<TContext, unknown[], unknown, TData>
+    | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
+  /** Programmatic function or tool to run after AI responds */
+  finalize?:
+    | string
+    | Tool<TContext, unknown[], unknown, TData>
+    | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
   /** Transition to a specific step or end marker */
   step?: StepRef | symbol;
   /**
@@ -224,11 +230,35 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
 }
 
 /**
+ * Specification for a branch in the conversation flow
+ */
+export interface BranchSpec<TContext = unknown, TData = unknown> {
+  /** User-friendly identifier for this branch (used as object key) */
+  name: string;
+  /** Optional ID for this branch (auto-generated if not provided) */
+  id?: string;
+  /** Step configuration for this branch */
+  step: StepOptions<TContext, TData>;
+}
+
+/**
+ * Result of a branch operation
+ * Maps branch names to their respective step results for continued chaining
+ */
+export interface BranchResult<TContext = unknown, TData = unknown> {
+  [branchName: string]: StepResult<TContext, TData>;
+}
+
+/**
  * Result of a transition operation
- * Combines step reference with the ability to chain transitions
+ * Combines step reference with the ability to chain transitions and create branches
  */
 export interface StepResult<TContext = unknown, TData = unknown>
   extends StepRef {
   /** Allow chaining transitions */
   nextStep: (spec: StepOptions<TContext, TData>) => StepResult<TContext, TData>;
+  /** Create multiple branches from this step */
+  branch: (
+    branches: BranchSpec<TContext, TData>[]
+  ) => BranchResult<TContext, TData>;
 }

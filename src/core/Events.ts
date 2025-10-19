@@ -7,9 +7,58 @@ import type {
   EmittedEvent,
   MessageEventData,
   ToolEventData,
-  ToolCall,
+  HistoryMessage,
+  MessageData,
+  HistoryItem,
+  History,
 } from "../types";
-import { EventKind, EventSource } from "../types";
+import { EventKind, MessageRole } from "../types";
+
+/**
+ * Convert a simple JSON history message to an internal Event
+ */
+export function convertHistoryMessage<TData = unknown>(
+  message: HistoryMessage<TData>
+): Event<MessageEventData> {
+  return {
+    kind: EventKind.MESSAGE,
+    source: message.role,
+    data: {
+      participant: {
+        display_name: message.name || getDefaultName(message.role),
+      },
+      message: message.content,
+      session: message.session,
+    },
+    timestamp: message.timestamp || new Date().toISOString(),
+    id: message.metadata?.id as string,
+  };
+}
+
+/**
+ * Get default participant name for a role
+ */
+function getDefaultName(role: MessageRole): string {
+  switch (role) {
+    case MessageRole.USER:
+      return "User";
+    case MessageRole.ASSISTANT:
+      return "Assistant";
+    case MessageRole.SYSTEM:
+      return "System";
+    default:
+      return "Unknown";
+  }
+}
+
+/**
+ * Convert an array of history messages to Events
+ */
+export function convertHistoryToEvents<TData = unknown>(
+  history: HistoryMessage<TData>[]
+): Event[] {
+  return history.map(convertHistoryMessage);
+}
 
 /**
  * Adapt an event for inclusion in prompts
@@ -48,13 +97,11 @@ export function adaptEvent(e: Event | EmittedEvent): string {
     };
   }
 
-  const sourceMap: Record<EventSource, string> = {
-    [EventSource.CUSTOMER]: "user",
-    [EventSource.CUSTOMER_UI]: "frontend_application",
-    [EventSource.HUMAN_AGENT]: "human_service_agent",
-    [EventSource.HUMAN_AGENT_ON_BEHALF_OF_AI_AGENT]: "ai_agent",
-    [EventSource.AI_AGENT]: "ai_agent",
-    [EventSource.SYSTEM]: "system-provided",
+  const sourceMap: Record<MessageRole, string> = {
+    [MessageRole.USER]: "user",
+    [MessageRole.ASSISTANT]: "assistant",
+    [MessageRole.AGENT]: "agent",
+    [MessageRole.SYSTEM]: "system",
   };
 
   return JSON.stringify({
@@ -65,112 +112,53 @@ export function adaptEvent(e: Event | EmittedEvent): string {
 }
 
 /**
- * Create a message event
+ * Convert MessageData to HistoryItem
  */
-export function createMessageEvent(
-  source: EventSource,
-  participantName: string,
-  message: string,
-  options?: {
-    timestamp?: string;
-    session?: {
-      routeId?: string;
-      routeTitle?: string;
-      stepId?: string;
-      stepDescription?: string;
-      data?: Record<string, unknown>;
-    };
-  }
-): Event<MessageEventData>;
-export function createMessageEvent(options: {
-  source: EventSource;
-  participantName: string;
-  message: string;
-  timestamp?: string;
-  session?: {
-    routeId?: string;
-    routeTitle?: string;
-    stepId?: string;
-    stepDescription?: string;
-    data?: Record<string, unknown>;
-  };
-}): Event<MessageEventData>;
-export function createMessageEvent(
-  sourceOrOptions:
-    | EventSource
-    | {
-        source: EventSource;
-        participantName: string;
-        message: string;
-        timestamp?: string;
-        session?: {
-          routeId?: string;
-          routeTitle?: string;
-          stepId?: string;
-          stepDescription?: string;
-          data?: Record<string, unknown>;
-        };
-      },
-  participantName?: string,
-  message?: string,
-  options?: {
-    timestamp?: string;
-    session?: {
-      routeId?: string;
-      routeTitle?: string;
-      stepId?: string;
-      stepDescription?: string;
-      data?: Record<string, unknown>;
-    };
-  }
-): Event<MessageEventData> {
-  if (typeof sourceOrOptions === "object") {
-    // New signature: createMessageEvent(options)
-    const {
-      source,
-      participantName: pName,
-      message: msg,
-      ...restOptions
-    } = sourceOrOptions;
-    return {
-      kind: EventKind.MESSAGE,
-      source,
-      data: {
-        participant: { display_name: pName },
-        message: msg,
-        session: restOptions.session,
-      },
-      timestamp: restOptions.timestamp || new Date().toISOString(),
-    };
-  } else {
-    // Original signature: createMessageEvent(source, participantName, message, options)
-    return {
-      kind: EventKind.MESSAGE,
-      source: sourceOrOptions,
-      data: {
-        participant: { display_name: participantName! },
-        message: message!,
-        session: options?.session,
-      },
-      timestamp: options?.timestamp || new Date().toISOString(),
-    };
+export function convertMessageDataToHistoryItem(
+  message: MessageData
+): HistoryItem {
+  switch (message.role) {
+    case MessageRole.USER:
+      return {
+        role: "user",
+        content: message.content,
+      };
+    case MessageRole.ASSISTANT:
+      return {
+        role: "assistant",
+        content: message.content,
+        tool_calls: message.toolCalls?.map((tc, index) => ({
+          id: `call_${index}`, // Generate an ID since MessageData doesn't have tool call IDs
+          name: tc.toolName,
+          arguments: tc.arguments,
+        })),
+      };
+    case MessageRole.AGENT:
+      // Agent role typically represents tool execution results
+      // Since we don't have tool_call_id in MessageData, we'll use a placeholder
+      return {
+        role: "tool",
+        tool_call_id: "unknown", // MessageData doesn't store tool call IDs
+        name: "unknown_tool",
+        content: message.content,
+      };
+    case MessageRole.SYSTEM:
+      return {
+        role: "system",
+        content: message.content,
+      };
+    default:
+      // Fallback for unknown roles
+      return {
+        role: "system",
+        content: message.content,
+      };
   }
 }
 
 /**
- * Create a tool event
+ * Convert an array of MessageData to History (HistoryItem[])
  */
-export function createToolEvent(
-  source: EventSource,
-  toolCalls: ToolCall[],
-  timestamp?: string
-): Event<ToolEventData> {
-  return {
-    kind: EventKind.TOOL,
-    source,
-    data: {
-      tool_calls: toolCalls,
-    },
-    timestamp: timestamp || new Date().toISOString(),
-  };
+export function convertMessagesToHistory(messages: MessageData[]): History {
+  return messages.map(convertMessageDataToHistoryItem);
 }

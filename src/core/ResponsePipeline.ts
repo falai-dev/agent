@@ -9,7 +9,7 @@ import type {
   AgentStructuredResponse,
   Tool,
 } from "../types";
-import { EventKind, EventSource } from "../types/history";
+import { EventKind, MessageRole } from "../types/history";
 import {
   createSession,
   enterRoute,
@@ -63,7 +63,7 @@ export class ResponsePipeline<TContext = unknown> {
     ) => Promise<void>,
     private readonly updateData: (
       session: SessionState,
-      collectedUpdate: Partial<unknown>
+      dataUpdate: Partial<unknown>
     ) => Promise<SessionState>
   ) {}
 
@@ -308,16 +308,16 @@ export class ResponsePipeline<TContext = unknown> {
       }
 
       // Update collected data with tool results
-      if (result.collectedUpdate) {
+      if (result.dataUpdate) {
         updatedSession = await this.updateData(
           updatedSession,
-          result.collectedUpdate
+          result.dataUpdate
         );
         logger.debug(
           `[ResponseHandler] ${
             isStreaming ? "Streaming " : ""
           }Tool updated collected data:`,
-          result.collectedUpdate
+          result.dataUpdate
         );
       }
 
@@ -383,7 +383,7 @@ export class ResponsePipeline<TContext = unknown> {
         if (tool) {
           toolResultsEvents.push({
             kind: EventKind.TOOL,
-            source: EventSource.AI_AGENT,
+            source: MessageRole.AGENT,
             timestamp: new Date().toISOString(),
             data: {
               tool_calls: [
@@ -594,12 +594,16 @@ export class ResponsePipeline<TContext = unknown> {
   ): Tool<TContext, unknown[], unknown, unknown> | undefined {
     // Check route-level tools first (if route provided)
     if (route) {
-      const routeTool = route.getTools().find((tool) => tool.id === toolName);
+      const routeTool = route
+        .getTools()
+        .find((tool) => tool.id === toolName || tool.name === toolName);
       if (routeTool) return routeTool;
     }
 
     // Fall back to agent-level tools
-    return this.tools.find((tool) => tool.id === toolName);
+    return this.tools.find(
+      (tool) => tool.id === toolName || tool.name === toolName
+    );
   }
 
   /**

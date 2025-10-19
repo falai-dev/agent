@@ -6,6 +6,8 @@ import type {
   StepRef,
   StepOptions,
   StepResult,
+  BranchSpec,
+  BranchResult,
   Guideline,
   Tool,
 } from "../types";
@@ -28,14 +30,14 @@ export class Step<TContext = unknown, TData = unknown> {
   public skipIf?: (data: Partial<TData>) => boolean;
   public requires?: string[];
   public prompt?: Template<TContext, TData>;
-  public prepare?: (
-    context: TContext,
-    data?: Partial<TData>
-  ) => void | Promise<void>;
-  public finalize?: (
-    context: TContext,
-    data?: Partial<TData>
-  ) => void | Promise<void>;
+  public prepare?:
+    | string
+    | Tool<TContext, unknown[], unknown, TData>
+    | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
+  public finalize?:
+    | string
+    | Tool<TContext, unknown[], unknown, TData>
+    | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
   public tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
 
   constructor(routeId: string, options: StepOptions<TContext, TData> = {}) {
@@ -63,14 +65,14 @@ export class Step<TContext = unknown, TData = unknown> {
     skipIf?: (data: Partial<TData>) => boolean;
     requires?: string[];
     prompt?: Template<TContext, TData>;
-    prepare?: (
-      context: TContext,
-      data?: Partial<TData>
-    ) => void | Promise<void>;
-    finalize?: (
-      context: TContext,
-      data?: Partial<TData>
-    ) => void | Promise<void>;
+    prepare?:
+      | string
+      | Tool<TContext, unknown[], unknown, TData>
+      | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
+    finalize?:
+      | string
+      | Tool<TContext, unknown[], unknown, TData>
+      | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
     tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
   }): this {
     if (config.description !== undefined) {
@@ -98,6 +100,21 @@ export class Step<TContext = unknown, TData = unknown> {
       this.tools = config.tools;
     }
     return this;
+  }
+
+  /**
+   * Shortcut to end the current route
+   *
+   * @param options - Optional step options for the end step
+   * @returns Terminal step result
+   */
+  endRoute(
+    options: Omit<StepOptions<TContext, TData>, "step"> = {}
+  ): StepResult<TContext, TData> {
+    return this.nextStep({
+      ...options,
+      step: END_ROUTE,
+    });
   }
 
   /**
@@ -129,6 +146,38 @@ export class Step<TContext = unknown, TData = unknown> {
     this.nextSteps.push(targetStep);
 
     return this.createStepRefWithTransition(targetStep.getRef(), targetStep);
+  }
+
+  /**
+   * Create multiple branches from this step
+   *
+   * @param branches - Array of branch specifications
+   * @returns BranchResult mapping branch names to their step results
+   */
+  branch(
+    branches: BranchSpec<TContext, TData>[]
+  ): BranchResult<TContext, TData> {
+    const result = {} as BranchResult<TContext, TData>;
+
+    for (const branchSpec of branches) {
+      // Create step options with optional ID
+      const stepOptions: StepOptions<TContext, TData> = branchSpec.id
+        ? { ...branchSpec.step, id: branchSpec.id }
+        : branchSpec.step;
+
+      // Create a new step for this branch
+      const branchStep = new Step<TContext, TData>(this.routeId, stepOptions);
+      // Add it to our transitions
+      this.nextSteps.push(branchStep);
+      // Create a step result for chaining
+      const branchName: string = branchSpec.name;
+      result[branchName] = this.createStepRefWithTransition(
+        branchStep.getRef(),
+        branchStep
+      );
+    }
+
+    return result;
   }
 
   /**
@@ -191,6 +240,8 @@ export class Step<TContext = unknown, TData = unknown> {
       ...ref,
       nextStep: (spec: StepOptions<TContext, TData>) =>
         stepInstance.nextStep(spec),
+      branch: (branches: BranchSpec<TContext, TData>[]) =>
+        stepInstance.branch(branches),
     };
   }
 
@@ -208,6 +259,9 @@ export class Step<TContext = unknown, TData = unknown> {
       nextStep: () => {
         throw new Error("Cannot transition from END_ROUTE step");
       },
+      branch: () => {
+        throw new Error("Cannot branch from END_ROUTE step");
+      },
     };
   }
 
@@ -218,6 +272,8 @@ export class Step<TContext = unknown, TData = unknown> {
     return {
       ...this.getRef(),
       nextStep: (spec: StepOptions<TContext, TData>) => this.nextStep(spec),
+      branch: (branches: BranchSpec<TContext, TData>[]) =>
+        this.branch(branches),
     };
   }
 }

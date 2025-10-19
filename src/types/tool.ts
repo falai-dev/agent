@@ -35,7 +35,7 @@ export interface ToolResult<
   /** Optional context update to be merged with current context */
   contextUpdate?: Partial<TContext>;
   /** Optional collected data update to be merged with session step */
-  collectedUpdate?: Partial<TData>;
+  dataUpdate?: Partial<TData>;
   /** Optional metadata about the execution */
   meta?: Record<string, unknown>;
 }
@@ -66,6 +66,8 @@ export interface Tool<
 > {
   /** Tool identifier */
   id: string;
+  /** Tool display name (shown to AI models) */
+  name?: string;
   /** Tool handler function */
   handler: ToolHandler<TContext, TArgs, TResult, TData>;
   /** Description of what the tool does (for AI discovery) */

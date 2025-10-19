@@ -264,7 +264,7 @@ export class AnthropicProvider implements AiProvider {
       // Add tools if provided
       if (input.tools && input.tools.length > 0) {
         params.tools = input.tools.map((tool) => ({
-          name: tool.id,
+          name: tool.name || tool.id,
           description: tool.description || "",
           input_schema: tool.parameters as Tool["input_schema"], // JSON schema
         }));
@@ -455,7 +455,7 @@ export class AnthropicProvider implements AiProvider {
     // Add tools if provided
     if (input.tools && input.tools.length > 0) {
       params.tools = input.tools.map((tool) => ({
-        name: tool.id,
+        name: tool.name || tool.id,
         description: tool.description || "",
         input_schema: tool.parameters as Tool["input_schema"], // JSON schema
       }));

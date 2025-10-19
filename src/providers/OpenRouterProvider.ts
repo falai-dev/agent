@@ -294,7 +294,7 @@ export class OpenRouterProvider implements AiProvider {
         params.tools = input.tools.map((tool) => ({
           type: "function" as const,
           function: {
-            name: tool.id,
+            name: tool.name || tool.id,
             description: tool.description,
             parameters: tool.parameters as FunctionParameters, // JSON schema
           },
@@ -493,7 +493,7 @@ export class OpenRouterProvider implements AiProvider {
       params.tools = input.tools.map((tool) => ({
         type: "function" as const,
         function: {
-          name: tool.id,
+          name: tool.name || tool.id,
           description: tool.description,
           parameters: tool.parameters as FunctionParameters, // JSON schema
         },

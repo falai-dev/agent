@@ -9,7 +9,7 @@ export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
 export { Step } from "./core/Step";
 export { DomainRegistry } from "./core/DomainRegistry";
-export { adaptEvent, createMessageEvent, createToolEvent } from "./core/Events";
+export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
 export { ToolExecutor } from "./core/ToolExecutor";
 export type { ToolExecutionResult } from "./core/ToolExecutor";
@@ -65,6 +65,13 @@ export { END_ROUTE, END_ROUTE_ID } from "./constants";
 // Utils
 export { generateRouteId, generateStepId, generateToolId } from "./utils/id";
 export { formatKnowledgeBase } from "./utils/template";
+export {
+  normalizeHistory,
+  userMessage,
+  assistantMessage,
+  toolMessage,
+  systemMessage,
+} from "./utils/history";
 
 // Types
 export type {
@@ -102,12 +109,14 @@ export type {
   SessionData,
   MessageData,
   SessionStatus,
-  MessageRole,
   SessionRepository,
   MessageRepository,
   PersistenceConfig,
   CreateSessionOptions,
   SaveMessageOptions,
+  Role,
+  HistoryItem,
+  History,
 } from "./types";
-export { CompositionMode, EventKind, EventSource } from "./types";
+export { CompositionMode, EventKind, MessageRole } from "./types";
 export { createSession, enterRoute, enterStep, mergeCollected } from "./utils";

@@ -349,7 +349,7 @@ export class GeminiProvider implements AiProvider {
         configOverride.tools = [
           {
             functionDeclarations: input.tools.map((tool) => ({
-              name: tool.id,
+              name: tool.name || tool.id,
               description: tool.description || "",
               parameters: tool.parameters as FunctionDeclaration["parameters"], // JSON schema
             })),
@@ -512,7 +512,7 @@ export class GeminiProvider implements AiProvider {
       configOverride.tools = [
         {
           functionDeclarations: input.tools.map((tool) => ({
-            name: tool.id,
+            name: tool.name || tool.id,
             description: tool.description || "",
             parameters: tool.parameters as FunctionDeclaration["parameters"],
           })),

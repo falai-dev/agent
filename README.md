@@ -97,9 +97,9 @@ After building production AI applications, we found existing solutions either:
 
 ### 🔧 **Tools & Data Integration**
 
-- **Data-Aware Tools** - Tools access collected data directly via `data` context
-- **Enrichment Hooks** - Tools can modify collected data with `dataUpdate`
-- **Action Flags** - Tools set flags for conditional execution
+- **Advanced Tool System** - Context-aware tools with data access and lifecycle integration
+- **Dynamic Tool Calling** - AI can call tools during streaming responses
+- **Tool Result Processing** - Tools update context and collected data automatically
 
 </td>
 </tr>
@@ -119,6 +119,28 @@ After building production AI applications, we found existing solutions either:
 
 - **Always-On Routing** - Users can change their mind mid-conversation
 - **Context Awareness** - Router sees current progress and collected data
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🚀 **Advanced Features**
+
+- **Streaming Responses** - Real-time response generation with tool execution
+- **Lifecycle Hooks** - `prepare`/`finalize` functions or tools on steps, context/data update hooks
+- **Sequential Steps** - Define linear conversation flows with `steps` array
+- **Route Transitions** - Automatic flow transitions when routes complete
+- **Smart Step Control** - `skipIf` and `requires` for data-driven flow control
+
+</td>
+<td width="50%">
+
+### 🎨 **Behavioral Control**
+
+- **Guidelines & Rules** - Define agent behavior patterns and restrictions
+- **Route-Specific Logic** - Different rules for different conversation contexts
+- **Knowledge Base** - Structured information available to AI during responses
 - **Session Step** - Track conversation progress across turns
 
 </td>
@@ -151,7 +173,12 @@ yarn add @falai/agent
 Create a minimal conversational agent:
 
 ```typescript
-import { Agent, GeminiProvider } from "@falai/agent";
+import {
+  Agent,
+  GeminiProvider,
+  createMessageEvent,
+  EventSource,
+} from "@falai/agent";
 
 // Create your agent
 const agent = new Agent({
@@ -163,25 +190,85 @@ const agent = new Agent({
   }),
 });
 
-// Create a simple route
+// Create a simple route with sequential steps
 agent.createRoute({
   title: "General Help",
   description: "Answers user questions",
   conditions: ["User needs help or asks a question"],
-  initialStep: {
-    prompt: "Answer the user's question helpfully",
-  },
+  steps: [
+    {
+      id: "answer_question",
+      description: "Answer the user's question helpfully",
+      prompt: "Answer the user's question helpfully",
+    },
+  ],
 });
 
 // Start chatting
 const response = await agent.respond({
-  history: [{ source: "customer", name: "Alice", content: "What can you do?" }],
+  history: [
+    createMessageEvent(EventSource.CUSTOMER, "Alice", "What can you do?"),
+  ],
 });
 
 console.log(response.message);
 ```
 
 **That's it!** You now have a working conversational AI agent.
+
+---
+
+## 🔧 Advanced Step Configuration
+
+### Using Tools as Prepare/Finalize Hooks
+
+Steps can use tools for `prepare` and `finalize` lifecycle hooks, enabling powerful data processing and side effects:
+
+```typescript
+// Define a preparation tool
+const validateUser = {
+  id: "validate_user",
+  description: "Validate user data before processing",
+  parameters: { type: "object", properties: {} },
+  handler: ({ context, data }) => {
+    // Validation logic
+    if (!data.email?.includes("@")) {
+      throw new Error("Invalid email address");
+    }
+    return { data: "User validated" };
+  },
+};
+
+// Use tools in step lifecycle
+agent.createRoute({
+  title: "User Registration",
+  schema: {
+    /* ... */
+  },
+  steps: [
+    {
+      id: "collect_info",
+      description: "Collect user information",
+      collect: ["name", "email"],
+      prompt: "Please provide your name and email.",
+      finalize: validateUser, // Tool validates data after collection
+    },
+    {
+      id: "send_welcome",
+      description: "Send welcome email",
+      prompt: "Welcome! Check your email for confirmation.",
+      prepare: "send_welcome_email", // Tool ID string - sends email before AI responds
+    },
+  ],
+});
+```
+
+**Benefits:**
+
+- ✅ **Reusable Logic** - Tools can be shared across steps and routes
+- ✅ **Error Handling** - Tool execution includes automatic error handling
+- ✅ **Context Access** - Tools receive full context and collected data
+- ✅ **Data Updates** - Tools can modify collected data or agent context
 
 ---
 
@@ -193,11 +280,9 @@ Now let's build an agent that intelligently collects structured data:
 import {
   Agent,
   OpenAIProvider,
-  defineTool,
   createMessageEvent,
   EventSource,
-  END_ROUTE,
-  type ToolContext,
+  type Tool,
 } from "@falai/agent";
 
 // 1️⃣ Define the data you want to collect
@@ -213,21 +298,23 @@ const agent = new Agent({
   description: "A hotel booking assistant that collects information.",
   provider: new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY,
-    model: "gpt-5", // or your preferred model
+    model: "gpt-4", // or your preferred model
   }),
 });
 
 // 3️⃣ Define a tool that uses the collected data
-const bookHotel = defineTool(
-  "book_hotel",
-  async ({ data }: ToolContext<{}, HotelBookingData>) => {
+const bookHotel: Tool<unknown, [], string, HotelBookingData> = {
+  id: "book_hotel",
+  description: "Books a hotel once all information is collected.",
+  parameters: { type: "object", properties: {} },
+  handler: ({ data }) => {
+    const bookingData = data as Partial<HotelBookingData>;
     // Logic to book the hotel...
     return {
-      data: `Booking confirmed for ${data?.guests} at ${data?.hotelName} on ${data?.date}!`,
+      data: `Booking confirmed for ${bookingData.guests} guests at ${bookingData.hotelName} on ${bookingData.date}!`,
     };
   },
-  { description: "Books a hotel once all information is collected." }
-);
+};
 
 const schema = {
   type: "object",
@@ -239,47 +326,48 @@ const schema = {
   required: ["hotelName", "date", "guests"],
 };
 
-// 4️⃣ Create a data-driven route
-const bookingRoute = agent.createRoute<HotelBookingData>({
+// 4️⃣ Create a data-driven route with sequential steps
+agent.createRoute<HotelBookingData>({
   title: "Book Hotel",
   description: "Guides the user through the hotel booking process.",
   conditions: ["User wants to book a hotel"],
   schema,
-  endStep: {
-    prompt: "Confirm the booking details warmly and thank the user",
-  },
+  // 5️⃣ Define the flow to collect data step-by-step
+  steps: [
+    {
+      id: "ask_hotel",
+      description: "Ask which hotel they want to book",
+      prompt: "Which hotel would you like to book?",
+      collect: ["hotelName"],
+      skipIf: (data: Partial<HotelBookingData>) => !!data.hotelName,
+    },
+    {
+      id: "ask_date",
+      description: "Ask for the booking date",
+      prompt: "What date would you like to book for?",
+      collect: ["date"],
+      requires: ["hotelName"],
+      skipIf: (data: Partial<HotelBookingData>) => !!data.date,
+    },
+    {
+      id: "ask_guests",
+      description: "Ask for the number of guests",
+      prompt: "How many guests will be staying?",
+      collect: ["guests"],
+      requires: ["hotelName", "date"],
+      skipIf: (data: Partial<HotelBookingData>) => data.guests !== undefined,
+    },
+    {
+      id: "confirm_booking",
+      description: "Confirm and book the hotel",
+      prompt: "Let me confirm your booking details.",
+      tools: [bookHotel],
+      requires: ["hotelName", "date", "guests"],
+    },
+  ],
 });
 
-// 5️⃣ Build the flow to collect data step-by-step
-const askHotel = bookingRoute.initialStep.nextStep({
-  prompt: "Ask which hotel they want to book",
-  collect: ["hotelName"],
-  skipIf: (data) => !!data.hotelName, // Skip if we already have it
-});
-
-const askDate = askHotel.nextStep({
-  prompt: "Ask for the booking date",
-  collect: ["date"],
-  skipIf: (data) => !!data.date,
-});
-
-const askGuests = askDate.nextStep({
-  prompt: "Ask for the number of guests",
-  collect: ["guests"],
-  skipIf: (data) => !!data.guests,
-});
-
-const confirmBooking = askGuests.nextStep({
-  tool: bookHotel,
-  condition:
-    "All required information (hotel, date, guests) has been collected.",
-});
-
-confirmBooking.nextStep({
-  step: END_ROUTE, // End the conversation flow
-});
-
-// 6️⃣ Start conversing
+// 5️⃣ Start conversing
 const response = await agent.respond({
   history: [
     createMessageEvent(
@@ -293,7 +381,7 @@ const response = await agent.respond({
 // The agent sees that `hotelName` and `guests` are provided,
 // skips the first and third steps, and only asks for the date.
 console.log(response.message);
-// Expected: "Sure, for what date would you like to book at the Grand Hotel?"
+// Expected: "What date would you like to book for?"
 ```
 
 **That's it!** The data-driven agent will:
@@ -306,15 +394,20 @@ console.log(response.message);
 
 This creates a flexible and natural conversation, guided by a clear data structure.
 
-📖 **[See more examples →](./docs/EXAMPLES.md)** | **[Full tutorial →](./docs/GETTING_STARTED.md)**
+📖 **[See more examples →](./examples/)** | **[Full tutorial →](./docs/guides/getting-started/README.md)**
 
 ### ⚡ Advanced Features
 
 **Streaming responses** for real-time UX:
 
 ```typescript
-for await (const chunk of agent.respondStream({ history })) {
+for await (const chunk of agent.respondStream({
+  history: [createMessageEvent(EventSource.CUSTOMER, "Alice", "Hello")],
+})) {
   process.stdout.write(chunk.delta);
+  if (chunk.done) {
+    console.log("\nTool calls:", chunk.toolCalls);
+  }
 }
 ```
 
@@ -341,104 +434,172 @@ const agent = new Agent({
 
 ## 📚 Documentation
 
-📋 **[Complete Documentation Index →](docs/DOCS.md)** - Searchable index of all docs
+📋 **[Complete Documentation Index →](docs/README.md)** - Searchable index of all docs
 
-**Core Guides:**
+### 🚀 Getting Started
 
-- 📘 **[Getting Started](./docs/GETTING_STARTED.md)** - Build your first agent in 5 minutes
-- 🏗️ **[Architecture](./docs/ARCHITECTURE.md)** - Design principles & philosophy
-- 🔧 **[API Reference](./docs/API_REFERENCE.md)** - Complete API documentation
-- 📝 **[Examples](./docs/EXAMPLES.md)** - Production-ready code examples
+- **[Quick Start Guide](./docs/guides/getting-started/README.md)** - Build your first agent in 15 minutes
 
-**Feature Guides:**
+### 🏗️ Core Framework
 
-- 🛤️ **[Routes](./docs/ROUTES.md)** - Creating conversational routes & flows
-- 🔄 **[Steps](./docs/STEPS.md)** - Managing steps & transitions
-- 💾 **[Persistence](./docs/PERSISTENCE.md)** - Database integration with adapters
-- 🔒 **[Domains](./docs/DOMAINS.md)** - Optional tool security & organization
-- 🎛️ **[Agent](./docs/AGENT.md)** - Configuration patterns
-- 📊 **[Context Management](./docs/CONTEXT_MANAGEMENT.md)** - Session step & lifecycle hooks
-- 🤖 **[AI Providers](./docs/PROVIDERS.md)** - Anthropic, OpenAI, Gemini, OpenRouter
+- **[Agent Orchestration](./docs/core/agent/README.md)** - Agent lifecycle, configuration & hooks
+- **[Context Management](./docs/core/agent/context-management.md)** - Dynamic context providers & updates
+- **[Session Management](./docs/core/agent/session-management.md)** - Session persistence & state
+
+### 💬 Conversation Flows
+
+- **[Routes](./docs/core/conversation-flows/routes.md)** - Route definition & lifecycle
+- **[Steps](./docs/core/conversation-flows/steps.md)** - Step transitions & logic
+
+### 🤖 AI Integration
+
+- **[AI Providers](./docs/core/ai-integration/providers.md)** - Gemini, OpenAI, Anthropic, OpenRouter
+- **[Prompt Composition](./docs/core/ai-integration/prompt-composition/)** - How prompts are built
+- **[Response Processing](./docs/core/ai-integration/response-processing/)** - Schema extraction & tool calls
+
+### 🔧 Tools & Data
+
+- **[Tool Definition](./docs/core/tools/tool-definition.md)** - Creating and configuring tools
+- **[Tool Execution](./docs/core/tools/tool-execution.md)** - Dynamic tool calling and context updates
+- **[Tool Scoping](./docs/core/tools/tool-scoping.md)** - Agent, route, and step-level tool management
+
+### 💾 Persistence
+
+- **[Session Storage](./docs/core/persistence/session-storage.md)** - Session persistence patterns
+- **[Database Adapters](./docs/core/persistence/adapters.md)** - Built-in adapter configurations
+
+### 🚀 Advanced Guides
+
+- **[Building Agents](./docs/guides/building-agents/)** - Complete agent construction patterns
+- **[Advanced Patterns](./docs/guides/advanced-patterns/)** - Complex use cases & integrations
+- **[API Reference](./docs/api/overview.md)** - Complete API documentation
 
 ---
 
-## 🎯 Examples - Pick Your Use Case
+## 🎯 Examples - By Domain
 
-### 🤖 Conversational Flows
+### 🏗️ Core Concepts
 
-Build intelligent data-collecting conversations:
+Fundamental patterns every agent needs:
 
-- 🏢 **[Business Onboarding](./examples/business-onboarding.ts)** - Multi-step company setup with conditional branching
-- ✈️ **[Travel Agent](./examples/travel-agent.ts)** - Flight & hotel booking with session step
-- 🏥 **[Healthcare Assistant](./examples/healthcare-agent.ts)** - Appointment scheduling & lab result delivery
+- **[Basic Agent](./examples/core-concepts/basic-agent.ts)** - Minimal agent setup and configuration
+- **[Schema-Driven Extraction](./examples/core-concepts/schema-driven-extraction.ts)** - Type-safe data collection with JSON Schema
+- **[Session Management](./examples/core-concepts/session-management.ts)** - Multi-turn conversations with persistence
+- **[Context Providers](./examples/core-concepts/context-providers.ts)** - Dynamic context fetching and updates
 
-### 🏢 Production Patterns
+### 💬 Conversation Flows
 
-Enterprise-ready features:
+Building intelligent dialogue systems:
 
-- 💾 **[Prisma Persistence](./examples/prisma-persistence.ts)** - Auto-save sessions with Prisma ORM
-- ⚡ **[Redis Persistence](./examples/redis-persistence.ts)** - High-performance in-memory sessions
-- 🔐 **[Domain Scoping](./examples/domain-scoping.ts)** - Tool security & access control
+- **[Simple Route](./examples/conversation-flows/simple-route.ts)** - Basic route with linear step progression
+- **[Data-Driven Flows](./examples/conversation-flows/data-driven-flows.ts)** - Conditional logic with skipIf and requires
+- **[Conditional Branching](./examples/conversation-flows/conditional-branching.ts)** - AI-powered branching decisions
+- **[Completion Transitions](./examples/conversation-flows/completion-transitions.ts)** - Route transitions when flows complete
 
-### ⚡ Advanced Techniques
+### 🤖 AI Providers
 
-Power-user features:
+Integrating different AI services:
 
-- 📋 **[Declarative Agent](./examples/declarative-agent.ts)** - Full constructor-based configuration
-- ⚡ **[Streaming Responses](./examples/streaming-agent.ts)** - Real-time response streaming
-- 📜 **[Rules & Prohibitions](./examples/rules-prohibitions.ts)** - Fine-grained behavior control
+- **[Gemini Integration](./examples/ai-providers/gemini-integration.ts)** - Google Gemini with advanced features
+- **[OpenAI Integration](./examples/ai-providers/openai-integration.ts)** - GPT-4 and GPT-3.5 Turbo
+- **[Anthropic Integration](./examples/ai-providers/anthropic-integration.ts)** - Claude with streaming and tool calling
+- **[Custom Provider](./examples/ai-providers/custom-provider.ts)** - Build your own AI provider integration
 
-📖 **[See all examples with detailed explanations →](./docs/EXAMPLES.md)**
+### 💾 Persistence
+
+Session storage and data persistence:
+
+- **[Memory Sessions](./examples/persistence/memory-sessions.ts)** - In-memory session management
+- **[Redis Persistence](./examples/persistence/redis-persistence.ts)** - High-performance Redis storage
+- **[Database Persistence](./examples/persistence/database-persistence.ts)** - SQL/NoSQL database integration
+- **[Custom Adapter](./examples/persistence/custom-adapter.ts)** - Build custom persistence adapters
+
+### 🔧 Tools
+
+Tool creation and data manipulation:
+
+- **[Basic Tools](./examples/tools/basic-tools.ts)** - Simple tool creation and execution
+- **[Data Enrichment Tools](./examples/tools/data-enrichment-tools.ts)** - Tools that modify collected data
+- **[Context Updating Tools](./examples/tools/context-updating-tools.ts)** - Tools that modify agent context
+- **[Domain Scoped Tools](./examples/tools/domain-scoped-tools.ts)** - Tool security and access control
+
+### 🚀 Advanced Patterns
+
+Complex use cases and integrations:
+
+- **[Multi-Turn Conversations](./examples/advanced-patterns/multi-turn-conversations.ts)** - Complex dialogue flows with backtracking
+- **[Streaming Responses](./examples/advanced-patterns/streaming-responses.ts)** - Real-time response streaming
+- **[Route Lifecycle Hooks](./examples/advanced-patterns/route-lifecycle-hooks.ts)** - Custom route behavior
+- **[Custom Response Schemas](./examples/advanced-patterns/custom-response-schemas.ts)** - Advanced schema patterns
+
+### 🔗 Integrations
+
+External service integrations:
+
+- **[Server Deployment](./examples/integrations/server-deployment.ts)** - HTTP API with WebSocket streaming
+- **[Database Integration](./examples/integrations/database-integration.ts)** - Direct database access patterns
+- **[Webhook Integration](./examples/integrations/webhook-integration.ts)** - HTTP webhook handling
+- **[API Integration](./examples/integrations/api-integration.ts)** - External API calls and responses
+
+📖 **[See all examples with detailed explanations →](./examples/)**
 
 ---
 
 ## 🏗️ How It Works
 
-`@falai/agent` uses a **schema-first, step machine-driven architecture**:
+`@falai/agent` uses a **schema-first, pipeline-driven architecture** with sophisticated data extraction and lifecycle management:
 
 ```
-User Message
+User Message + Session State
     ↓
 ┌─────────────────────────────────────────┐
-│ 1. PREPARATION (Tools)                  │
-│    • Execute tools for current step    │
-│    • Update context with results        │
-│    • Enrich collected data              │
+│ 1. RESPONSE PIPELINE                    │
+│    • Prepare context & session          │
+│    • Handle pending transitions         │
+│    • Execute step prepare() functions   │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 2. ROUTING (AI-Driven)                  │
-│    • Evaluate all routes                │
-│    • Consider session context           │
-│    • Select best route (0-100 score)    │
+│ 2. ROUTING + STEP SELECTION            │
+│    • Evaluate routes (AI scoring)       │
+│    • Filter steps (skipIf, requires)    │
+│    • Select best route & step           │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 3. STEP SELECTION (Code + AI)          │
-│    • Filter steps with skipIf (code)   │
-│    • AI picks best from valid steps    │
-│    • Update session step               │
-└─────────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────────┐
-│ 4. RESPONSE (AI + Schema)               │
+│ 3. RESPONSE GENERATION                 │
+│    • Build prompt with context/schema   │
+│    • Stream or generate AI response     │
 │    • Extract data via JSON Schema       │
-│    • Generate natural message           │
-│    • Update session with new data       │
+│    • Execute dynamic tools (streaming)  │
 └─────────────────────────────────────────┘
     ↓
-Response with Structured Data
+┌─────────────────────────────────────────┐
+│ 4. POST-PROCESSING                     │
+│    • Run finalize() functions           │
+│    • Update context/data (lifecycle)    │
+│    • Auto-save session                  │
+│    • Handle route completion/transitions│
+└─────────────────────────────────────────┘
+    ↓
+Response + Updated Session State
 ```
 
 ### Key Principles:
 
-✅ **AI decides:** Route selection, step selection (from valid options), message generation, data extraction
-✅ **Code decides:** Tool execution, step filtering (`skipIf`), data validation, flow control
+✅ **AI decides:** Route selection, message generation, data extraction, tool calling
+✅ **Code decides:** Step flow control (`skipIf`/`requires`), tool execution, lifecycle hooks, data validation
 ✅ **Result:** Predictable, testable agents with natural conversations
 
-**This architecture delivers 1-2 LLM calls per turn** (vs 3-5 in traditional approaches) while maintaining complete type safety.
+### New Features:
 
-📖 **[Read the full architecture guide →](./docs/ARCHITECTURE.md)**
+🚀 **Streaming Support**: Real-time response generation with tool execution
+🔄 **Lifecycle Hooks**: `prepare`/`finalize` functions or tools, context/data update hooks
+📊 **Data-Driven Flows**: Smart step skipping, prerequisite checking, schema validation
+🛠️ **Advanced Tools**: Context-aware tools with data access and lifecycle integration
+💾 **Session Management**: Automatic persistence, state restoration, route transitions
+
+📖 **[Read the architecture docs →](./docs/core/agent/README.md)**
 
 ---
 
@@ -469,8 +630,8 @@ MIT © 2025
 
 **Choose your path:**
 
-👶 **New to AI agents?** → [5-minute tutorial](./docs/GETTING_STARTED.md)
-🏗️ **Building production app?** → [Architecture guide](./docs/ARCHITECTURE.md)
+👶 **New to AI agents?** → [Quick Start Guide](./docs/guides/getting-started/README.md)
+🏗️ **Building production app?** → [Agent Architecture](./docs/core/agent/README.md)
 💡 **Have questions?** → [Open a discussion](https://github.com/falai-dev/agent/discussions)
 
 ---

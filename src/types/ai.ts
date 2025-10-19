@@ -42,6 +42,7 @@ export interface GenerateMessageInput<TContext = unknown> {
   /** Tools available for AI to call during this interaction */
   tools?: Array<{
     id: string;
+    name?: string;
     description?: string;
     parameters?: unknown;
   }>;

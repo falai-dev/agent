@@ -13,8 +13,9 @@ import type {
   AgentStructuredResponse,
   Template,
   StepRef,
+  History,
 } from "../types";
-import { EventKind, EventSource } from "../types/history";
+import { EventKind, MessageRole } from "../types/history";
 import {
   createSession,
   enterRoute,
@@ -24,6 +25,7 @@ import {
   LoggerLevel,
   render,
   getLastMessageFromHistory,
+  normalizeHistory,
 } from "../utils";
 
 import { Route } from "./Route";
@@ -249,14 +251,14 @@ export class Agent<TContext = unknown> {
    */
   private async updateData<TData = unknown>(
     session: SessionState<TData>,
-    collectedUpdate: Partial<TData>
+    dataUpdate: Partial<TData>
   ): Promise<SessionState<TData>> {
     const previousCollected = { ...session.data };
 
     // Merge new collected data
     let newCollected = {
       ...session.data,
-      ...collectedUpdate,
+      ...dataUpdate,
     };
 
     // Trigger route-specific lifecycle hook if configured and session has a current route
@@ -302,7 +304,7 @@ export class Agent<TContext = unknown> {
    * Generate a response based on history and context as a stream
    */
   async *respondStream(params: {
-    history: Event[];
+    history: History;
     step?: StepRef;
     session?: SessionState;
     contextOverride?: Partial<TContext>;
@@ -315,7 +317,8 @@ export class Agent<TContext = unknown> {
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
     isRouteComplete?: boolean;
   }> {
-    const { history, signal } = params;
+    const { history: simpleHistory, signal } = params;
+    const history = normalizeHistory(simpleHistory);
 
     // Prepare context and session using the response pipeline
     this.responsePipeline.setContext(this.context);
@@ -338,10 +341,14 @@ export class Agent<TContext = unknown> {
       if (currentRoute) {
         const currentStep = currentRoute.getStep(session.currentStep.id);
         if (currentStep?.prepare) {
-          logger.debug(
-            `[Agent] Executing prepare function for step: ${currentStep.id}`
+          logger.debug(`[Agent] Executing prepare for step: ${currentStep.id}`);
+          await this.executePrepareFinalize(
+            currentStep.prepare,
+            effectiveContext,
+            session.data,
+            currentRoute,
+            currentStep
           );
-          await currentStep.prepare(effectiveContext, session.data);
         }
       }
     }
@@ -475,14 +482,11 @@ export class Agent<TContext = unknown> {
               }
 
               // Update collected data with tool results
-              if (result.collectedUpdate) {
-                session = await this.updateData(
-                  session,
-                  result.collectedUpdate
-                );
+              if (result.dataUpdate) {
+                session = await this.updateData(session, result.dataUpdate);
                 logger.debug(
                   `[Agent] Tool updated collected data:`,
-                  result.collectedUpdate
+                  result.dataUpdate
                 );
               }
 
@@ -514,7 +518,7 @@ export class Agent<TContext = unknown> {
             if (tool) {
               toolResultsEvents.push({
                 kind: EventKind.TOOL,
-                source: EventSource.AI_AGENT,
+                source: MessageRole.AGENT,
                 timestamp: new Date().toISOString(),
                 data: {
                   tool_calls: [
@@ -596,14 +600,11 @@ export class Agent<TContext = unknown> {
                 );
               }
 
-              if (result.collectedUpdate) {
-                session = await this.updateData(
-                  session,
-                  result.collectedUpdate
-                );
+              if (result.dataUpdate) {
+                session = await this.updateData(session, result.dataUpdate);
                 logger.debug(
                   `[Agent] Streaming follow-up tool updated collected data:`,
-                  result.collectedUpdate
+                  result.dataUpdate
                 );
               }
 
@@ -685,9 +686,15 @@ export class Agent<TContext = unknown> {
             const currentStep = currentRoute.getStep(session.currentStep.id);
             if (currentStep?.finalize) {
               logger.debug(
-                `[Agent] Executing finalize function for step: ${currentStep.id}`
+                `[Agent] Executing finalize for step: ${currentStep.id}`
               );
-              await currentStep.finalize(effectiveContext, session.data);
+              await this.executePrepareFinalize(
+                currentStep.finalize,
+                effectiveContext,
+                session.data,
+                currentRoute,
+                currentStep
+              );
             }
           }
         }
@@ -885,7 +892,7 @@ export class Agent<TContext = unknown> {
    * Generate a response based on history and context
    */
   async respond(params: {
-    history: Event[];
+    history: History;
     step?: StepRef;
     session?: SessionState;
     contextOverride?: Partial<TContext>;
@@ -896,7 +903,8 @@ export class Agent<TContext = unknown> {
     toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
     isRouteComplete?: boolean;
   }> {
-    const { history, contextOverride, signal } = params;
+    const { history: simpleHistory, contextOverride, signal } = params;
+    const history = normalizeHistory(simpleHistory);
 
     // Get current context (may fetch from provider)
     let currentContext = await this.getContext();
@@ -926,10 +934,14 @@ export class Agent<TContext = unknown> {
       if (currentRoute) {
         const currentStep = currentRoute.getStep(session.currentStep.id);
         if (currentStep?.prepare) {
-          logger.debug(
-            `[Agent] Executing prepare function for step: ${currentStep.id}`
+          logger.debug(`[Agent] Executing prepare for step: ${currentStep.id}`);
+          await this.executePrepareFinalize(
+            currentStep.prepare,
+            effectiveContext,
+            session.data,
+            currentRoute,
+            currentStep
           );
-          await currentStep.prepare(effectiveContext, session.data);
         }
       }
     }
@@ -1129,14 +1141,11 @@ export class Agent<TContext = unknown> {
             }
 
             // Update collected data with tool results
-            if (toolResult.collectedUpdate) {
-              session = await this.updateData(
-                session,
-                toolResult.collectedUpdate
-              );
+            if (toolResult.dataUpdate) {
+              session = await this.updateData(session, toolResult.dataUpdate);
               logger.debug(
                 `[Agent] Tool updated collected data:`,
-                toolResult.collectedUpdate
+                toolResult.dataUpdate
               );
             }
 
@@ -1165,7 +1174,7 @@ export class Agent<TContext = unknown> {
           if (tool) {
             toolResultsEvents.push({
               kind: EventKind.TOOL,
-              source: EventSource.AI_AGENT,
+              source: MessageRole.AGENT,
               timestamp: new Date().toISOString(),
               data: {
                 tool_calls: [
@@ -1238,14 +1247,11 @@ export class Agent<TContext = unknown> {
               );
             }
 
-            if (toolResult.collectedUpdate) {
-              session = await this.updateData(
-                session,
-                toolResult.collectedUpdate
-              );
+            if (toolResult.dataUpdate) {
+              session = await this.updateData(session, toolResult.dataUpdate);
               logger.debug(
                 `[Agent] Follow-up tool updated collected data:`,
-                toolResult.collectedUpdate
+                toolResult.dataUpdate
               );
             }
 
@@ -1471,9 +1477,15 @@ export class Agent<TContext = unknown> {
         const currentStep = currentRoute.getStep(session.currentStep.id);
         if (currentStep?.finalize) {
           logger.debug(
-            `[Agent] Executing finalize function for step: ${currentStep.id}`
+            `[Agent] Executing finalize for step: ${currentStep.id}`
           );
-          await currentStep.finalize(effectiveContext, session.data);
+          await this.executePrepareFinalize(
+            currentStep.finalize,
+            effectiveContext,
+            session.data,
+            currentRoute,
+            currentStep
+          );
         }
       }
     }
@@ -1523,12 +1535,16 @@ export class Agent<TContext = unknown> {
   ): Tool<TContext, unknown[], unknown, unknown> | undefined {
     // Check route-level tools first (if route provided)
     if (route) {
-      const routeTool = route.getTools().find((tool) => tool.id === toolName);
+      const routeTool = route
+        .getTools()
+        .find((tool) => tool.id === toolName || tool.name === toolName);
       if (routeTool) return routeTool;
     }
 
     // Fall back to agent-level tools
-    return this.tools.find((tool) => tool.id === toolName);
+    return this.tools.find(
+      (tool) => tool.id === toolName || tool.name === toolName
+    );
   }
 
   /**
@@ -1600,9 +1616,98 @@ export class Agent<TContext = unknown> {
     // Convert to the format expected by AI providers
     return Array.from(availableTools.values()).map((tool) => ({
       id: tool.id,
+      name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
     }));
+  }
+
+  /**
+   * Execute a prepare or finalize function/tool
+   * @private
+   */
+  private async executePrepareFinalize(
+    prepareOrFinalize:
+      | string
+      | Tool<TContext, unknown[], unknown, unknown>
+      | ((context: TContext, data?: Partial<unknown>) => void | Promise<void>)
+      | undefined,
+    context: TContext,
+    data?: Partial<unknown>,
+    route?: Route<TContext, unknown>,
+    step?: Step<TContext, unknown>
+  ): Promise<void> {
+    if (!prepareOrFinalize) return;
+
+    if (typeof prepareOrFinalize === "function") {
+      // It's a function - call it directly
+      await prepareOrFinalize(context, data);
+    } else {
+      // It's a tool reference - find and execute the tool
+      let tool: Tool<TContext, unknown[], unknown, unknown> | undefined;
+
+      if (typeof prepareOrFinalize === "string") {
+        // Tool ID - find it in available tools
+        const availableTools = new Map<
+          string,
+          Tool<TContext, unknown[], unknown, unknown>
+        >();
+
+        // Add agent-level tools
+        this.tools.forEach((t) => {
+          availableTools.set(t.id, t);
+        });
+
+        // Add route-level tools
+        if (route) {
+          route.getTools().forEach((t) => {
+            availableTools.set(t.id, t);
+          });
+        }
+
+        // Add step-level tools
+        if (step?.tools) {
+          for (const toolRef of step.tools) {
+            if (typeof toolRef === "string") {
+              // Keep as is
+            } else if (toolRef.id) {
+              availableTools.set(toolRef.id, toolRef);
+            }
+          }
+        }
+
+        tool = availableTools.get(prepareOrFinalize);
+      } else {
+        // Tool object - use directly
+        tool = prepareOrFinalize;
+      }
+
+      if (tool) {
+        const toolExecutor = new ToolExecutor<TContext, unknown>();
+        const result = await toolExecutor.executeTool({
+          tool,
+          context,
+          updateContext: this.updateContext.bind(this),
+          history: [], // Empty history for prepare/finalize
+          data,
+        });
+
+        if (!result.success) {
+          logger.error(
+            `[Agent] Tool execution failed in prepare/finalize: ${result.error}`
+          );
+          throw new Error(`Tool execution failed: ${result.error}`);
+        }
+      } else {
+        logger.warn(
+          `[Agent] Tool not found for prepare/finalize: ${
+            typeof prepareOrFinalize === "string"
+              ? prepareOrFinalize
+              : "inline tool"
+          }`
+        );
+      }
+    }
   }
 
   /**

@@ -14,8 +14,10 @@ import type {
   MessageRepository,
   Event,
   SessionState,
+  History,
 } from "../types";
 import { createSession, sessionStepToData, sessionDataToStep } from "../utils";
+import { convertMessagesToHistory } from "./Events";
 
 /**
  * Manager for handling persistence operations
@@ -211,11 +213,9 @@ export class PersistenceManager {
   /**
    * Helper: Load history from session messages
    */
-  async loadSessionHistory(sessionId: string): Promise<Event[]> {
+  async loadSessionHistory(sessionId: string): Promise<History> {
     const messages = await this.getSessionMessages(sessionId);
-    return messages
-      .map((m) => this.messageToEvent(m))
-      .filter((e): e is Event => e !== undefined);
+    return convertMessagesToHistory(messages);
   }
 
   /**

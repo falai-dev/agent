@@ -32,6 +32,15 @@ export {
 // Event utilities
 export { getLastMessageFromHistory } from "./event";
 
+// History utilities
+export {
+  normalizeHistory,
+  userMessage,
+  assistantMessage,
+  toolMessage,
+  systemMessage,
+} from "./history";
+
 // Logging
 export { LoggerLevel, logger } from "./logger";
 
