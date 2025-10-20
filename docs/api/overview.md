@@ -23,12 +23,12 @@ Complete API documentation for `@falai/agent`. This framework provides a strongl
 
 ### Agent
 
-The central orchestrator class that manages conversation flow, routing, and tool execution.
+The central orchestrator class that manages conversation flow, routing, tool execution, and agent-level data collection.
 
 #### Constructor
 
 ```typescript
-new Agent<TContext = unknown>(options: AgentOptions<TContext>)
+new Agent<TContext = unknown, TData = unknown>(options: AgentOptions<TContext, TData>)
 ```
 
 #### Properties
@@ -44,10 +44,10 @@ new Agent<TContext = unknown>(options: AgentOptions<TContext>)
 ##### Route Management
 
 ```typescript
-createRoute<TData = unknown>(options: RouteOptions<TContext, TData>): Route<TContext, TData>
+createRoute(options: RouteOptions<TContext, TData>): Route<TContext, TData>
 ```
 
-Creates a new conversation route with the specified options.
+Creates a new conversation route with required fields specification that references the agent-level schema.
 
 ##### Context Management
 
@@ -62,6 +62,26 @@ getContext(): Promise<TContext | undefined>
 ```
 
 Gets current context, fetching from provider if configured.
+
+##### Agent-Level Data Management
+
+```typescript
+getCollectedData(): Partial<TData>
+```
+
+Gets the current agent-level collected data.
+
+```typescript
+updateCollectedData(updates: Partial<TData>): Promise<void>
+```
+
+Updates agent-level collected data and triggers validation and lifecycle hooks.
+
+```typescript
+validateData(data: Partial<TData>): ValidationResult
+```
+
+Validates data against the agent-level schema, returning detailed validation results.
 
 ##### Response Generation
 
@@ -150,7 +170,7 @@ hasPersistence(): boolean
 
 ### Route
 
-Represents a conversational journey with structured steps and data collection.
+Represents a conversational journey with required fields specification and steps that collect data into the agent-level schema.
 
 #### Constructor
 
@@ -176,6 +196,26 @@ createStep(options: StepOptions<TContext, TData>): Step<TContext, TData>
 getStep(stepId: string): Step<TContext, TData> | undefined
 getAllSteps(): Step<TContext, TData>[]
 ```
+
+##### Route Completion Logic
+
+```typescript
+isComplete(data: Partial<TData>): boolean
+```
+
+Checks if the route is complete based on agent-level data.
+
+```typescript
+getMissingRequiredFields(data: Partial<TData>): (keyof TData)[]
+```
+
+Returns the fields still needed for route completion.
+
+```typescript
+getCompletionProgress(data: Partial<TData>): number
+```
+
+Returns completion progress as a number between 0 and 1.
 
 ##### Data Collection
 
@@ -559,23 +599,28 @@ getSnapshot(): { sessions: SessionData[]; messages: MessageData[] }
 ### Core Types
 
 ```typescript
-interface AgentOptions<TContext = unknown> {
+interface AgentOptions<TContext = unknown, TData = unknown> {
   name: string;
   provider: AiProvider;
   description?: string;
   goal?: string;
-  personality?: Template<TContext>;
-  identity?: Template<TContext>;
+  personality?: Template<TContext, TData>;
+  identity?: Template<TContext, TData>;
   context?: TContext;
   contextProvider?: ContextProvider<TContext>;
-  hooks?: ContextLifecycleHooks<TContext>;
+  
+  // NEW: Agent-level data schema and initial data
+  schema?: StructuredSchema;
+  initialData?: Partial<TData>;
+  
+  hooks?: ContextLifecycleHooks<TContext, TData>;
   debug?: boolean;
   session?: SessionState;
   persistence?: PersistenceConfig;
   terms?: Term<TContext>[];
   guidelines?: Guideline<TContext>[];
-  tools?: Tool<TContext, unknown[], unknown, unknown>[];
-  routes?: RouteOptions<TContext, unknown>[];
+  tools?: Tool<TContext, unknown[], unknown, TData>[];
+  routes?: RouteOptions<TContext, TData>[];
   knowledgeBase?: Record<string, unknown>;
 }
 
@@ -588,7 +633,14 @@ interface RouteOptions<TContext = unknown, TData = unknown> {
   conditions?: Template<TContext, TData>[];
   rules?: Template<TContext, TData>[];
   prohibitions?: Template<TContext, TData>[];
-  schema?: StructuredSchema;
+  
+  // NEW: Required fields for route completion (replaces schema)
+  requiredFields?: (keyof TData)[];
+  optionalFields?: (keyof TData)[];
+  
+  // REMOVED: schema (now at agent level)
+  // schema?: StructuredSchema;
+  
   initialData?: Partial<TData>;
   steps?: StepOptions<TContext, TData>[];
   initialStep?: Omit<StepOptions<TContext, TData>, "step">;
@@ -793,6 +845,108 @@ formatKnowledgeBase(
 generateRouteId(title: string): string
 generateStepId(routeId: string, description?: string): string
 generateToolId(name: string): string
+```
+
+## Agent-Level Data Collection Example
+
+Here's a comprehensive example showing the new agent-level data collection architecture:
+
+```typescript
+import { Agent, OpenAIProvider } from "@falai/agent";
+
+// Define comprehensive agent-level data interface
+interface CustomerServiceData {
+  // Customer identification
+  customerId?: string;
+  customerName?: string;
+  email?: string;
+  phone?: string;
+  
+  // Issue tracking
+  issueType?: 'booking' | 'billing' | 'technical' | 'other';
+  issueDescription?: string;
+  priority?: 'low' | 'medium' | 'high';
+  
+  // Feedback
+  rating?: number;
+  comments?: string;
+  recommendToFriend?: boolean;
+}
+
+// Create agent with centralized schema
+const agent = new Agent<{}, CustomerServiceData>({
+  name: "Customer Service Agent",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY, model: "gpt-4" }),
+  
+  // Agent-level schema defines all possible data fields
+  schema: {
+    type: "object",
+    properties: {
+      customerId: { type: "string" },
+      customerName: { type: "string" },
+      email: { type: "string", format: "email" },
+      phone: { type: "string" },
+      issueType: { type: "string", enum: ["booking", "billing", "technical", "other"] },
+      issueDescription: { type: "string" },
+      priority: { type: "string", enum: ["low", "medium", "high"] },
+      rating: { type: "number", minimum: 1, maximum: 5 },
+      comments: { type: "string" },
+      recommendToFriend: { type: "boolean" }
+    }
+  },
+  
+  // Agent-level data validation and enrichment
+  hooks: {
+    onDataUpdate: async (data, previousData) => {
+      // Auto-set priority based on issue type
+      if (data.issueType === 'billing' && !data.priority) {
+        data.priority = 'high';
+      }
+      
+      // Enrich customer data
+      if (data.customerName && !data.customerId) {
+        data.customerId = await lookupCustomerId(data.customerName);
+      }
+      
+      return data;
+    }
+  }
+});
+
+// Routes specify required fields instead of schemas
+const supportRoute = agent.createRoute({
+  title: "Customer Support",
+  requiredFields: ["customerName", "email", "issueType", "issueDescription"],
+  optionalFields: ["phone", "priority"],
+  
+  initialStep: {
+    prompt: "I'm here to help with your issue. Can you tell me your name and email?",
+    collect: ["customerName", "email"]
+  }
+});
+
+const feedbackRoute = agent.createRoute({
+  title: "Feedback Collection",
+  requiredFields: ["customerName", "email", "rating"],
+  optionalFields: ["comments", "recommendToFriend"],
+  
+  initialStep: {
+    prompt: "I'd love to get your feedback. What's your name and email?",
+    collect: ["customerName", "email"]
+  }
+});
+
+// Cross-route data sharing example
+const response1 = await agent.respond("Hi, I'm John Doe, email john@example.com, I have a billing issue");
+// Agent data: { customerName: "John Doe", email: "john@example.com", issueType: "billing" }
+
+const response2 = await agent.respond("Actually, I want to leave feedback instead. I'd rate you 5 stars.");
+// Feedback route completes immediately: already has name, email, and now rating
+// { customerName: "John Doe", email: "john@example.com", rating: 5 }
+
+// Check route completion
+console.log(feedbackRoute.isComplete(agent.getCollectedData())); // true
+console.log(feedbackRoute.getCompletionProgress(agent.getCollectedData())); // 1.0
 ```
 
 This API reference covers the complete @falai/agent framework. For more detailed examples and usage patterns, see the [examples directory](../../examples/) and [guides](../../docs/guides/).

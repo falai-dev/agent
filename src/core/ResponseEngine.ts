@@ -23,27 +23,30 @@ export interface BuildResponsePromptParams<
   directives: string[] | undefined;
   history: Event[];
   lastMessage: string;
-  agentOptions?: AgentOptions<TContext>;
+  agentOptions?: AgentOptions<TContext, TData>;
   // Combined properties from agent and route
-  combinedGuidelines?: Guideline<TContext>[];
-  combinedTerms?: Term<TContext>[];
+  combinedGuidelines?: Guideline<TContext, TData>[];
+  combinedTerms?: Term<TContext, TData>[];
+  context?: TContext;
+  session?: SessionState<TData>;
+  // NEW: Agent-level schema for data validation
+  agentSchema?: StructuredSchema;
+}
+
+export interface BuildFallbackPromptParams<TContext = unknown, TData = unknown> {
+  history: Event[];
+  agentOptions: AgentOptions<TContext, TData>;
+  terms: Term<TContext, TData>[];
+  guidelines: Guideline<TContext, TData>[];
   context?: TContext;
   session?: SessionState<TData>;
 }
 
-export interface BuildFallbackPromptParams<TContext = unknown> {
-  history: Event[];
-  agentOptions: AgentOptions<TContext>;
-  terms: Term<TContext>[];
-  guidelines: Guideline<TContext>[];
-  context?: TContext;
-  session?: SessionState;
-}
-
-export class ResponseEngine<TContext = unknown> {
-  responseSchemaForRoute<TData = unknown>(
+export class ResponseEngine<TContext = unknown, TData = unknown> {
+  responseSchemaForRoute(
     route: Route<TContext, TData>,
-    currentStep?: Step<TContext, TData>
+    currentStep?: Step<TContext, TData>,
+    agentSchema?: StructuredSchema
   ): StructuredSchema {
     const base: StructuredSchema = {
       type: "object",
@@ -59,12 +62,12 @@ export class ResponseEngine<TContext = unknown> {
       base.properties!.data = route.responseOutputSchema;
     }
 
-    // Add collect fields from current step
-    if (currentStep?.collect && route.schema?.properties) {
+    // Add collect fields from current step using agent-level schema
+    if (currentStep?.collect && agentSchema?.properties) {
       for (const field of currentStep.collect) {
-        const fieldSchema = route.schema.properties[field];
+        const fieldSchema = agentSchema.properties[field as string];
         if (fieldSchema) {
-          base.properties![field] = fieldSchema;
+          base.properties![field as string] = fieldSchema;
         }
       }
     }
@@ -73,7 +76,7 @@ export class ResponseEngine<TContext = unknown> {
   }
 
   async buildResponsePrompt(
-    params: BuildResponsePromptParams<TContext>
+    params: BuildResponsePromptParams<TContext, TData>
   ): Promise<string> {
     const {
       route,
@@ -107,8 +110,7 @@ export class ResponseEngine<TContext = unknown> {
       await pc.addAgentMeta(effectiveAgentOptions);
     }
     await pc.addInstruction(
-      `Route: ${route.title}${
-        route.description ? ` — ${route.description}` : ""
+      `Route: ${route.title}${route.description ? ` — ${route.description}` : ""
       }`
     );
     if (currentStep.prompt) {
@@ -148,7 +150,7 @@ export class ResponseEngine<TContext = unknown> {
   }
 
   async buildFallbackPrompt(
-    params: BuildFallbackPromptParams<TContext>
+    params: BuildFallbackPromptParams<TContext, TData>
   ): Promise<string> {
     const { history, agentOptions, terms, guidelines, context, session } =
       params;

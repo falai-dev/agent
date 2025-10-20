@@ -6,13 +6,20 @@ import { Agent } from "../src/core/Agent";
 import { END_ROUTE } from "../src/constants";
 
 // Create a test agent
-const agent = new Agent({
+const agent = new Agent<any, any>({
   name: "Test Agent",
   provider: {
     name: "Test Provider",
     generateMessage: async () => ({ message: "test" }),
     generateMessageStream: async function* () {
       yield { delta: "test", accumulated: "test", done: true };
+    },
+  },
+  schema: {
+    type: "object",
+    properties: {
+      account_number: { type: "string" },
+      issue_description: { type: "string" },
     },
   },
 });

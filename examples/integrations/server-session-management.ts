@@ -31,7 +31,7 @@ interface BookingData {
 }
 
 // Booking confirmation tool
-const confirmBooking: Tool<unknown, [], string, BookingData> = {
+const confirmBooking: Tool<unknown, BookingData, [], string> = {
     id: "confirm_booking",
     description: "Confirm the hotel booking with all details",
     parameters: {
@@ -56,15 +56,33 @@ const confirmBooking: Tool<unknown, [], string, BookingData> = {
     },
 };
 
+// Define booking schema
+const bookingSchema = {
+    type: "object",
+    properties: {
+        customerName: { type: "string" },
+        hotelName: { type: "string" },
+        checkInDate: { type: "string" },
+        checkOutDate: { type: "string" },
+        guests: { type: "number", minimum: 1, maximum: 10 },
+        roomType: { type: "string", enum: ["standard", "deluxe", "suite"] },
+        specialRequests: { type: "string" },
+        bookingId: { type: "string" },
+    },
+    required: ["customerName", "hotelName", "checkInDate", "checkOutDate", "guests"],
+};
+
 // Function to create agent for each request (server pattern)
 function createBookingAgent(sessionId?: string) {
-    return new Agent({
+    return new Agent<unknown, BookingData>({
         name: "Hotel Booking Assistant",
         description: "Help customers book hotel rooms",
         provider: new OpenAIProvider({
             apiKey: process.env.OPENAI_API_KEY!,
             model: "gpt-4",
         }),
+        // NEW: Agent-level schema
+        schema: bookingSchema,
         persistence: {
             adapter: new MemoryAdapter(), // In production: RedisAdapter, PrismaAdapter, etc.
             autoSave: true,
@@ -75,20 +93,10 @@ function createBookingAgent(sessionId?: string) {
                 title: "Hotel Booking",
                 description: "Collect booking details and confirm reservation",
                 conditions: ["User wants to book a hotel room"],
-                schema: {
-                    type: "object",
-                    properties: {
-                        customerName: { type: "string" },
-                        hotelName: { type: "string" },
-                        checkInDate: { type: "string" },
-                        checkOutDate: { type: "string" },
-                        guests: { type: "number", minimum: 1, maximum: 10 },
-                        roomType: { type: "string", enum: ["standard", "deluxe", "suite"] },
-                        specialRequests: { type: "string" },
-                        bookingId: { type: "string" },
-                    },
-                    required: ["customerName", "hotelName", "checkInDate", "checkOutDate", "guests"],
-                },
+                // NEW: Required fields for route completion
+                requiredFields: ["customerName", "hotelName", "checkInDate", "checkOutDate", "guests"],
+                // NEW: Optional fields that enhance the experience
+                optionalFields: ["roomType", "specialRequests", "bookingId"],
                 steps: [
                     {
                         id: "ask_name",
@@ -179,7 +187,7 @@ async function handleChatRequest(request: ChatRequest): Promise<ChatResponse> {
         message: response.message,
         sessionId: agent.session.id!,
         isComplete: response.isRouteComplete!,
-        data: agent.session.getData<BookingData>(),
+        data: agent.session.getData(),
     };
 }
 

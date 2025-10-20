@@ -17,6 +17,8 @@ import type {
   AgentResponseStreamChunk,
   AgentResponse,
   StructuredSchema,
+  ValidationError,
+  ValidationResult,
 } from "../types";
 import { EventKind, MessageRole } from "../types/history";
 import {
@@ -42,26 +44,48 @@ import { ResponsePipeline } from "./ResponsePipeline";
 import { END_ROUTE_ID } from "../constants";
 
 /**
- * Main Agent class with generic context support
+ * Error thrown when data validation fails
  */
-export class Agent<TContext = unknown> {
-  private terms: Term<TContext>[] = [];
-  private guidelines: Guideline<TContext>[] = [];
-  private tools: Tool<TContext, unknown[], unknown, unknown>[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private routes: Route<TContext, any>[] = [];
+class DataValidationError extends Error {
+  constructor(public errors: ValidationError[], message?: string) {
+    super(message || "Data validation failed");
+    this.name = "DataValidationError";
+  }
+}
+
+/**
+ * Error thrown when route configuration is invalid
+ */
+class RouteConfigurationError extends Error {
+  constructor(public routeTitle: string, public invalidFields: string[], message?: string) {
+    super(message || `Route configuration error in '${routeTitle}'`);
+    this.name = "RouteConfigurationError";
+  }
+}
+
+/**
+ * Main Agent class with generic context and data support
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export class Agent<TContext = any, TData = any> {
+  private terms: Term<TContext, TData>[] = [];
+  private guidelines: Guideline<TContext, TData>[] = [];
+  private tools: Tool<TContext, TData, unknown[], unknown>[] = [];
+  private routes: Route<TContext, TData>[] = [];
   private context: TContext | undefined;
-  private persistenceManager: PersistenceManager | undefined;
-  private routingEngine: RoutingEngine<TContext>;
-  private responseEngine: ResponseEngine<TContext>;
-  private responsePipeline: ResponsePipeline<TContext>;
-  private currentSession?: SessionState;
+  private persistenceManager: PersistenceManager<TData> | undefined;
+  private routingEngine: RoutingEngine<TContext, TData>;
+  private responseEngine: ResponseEngine<TContext, TData>;
+  private responsePipeline: ResponsePipeline<TContext, TData>;
+  private currentSession?: SessionState<TData>;
   private knowledgeBase: Record<string, unknown> = {};
+  private schema?: StructuredSchema;
+  private collectedData: Partial<TData> = {};
 
   /** Public session manager for easy session management */
-  public session: SessionManager<unknown>;
+  public session: SessionManager<TData>;
 
-  constructor(private readonly options: AgentOptions<TContext>) {
+  constructor(private readonly options: AgentOptions<TContext, TData>) {
     // Set log level based on debug option
     if (options.debug) {
       logger.setLevel(LoggerLevel.DEBUG);
@@ -74,40 +98,81 @@ export class Agent<TContext = unknown> {
       );
     }
 
+    // Initialize and validate agent-level schema if provided
+    if (options.schema) {
+      this.schema = options.schema;
+      this.validateSchema(this.schema);
+      logger.debug("[Agent] Agent-level schema initialized and validated");
+    }
+
     // Initialize context if provided
     this.context = options.context;
+
+    // Initialize collected data with initial data if provided
+    if (options.initialData) {
+      if (this.schema) {
+        const validation = this.validateData(options.initialData);
+        if (!validation.valid) {
+          throw new Error(
+            `Initial data validation failed: ${validation.errors.map(e => e.message).join(', ')}`
+          );
+        }
+      }
+      this.collectedData = { ...options.initialData };
+      logger.debug("[Agent] Initial data set:", this.collectedData);
+    }
 
     // Initialize current session if provided
     this.currentSession = options.session;
 
     // Initialize routing and response engines
-    this.routingEngine = new RoutingEngine<TContext>({
+    this.routingEngine = new RoutingEngine<TContext, TData>({
       maxCandidates: 5,
       allowRouteSwitch: true,
       switchThreshold: 70,
     });
-    this.responseEngine = new ResponseEngine<TContext>();
-    this.responsePipeline = new ResponsePipeline<TContext>(
+    this.responseEngine = new ResponseEngine<TContext, TData>();
+    this.responsePipeline = new ResponsePipeline<TContext, TData>(
       options,
       this.routes,
       this.tools,
       this.routingEngine,
       this.updateContext.bind(this),
-      this.updateData.bind(this)
+      this.updateData.bind(this),
+      this.updateCollectedData.bind(this)
     );
 
     // Initialize persistence if configured
     if (options.persistence) {
-      this.persistenceManager = new PersistenceManager(options.persistence);
+      try {
+        // Validate persistence configuration
+        if (!options.persistence.adapter) {
+          throw new Error("Persistence adapter is required when persistence is configured");
+        }
 
-      // Initialize the adapter if it has an initialize method
-      if (options.persistence.adapter.initialize) {
-        options.persistence.adapter.initialize().catch((error) => {
-          logger.error(
-            "[Agent] Persistence adapter initialization failed:",
-            error
-          );
-        });
+        if (!options.persistence.adapter.sessionRepository) {
+          throw new Error("Persistence adapter must provide a sessionRepository");
+        }
+
+        if (!options.persistence.adapter.messageRepository) {
+          throw new Error("Persistence adapter must provide a messageRepository");
+        }
+
+        this.persistenceManager = new PersistenceManager<TData>(options.persistence);
+
+        // Initialize the adapter if it has an initialize method
+        if (options.persistence.adapter.initialize) {
+          options.persistence.adapter.initialize().catch((error) => {
+            logger.error(
+              "[Agent] Persistence adapter initialization failed:",
+              error instanceof Error ? error.message : String(error)
+            );
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error("[Agent] Failed to initialize persistence:", errorMessage);
+        throw new Error(`Failed to initialize persistence: ${errorMessage}`);
       }
     }
 
@@ -132,7 +197,7 @@ export class Agent<TContext = unknown> {
 
     if (options.routes) {
       options.routes.forEach((routeOptions) => {
-        this.createRoute<unknown>(routeOptions);
+        this.createRoute(routeOptions);
       });
     }
 
@@ -142,7 +207,7 @@ export class Agent<TContext = unknown> {
     }
 
     // Initialize session manager
-    this.session = new SessionManager(this.persistenceManager);
+    this.session = new SessionManager<TData>(this.persistenceManager);
 
     // Store sessionId for later use in getOrCreate calls
     if (options.sessionId) {
@@ -151,6 +216,143 @@ export class Agent<TContext = unknown> {
         logger.error("Failed to start session", err);
       });
     }
+  }
+
+  /**
+   * Validate the agent-level schema structure
+   * @private
+   */
+  private validateSchema(schema: StructuredSchema): void {
+    if (!schema || typeof schema !== 'object') {
+      throw new Error(
+        "Agent schema must be a valid JSON Schema object. " +
+        "Provide a schema with 'type': 'object' and 'properties' to define the data structure."
+      );
+    }
+
+    if (schema.type !== 'object') {
+      throw new Error(
+        `Agent schema must be of type 'object', but received '${String(schema.type)}'. ` +
+        "Agent-level schemas must define object structures for data collection."
+      );
+    }
+
+    if (!schema.properties || typeof schema.properties !== 'object') {
+      throw new Error(
+        "Agent schema must have a 'properties' field defining the data fields. " +
+        "Example: { type: 'object', properties: { name: { type: 'string' }, email: { type: 'string' } } }"
+      );
+    }
+
+    logger.debug("[Agent] Schema validation passed");
+  }
+
+  /**
+   * Validate data against the agent-level schema
+   */
+  validateData(data: Partial<TData>): ValidationResult {
+    if (!this.schema) {
+      // No schema defined, consider all data valid
+      return { valid: true, errors: [], warnings: [] };
+    }
+
+    const errors: ValidationError[] = [];
+    const warnings: ValidationError[] = [];
+
+    // Basic validation - check if provided fields exist in schema
+    if (this.schema.properties) {
+      for (const [key, value] of Object.entries(data)) {
+        if (!(key in this.schema.properties)) {
+          errors.push({
+            field: key,
+            value,
+            message: `Field '${key}' is not defined in agent schema`,
+            schemaPath: `properties.${key}`
+          });
+        }
+      }
+    }
+
+    // Check required fields if specified
+    if (this.schema.required && Array.isArray(this.schema.required)) {
+      for (const requiredField of this.schema.required) {
+        if (!(requiredField in data) || data[requiredField as keyof TData] === undefined) {
+          warnings.push({
+            field: requiredField,
+            value: undefined,
+            message: `Required field '${requiredField}' is missing`,
+            schemaPath: `required`
+          });
+        }
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings
+    };
+  }
+
+  /**
+   * Check if a field is valid according to the agent schema
+   * @param field - The field key to validate
+   * @returns true if field exists in schema or no schema is defined, false otherwise
+   */
+  isValidSchemaField(field: keyof TData): boolean {
+    if (!this.schema || !this.schema.properties) {
+      // No schema defined, consider all fields valid
+      return true;
+    }
+
+    return field as string in this.schema.properties;
+  }
+
+  /**
+   * Get the current collected data
+   */
+  getCollectedData(): Partial<TData> {
+    return { ...this.collectedData };
+  }
+
+  /**
+   * Update collected data with validation
+   */
+  async updateCollectedData(updates: Partial<TData>): Promise<void> {
+    // Validate the updates
+    const validation = this.validateData(updates);
+    if (!validation.valid) {
+      const errorMessages = validation.errors.map(e => e.message).join(', ');
+      throw new DataValidationError(validation.errors, `Data validation failed: ${errorMessages}`);
+    }
+
+    // Log warnings if any
+    if (validation.warnings.length > 0) {
+      const warningMessages = validation.warnings.map(w => w.message).join(', ');
+      logger.warn(`[Agent] Data validation warnings: ${warningMessages}`);
+    }
+
+    // Merge updates with current data
+    const previousData = { ...this.collectedData };
+    this.collectedData = {
+      ...this.collectedData,
+      ...updates
+    };
+
+    // Trigger agent-level lifecycle hook if configured
+    if (this.options.hooks?.onDataUpdate) {
+      this.collectedData = await this.options.hooks.onDataUpdate(
+        this.collectedData,
+        previousData
+      );
+    }
+
+    // Update current session if it exists to keep it in sync
+    if (this.currentSession) {
+      this.currentSession = mergeCollected(this.currentSession, this.collectedData);
+    }
+
+    logger.debug("[Agent] Collected data updated:", updates);
   }
 
   /**
@@ -182,12 +384,41 @@ export class Agent<TContext = unknown> {
   }
 
   /**
-   * Create a new route (journey)
-   * @template TData - Type of data collected throughout the route
+   * Create a new route (journey) using agent-level data type
    */
-  createRoute<TData = unknown>(
+  createRoute(
     options: RouteOptions<TContext, TData>
   ): Route<TContext, TData> {
+    // Validate that requiredFields exist in agent schema
+    if (options.requiredFields && this.schema?.properties) {
+      const invalidRequiredFields = options.requiredFields.filter(
+        field => !(String(field) in this.schema!.properties!)
+      );
+      if (invalidRequiredFields.length > 0) {
+        throw new RouteConfigurationError(
+          options.title,
+          invalidRequiredFields.map(f => String(f)),
+          `Invalid required fields in route '${options.title}': ${invalidRequiredFields.join(', ')}. ` +
+          `Must be valid keys from agent schema. Available fields: ${Object.keys(this.schema.properties).join(', ')}.`
+        );
+      }
+    }
+
+    // Validate that optionalFields exist in agent schema
+    if (options.optionalFields && this.schema?.properties) {
+      const invalidOptionalFields = options.optionalFields.filter(
+        field => !(String(field) in this.schema!.properties!)
+      );
+      if (invalidOptionalFields.length > 0) {
+        throw new RouteConfigurationError(
+          options.title,
+          invalidOptionalFields.map(f => String(f)),
+          `Invalid optional fields in route '${options.title}': ${invalidOptionalFields.join(', ')}. ` +
+          `Must be valid keys from agent schema. Available fields: ${Object.keys(this.schema.properties).join(', ')}.`
+        );
+      }
+    }
+
     const route = new Route<TContext, TData>(options);
     this.routes.push(route);
     return route;
@@ -196,7 +427,7 @@ export class Agent<TContext = unknown> {
   /**
    * Create a domain term for the glossary
    */
-  createTerm(term: Term<TContext>): this {
+  createTerm(term: Term<TContext, TData>): this {
     this.terms.push(term);
     return this;
   }
@@ -204,7 +435,7 @@ export class Agent<TContext = unknown> {
   /**
    * Create a behavioral guideline
    */
-  createGuideline(guideline: Guideline<TContext>): this {
+  createGuideline(guideline: Guideline<TContext, TData>): this {
     const guidelineWithId = {
       ...guideline,
       id: guideline.id || `guideline_${this.guidelines.length}`,
@@ -217,7 +448,7 @@ export class Agent<TContext = unknown> {
   /**
    * Register a tool at the agent level
    */
-  createTool(tool: Tool<TContext, unknown[], unknown, unknown>): this {
+  createTool(tool: Tool<TContext, TData, unknown[], unknown>): this {
     this.tools.push(tool);
     return this;
   }
@@ -225,7 +456,7 @@ export class Agent<TContext = unknown> {
   /**
    * Register multiple tools at the agent level
    */
-  registerTools(tools: Tool<TContext, unknown[], unknown, unknown>[]): this {
+  registerTools(tools: Tool<TContext, TData, unknown[], unknown>[]): this {
     tools.forEach((tool) => this.createTool(tool));
     return this;
   }
@@ -267,7 +498,7 @@ export class Agent<TContext = unknown> {
    * Triggers both agent-level and route-specific onDataUpdate lifecycle hooks if configured
    * @internal
    */
-  private async updateData<TData = unknown>(
+  private async updateData(
     session: SessionState<TData>,
     dataUpdate: Partial<TData>
   ): Promise<SessionState<TData>> {
@@ -297,8 +528,11 @@ export class Agent<TContext = unknown> {
       newCollected = (await this.options.hooks.onDataUpdate(
         newCollected,
         previousCollected
-      )) as Partial<TData>;
+      ));
     }
+
+    // Update agent's collected data to stay in sync
+    this.collectedData = { ...newCollected };
 
     // Return updated session
     return mergeCollected(session, newCollected);
@@ -316,11 +550,17 @@ export class Agent<TContext = unknown> {
     // Otherwise return the stored context
     return this.context;
   }
+  /**
+   * Get current schema
+   */
+  getSchema(): StructuredSchema | undefined {
+    return this.schema;
+  }
 
   /**
    * Generate a response based on history and context as a stream
    */
-  async *respondStream<TData = Record<string, unknown>>(params: {
+  async *respondStream(params: {
     history: History;
     step?: StepRef;
     session?: SessionState<TData>;
@@ -340,6 +580,13 @@ export class Agent<TContext = unknown> {
     });
     const { effectiveContext } = responseContext;
     session = responseContext.session;
+    
+    // Merge agent's collected data into session (agent data takes precedence)
+    if (Object.keys(this.collectedData).length > 0) {
+      session = mergeCollected(session, this.collectedData);
+      logger.debug("[Agent] Merged agent collected data into session:", this.collectedData);
+    }
+    
     // Update our stored context if it was modified by beforeRespond hook
     this.context = this.responsePipeline.getStoredContext();
 
@@ -395,7 +642,8 @@ export class Agent<TContext = unknown> {
       // Build response schema for this route (with collect fields from step)
       const responseSchema = this.responseEngine.responseSchemaForRoute(
         selectedRoute,
-        nextStep
+        nextStep,
+        this.schema
       );
 
       // Check if selected route and next step are defined
@@ -428,6 +676,7 @@ export class Agent<TContext = unknown> {
         ),
         context: effectiveContext,
         session,
+        agentSchema: this.schema,
       });
 
       // Collect available tools for AI
@@ -475,11 +724,12 @@ export class Agent<TContext = unknown> {
                 continue;
               }
 
-              const toolExecutor = new ToolExecutor<TContext, unknown>();
+              const toolExecutor = new ToolExecutor<TContext, TData>();
               const result = await toolExecutor.executeTool({
                 tool: tool,
                 context: effectiveContext,
                 updateContext: this.updateContext.bind(this),
+                updateData: this.updateCollectedData.bind(this),
                 history,
                 data: session.data,
                 toolArguments: toolCall.arguments,
@@ -494,7 +744,7 @@ export class Agent<TContext = unknown> {
 
               // Update collected data with tool results
               if (result.dataUpdate) {
-                session = await this.updateData(session, result.dataUpdate);
+                session = await this.updateData(session, result.dataUpdate as Partial<TData>);
                 logger.debug(
                   `[Agent] Tool updated collected data:`,
                   result.dataUpdate
@@ -577,8 +827,7 @@ export class Agent<TContext = unknown> {
 
           if (hasToolCalls) {
             logger.debug(
-              `[Agent] Follow-up streaming call produced ${
-                followUpToolCalls!.length
+              `[Agent] Follow-up streaming call produced ${followUpToolCalls!.length
               } additional tool calls`
             );
 
@@ -595,11 +844,12 @@ export class Agent<TContext = unknown> {
                 continue;
               }
 
-              const toolExecutor = new ToolExecutor<TContext, unknown>();
+              const toolExecutor = new ToolExecutor<TContext, TData>();
               const result = await toolExecutor.executeTool({
                 tool: tool,
                 context: effectiveContext,
                 updateContext: this.updateContext.bind(this),
+                updateData: this.updateCollectedData.bind(this),
                 history: updatedHistory,
                 data: session.data,
                 toolArguments: toolCall.arguments,
@@ -613,7 +863,7 @@ export class Agent<TContext = unknown> {
               }
 
               if (result.dataUpdate) {
-                session = await this.updateData(session, result.dataUpdate);
+                session = await this.updateData(session, result.dataUpdate as Partial<TData>);
                 logger.debug(
                   `[Agent] Streaming follow-up tool updated collected data:`,
                   result.dataUpdate
@@ -651,14 +901,19 @@ export class Agent<TContext = unknown> {
             Record<string, unknown>;
 
           for (const field of nextStep.collect) {
-            if (field in structuredData) {
-              collectedData[field] = structuredData[field];
+            const fieldKey = String(field);
+            if (fieldKey in structuredData) {
+              collectedData[fieldKey] = structuredData[fieldKey];
             }
           }
 
-          // Merge collected data into session
+          // Merge collected data into session using agent-level data validation
           if (Object.keys(collectedData).length > 0) {
-            session = await this.updateData(session, collectedData);
+            // Update agent-level collected data with validation
+            await this.updateCollectedData(collectedData as Partial<TData>);
+
+            // Update session with validated data
+            session = await this.updateData(session, collectedData as Partial<TData>);
             logger.debug(`[Agent] Collected data:`, collectedData);
           }
         }
@@ -735,7 +990,7 @@ export class Agent<TContext = unknown> {
       const endStepSpec = selectedRoute.endStepSpec;
 
       // Create a temporary step for completion message generation using endStep configuration
-      const completionStep = new Step<TContext, unknown>(selectedRoute.id, {
+      const completionStep = new Step<TContext, TData>(selectedRoute.id, {
         description: endStepSpec.description,
         id: endStepSpec.id || END_ROUTE_ID,
         collect: endStepSpec.collect,
@@ -748,7 +1003,8 @@ export class Agent<TContext = unknown> {
       // Build response schema for completion
       const responseSchema = this.responseEngine.responseSchemaForRoute(
         selectedRoute,
-        completionStep
+        completionStep,
+        this.schema
       );
       const templateContext = {
         context: effectiveContext,
@@ -777,6 +1033,7 @@ export class Agent<TContext = unknown> {
         ),
         context: effectiveContext,
         session,
+        agentSchema: this.schema,
       });
 
       // Stream completion message using AI provider
@@ -909,7 +1166,7 @@ export class Agent<TContext = unknown> {
   /**
    * Generate a response based on history and context
    */
-  async respond<TData = Record<string, unknown>>(params: {
+  async respond(params: {
     history: History;
     step?: StepRef;
     session?: SessionState<TData>;
@@ -941,6 +1198,12 @@ export class Agent<TContext = unknown> {
       cloneDeep(this.currentSession) ||
       (await this.session.getOrCreate());
 
+    // Merge agent's collected data into session (agent data takes precedence)
+    if (Object.keys(this.collectedData).length > 0) {
+      session = mergeCollected(session, this.collectedData);
+      logger.debug("[Agent] Merged agent collected data into session:", this.collectedData);
+    }
+
     // PHASE 1: PREPARE - Execute prepare function if current step has one
     if (session.currentRoute && session.currentStep) {
       const currentRoute = this.routes.find(
@@ -962,9 +1225,9 @@ export class Agent<TContext = unknown> {
     }
 
     // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use (combined)
-    let selectedRoute: Route<TContext, unknown> | undefined;
+    let selectedRoute: Route<TContext, TData> | undefined;
     let responseDirectives: string[] | undefined;
-    let selectedStep: Step<TContext, unknown> | undefined;
+    let selectedStep: Step<TContext, TData> | undefined;
     let isRouteComplete = false;
 
     // Check for pending transition from previous route completion
@@ -1034,9 +1297,14 @@ export class Agent<TContext = unknown> {
       | Array<{ toolName: string; arguments: Record<string, unknown> }>
       | undefined = undefined;
     let responsePrompt: string;
-    let availableTools: Tool<TContext, unknown[], unknown, unknown>[] = [];
+    let availableTools: Array<{
+      id: string;
+      name: string;
+      description?: string;
+      parameters?: unknown;
+    }> = [];
     let responseSchema: StructuredSchema | undefined;
-    let nextStep: Step<TContext, unknown> | undefined;
+    let nextStep: Step<TContext, TData> | undefined;
 
     // Get last user message (needed for both route and completion handling)
     const lastUserMessage = getLastMessageFromHistory(history);
@@ -1077,7 +1345,8 @@ export class Agent<TContext = unknown> {
       // Build response schema for this route (with collect fields from step)
       responseSchema = this.responseEngine.responseSchemaForRoute(
         selectedRoute,
-        nextStep
+        nextStep,
+        this.schema
       );
 
       // Build response prompt
@@ -1101,13 +1370,14 @@ export class Agent<TContext = unknown> {
         ),
         context: effectiveContext,
         session,
+        agentSchema: this.schema,
       });
 
       // Collect available tools for AI
       availableTools = this.collectAvailableTools(
         selectedRoute,
         nextStep
-      ) as Tool<TContext, unknown[], unknown, unknown>[];
+      );
     } else {
       // No route selected - generate basic response without route context
       logger.debug(`[Agent] No route selected, generating basic response`);
@@ -1123,7 +1393,7 @@ export class Agent<TContext = unknown> {
       });
 
       // Use agent-level tools only
-      availableTools = [...this.tools];
+      availableTools = this.collectAvailableTools();
       responseSchema = undefined;
     }
 
@@ -1136,9 +1406,9 @@ export class Agent<TContext = unknown> {
       signal,
       parameters: responseSchema
         ? {
-            jsonSchema: responseSchema,
-            schemaName: "response_output",
-          }
+          jsonSchema: responseSchema,
+          schemaName: "response_output",
+        }
         : undefined,
     });
 
@@ -1161,11 +1431,12 @@ export class Agent<TContext = unknown> {
             continue;
           }
 
-          const toolExecutor = new ToolExecutor<TContext, unknown>();
+          const toolExecutor = new ToolExecutor<TContext, TData>();
           const toolResult = await toolExecutor.executeTool({
             tool: tool,
             context: effectiveContext,
             updateContext: this.updateContext.bind(this),
+            updateData: this.updateCollectedData.bind(this),
             history,
             data: session.data,
             toolArguments: toolCall.arguments,
@@ -1180,7 +1451,7 @@ export class Agent<TContext = unknown> {
 
           // Update collected data with tool results
           if (toolResult.dataUpdate) {
-            session = await this.updateData(session, toolResult.dataUpdate);
+            session = await this.updateData(session, toolResult.dataUpdate as Partial<TData>);
             logger.debug(
               `[Agent] Tool updated collected data:`,
               toolResult.dataUpdate
@@ -1251,8 +1522,7 @@ export class Agent<TContext = unknown> {
 
       if (hasToolCalls) {
         logger.debug(
-          `[Agent] Follow-up call produced ${
-            followUpToolCalls!.length
+          `[Agent] Follow-up call produced ${followUpToolCalls!.length
           } additional tool calls`
         );
 
@@ -1266,11 +1536,12 @@ export class Agent<TContext = unknown> {
             continue;
           }
 
-          const toolExecutor = new ToolExecutor<TContext, unknown>();
+          const toolExecutor = new ToolExecutor<TContext, TData>();
           const toolResult = await toolExecutor.executeTool({
             tool: tool,
             context: effectiveContext,
             updateContext: this.updateContext.bind(this),
+            updateData: this.updateCollectedData.bind(this),
             history: updatedHistory,
             data: session.data,
             toolArguments: toolCall.arguments,
@@ -1284,7 +1555,7 @@ export class Agent<TContext = unknown> {
           }
 
           if (toolResult.dataUpdate) {
-            session = await this.updateData(session, toolResult.dataUpdate);
+            session = await this.updateData(session, toolResult.dataUpdate as Partial<TData>);
             logger.debug(
               `[Agent] Follow-up tool updated collected data:`,
               toolResult.dataUpdate
@@ -1323,14 +1594,19 @@ export class Agent<TContext = unknown> {
         Record<string, unknown>;
 
       for (const field of nextStep.collect) {
-        if (field in structuredData) {
-          collectedData[field] = structuredData[field];
+        const fieldKey = String(field);
+        if (fieldKey in structuredData) {
+          collectedData[fieldKey] = structuredData[fieldKey];
         }
       }
 
-      // Merge collected data into session
+      // Merge collected data into session using agent-level data validation
       if (Object.keys(collectedData).length > 0) {
-        session = await this.updateData(session, collectedData);
+        // Update agent-level collected data with validation
+        await this.updateCollectedData(collectedData as Partial<TData>);
+
+        // Update session with validated data
+        session = await this.updateData(session, collectedData as Partial<TData>);
         logger.debug(`[Agent] Collected data:`, collectedData);
       }
     }
@@ -1355,7 +1631,7 @@ export class Agent<TContext = unknown> {
       const endStepSpec = selectedRoute!.endStepSpec;
 
       // Create a temporary step for completion message generation using endStep configuration
-      const completionStep = new Step<TContext, unknown>(selectedRoute!.id, {
+      const completionStep = new Step<TContext, TData>(selectedRoute!.id, {
         description: endStepSpec.description,
         id: endStepSpec.id || END_ROUTE_ID,
         collect: endStepSpec.collect,
@@ -1365,19 +1641,21 @@ export class Agent<TContext = unknown> {
           "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
       });
 
+      if (!selectedRoute) {
+        throw new Error("Selected route is not defined");
+      }
+
       // Build response schema for completion
       const responseSchema = this.responseEngine.responseSchemaForRoute(
-        selectedRoute!,
-        completionStep
+        selectedRoute,
+        completionStep,
+        this.schema
       );
       const templateContext = {
         context: effectiveContext,
         session,
         history,
       };
-      if (!selectedRoute) {
-        throw new Error("Selected route is not defined");
-      }
 
       // Build completion response prompt
       const completionPrompt = await this.responseEngine.buildResponsePrompt({
@@ -1400,6 +1678,7 @@ export class Agent<TContext = unknown> {
         ),
         context: effectiveContext,
         session,
+        agentSchema: this.schema,
       });
 
       // Generate completion message using AI provider
@@ -1545,21 +1824,21 @@ export class Agent<TContext = unknown> {
   /**
    * Get all routes
    */
-  getRoutes(): Route<TContext, unknown>[] {
+  getRoutes(): Route<TContext, TData>[] {
     return [...this.routes];
   }
 
   /**
    * Get all terms
    */
-  getTerms(): Term<TContext>[] {
+  getTerms(): Term<TContext, TData>[] {
     return [...this.terms];
   }
 
   /**
    * Get all tools
    */
-  getTools(): Tool<TContext, unknown[], unknown, unknown>[] {
+  getTools(): Tool<TContext, TData, unknown[], unknown>[] {
     return [...this.tools];
   }
 
@@ -1570,8 +1849,8 @@ export class Agent<TContext = unknown> {
    */
   private findAvailableTool(
     toolName: string,
-    route?: Route<TContext, unknown>
-  ): Tool<TContext, unknown[], unknown, unknown> | undefined {
+    route?: Route<TContext, TData>
+  ): Tool<TContext, TData, unknown[], unknown> | undefined {
     // Check route-level tools first (if route provided)
     if (route) {
       const routeTool = route
@@ -1591,8 +1870,8 @@ export class Agent<TContext = unknown> {
    * @private
    */
   private collectAvailableTools(
-    route?: Route<TContext, unknown>,
-    step?: Step<TContext, unknown>
+    route?: Route<TContext, TData>,
+    step?: Step<TContext, TData>
   ): Array<{
     id: string;
     name: string;
@@ -1601,7 +1880,7 @@ export class Agent<TContext = unknown> {
   }> {
     const availableTools = new Map<
       string,
-      Tool<TContext, unknown[], unknown, unknown>
+      Tool<TContext, TData, unknown[], unknown>
     >();
 
     // Add agent-level tools
@@ -1619,7 +1898,7 @@ export class Agent<TContext = unknown> {
     // Filter by step-level allowed tools if specified
     if (step?.tools) {
       const allowedToolIds = new Set<string>();
-      const stepTools: Tool<TContext, unknown[], unknown, unknown>[] = [];
+      const stepTools: Tool<TContext, TData, unknown[], unknown>[] = [];
 
       for (const toolRef of step.tools) {
         if (typeof toolRef === "string") {
@@ -1638,7 +1917,7 @@ export class Agent<TContext = unknown> {
       if (allowedToolIds.size > 0) {
         const filteredTools = new Map<
           string,
-          Tool<TContext, unknown[], unknown, unknown>
+          Tool<TContext, TData, unknown[], unknown>
         >();
         for (const toolId of allowedToolIds) {
           const tool = availableTools.get(toolId);
@@ -1673,13 +1952,13 @@ export class Agent<TContext = unknown> {
   private async executePrepareFinalize(
     prepareOrFinalize:
       | string
-      | Tool<TContext, unknown[], unknown, unknown>
-      | ((context: TContext, data?: Partial<unknown>) => void | Promise<void>)
+      | Tool<TContext, TData, unknown[], unknown>
+      | ((context: TContext, data?: Partial<TData>) => void | Promise<void>)
       | undefined,
     context: TContext,
-    data?: Partial<unknown>,
-    route?: Route<TContext, unknown>,
-    step?: Step<TContext, unknown>
+    data?: Partial<TData>,
+    route?: Route<TContext, TData>,
+    step?: Step<TContext, TData>
   ): Promise<void> {
     if (!prepareOrFinalize) return;
 
@@ -1688,13 +1967,13 @@ export class Agent<TContext = unknown> {
       await prepareOrFinalize(context, data);
     } else {
       // It's a tool reference - find and execute the tool
-      let tool: Tool<TContext, unknown[], unknown, unknown> | undefined;
+      let tool: Tool<TContext, TData, unknown[], unknown> | undefined;
 
       if (typeof prepareOrFinalize === "string") {
         // Tool ID - find it in available tools
         const availableTools = new Map<
           string,
-          Tool<TContext, unknown[], unknown, unknown>
+          Tool<TContext, TData, unknown[], unknown>
         >();
 
         // Add agent-level tools
@@ -1727,11 +2006,12 @@ export class Agent<TContext = unknown> {
       }
 
       if (tool) {
-        const toolExecutor = new ToolExecutor<TContext, unknown>();
+        const toolExecutor = new ToolExecutor<TContext, TData>();
         const result = await toolExecutor.executeTool({
           tool,
           context,
           updateContext: this.updateContext.bind(this),
+          updateData: this.updateCollectedData.bind(this),
           history: [], // Empty history for prepare/finalize
           data,
         });
@@ -1744,10 +2024,9 @@ export class Agent<TContext = unknown> {
         }
       } else {
         logger.warn(
-          `[Agent] Tool not found for prepare/finalize: ${
-            typeof prepareOrFinalize === "string"
-              ? prepareOrFinalize
-              : "inline tool"
+          `[Agent] Tool not found for prepare/finalize: ${typeof prepareOrFinalize === "string"
+            ? prepareOrFinalize
+            : "inline tool"
           }`
         );
       }
@@ -1757,7 +2036,7 @@ export class Agent<TContext = unknown> {
   /**
    * Get all guidelines
    */
-  getGuidelines(): Guideline<TContext>[] {
+  getGuidelines(): Guideline<TContext, TData>[] {
     return [...this.guidelines];
   }
 
@@ -1773,10 +2052,10 @@ export class Agent<TContext = unknown> {
    * @private
    */
   private mergeTerms(
-    agentTerms: Term<TContext>[],
-    routeTerms: Term<TContext>[]
-  ): Term<TContext>[] {
-    const merged = new Map<string, Term<TContext>>();
+    agentTerms: Term<TContext, TData>[],
+    routeTerms: Term<TContext, TData>[]
+  ): Term<TContext, TData>[] {
+    const merged = new Map<string, Term<TContext, TData>>();
 
     // Add agent terms first
     agentTerms.forEach((term) => {
@@ -1798,7 +2077,7 @@ export class Agent<TContext = unknown> {
   /**
    * Get the persistence manager (if configured)
    */
-  getPersistenceManager(): PersistenceManager | undefined {
+  getPersistenceManager(): PersistenceManager<TData> | undefined {
     return this.persistenceManager;
   }
 
@@ -1832,21 +2111,20 @@ export class Agent<TContext = unknown> {
   }
 
   /**
-   * Get collected data from current session
+   * Get collected data from current session or agent-level collected data
    * @param routeId - Optional route ID to get data for (uses current route if not provided)
-   * @returns The collected data from the current session
+   * @returns The collected data from the current session or agent-level data
    */
-  getData<TData = unknown>(routeId?: string): Partial<TData> {
-    if (!this.currentSession) {
-      return {} as Partial<TData>;
+  getData(): Partial<TData> {
+    // If we have a current session, use session data
+    if (this.currentSession) {
+      // With agent-level data, all routes share the same data structure
+      // No need for route-specific data access
+      return (this.currentSession.data) || {};
     }
-    if (routeId) {
-      return (
-        (this.currentSession.dataByRoute?.[routeId] as Partial<TData>) ||
-        ({} as Partial<TData>)
-      );
-    }
-    return (this.currentSession.data as Partial<TData>) || {};
+
+    // Otherwise, return agent-level collected data
+    return this.getCollectedData();
   }
 
   /**
@@ -1868,10 +2146,10 @@ export class Agent<TContext = unknown> {
    */
   async nextStepRoute(
     routeIdOrTitle: string,
-    session?: SessionState,
-    condition?: Template<TContext, unknown>,
+    session?: SessionState<TData>,
+    condition?: Template<TContext, TData>,
     history?: Event[]
-  ): Promise<SessionState> {
+  ): Promise<SessionState<TData>> {
     const targetSession = session || this.currentSession;
 
     if (!targetSession) {
@@ -1900,12 +2178,12 @@ export class Agent<TContext = unknown> {
     };
     const renderedCondition = await render(condition, templateContext);
 
-    const updatedSession: SessionState = {
+    const updatedSession: SessionState<TData> = {
       ...targetSession,
       pendingTransition: {
         targetRouteId: targetRoute.id,
         condition: renderedCondition,
-        reason: "manual",
+        reason: "route_complete",
       },
     };
 
@@ -1915,7 +2193,7 @@ export class Agent<TContext = unknown> {
     }
 
     logger.debug(
-      `[Agent] Set pending manual transition to route: ${targetRoute.title}`
+      `[Agent] Set pending transition to route: ${targetRoute.title}`
     );
 
     return updatedSession;
@@ -1925,7 +2203,7 @@ export class Agent<TContext = unknown> {
    * Simplified respond method using SessionManager
    * Automatically manages conversation history through the session
    */
-  async chat<TData = Record<string, unknown>>(
+  async chat(
     message?: string,
     options?: {
       history?: History; // Optional: override session history for this response
@@ -1947,7 +2225,15 @@ export class Agent<TContext = unknown> {
     }
 
     // Get or create session
-    const session = await this.session.getOrCreate();
+    let session = await this.session.getOrCreate();
+
+    // Merge agent's collected data into session (agent data takes precedence)
+    if (Object.keys(this.collectedData).length > 0) {
+      session = mergeCollected(session, this.collectedData);
+      // Update the session manager with the merged data
+      await this.session.setData(this.collectedData);
+      logger.debug("[Agent] Merged agent collected data into chat session:", this.collectedData);
+    }
 
     // Use existing respond method with session-managed history
     const result = await this.respond({
@@ -1962,6 +2248,10 @@ export class Agent<TContext = unknown> {
       await this.session.addMessage("assistant", result.message);
     }
 
-    return result as AgentResponse<TData>;
+    // Ensure the result includes the current session
+    return {
+      ...result,
+      session: result.session || this.session.current,
+    };
   }
 }

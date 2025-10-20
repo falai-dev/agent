@@ -17,7 +17,6 @@ import {
   type Guideline,
   type Tool,
   type RouteOptions,
-  History,
 } from "../../src/index";
 
 // Context type
@@ -42,7 +41,7 @@ interface LabData {
 }
 
 // Define tools using the new Tool interface
-const getInsuranceProviders: Tool<HealthcareContext, [], string[]> = {
+const getInsuranceProviders: Tool<HealthcareContext, HealthcareData, [], string[]> = {
   id: "healthcare_insurance_providers",
   description: "Retrieves list of accepted insurance providers",
   parameters: {
@@ -58,6 +57,7 @@ const getInsuranceProviders: Tool<HealthcareContext, [], string[]> = {
 
 const getAvailableSlots: Tool<
   HealthcareContext,
+  HealthcareData,
   [],
   { date: string; time: string }[]
 > = {
@@ -80,6 +80,7 @@ const getAvailableSlots: Tool<
 
 const getLabResults: Tool<
   HealthcareContext,
+  HealthcareData,
   [],
   { report: string; status: string }
 > = {
@@ -89,19 +90,12 @@ const getLabResults: Tool<
     type: "object",
     properties: {},
   },
-  handler: ({
-    context,
-    data,
-  }: {
-    context: HealthcareContext;
-    data?: Partial<LabData>;
-  }) => {
+  handler: ({ context, data }) => {
     // Tools can access collected data and context
-    const labData = data as Partial<LabData>;
-    if (labData?.testType) {
+    if (data?.testType) {
       return {
         data: {
-          report: `${labData.testType} results for ${context.patientName}`,
+          report: `${data.testType} results for ${context.patientName}`,
           status: "All values within normal range",
         },
       };
@@ -118,6 +112,7 @@ const getLabResults: Tool<
 
 const scheduleAppointment: Tool<
   HealthcareContext,
+  HealthcareData,
   [],
   { confirmation: string }
 > = {
@@ -127,21 +122,15 @@ const scheduleAppointment: Tool<
     type: "object",
     properties: {},
   },
-  handler: ({
-    data,
-  }: {
-    context: HealthcareContext;
-    data?: Partial<AppointmentData>;
-  }) => {
+  handler: ({ data }) => {
     // Tools access collected appointment data
-    const appointment = data as Partial<AppointmentData>;
-    if (!appointment?.preferredDate || !appointment?.preferredTime) {
+    if (!data?.preferredDate || !data?.preferredTime) {
       return { data: { confirmation: "Please provide appointment details" } };
     }
 
     return {
       data: {
-        confirmation: `Appointment scheduled for ${appointment.preferredDate} at ${appointment.preferredTime}`,
+        confirmation: `Appointment scheduled for ${data.preferredDate} at ${data.preferredTime}`,
       },
     };
   },
@@ -186,40 +175,16 @@ const guidelines: Guideline<HealthcareContext>[] = [
   },
 ];
 
-const routes: RouteOptions<HealthcareContext>[] = [
+const routes: RouteOptions<HealthcareContext, HealthcareData>[] = [
   {
     id: "route_schedule_appointment",
     title: "Schedule Appointment",
     description: "Helps the patient schedule an appointment",
     conditions: ["The patient wants to schedule an appointment"],
-    schema: {
-      type: "object",
-      properties: {
-        appointmentType: {
-          type: "string",
-          enum: ["checkup", "consultation", "followup"],
-          description: "Type of appointment needed",
-        },
-        preferredDate: {
-          type: "string",
-          description: "Preferred appointment date",
-        },
-        preferredTime: {
-          type: "string",
-          description: "Preferred appointment time",
-        },
-        symptoms: {
-          type: "string",
-          description: "Description of symptoms (if applicable)",
-        },
-        urgency: {
-          type: "string",
-          enum: ["low", "medium", "high"],
-          default: "medium",
-        },
-      },
-      required: ["appointmentType", "preferredDate", "preferredTime"],
-    },
+    // NEW: Required fields for route completion (instead of schema)
+    requiredFields: ["appointmentType", "preferredDate", "preferredTime"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["symptoms", "urgency"],
     guidelines: [
       {
         condition: "The patient says their visit is urgent",
@@ -249,7 +214,7 @@ const routes: RouteOptions<HealthcareContext>[] = [
         description: "Ask about symptoms",
         prompt: "Are you experiencing any symptoms?",
         collect: ["symptoms"],
-        skipIf: (data: Partial<AppointmentData>) =>
+        skipIf: (data: Partial<HealthcareData>) =>
           data.appointmentType === "checkup", // Skip for checkups
       },
       {
@@ -283,25 +248,10 @@ const routes: RouteOptions<HealthcareContext>[] = [
     title: "Check Lab Results",
     description: "Retrieves and explains patient lab results",
     conditions: ["The patient wants to see their lab results"],
-    schema: {
-      type: "object",
-      properties: {
-        testType: {
-          type: "string",
-          description: "Type of lab test",
-        },
-        testDate: {
-          type: "string",
-          description: "Date of the lab test",
-        },
-        resultsNeeded: {
-          type: "boolean",
-          default: true,
-          description: "Whether detailed results are needed",
-        },
-      },
-      required: ["testType"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["testType"],
+    // NEW: Optional fields
+    optionalFields: ["testDate", "resultsNeeded"],
     guidelines: [
       {
         condition: "The patient presses for more conclusions about results",
@@ -316,12 +266,58 @@ const routes: RouteOptions<HealthcareContext>[] = [
     title: "General Healthcare Questions",
     description: "Answer general healthcare questions",
     conditions: ["Patient asks general healthcare questions"],
-    // No schema - conversational Q&A
+    // No required fields - conversational Q&A
   },
 ];
 
-// Create the fully configured agent
-const agent = new Agent<HealthcareContext>({
+// Define a unified data schema for all healthcare interactions
+interface HealthcareData extends AppointmentData, LabData {}
+
+const healthcareSchema = {
+  type: "object",
+  properties: {
+    // Appointment fields
+    appointmentType: {
+      type: "string",
+      enum: ["checkup", "consultation", "followup"],
+      description: "Type of appointment needed",
+    },
+    preferredDate: {
+      type: "string",
+      description: "Preferred appointment date",
+    },
+    preferredTime: {
+      type: "string",
+      description: "Preferred appointment time",
+    },
+    symptoms: {
+      type: "string",
+      description: "Description of symptoms (if applicable)",
+    },
+    urgency: {
+      type: "string",
+      enum: ["low", "medium", "high"],
+      default: "medium",
+    },
+    // Lab fields
+    testType: {
+      type: "string",
+      description: "Type of lab test",
+    },
+    testDate: {
+      type: "string",
+      description: "Date of the lab test",
+    },
+    resultsNeeded: {
+      type: "boolean",
+      default: true,
+      description: "Whether detailed results are needed",
+    },
+  },
+};
+
+// Create the fully configured agent with agent-level schema
+const agent = new Agent<HealthcareContext, HealthcareData>({
   name: "HealthBot",
   description: "A compassionate healthcare assistant",
   goal: "Provide helpful information and assist with appointments",
@@ -333,6 +329,8 @@ const agent = new Agent<HealthcareContext>({
     apiKey: process.env.GEMINI_API_KEY || "demo-key",
     model: "models/gemini-2.5-flash",
   }),
+  // NEW: Agent-level schema
+  schema: healthcareSchema,
   // Declarative initialization
   terms,
   guidelines,
@@ -381,7 +379,7 @@ async function main() {
   });
   
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Collected data:", agent.session.getData<AppointmentData | LabData>());
+  console.log("📊 Collected data:", agent.session.getData());
   console.log("📍 Current step:", response2.session?.currentStep?.id);
 
   await agent.session.addMessage("assistant", response2.message);
@@ -396,7 +394,7 @@ async function main() {
   });
   
   console.log("🤖 Agent:", response3.message);
-  console.log("📊 Updated data:", agent.session.getData<AppointmentData | LabData>());
+  console.log("📊 Updated data:", agent.session.getData());
   console.log("📍 Current step:", response3.session?.currentStep?.id);
   
   await agent.session.addMessage("assistant", response3.message);
@@ -405,7 +403,7 @@ async function main() {
   if (response3.isRouteComplete && response3.session) {
     console.log("\n✅ Appointment scheduling complete!");
     await sendAppointmentConfirmation(
-      agent.getData<AppointmentData>(response3.session.id) as AppointmentData
+      agent.getCollectedData() as HealthcareData
     );
   }
 
@@ -424,9 +422,9 @@ async function main() {
 
 /**
  * Mock function to send an appointment confirmation.
- * @param data - The appointment data.
+ * @param data - The healthcare data.
  */
-async function sendAppointmentConfirmation(data: AppointmentData) {
+async function sendAppointmentConfirmation(data: HealthcareData) {
   console.log("\n" + "=".repeat(60));
   console.log("🚀 Sending Appointment Confirmation...");
   console.log("=".repeat(60));

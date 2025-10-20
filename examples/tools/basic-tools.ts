@@ -6,7 +6,7 @@
  * and integration with conversation flows.
  *
  * Key concepts:
- * - Tool definition with Tool<TContext, TArgs, TResult, TData> interface
+ * - Tool definition with Tool<TContext, TData, TArgs, TResult> interface
  * - Tool context and parameters
  * - Tool execution in conversation flows
  * - Error handling in tools
@@ -36,7 +36,7 @@ interface SearchData {
 }
 
 // Example 1: Simple Calculator Tool
-const calculatorTool: Tool<unknown, [], string, CalculatorData> = {
+const calculatorTool: Tool<unknown, UnifiedToolData, [], string> = {
   id: "calculator",
   name: "Math Calculator",
   description: "Evaluate mathematical expressions and return results",
@@ -51,8 +51,7 @@ const calculatorTool: Tool<unknown, [], string, CalculatorData> = {
     required: ["expression"],
   },
   handler: ({ data }) => {
-    const calcData = data as Partial<CalculatorData>;
-    if (!calcData?.expression) {
+    if (!data?.expression) {
       throw new Error("No expression provided");
     }
 
@@ -60,22 +59,22 @@ const calculatorTool: Tool<unknown, [], string, CalculatorData> = {
       // Simple expression evaluation (in production, use a safe math library)
       // WARNING: eval is unsafe - use a proper math evaluation library in production
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const result = eval(calcData.expression);
+      const result = eval(data.expression);
 
       if (typeof result !== "number" || isNaN(result)) {
         throw new Error("Invalid calculation result");
       }
 
       return {
-        data: `The result of ${calcData.expression} is ${result}`,
+        data: `The result of ${data.expression} is ${result}`,
         dataUpdate: {
           result,
-          operation: calcData.expression,
+          operation: data.expression,
         },
       };
     } catch (error) {
       throw new Error(
-        `Error calculating ${calcData.expression}: ${
+        `Error calculating ${data.expression}: ${
           error instanceof Error ? error.message : "Unknown error"
         }`
       );
@@ -84,7 +83,7 @@ const calculatorTool: Tool<unknown, [], string, CalculatorData> = {
 };
 
 // Example 2: Weather Tool with External API Simulation
-const weatherTool: Tool<unknown, [], string, WeatherData> = {
+const weatherTool: Tool<unknown, UnifiedToolData, [], string> = {
   id: "get_weather",
   name: "Weather Lookup",
   description: "Get current weather and forecast for a location",
@@ -96,8 +95,7 @@ const weatherTool: Tool<unknown, [], string, WeatherData> = {
     required: ["location"],
   },
   handler: async ({ data }) => {
-    const weatherData = data as Partial<WeatherData>;
-    if (!weatherData?.location) {
+    if (!data?.location) {
       throw new Error("No location provided");
     }
 
@@ -127,14 +125,14 @@ const weatherTool: Tool<unknown, [], string, WeatherData> = {
       },
     };
 
-    const weather = mockWeather[weatherData.location] || {
+    const weather = mockWeather[data.location] || {
       temp: 70,
       condition: "Unknown",
       forecast: "Weather data unavailable",
     };
 
     return {
-      data: `Weather in ${weatherData.location}: ${weather.temp}°F and ${weather.condition}. ${weather.forecast}`,
+      data: `Weather in ${data.location}: ${weather.temp}°F and ${weather.condition}. ${weather.forecast}`,
       dataUpdate: {
         temperature: weather.temp,
         condition: weather.condition,
@@ -145,7 +143,7 @@ const weatherTool: Tool<unknown, [], string, WeatherData> = {
 };
 
 // Example 3: Search Tool with Multiple Results
-const searchTool: Tool<unknown, [], string, SearchData> = {
+const searchTool: Tool<unknown, UnifiedToolData, [], string> = {
   id: "web_search",
   name: "Web Search",
   description: "Search the web for information on a given query",
@@ -157,8 +155,7 @@ const searchTool: Tool<unknown, [], string, SearchData> = {
     required: ["query"],
   },
   handler: async ({ data }) => {
-    const searchData = data as Partial<SearchData>;
-    if (!searchData?.query) {
+    if (!data?.query) {
       throw new Error("No search query provided");
     }
 
@@ -187,15 +184,15 @@ const searchTool: Tool<unknown, [], string, SearchData> = {
       ],
     };
 
-    const results = mockResults[searchData.query.toLowerCase()] || [
-      `Search results for "${searchData.query}"`,
+    const results = mockResults[data.query.toLowerCase()] || [
+      `Search results for "${data.query}"`,
       "This is a simulated search result",
       "In a real implementation, this would connect to a search API",
       "Such as Google Custom Search, Bing Web Search, or Elasticsearch",
     ];
 
     return {
-      data: `Search results for "${searchData.query}":\n${results
+      data: `Search results for "${data.query}":\n${results
         .map((r, i) => `${i + 1}. ${r}`)
         .join("\n")}`,
       dataUpdate: {
@@ -209,9 +206,9 @@ const searchTool: Tool<unknown, [], string, SearchData> = {
 // Example 4: Tool that Modifies Context (Advanced)
 const updatePreferencesTool: Tool<
   { preferences?: { theme: string; language: string } },
+  UnifiedToolData,
   [],
-  string,
-  { theme?: string; language?: string }
+  string
 > = {
   id: "update_preferences",
   name: "Update Preferences",
@@ -242,29 +239,54 @@ const updatePreferencesTool: Tool<
   },
 };
 
+// Define unified data schema for all tool interactions
+interface UnifiedToolData extends CalculatorData, WeatherData, SearchData {
+  theme?: string;
+  language?: string;
+}
+
+const unifiedToolSchema = {
+  type: "object",
+  properties: {
+    // Calculator fields
+    expression: { type: "string" },
+    result: { type: "number" },
+    operation: { type: "string" },
+    // Weather fields
+    location: { type: "string" },
+    temperature: { type: "number" },
+    condition: { type: "string" },
+    forecast: { type: "string" },
+    // Search fields
+    query: { type: "string" },
+    results: { type: "array", items: { type: "string" } },
+    source: { type: "string" },
+    // Preferences fields
+    theme: { type: "string", enum: ["light", "dark"] },
+    language: { type: "string", enum: ["en", "es", "fr"] },
+  },
+};
+
 // Create agent with tools
-const agent = new Agent<{ preferences?: { theme: string; language: string } }>({
+const agent = new Agent<{ preferences?: { theme: string; language: string } }, UnifiedToolData>({
   name: "ToolBot",
   description: "An agent demonstrating various tool capabilities",
   provider: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
     model: "models/gemini-2.5-flash",
   }),
+  // NEW: Agent-level schema
+  schema: unifiedToolSchema,
 });
 
 // Create routes that use different tools
-agent.createRoute<CalculatorData>({
+agent.createRoute({
   title: "Calculator",
   description: "Mathematical calculations",
-  schema: {
-    type: "object",
-    properties: {
-      expression: { type: "string" },
-      result: { type: "number" },
-      operation: { type: "string" },
-    },
-    required: ["expression"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["expression"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["result", "operation"],
   steps: [
     {
       id: "get_expression",
@@ -283,19 +305,13 @@ agent.createRoute<CalculatorData>({
   ],
 });
 
-agent.createRoute<WeatherData>({
+agent.createRoute({
   title: "Weather",
   description: "Weather information",
-  schema: {
-    type: "object",
-    properties: {
-      location: { type: "string" },
-      temperature: { type: "number" },
-      condition: { type: "string" },
-      forecast: { type: "string" },
-    },
-    required: ["location"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["location"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["temperature", "condition", "forecast"],
   steps: [
     {
       id: "get_location",
@@ -314,18 +330,13 @@ agent.createRoute<WeatherData>({
   ],
 });
 
-agent.createRoute<SearchData>({
+agent.createRoute({
   title: "Web Search",
   description: "Information search",
-  schema: {
-    type: "object",
-    properties: {
-      query: { type: "string" },
-      results: { type: "array", items: { type: "string" } },
-      source: { type: "string" },
-    },
-    required: ["query"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["query"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["results", "source"],
   steps: [
     {
       id: "get_query",
@@ -371,7 +382,7 @@ async function demonstrateBasicTools() {
   console.log("Bot:", calcResponse.message);
   console.log(
     "Calculated result:",
-    (calcResponse.session?.data as Partial<CalculatorData>)?.result
+    calcResponse.session?.data?.result
   );
   console.log();
 
@@ -383,9 +394,9 @@ async function demonstrateBasicTools() {
   });
   console.log("Bot:", weatherResponse.message);
   console.log("Weather data:", {
-    temperature: (weatherResponse.session?.data as Partial<WeatherData>)
+    temperature: (weatherResponse.session?.data as Partial<UnifiedToolData>)
       ?.temperature,
-    condition: (weatherResponse.session?.data as Partial<WeatherData>)
+    condition: (weatherResponse.session?.data as Partial<UnifiedToolData>)
       ?.condition,
   });
   console.log();
@@ -404,7 +415,7 @@ async function demonstrateBasicTools() {
   console.log("Bot:", searchResponse.message);
   console.log(
     "Search results count:",
-    (searchResponse.session?.data as Partial<SearchData>)?.results?.length
+    (searchResponse.session?.data as Partial<UnifiedToolData>)?.results?.length
   );
 }
 
@@ -453,15 +464,15 @@ async function demonstrateToolDataFlow() {
   console.log("1. Initial calculation:");
   console.log(
     "   User input collected:",
-    (response1.session?.data as Partial<CalculatorData>)?.expression
+    (response1.session?.data as Partial<UnifiedToolData>)?.expression
   );
   console.log(
     "   Tool result:",
-    (response1.session?.data as Partial<CalculatorData>)?.result
+    (response1.session?.data as Partial<UnifiedToolData>)?.result
   );
   console.log(
     "   Operation stored:",
-    (response1.session?.data as Partial<CalculatorData>)?.operation
+    (response1.session?.data as Partial<UnifiedToolData>)?.operation
   );
 
   // Follow up question using previous result
@@ -475,7 +486,7 @@ async function demonstrateToolDataFlow() {
   console.log("\n2. Follow-up calculation:");
   console.log(
     "   Previous result available:",
-    (response2.session?.data as Partial<CalculatorData>)?.result
+    (response2.session?.data as Partial<UnifiedToolData>)?.result
   );
   console.log("   Bot response:", response2.message);
 }
@@ -486,7 +497,7 @@ function demonstrateToolPatterns() {
 
   console.log("1. Basic Tool Pattern:");
   console.log(`
-const myTool: Tool<ContextType, [], ResultType, DataType> = {
+const myTool: Tool<ContextType, DataType, [], ResultType> = {
   id: "tool_name",                    // Unique identifier
   description: "What this tool does", // AI uses this to decide when to call
   parameters: {                       // JSON Schema for tool parameters

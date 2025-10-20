@@ -8,6 +8,7 @@ import type {
   SessionState,
   AgentStructuredResponse,
   Tool,
+  RouteTransitionConfig,
 } from "../types";
 import { EventKind, MessageRole } from "../types/history";
 import {
@@ -24,47 +25,51 @@ import { RoutingEngine } from "../core/RoutingEngine";
 import { ToolExecutor } from "../core/ToolExecutor";
 import { END_ROUTE_ID } from "../constants";
 
-export interface ResponsePreparationResult<TContext> {
+export interface ResponsePreparationResult<TContext, TData = unknown> {
   effectiveContext: TContext;
-  session: SessionState;
+  session: SessionState<TData>;
 }
 
-export interface RoutingResult<TContext> {
-  selectedRoute: Route<TContext, unknown> | undefined;
-  selectedStep: Step<TContext, unknown> | undefined;
+export interface RoutingResult<TContext, TData = unknown> {
+  selectedRoute: Route<TContext, TData> | undefined;
+  selectedStep: Step<TContext, TData> | undefined;
   responseDirectives: string[] | undefined;
-  session: SessionState;
+  session: SessionState<TData>;
   isRouteComplete: boolean;
+  completedRoutes?: Route<TContext, TData>[];
 }
 
-export interface ToolExecutionResult {
-  session: SessionState;
+export interface ToolExecutionResult<TData = unknown> {
+  session: SessionState<TData>;
   toolCalls:
     | Array<{ toolName: string; arguments: Record<string, unknown> }>
     | undefined;
 }
 
-export interface DataCollectionResult {
-  session: SessionState;
-  collectedData?: Record<string, unknown>;
+export interface DataCollectionResult<TData = unknown> {
+  session: SessionState<TData>;
+  collectedData?: Partial<TData>;
 }
 
 /**
  * Shared response processing logic between respond() and respondStream() methods
  */
-export class ResponsePipeline<TContext = unknown> {
+export class ResponsePipeline<TContext = unknown, TData = unknown> {
   constructor(
-    private readonly options: AgentOptions<TContext>,
-    private readonly routes: Route<TContext, unknown>[],
-    private readonly tools: Tool<TContext, unknown[], unknown, unknown>[],
-    private readonly routingEngine: RoutingEngine<TContext>,
+    private readonly options: AgentOptions<TContext, TData>,
+    private readonly routes: Route<TContext, TData>[],
+    private readonly tools: Tool<TContext, TData, unknown[], unknown>[],
+    private readonly routingEngine: RoutingEngine<TContext, TData>,
     private readonly updateContext: (
       updates: Partial<TContext>
     ) => Promise<void>,
     private readonly updateData: (
-      session: SessionState,
-      dataUpdate: Partial<unknown>
-    ) => Promise<SessionState>
+      session: SessionState<TData>,
+      dataUpdate: Partial<TData>
+    ) => Promise<SessionState<TData>>,
+    private readonly updateCollectedData?: (
+      updates: Partial<TData>
+    ) => Promise<void>
   ) {}
 
   /**
@@ -72,8 +77,8 @@ export class ResponsePipeline<TContext = unknown> {
    */
   async prepareResponseContext(params: {
     contextOverride?: Partial<TContext>;
-    session?: SessionState;
-  }): Promise<ResponsePreparationResult<TContext>> {
+    session?: SessionState<TData>;
+  }): Promise<ResponsePreparationResult<TContext, TData>> {
     const { contextOverride, session } = params;
 
     // Get current context (may fetch from provider)
@@ -93,7 +98,7 @@ export class ResponsePipeline<TContext = unknown> {
     } as TContext;
 
     // Initialize or get session (use current session if available)
-    const targetSession = session || this.currentSession || createSession();
+    const targetSession = session || this.currentSession || createSession<TData>();
 
     return {
       effectiveContext,
@@ -105,18 +110,19 @@ export class ResponsePipeline<TContext = unknown> {
    * Handle routing and step selection logic
    */
   async handleRoutingAndStepSelection(params: {
-    session: SessionState;
+    session: SessionState<TData>;
     history: Event[];
     context: TContext;
     signal?: AbortSignal;
-  }): Promise<RoutingResult<TContext>> {
+  }): Promise<RoutingResult<TContext, TData>> {
     const { session, history, context, signal } = params;
 
     // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use (combined)
-    let selectedRoute: Route<TContext, unknown> | undefined;
+    let selectedRoute: Route<TContext, TData> | undefined;
     let responseDirectives: string[] | undefined;
-    let selectedStep: Step<TContext, unknown> | undefined;
+    let selectedStep: Step<TContext, TData> | undefined;
     let isRouteComplete = false;
+    let completedRoutes: Route<TContext, TData>[] = [];
     let targetSession = session;
 
     // Check for pending transition from previous route completion
@@ -178,6 +184,7 @@ export class ResponsePipeline<TContext = unknown> {
       responseDirectives = orchestration.responseDirectives;
       targetSession = orchestration.session;
       isRouteComplete = orchestration.isRouteComplete || false;
+      completedRoutes = orchestration.completedRoutes || [];
 
       // Log if route is complete
       if (isRouteComplete) {
@@ -193,6 +200,7 @@ export class ResponsePipeline<TContext = unknown> {
       responseDirectives,
       session: targetSession,
       isRouteComplete,
+      completedRoutes,
     };
   }
 
@@ -200,18 +208,18 @@ export class ResponsePipeline<TContext = unknown> {
    * Determine next step and update session
    */
   determineNextStep(params: {
-    selectedRoute: Route<TContext, unknown> | undefined;
-    selectedStep: Step<TContext, unknown> | undefined;
-    session: SessionState;
+    selectedRoute: Route<TContext, TData> | undefined;
+    selectedStep: Step<TContext, TData> | undefined;
+    session: SessionState<TData>;
     isRouteComplete: boolean;
-  }): { nextStep: Step<TContext, unknown> | undefined; session: SessionState } {
+  }): { nextStep: Step<TContext, TData> | undefined; session: SessionState<TData> } {
     const { selectedRoute, selectedStep, session, isRouteComplete } = params;
 
     if (!selectedRoute || isRouteComplete) {
       return { nextStep: undefined, session };
     }
 
-    let nextStep: Step<TContext, unknown>;
+    let nextStep: Step<TContext, TData>;
 
     // If we have a selected step from the combined routing decision, use it
     if (selectedStep) {
@@ -253,12 +261,12 @@ export class ResponsePipeline<TContext = unknown> {
    */
   async executeToolCalls(params: {
     toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-    selectedRoute?: Route<TContext, unknown>;
+    selectedRoute?: Route<TContext, TData>;
     context: TContext;
-    session: SessionState;
+    session: SessionState<TData>;
     history: Event[];
     isStreaming?: boolean;
-  }): Promise<ToolExecutionResult> {
+  }): Promise<ToolExecutionResult<TData>> {
     const {
       toolCalls,
       selectedRoute,
@@ -291,11 +299,12 @@ export class ResponsePipeline<TContext = unknown> {
         continue;
       }
 
-      const toolExecutor = new ToolExecutor<TContext, unknown>();
+      const toolExecutor = new ToolExecutor<TContext, TData>();
       const result = await toolExecutor.executeTool({
         tool,
         context,
         updateContext: this.updateContext,
+        updateData: this.updateCollectedData || (async () => {}),
         history,
         data: updatedSession.data,
       });
@@ -311,7 +320,7 @@ export class ResponsePipeline<TContext = unknown> {
       if (result.dataUpdate) {
         updatedSession = await this.updateData(
           updatedSession,
-          result.dataUpdate
+          result.dataUpdate as Partial<TData>
         );
         logger.debug(
           `[ResponseHandler] ${
@@ -341,15 +350,15 @@ export class ResponsePipeline<TContext = unknown> {
     initialToolCalls:
       | Array<{ toolName: string; arguments: Record<string, unknown> }>
       | undefined;
-    selectedRoute?: Route<TContext, unknown>;
-    nextStep: Step<TContext, unknown>;
+    selectedRoute?: Route<TContext, TData>;
+    nextStep: Step<TContext, TData>;
     responsePrompt: string;
     history: Event[];
     context: TContext;
-    session: SessionState;
+    session: SessionState<TData>;
     responseSchema: Record<string, unknown>;
     isStreaming?: boolean;
-  }): Promise<ToolExecutionResult> {
+  }): Promise<ToolExecutionResult<TData>> {
     const {
       initialToolCalls,
       selectedRoute,
@@ -469,28 +478,35 @@ export class ResponsePipeline<TContext = unknown> {
    */
   async handleDataCollection(params: {
     structured: AgentStructuredResponse | undefined;
-    nextStep: Step<TContext, unknown>;
-    session: SessionState;
-  }): Promise<DataCollectionResult> {
+    nextStep: Step<TContext, TData>;
+    session: SessionState<TData>;
+  }): Promise<DataCollectionResult<TData>> {
     const { structured, nextStep, session } = params;
 
     if (!structured || !nextStep.collect) {
       return { session };
     }
 
-    const collectedData: Record<string, unknown> = {};
+    const collectedData: Partial<TData> = {};
     // The structured response includes both base fields and collected extraction fields
     const structuredData = structured as AgentStructuredResponse &
       Record<string, unknown>;
 
     for (const field of nextStep.collect) {
-      if (field in structuredData) {
-        collectedData[field] = structuredData[field];
+      const fieldKey = field as string;
+      if (fieldKey in structuredData) {
+        (collectedData as Record<string, unknown>)[fieldKey] = structuredData[fieldKey];
       }
     }
 
     let updatedSession = session;
     if (Object.keys(collectedData).length > 0) {
+      // Update agent-level collected data with validation if available
+      if (this.updateCollectedData) {
+        await this.updateCollectedData(collectedData);
+      }
+      
+      // Update session with validated data
       updatedSession = await this.updateData(session, collectedData);
       logger.debug(`[ResponseHandler] Collected data:`, collectedData);
     }
@@ -523,11 +539,11 @@ export class ResponsePipeline<TContext = unknown> {
    * Handle route completion logic
    */
   async handleRouteCompletion(params: {
-    selectedRoute: Route<TContext, unknown>;
-    session: SessionState;
+    selectedRoute: Route<TContext, TData>;
+    session: SessionState<TData>;
     context: TContext;
     history: Event[];
-  }): Promise<{ session: SessionState; hasTransition: boolean }> {
+  }): Promise<{ session: SessionState<TData>; hasTransition: boolean }> {
     const { selectedRoute, session, context, history } = params;
 
     // Check for onComplete transition
@@ -590,8 +606,8 @@ export class ResponsePipeline<TContext = unknown> {
    */
   private findAvailableTool(
     toolName: string,
-    route?: Route<TContext, unknown>
-  ): Tool<TContext, unknown[], unknown, unknown> | undefined {
+    route?: Route<TContext, TData>
+  ): Tool<TContext, TData, unknown[], unknown> | undefined {
     // Check route-level tools first (if route provided)
     if (route) {
       const routeTool = route
@@ -610,12 +626,12 @@ export class ResponsePipeline<TContext = unknown> {
    * Collect all available tools for the given route and step context
    */
   private collectAvailableTools(
-    route?: Route<TContext, unknown>,
-    step?: Step<TContext, unknown>
+    route?: Route<TContext, TData>,
+    step?: Step<TContext, TData>
   ): Array<{ id: string; description?: string; parameters?: unknown }> {
     const availableTools = new Map<
       string,
-      Tool<TContext, unknown[], unknown, unknown>
+      Tool<TContext, TData, unknown[], unknown>
     >();
 
     // Add agent-level tools
@@ -633,7 +649,7 @@ export class ResponsePipeline<TContext = unknown> {
     // Filter by step-level allowed tools if specified
     if (step?.tools) {
       const allowedToolIds = new Set<string>();
-      const stepTools: Tool<TContext, unknown[], unknown, unknown>[] = [];
+      const stepTools: Tool<TContext, TData, unknown[], unknown>[] = [];
 
       for (const toolRef of step.tools) {
         if (typeof toolRef === "string") {
@@ -652,7 +668,7 @@ export class ResponsePipeline<TContext = unknown> {
       if (allowedToolIds.size > 0) {
         const filteredTools = new Map<
           string,
-          Tool<TContext, unknown[], unknown, unknown>
+          Tool<TContext, TData, unknown[], unknown>
         >();
         for (const toolId of allowedToolIds) {
           const tool = availableTools.get(toolId);
@@ -694,14 +710,14 @@ export class ResponsePipeline<TContext = unknown> {
 
   // These need to be passed in or accessed differently since ResponseHandler is not part of Agent
   private context?: TContext;
-  private currentSession?: SessionState;
+  private currentSession?: SessionState<TData>;
 
   // Setters for context and current session (needed for beforeRespond hook)
   setContext(context: TContext | undefined): void {
     this.context = context;
   }
 
-  setCurrentSession(session: SessionState | undefined): void {
+  setCurrentSession(session: SessionState<TData> | undefined): void {
     this.currentSession = session;
   }
 
@@ -709,7 +725,106 @@ export class ResponsePipeline<TContext = unknown> {
     return this.context;
   }
 
-  public getCurrentSession(): SessionState | undefined {
+  public getCurrentSession(): SessionState<TData> | undefined {
     return this.currentSession;
+  }
+
+  /**
+   * Handle cross-route completion evaluation and notifications
+   * This method evaluates all routes for completion and can trigger completion handlers
+   */
+  async handleCrossRouteCompletion(params: {
+    routes: Route<TContext, TData>[];
+    session: SessionState<TData>;
+    context: TContext;
+    history: Event[];
+  }): Promise<{
+    session: SessionState<TData>;
+    completedRoutes: Route<TContext, TData>[];
+    pendingTransitions: Array<{
+      route: Route<TContext, TData>;
+      transitionConfig: RouteTransitionConfig<TContext, TData>;
+    }>;
+  }> {
+    const { routes, session, context } = params;
+    
+    // Evaluate all routes for completion
+    const completedRoutes: Route<TContext, TData>[] = [];
+    const pendingTransitions: Array<{
+      route: Route<TContext, TData>;
+      transitionConfig: RouteTransitionConfig<TContext, TData>;
+    }> = [];
+    
+    for (const route of routes) {
+      if (route.isComplete(session.data || {})) {
+        completedRoutes.push(route);
+        
+        // Check for onComplete transitions
+        const transitionConfig = await route.evaluateOnComplete(
+          { data: session.data },
+          context
+        );
+        
+        if (transitionConfig) {
+          pendingTransitions.push({ route, transitionConfig });
+        }
+        
+        logger.debug(
+          `[ResponsePipeline] Route completed: ${route.title} ` +
+          `(${Math.round(route.getCompletionProgress(session.data || {}) * 100)}%)`
+        );
+      }
+    }
+    
+    // Log completion status for all routes
+    if (completedRoutes.length > 0) {
+      logger.debug(
+        `[ResponsePipeline] Cross-route completion evaluation: ` +
+        `${completedRoutes.length}/${routes.length} routes complete`
+      );
+    }
+    
+    return {
+      session,
+      completedRoutes,
+      pendingTransitions,
+    };
+  }
+
+  /**
+   * Update data flow to ensure agent-level data consistency
+   * This method ensures that data updates are properly validated and propagated
+   */
+  async updateDataFlow(params: {
+    session: SessionState<TData>;
+    dataUpdate: Partial<TData>;
+    routes: Route<TContext, TData>[];
+  }): Promise<SessionState<TData>> {
+    const { session, dataUpdate, routes } = params;
+    
+    // Update session data
+    const updatedSession = await this.updateData(session, dataUpdate);
+    
+    // Update agent-level data if handler is available
+    if (this.updateCollectedData) {
+      await this.updateCollectedData(dataUpdate);
+    }
+    
+    // Evaluate route completions after data update
+    const completionResults = await this.handleCrossRouteCompletion({
+      routes,
+      session: updatedSession,
+      context: this.context!,
+      history: [],
+    });
+    
+    // Log any newly completed routes
+    if (completionResults.completedRoutes.length > 0) {
+      logger.debug(
+        `[ResponsePipeline] Data update resulted in ${completionResults.completedRoutes.length} completed routes`
+      );
+    }
+    
+    return completionResults.session;
   }
 }

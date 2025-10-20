@@ -15,7 +15,7 @@ import {
 import { cloneDeep } from "../src/utils/clone";
 import { MockProviderFactory } from "./mock-provider";
 
-// Test data types
+// Test data types for agent-level data collection
 interface SupportTicketData {
   issue: string;
   category: "technical" | "billing" | "account" | "general";
@@ -24,6 +24,8 @@ interface SupportTicketData {
   assignedAgent?: string;
   resolution?: string;
   updated?: boolean;
+  customerName?: string;
+  email?: string;
 }
 
 interface UserInfoData {
@@ -48,16 +50,33 @@ interface ShoppingCartData {
   shippingAddress?: string;
   paymentMethod?: string;
   orderId?: string;
+  customerName?: string;
+  email?: string;
 }
 
 // Test utilities
-function createSessionTestAgent(): Agent<SupportTicketData> {
-  return new Agent<SupportTicketData>({
+function createSessionTestAgent(): Agent<unknown, SupportTicketData> {
+  return new Agent<unknown, SupportTicketData>({
     name: "SessionTestAgent",
     description: "Agent for testing session functionality",
     provider: MockProviderFactory.basic(),
     persistence: {
       adapter: new MemoryAdapter(),
+    },
+    schema: {
+      type: "object",
+      properties: {
+        issue: { type: "string" },
+        category: { type: "string", enum: ["technical", "billing", "account", "general"] },
+        priority: { type: "string", enum: ["low", "medium", "high"] },
+        ticketId: { type: "string" },
+        assignedAgent: { type: "string" },
+        resolution: { type: "string" },
+        updated: { type: "boolean" },
+        customerName: { type: "string" },
+        email: { type: "string", format: "email" },
+      },
+      required: ["issue", "category"],
     },
   });
 }
@@ -738,7 +757,7 @@ describe("SessionManager Integration with Agent Responses", () => {
     session.data = { issue: "Test issue" };
 
     // First response - should preserve existing data
-    const response1 = await agent.respond<SupportTicketData>({
+    const response1 = await agent.respond({
       history: [
         {
           role: "user" as const,
@@ -788,11 +807,19 @@ describe("SessionManager Integration with Agent Responses", () => {
 });
 
 describe("SessionManager Integration with Agent", () => {
-  test("should create and manage sessions automatically", async () => {
-    const agent = new Agent({
+  test("should create and manage sessions automatically with agent-level data", async () => {
+    const agent = new Agent<unknown, SupportTicketData>({
       name: "SessionManagerAgent",
       provider: MockProviderFactory.basic(),
       sessionId: "test-session-manager-123",
+      schema: {
+        type: "object",
+        properties: {
+          issue: { type: "string" },
+          category: { type: "string" },
+          priority: { type: "string" },
+        },
+      },
     });
 
     // Session should be created automatically
@@ -821,27 +848,44 @@ describe("SessionManager Integration with Agent", () => {
     expect(history[3].role).toBe("assistant");
   });
 
-  test("should persist session with history", async () => {
+  test("should persist session with history and agent-level data", async () => {
     const adapter = new MemoryAdapter();
-    const agent = new Agent({
+    const agent = new Agent<unknown, SupportTicketData>({
       name: "PersistenceAgent",
       provider: MockProviderFactory.basic(),
       sessionId: "persist-test-session",
       persistence: { adapter },
+      schema: {
+        type: "object",
+        properties: {
+          issue: { type: "string" },
+          category: { type: "string" },
+          customerName: { type: "string" },
+        },
+      },
     });
 
-    // Add conversation
+    // Add conversation and agent-level data
     await agent.chat("Test message");
+    await agent.updateCollectedData({ issue: "Test issue", category: "technical" });
 
     // Manually save
     await agent.session.save();
 
     // Create new agent with same session ID to verify persistence
-    const newAgent = new Agent({
+    const newAgent = new Agent<unknown, SupportTicketData>({
       name: "PersistenceAgent2",
       provider: MockProviderFactory.basic(),
       sessionId: "persist-test-session",
       persistence: { adapter },
+      schema: {
+        type: "object",
+        properties: {
+          issue: { type: "string" },
+          category: { type: "string" },
+          customerName: { type: "string" },
+        },
+      },
     });
 
     // Load the session and check history
@@ -853,35 +897,58 @@ describe("SessionManager Integration with Agent", () => {
     // Check if we have the user message (could be first or second depending on order)
     const userMessage = restoredHistory.find(msg => msg.role === "user");
     expect(userMessage?.content).toBe("Test message");
+
+    // Check that agent-level data was persisted
+    expect(restoredSession.data?.issue).toBe("Test issue");
+    expect(restoredSession.data?.category).toBe("technical");
   });
 
-  test("should handle session data operations", async () => {
-    const agent = new Agent({
+  test("should handle session data operations with agent-level data", async () => {
+    const agent = new Agent<unknown, SupportTicketData>({
       name: "DataAgent",
       provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          customerName: { type: "string" },
+          email: { type: "string" },
+          issue: { type: "string" },
+        },
+      },
     });
 
-    // Set some data
-    await agent.session.setData({ name: "John", email: "john@example.com" });
+    // Set some agent-level data
+    await agent.session.setData({ customerName: "John", email: "john@example.com" });
 
     // Get data
     const data = agent.session.getData();
-    expect(data).toEqual({ name: "John", email: "john@example.com" });
+    expect(data).toEqual({ customerName: "John", email: "john@example.com" });
 
     // Session should have the data
     const session = await agent.session.getOrCreate();
-    expect(session.data).toEqual({ name: "John", email: "john@example.com" });
+    expect(session.data).toEqual({ customerName: "John", email: "john@example.com" });
+
+    // Agent's collected data should also be updated
+    const collectedData = agent.getCollectedData();
+    expect(collectedData).toEqual({ customerName: "John", email: "john@example.com" });
   });
 
   test("should reset session while preserving history if requested", async () => {
-    const agent = new Agent({
+    const agent = new Agent<unknown, SupportTicketData>({
       name: "ResetAgent",
       provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          issue: { type: "string" },
+          important: { type: "string" },
+        },
+      },
     });
 
     // Add some conversation and data
     await agent.chat("Hello");
-    await agent.session.setData({ important: "data" });
+    await agent.session.setData({ issue: "test issue", category: "technical" });
 
     const originalSessionId = agent.session.id;
     const originalHistory = agent.session.getHistory();
@@ -916,6 +983,49 @@ describe("SessionManager Integration with Agent", () => {
     const sessionHistory = agent.session.getHistory();
     expect(sessionHistory).toHaveLength(2);
     expect(sessionHistory[0].content).toBe("Normal message");
+  });
+
+  test("should handle cross-route data sharing in sessions", async () => {
+    const agent = createSessionTestAgent();
+
+    // Create routes that share agent-level data
+    const infoRoute = agent.createRoute({
+      title: "Customer Info",
+      requiredFields: ["customerName", "email"],
+      steps: [
+        {
+          prompt: "What's your name?",
+          collect: ["customerName"],
+        },
+      ],
+    });
+
+    const ticketRoute = agent.createRoute({
+      title: "Support Ticket",
+      requiredFields: ["issue", "category"],
+      steps: [
+        {
+          prompt: "What's the issue?",
+          collect: ["issue"],
+        },
+      ],
+    });
+
+    // Simulate data collection across routes
+    const session = await agent.session.getOrCreate();
+    
+    // Update agent-level data that both routes can use
+    await agent.updateCollectedData({
+      customerName: "John Doe",
+      email: "john@example.com",
+      issue: "Login problem",
+      category: "technical",
+    });
+
+    // Both routes should be able to evaluate completion based on shared data
+    const agentData = agent.getCollectedData();
+    expect(infoRoute.isComplete(agentData)).toBe(true);
+    expect(ticketRoute.isComplete(agentData)).toBe(true);
   });
 });
 

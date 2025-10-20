@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `Agent<TContext>` class is the central orchestrator of @falai/agent, providing a strongly-typed, context-aware AI agent framework with intelligent routing and schema-driven data collection.
+The `Agent<TContext, TData>` class is the central orchestrator of @falai/agent, providing a strongly-typed, context-aware AI agent framework with intelligent routing and agent-level schema-driven data collection.
 
 ## Core Responsibilities
 
@@ -11,7 +11,7 @@ The `Agent<TContext>` class is the central orchestrator of @falai/agent, providi
 - **Context Lifecycle**: Dynamic context management with provider functions and lifecycle hooks
 - **Session Management**: Conversation state persistence and multi-turn dialogue support
 - **Tool Orchestration**: Hierarchical tool execution (agent → route → step level)
-- **Data Collection**: Schema-driven information extraction from natural conversations
+- **Agent-Level Data Collection**: Centralized schema-driven information extraction shared across all routes
 
 ## Agent Configuration
 
@@ -43,7 +43,18 @@ interface CustomerContext {
   };
 }
 
-const agent = new Agent<CustomerContext>({
+interface CustomerData {
+  customerName?: string;
+  email?: string;
+  phone?: string;
+  issueType?: 'booking' | 'billing' | 'technical' | 'other';
+  issueDescription?: string;
+  priority?: 'low' | 'medium' | 'high';
+  rating?: number;
+  comments?: string;
+}
+
+const agent = new Agent<CustomerContext, CustomerData>({
   // Identity
   name: "Premium Support Assistant",
   description: "24/7 AI support for premium customers",
@@ -55,6 +66,21 @@ const agent = new Agent<CustomerContext>({
     model: "gpt-5",
     backupModels: ["gpt-4"],
   }),
+
+  // Agent-level data schema (NEW)
+  schema: {
+    type: "object",
+    properties: {
+      customerName: { type: "string" },
+      email: { type: "string", format: "email" },
+      phone: { type: "string" },
+      issueType: { type: "string", enum: ["booking", "billing", "technical", "other"] },
+      issueDescription: { type: "string" },
+      priority: { type: "string", enum: ["low", "medium", "high"] },
+      rating: { type: "number", minimum: 1, maximum: 5 },
+      comments: { type: "string" }
+    }
+  },
 
   // Static context (can be overridden by contextProvider)
   context: {
@@ -102,16 +128,21 @@ const agent = new Agent<CustomerContext>({
       }
     },
 
-    // Validate and enrich collected data
+    // Validate and enrich collected data (NEW: Agent-level data hooks)
     onDataUpdate: async (data, previousData) => {
-      // Data validation
+      // Data validation against agent schema
       if (data.email && !isValidEmail(data.email)) {
         throw new Error("Invalid email format");
       }
 
-      // Data enrichment
-      if (data.userId && !data.userProfile) {
-        data.userProfile = await db.getUserProfile(data.userId);
+      // Data enrichment using agent-level data
+      if (data.customerName && !data.customerId) {
+        data.customerId = await lookupCustomerId(data.customerName);
+      }
+
+      // Auto-set priority based on issue type
+      if (data.issueType === 'billing' && !data.priority) {
+        data.priority = 'high';
       }
 
       return data;
@@ -327,26 +358,33 @@ agent.session.clearHistory();
 ### Declarative Route Creation
 
 ```typescript
-const agent = new Agent({
+const agent = new Agent<CustomerContext, CustomerData>({
+  // Agent-level schema defines all possible data fields
+  schema: { /* comprehensive schema */ },
+  
   routes: [
     {
       title: "Technical Support",
       description: "Help with technical issues",
       conditions: ["user reports technical problem"],
+      // NEW: Routes specify required fields instead of schemas
+      requiredFields: ["customerName", "email", "issueType", "issueDescription"],
+      optionalFields: ["phone", "priority"],
       initialStep: {
         prompt:
           "I understand you're having a technical issue. Can you describe what's happening?",
-        collect: ["problem", "severity"],
+        collect: ["issueType", "issueDescription"], // Collects into agent-level data
       },
     },
     {
-      title: "Billing Inquiry",
+      title: "Billing Inquiry", 
       description: "Handle billing and payment questions",
       conditions: ["user asks about billing or payment"],
+      requiredFields: ["customerName", "email", "issueType"],
       initialStep: {
         prompt:
           "I'd be happy to help with your billing question. What can I assist with?",
-        collect: ["billingIssue"],
+        collect: ["issueType"], // Maps to agent schema field
       },
     },
   ],
@@ -356,18 +394,21 @@ const agent = new Agent({
 ### Programmatic Route Creation
 
 ```typescript
-// Create routes dynamically
+// Create routes dynamically with required fields
 const supportRoute = agent
   .createRoute({
     title: "Customer Support",
+    requiredFields: ["customerName", "email", "issueType"], // NEW: Required fields
+    optionalFields: ["phone"], // NEW: Optional fields
     initialStep: {
       prompt: "How can I help you today?",
-      collect: ["intent"],
+      collect: ["customerName", "email"], // Collects into agent-level data
     },
   })
   .nextStep({
-    prompt: "I understand you need help with {{intent}}",
-    requires: ["intent"],
+    prompt: "I understand you need help, {{customerName}}. What type of issue are you experiencing?",
+    collect: ["issueType"],
+    requires: ["customerName", "email"], // Prerequisites from agent data
   });
 
 // Access created routes
@@ -404,6 +445,110 @@ const route = agent.createRoute({
 2. **Route-level tools**
 3. **Agent-level tools** (lowest priority)
 
+## Agent-Level Data Collection
+
+### Centralized Data Schema
+
+The new architecture centralizes data collection at the agent level, allowing all routes to work with the same data structure:
+
+```typescript
+interface ComprehensiveData {
+  // Customer identification
+  customerId?: string;
+  customerName?: string;
+  email?: string;
+  phone?: string;
+  
+  // Issue tracking
+  issueType?: 'booking' | 'billing' | 'technical' | 'other';
+  issueDescription?: string;
+  priority?: 'low' | 'medium' | 'high';
+  
+  // Feedback
+  rating?: number;
+  comments?: string;
+  recommendToFriend?: boolean;
+}
+
+const agent = new Agent<Context, ComprehensiveData>({
+  name: "Customer Service Agent",
+  schema: {
+    type: "object",
+    properties: {
+      customerId: { type: "string" },
+      customerName: { type: "string" },
+      email: { type: "string", format: "email" },
+      phone: { type: "string" },
+      issueType: { type: "string", enum: ["booking", "billing", "technical", "other"] },
+      issueDescription: { type: "string" },
+      priority: { type: "string", enum: ["low", "medium", "high"] },
+      rating: { type: "number", minimum: 1, maximum: 5 },
+      comments: { type: "string" },
+      recommendToFriend: { type: "boolean" }
+    }
+  }
+});
+```
+
+### Route Completion Based on Required Fields
+
+Routes now specify which fields they need to complete, enabling cross-route data sharing:
+
+```typescript
+// Support route needs basic info + issue details
+const supportRoute = agent.createRoute({
+  title: "Customer Support",
+  requiredFields: ["customerName", "email", "issueType", "issueDescription"],
+  optionalFields: ["phone", "priority"]
+});
+
+// Feedback route needs basic info + rating
+const feedbackRoute = agent.createRoute({
+  title: "Feedback Collection",
+  requiredFields: ["customerName", "email", "rating"],
+  optionalFields: ["comments", "recommendToFriend"]
+});
+
+// Routes can complete when their required data is available,
+// regardless of which route collected it
+```
+
+### Cross-Route Data Sharing
+
+Data collected by any route is available to all other routes:
+
+```typescript
+// User starts with support, provides name and email
+const response1 = await agent.respond("I need help, my name is John Doe, email john@example.com");
+// Agent data now contains: { customerName: "John Doe", email: "john@example.com" }
+
+// User switches to feedback - already has 2/3 required fields
+const response2 = await agent.respond("Actually, I want to leave feedback. I'd rate you 5 stars.");
+// Feedback route completes immediately with: { customerName: "John Doe", email: "john@example.com", rating: 5 }
+```
+
+### Agent Data Management Methods
+
+Access and update agent-level data programmatically:
+
+```typescript
+// Get current collected data
+const currentData = agent.getCollectedData();
+console.log(currentData); // { customerName: "John", email: "john@example.com" }
+
+// Update data programmatically
+await agent.updateCollectedData({
+  customerId: "CUST-12345",
+  priority: "high"
+});
+
+// Validate data against schema
+const validation = agent.validateData({ email: "invalid-email" });
+if (!validation.valid) {
+  console.log(validation.errors); // Detailed validation errors
+}
+```
+
 ## Response Generation
 
 ### Simple Response API
@@ -412,7 +557,7 @@ const route = agent.createRoute({
 // Simple message-based API (recommended)
 const response = await agent.respond("How do I reset my password?");
 console.log(response.message);
-console.log(agent.session.getData()); // Any collected data
+console.log(agent.session.getData<CustomerData>()); // Agent-level collected data
 console.log(response.toolCalls); // Any tool calls made
 console.log(response.isRouteComplete); // Whether route finished
 

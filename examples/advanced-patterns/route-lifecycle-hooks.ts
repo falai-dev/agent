@@ -16,15 +16,39 @@ const provider = new OpenAIProvider({
   model: "gpt-5",
 });
 
+// Define data schema for feedback collection
+interface ServiceData {
+  feedbackRating?: number;
+  feedbackComments?: string;
+}
+
+const serviceSchema = {
+  type: "object",
+  properties: {
+    feedbackRating: {
+      type: "number",
+      description: "Rating from 1-5",
+      minimum: 1,
+      maximum: 5,
+    },
+    feedbackComments: {
+      type: "string",
+      description: "Additional feedback comments",
+    },
+  },
+};
+
 /**
  * Create a new agent instance with predefined routes and rules/prohibitions.
  */
-const agent = new Agent({
+const agent = new Agent<unknown, ServiceData>({
   name: "CustomerServiceAgent",
   description:
     "A versatile customer service agent that adapts its behavior based on the conversation's context.",
   goal: "Provide excellent customer service by following route-specific rules and prohibitions.",
   provider,
+  // NEW: Agent-level schema
+  schema: serviceSchema,
   debug: true,
 
   // Knowledge base with customer service best practices
@@ -223,12 +247,14 @@ agent.createRoute({
  * Demonstration function to show how the agent responds to different scenarios.
  */
 async function demonstrateRulesAndProhibitions() {
-  const agent = new Agent({
+  const agent = new Agent<unknown, ServiceData>({
     name: "CustomerServiceAgent",
     description:
       "A versatile customer service agent that adapts its behavior based on the conversation's context.",
     goal: "Provide excellent customer service by following route-specific rules and prohibitions.",
     provider,
+    // NEW: Agent-level schema
+    schema: serviceSchema,
     debug: true,
   });
 

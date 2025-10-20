@@ -288,46 +288,58 @@ interface HotelBookingData {
   guests: number;
 }
 
-// 2️⃣ Create your agent
-const agent = new Agent({
+// 2️⃣ Create your agent with centralized data schema
+const agent = new Agent<{}, HotelBookingData>({
   name: "BookingBot",
   description: "A hotel booking assistant that collects information.",
   provider: new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY,
     model: "gpt-4", // or your preferred model
   }),
+  
+  // Agent-level schema defines all possible data fields
+  schema: {
+    type: "object",
+    properties: {
+      hotelName: { type: "string", description: "The name of the hotel." },
+      date: { type: "string", description: "The desired booking date." },
+      guests: { type: "number", description: "The number of guests." },
+    },
+    required: ["hotelName", "date", "guests"],
+  },
+  
+  // Agent-level data validation and enrichment
+  hooks: {
+    onDataUpdate: async (data, previousData) => {
+      // Auto-validate and enrich data
+      if (data.guests && data.guests > 10) {
+        throw new Error("Maximum 10 guests allowed");
+      }
+      return data;
+    }
+  }
 });
 
-// 3️⃣ Define a tool that uses the collected data
+// 3️⃣ Define a tool that uses the agent-level collected data
 const bookHotel: Tool<unknown, [], string, HotelBookingData> = {
   id: "book_hotel",
   description: "Books a hotel once all information is collected.",
   parameters: { type: "object", properties: {} },
   handler: ({ data }) => {
-    const bookingData = data as Partial<HotelBookingData>;
-    // Logic to book the hotel...
+    // Tool receives complete agent data
     return {
-      data: `Booking confirmed for ${bookingData.guests} guests at ${bookingData.hotelName} on ${bookingData.date}!`,
+      data: `Booking confirmed for ${data.guests} guests at ${data.hotelName} on ${data.date}!`,
     };
   },
 };
 
-const schema = {
-  type: "object",
-  properties: {
-    hotelName: { type: "string", description: "The name of the hotel." },
-    date: { type: "string", description: "The desired booking date." },
-    guests: { type: "number", description: "The number of guests." },
-  },
-  required: ["hotelName", "date", "guests"],
-};
-
-// 4️⃣ Create a data-driven route with sequential steps
-agent.createRoute<HotelBookingData>({
+// 4️⃣ Create a route with required fields specification
+agent.createRoute({
   title: "Book Hotel",
   description: "Guides the user through the hotel booking process.",
   conditions: ["User wants to book a hotel"],
-  schema,
+  requiredFields: ["hotelName", "date", "guests"], // Required for route completion
+  
   // 5️⃣ Define the flow to collect data step-by-step
   steps: [
     {
@@ -342,7 +354,7 @@ agent.createRoute<HotelBookingData>({
       description: "Ask for the booking date",
       prompt: "What date would you like to book for?",
       collect: ["date"],
-      requires: ["hotelName"],
+      requires: ["hotelName"], // Prerequisites from agent data
       skipIf: (data: Partial<HotelBookingData>) => !!data.date,
     },
     {
@@ -350,14 +362,14 @@ agent.createRoute<HotelBookingData>({
       description: "Ask for the number of guests",
       prompt: "How many guests will be staying?",
       collect: ["guests"],
-      requires: ["hotelName", "date"],
+      requires: ["hotelName", "date"], // Prerequisites from agent data
       skipIf: (data: Partial<HotelBookingData>) => data.guests !== undefined,
     },
     {
       id: "confirm_booking",
       description: "Confirm and book the hotel",
       prompt: "Let me confirm your booking details.",
-      tools: [bookHotel],
+      tools: [bookHotel], // Tool accesses complete agent data
       requires: ["hotelName", "date", "guests"],
     },
   ],

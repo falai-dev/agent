@@ -26,7 +26,7 @@ interface WeatherData {
 }
 
 // Define a tool that can access collected data
-const getWeather: Tool<CustomerContext, unknown[], unknown, WeatherData> = {
+const getWeather: Tool<CustomerContext, WeatherData, unknown[], unknown> = {
   id: "get_weather",
   description: "Get current weather for a location",
   parameters: {
@@ -38,8 +38,7 @@ const getWeather: Tool<CustomerContext, unknown[], unknown, WeatherData> = {
   },
   handler: ({ data }, location) => {
     // Use data location if available, otherwise use args
-    const weatherData = data as Partial<WeatherData>;
-    const finalLocation = weatherData?.location || location;
+    const finalLocation = data?.location || location;
 
     // Simulate API call
     return {
@@ -71,7 +70,7 @@ async function main() {
   });
 
   // Create agent with OpenAI
-  const agent = new Agent<CustomerContext>({
+  const agent = new Agent<CustomerContext, WeatherData>({
     name: "Assistant",
     description:
       "A helpful AI assistant that can check weather and answer questions",
@@ -84,6 +83,25 @@ async function main() {
       preferences: ["concise answers", "weather updates"],
     },
     provider: openaiProvider,
+
+    schema: {
+      type: "object",
+      properties: {
+        location: {
+          type: "string",
+          description: "City or location for weather check",
+        },
+        temperature: {
+          type: "number",
+          description: "Temperature in Fahrenheit",
+        },
+        condition: {
+          type: "string",
+          description: "Weather condition (sunny, cloudy, rainy, etc.)",
+        },
+      },
+      required: ["location"],
+    },
   });
 
   // Add domain knowledge
@@ -106,28 +124,10 @@ async function main() {
     });
 
   // Create weather route with data extraction schema
-  const weatherRoute = agent.createRoute<WeatherData>({
+  const weatherRoute = agent.createRoute({
     title: "Check Weather",
     description: "Help user check weather for a location",
     conditions: ["User wants to know the weather"],
-    schema: {
-      type: "object",
-      properties: {
-        location: {
-          type: "string",
-          description: "City or location for weather check",
-        },
-        temperature: {
-          type: "number",
-          description: "Temperature in Fahrenheit",
-        },
-        condition: {
-          type: "string",
-          description: "Weather condition (sunny, cloudy, rainy, etc.)",
-        },
-      },
-      required: ["location"],
-    },
   });
 
   // Step 1: Collect location
@@ -180,14 +180,14 @@ async function main() {
     console.log(`   Customer: What's the weather like in San Francisco?`);
     console.log(`   Agent: ${response.message}`);
     console.log(`   Route: ${response.session?.currentRoute?.title}`);
-    console.log(`   Data:`, agent.session.getData<WeatherData>());
+    console.log(`   Data:`, agent.session.getData());
 
     await agent.session.addMessage("assistant", response.message);
 
     // Check for route completion
     if (response.isRouteComplete) {
       console.log("\n✅ Weather route complete!");
-      await logWeatherRequest(agent.session.getData<WeatherData>());
+      await logWeatherRequest(agent.session.getData());
     }
 
     console.log("\n✨ Session step benefits:");

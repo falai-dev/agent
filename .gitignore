@@ -32,6 +32,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+.kiro
 
 # Testing
 coverage/
@@ -40,8 +41,3 @@ coverage/
 # Temporary
 .tmp/
 .cache/
-
-#parlant/
-.idea/
-
-.kiro

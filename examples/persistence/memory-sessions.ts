@@ -38,7 +38,7 @@ interface SupportContext {
 }
 
 // Support tools
-const createTicket: Tool<unknown, [], string, SupportTicketData> = {
+const createTicket: Tool<unknown, SupportTicketData, [], string> = {
   id: "create_support_ticket",
   description: "Create a new support ticket",
   parameters: {
@@ -62,38 +62,46 @@ const createTicket: Tool<unknown, [], string, SupportTicketData> = {
   },
 };
 
+// Define support ticket schema
+const supportTicketSchema = {
+  type: "object",
+  properties: {
+    issue: { type: "string" },
+    category: {
+      type: "string",
+      enum: ["technical", "billing", "account", "general"],
+    },
+    priority: { type: "string", enum: ["low", "medium", "high"] },
+    status: { type: "string", enum: ["open", "in_progress", "resolved"] },
+    ticketId: { type: "string" },
+    assignedAgent: { type: "string" },
+  },
+  required: ["issue"],
+};
+
 // Create agent with memory persistence
-const agent = new Agent({
+const agent = new Agent<unknown, SupportTicketData>({
   name: "SupportBot",
   description: "A support agent with memory-based session management",
   provider: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
     model: "models/gemini-2.5-flash",
   }),
+  // NEW: Agent-level schema
+  schema: supportTicketSchema,
   persistence: {
     adapter: new MemoryAdapter(),
   },
 });
 
 // Create support route with sequential steps
-const supportRoute = agent.createRoute<SupportTicketData>({
+const supportRoute = agent.createRoute({
   title: "Customer Support",
   description: "Handle customer support requests with session persistence",
-  schema: {
-    type: "object",
-    properties: {
-      issue: { type: "string" },
-      category: {
-        type: "string",
-        enum: ["technical", "billing", "account", "general"],
-      },
-      priority: { type: "string", enum: ["low", "medium", "high"] },
-      status: { type: "string", enum: ["open", "in_progress", "resolved"] },
-      ticketId: { type: "string" },
-      assignedAgent: { type: "string" },
-    },
-    required: ["issue"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["issue"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["category", "priority", "status", "ticketId", "assignedAgent"],
   // Sequential steps for support ticket creation
   steps: [
     {
@@ -138,7 +146,7 @@ async function demonstrateSessionBasics() {
 
   // Create agent with specific sessionId
   const sessionId = "session-user-123";
-  const sessionAgent = new Agent<SupportContext>({
+  const sessionAgent = new Agent<SupportContext, SupportTicketData>({
     name: "Support Assistant",
     description: "Help users with technical issues",
     provider: new GeminiProvider({
@@ -150,6 +158,8 @@ async function demonstrateSessionBasics() {
       userName: "Alice",
       userTier: "premium",
     },
+    // NEW: Agent-level schema
+    schema: supportTicketSchema,
     persistence: {
       adapter: new MemoryAdapter(),
       autoSave: true,
@@ -158,33 +168,22 @@ async function demonstrateSessionBasics() {
   });
 
   // Create the same route on the new agent
-  sessionAgent.createRoute<SupportTicketData>({
+  sessionAgent.createRoute({
     title: "Customer Support",
     description: "Handle customer support requests with session persistence",
-    schema: {
-      type: "object",
-      properties: {
-        issue: { type: "string" },
-        category: {
-          type: "string",
-          enum: ["technical", "billing", "account", "general"],
-        },
-        priority: { type: "string", enum: ["low", "medium", "high"] },
-        status: { type: "string", enum: ["open", "in_progress", "resolved"] },
-        ticketId: { type: "string" },
-        assignedAgent: { type: "string" },
-      },
-      required: ["issue"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["issue"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["category", "priority", "status", "ticketId", "assignedAgent"],
   });
 
   console.log("Session ready:", sessionAgent.session.id);
 
   // Use the session in conversation
   console.log("\nUser: I can't access my account");
-  
+
   await sessionAgent.session.addMessage("user", "I can't access my account", "Alice");
-  
+
   const response1 = await sessionAgent.respond({
     history: sessionAgent.session.getHistory(),
   });
@@ -192,9 +191,9 @@ async function demonstrateSessionBasics() {
   console.log("Bot:", response1.message);
   console.log(
     "Session data:",
-    JSON.stringify(sessionAgent.session.getData<SupportTicketData>(), null, 2)
+    JSON.stringify(sessionAgent.session.getData(), null, 2)
   );
-  
+
   await sessionAgent.session.addMessage("assistant", response1.message);
 
   // Continue the conversation with the returned session
@@ -331,8 +330,7 @@ async function demonstrateMultiUserSessions() {
 
     console.log(`   Session ID: ${response.session?.id}`);
     console.log(
-      `   Issue recorded: ${
-        (response.session?.data as Partial<SupportTicketData>)?.issue
+      `   Issue recorded: ${(response.session?.data as Partial<SupportTicketData>)?.issue
       }`
     );
   }
@@ -362,8 +360,8 @@ async function demonstrateSessionLifecycle() {
   // 1. Create agent with session
   console.log("1. 🆕 Creating new session");
   const sessionId = `lifecycle-demo-${Date.now()}`;
-  
-  const lifecycleAgent = new Agent<SupportContext>({
+
+  const lifecycleAgent = new Agent<SupportContext, SupportTicketData>({
     name: "Support Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
@@ -374,6 +372,8 @@ async function demonstrateSessionLifecycle() {
       userName: "Demo",
       userTier: "standard",
     },
+    // NEW: Agent-level schema
+    schema: supportTicketSchema,
     persistence: {
       adapter: new MemoryAdapter(),
       autoSave: true,
@@ -382,39 +382,28 @@ async function demonstrateSessionLifecycle() {
   });
 
   // Create the same route on the lifecycle agent
-  lifecycleAgent.createRoute<SupportTicketData>({
+  lifecycleAgent.createRoute({
     title: "Customer Support",
     description: "Handle customer support requests with session persistence",
-    schema: {
-      type: "object",
-      properties: {
-        issue: { type: "string" },
-        category: {
-          type: "string",
-          enum: ["technical", "billing", "account", "general"],
-        },
-        priority: { type: "string", enum: ["low", "medium", "high"] },
-        status: { type: "string", enum: ["open", "in_progress", "resolved"] },
-        ticketId: { type: "string" },
-        assignedAgent: { type: "string" },
-      },
-      required: ["issue"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["issue"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["category", "priority", "status", "ticketId", "assignedAgent"],
   });
 
   console.log(`   Created session: ${lifecycleAgent.session.id}`);
 
   // 2. Use session in conversation
   console.log("\n2. 💬 Using session in conversation");
-  
+
   await lifecycleAgent.session.addMessage("user", "I need help with something", "Demo");
-  
+
   const response1 = await lifecycleAgent.respond({
     history: lifecycleAgent.session.getHistory(),
   });
 
-  console.log(`   Session data: ${JSON.stringify(lifecycleAgent.session.getData<SupportTicketData>())}`);
-  
+  console.log(`   Session data: ${JSON.stringify(lifecycleAgent.session.getData())}`);
+
   await lifecycleAgent.session.addMessage("assistant", response1.message);
 
   // 3. Complete the session

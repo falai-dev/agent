@@ -26,14 +26,14 @@ const smartRoute = agent
     initialStep: {
       prompt: "What's your name?",
       collect: ["name"],
-      skipIf: (data) => data.name !== undefined, // Skip if name already known
+      skipIf: (data) => data.name !== undefined, // Skip if name already collected by any route
     },
   })
   .nextStep({
     prompt: "What's your email, {{name}}?",
     collect: ["email"],
-    requires: ["name"], // Must have name to proceed
-    skipIf: (data) => data.email !== undefined, // Skip if email already known
+    requires: ["name"], // Must have name from agent data to proceed
+    skipIf: (data) => data.email !== undefined, // Skip if email already collected by any route
   });
 ```
 

@@ -15,21 +15,35 @@ import {
   type SessionState,
 } from "../../src/index";
 
-// Type definitions for our booking data
-interface BookingData {
+// Type definitions for our unified data collection
+interface UnifiedBookingData {
+  // Booking fields
   hotelName: string;
   date: string;
   guests: number;
-}
-
-interface FeedbackData {
+  // Feedback fields
   rating: number;
   comments?: string;
 }
 
 async function main() {
-  // Create agent
-  const agent = new Agent({
+  // Define unified schema for both booking and feedback data
+  const unifiedSchema = {
+    type: "object",
+    properties: {
+      // Booking fields
+      hotelName: { type: "string" },
+      date: { type: "string" },
+      guests: { type: "number" },
+      // Feedback fields
+      rating: { type: "number", minimum: 1, maximum: 5 },
+      comments: { type: "string" },
+    },
+    required: ["hotelName", "date", "guests"], // Only booking fields are required initially
+  };
+
+  // Create agent with unified schema
+  const agent = new Agent<unknown, UnifiedBookingData>({
     name: "HotelBot",
     description: "A hotel booking assistant with feedback collection",
     provider: new GeminiProvider({
@@ -37,22 +51,16 @@ async function main() {
       model: "models/gemini-2.5-flash",
     }),
     debug: true,
+    schema: unifiedSchema,
   });
 
   // Route 1: Hotel Booking with automatic transition to feedback
-  agent.createRoute<BookingData>({
+  agent.createRoute({
     title: "Book Hotel",
     description: "Collects hotel booking information",
     conditions: ["User wants to book a hotel"],
-    schema: {
-      type: "object",
-      properties: {
-        hotelName: { type: "string" },
-        date: { type: "string" },
-        guests: { type: "number" },
-      },
-      required: ["hotelName", "date", "guests"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["hotelName", "date", "guests"],
     // Sequential steps for booking flow
     steps: [
       {
@@ -60,7 +68,7 @@ async function main() {
         description: "Ask for hotel preference",
         prompt: "Which hotel would you like to book?",
         collect: ["hotelName"],
-        skipIf: (data: Partial<BookingData>) => !!data.hotelName,
+        skipIf: (data: Partial<UnifiedBookingData>) => !!data.hotelName,
       },
       {
         id: "ask_date",
@@ -68,7 +76,7 @@ async function main() {
         prompt: "What date would you like to book for?",
         collect: ["date"],
         requires: ["hotelName"],
-        skipIf: (data: Partial<BookingData>) => !!data.date,
+        skipIf: (data: Partial<UnifiedBookingData>) => !!data.date,
       },
       {
         id: "ask_guests",
@@ -76,7 +84,7 @@ async function main() {
         prompt: "How many guests will be staying?",
         collect: ["guests"],
         requires: ["hotelName", "date"],
-        skipIf: (data: Partial<BookingData>) => data.guests !== undefined,
+        skipIf: (data: Partial<UnifiedBookingData>) => data.guests !== undefined,
       },
       {
         id: "confirm_booking",
@@ -91,18 +99,14 @@ async function main() {
   });
 
   // Route 2: Feedback Collection
-  agent.createRoute<FeedbackData>({
+  agent.createRoute({
     title: "Collect Feedback",
     description: "Collects user feedback after booking",
     conditions: ["User wants to provide feedback"],
-    schema: {
-      type: "object",
-      properties: {
-        rating: { type: "number", minimum: 1, maximum: 5 },
-        comments: { type: "string" },
-      },
-      required: ["rating"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["rating"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["comments"],
     // Sequential steps for feedback collection
     steps: [
       {
@@ -110,7 +114,7 @@ async function main() {
         description: "Ask for rating",
         prompt: "How would you rate your booking experience from 1 to 5?",
         collect: ["rating"],
-        skipIf: (data: Partial<FeedbackData>) => data.rating !== undefined,
+        skipIf: (data: Partial<UnifiedBookingData>) => data.rating !== undefined,
       },
       {
         id: "ask_comments",
@@ -153,7 +157,7 @@ async function main() {
     "Pending transition?",
     response1.session?.pendingTransition?.targetRouteId
   );
-  console.log("Data booking data:", response1.session?.data);
+  console.log("Collected data:", response1.session?.data);
 
   session = response1.session;
   history = [
@@ -203,7 +207,7 @@ async function main() {
   const response3 = await agent.respond({ history, session });
   console.log("\nBot:", response3.message);
   console.log("Current route:", response3.session?.currentRoute?.title);
-  console.log("Data feedback data:", response3.session?.data);
+  console.log("Collected data:", response3.session?.data);
   console.log("Route complete?", response3.isRouteComplete);
 
   console.log("\n=== Manual Transition Example ===\n");

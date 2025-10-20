@@ -84,7 +84,7 @@ async function example() {
    */
   const sessionId = "session_user123_booking"; // Could be from request params
 
-  const agent = new Agent<ConversationContext>({
+  const agent = new Agent<ConversationContext, FlightBookingData>({
     name: "Travel Assistant",
     description: "A helpful travel booking assistant",
     goal: "Help users book flights with ease",
@@ -100,19 +100,6 @@ async function example() {
       adapter: new PrismaAdapter<ConversationContext>({ prisma }),
       autoSave: true, // Auto-saves session after each response
     },
-    sessionId, // ✨ Agent will automatically load or create this session
-  });
-
-  /**
-   * Create a route with data extraction schema
-   */
-  const flightRoute = agent.createRoute<FlightBookingData>({
-    title: "Book a Flight",
-    description: "Help user book a flight ticket",
-    conditions: [
-      "User wants to book a flight",
-      "User mentions travel, flying, or booking tickets",
-    ],
     schema: {
       type: "object",
       properties: {
@@ -143,6 +130,19 @@ async function example() {
       },
       required: ["destination", "departureDate", "passengers", "cabinClass"],
     },
+    sessionId, // ✨ Agent will automatically load or create this session
+  });
+
+  /**
+   * Create a route with data extraction schema
+   */
+  const flightRoute = agent.createRoute({
+    title: "Book a Flight",
+    description: "Help user book a flight ticket",
+    conditions: [
+      "User wants to book a flight",
+      "User mentions travel, flying, or booking tickets",
+    ],
   });
 
   // Step flow with smart data collecting and custom IDs
@@ -194,8 +194,8 @@ async function example() {
   console.log("📜 Conversation history:", agent.session.getHistory().length, "messages");
 
   // Set some initial data if this is a new session
-  if (!agent.session.getData<FlightBookingData>()?.cabinClass) {
-    await agent.session.setData<FlightBookingData>({ cabinClass: "economy" });
+  if (!agent.session.getData()?.cabinClass) {
+    await agent.session.setData({ cabinClass: "economy" });
   }
 
   /**
@@ -216,7 +216,7 @@ async function example() {
     sessionId: agent.session.id,
     currentRoute: response1.session?.currentRoute?.title,
     currentStepId: response1.session?.currentStep?.id,
-    data: agent.session.getData<FlightBookingData>(),
+    data: agent.session.getData(),
   });
 
   // Add agent response to session history
@@ -237,14 +237,14 @@ async function example() {
   console.log("📊 Session after turn 2:", {
     currentRoute: response2.session?.currentRoute?.title,
     currentStep: response2.session?.currentStep?.id,
-    data: agent.session.getData<FlightBookingData>(),
+    data: agent.session.getData(),
   });
 
   await agent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Flight booking complete!");
-    await sendFlightConfirmation(agent.session.getData<FlightBookingData>());
+    await sendFlightConfirmation(agent.session.getData());
   }
 
   /**
@@ -252,7 +252,7 @@ async function example() {
    */
   console.log("\n--- Session Recovery (New Agent Instance) ---");
   
-  const newAgent = new Agent<ConversationContext>({
+  const newAgent = new Agent<ConversationContext, FlightBookingData>({
     name: "Travel Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
@@ -261,6 +261,18 @@ async function example() {
     context: {
       userId: "user_123",
       userName: "Alice",
+    },
+    // NEW: Agent-level schema (same as original agent)
+    schema: {
+      type: "object",
+      properties: {
+        destination: { type: "string" },
+        departureDate: { type: "string" },
+        returnDate: { type: "string" },
+        passengers: { type: "number", minimum: 1, maximum: 9 },
+        cabinClass: { type: "string", enum: ["economy", "premium", "business", "first"] },
+      },
+      required: ["destination", "departureDate", "passengers", "cabinClass"],
     },
     persistence: {
       adapter: new PrismaAdapter<ConversationContext>({ prisma }),
@@ -271,7 +283,7 @@ async function example() {
   console.log("📥 Recovered session:", {
     sessionId: newAgent.session.id,
     historyLength: newAgent.session.getHistory().length,
-    data: newAgent.session.getData<FlightBookingData>(),
+    data: newAgent.session.getData(),
   });
 
   /**
@@ -308,7 +320,7 @@ async function advancedExample() {
     };
   }
 
-  const agent = new Agent<UserContext>({
+  const agent = new Agent<UserContext, OnboardingData>({
     name: "Onboarding Assistant",
     description: "Help new users get started",
     provider: new GeminiProvider({
@@ -357,12 +369,6 @@ async function advancedExample() {
       autoSave: true,
     },
     sessionId,
-  });
-
-  // Create onboarding route
-  const onboardingRoute = agent.createRoute<OnboardingData>({
-    title: "User Onboarding",
-    description: "Collect user information for account setup",
     schema: {
       type: "object",
       properties: {
@@ -373,6 +379,12 @@ async function advancedExample() {
       },
       required: ["fullName", "email", "country"],
     },
+  });
+
+  // Create onboarding route
+  const onboardingRoute = agent.createRoute({
+    title: "User Onboarding",
+    description: "Collect user information for account setup",
   });
 
   onboardingRoute.initialStep
@@ -413,7 +425,7 @@ async function advancedExample() {
   });
 
   console.log("🤖 Agent:", response.message);
-  console.log("📊 Data collected:", agent.session.getData<OnboardingData>());
+  console.log("📊 Data collected:", agent.session.getData());
 
   // Add to session history for future responses
   await agent.session.addMessage("user", "I'd like to create an account");
@@ -427,12 +439,12 @@ async function advancedExample() {
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Normalized data:", agent.session.getData<OnboardingData>());
+  console.log("📊 Normalized data:", agent.session.getData());
   // Shows normalized phone and email
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Onboarding complete!");
-    await sendOnboardingEmail(agent.session.getData<OnboardingData>());
+    await sendOnboardingEmail(agent.session.getData());
   }
 
   await prisma.$disconnect();
@@ -450,32 +462,36 @@ async function serverEndpointExample() {
     message: "I need help, my name is John and my email is john@example.com",
   };
 
+  // Define contact form schema
+  const contactFormSchema = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      email: { type: "string" },
+      message: { type: "string" },
+    },
+    required: ["name", "email", "message"],
+  };
+
   // Create agent with sessionId (loads existing or creates new)
-  const agent = new Agent({
+  const agent = new Agent<unknown, ContactFormData>({
     name: "Support Agent",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema
+    schema: contactFormSchema,
     persistence: {
-      adapter: new PrismaAdapter<ContactFormData>({ prisma }),
+      adapter: new PrismaAdapter<unknown>({ prisma }),
       autoSave: true,
     },
     sessionId: requestData.sessionId, // ✨ Automatic session management
   });
 
   // Create a simple contact form route
-  const contactRoute = agent.createRoute<ContactFormData>({
+  const contactRoute = agent.createRoute({
     title: "Contact Form",
-    schema: {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        email: { type: "string" },
-        message: { type: "string" },
-      },
-      required: ["name", "email", "message"],
-    },
   });
 
   contactRoute.initialStep
@@ -502,14 +518,14 @@ async function serverEndpointExample() {
     message: response.message,
     sessionId: agent.session.id,
     isComplete: response.isRouteComplete,
-    data: agent.session.getData<ContactFormData>(),
+    data: agent.session.getData(),
   };
 
   console.log("✅ API Response:", apiResponse);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Contact form submitted!");
-    await logContactForm(agent.session.getData<ContactFormData>());
+    await logContactForm(agent.session.getData());
   }
 
   await prisma.$disconnect();

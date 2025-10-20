@@ -43,7 +43,7 @@ interface PaymentData {
 }
 
 // Tools for order processing
-const createOrder: Tool<unknown, [], string, OrderData> = {
+const createOrder: Tool<unknown, UnifiedOrderData, [], string> = {
   id: "create_order",
   description: "Create a new order from the collected order data",
   parameters: {
@@ -52,8 +52,7 @@ const createOrder: Tool<unknown, [], string, OrderData> = {
   },
   handler: ({ data }) => {
     const orderId = `ORD-${Date.now()}`;
-    const orderData = data as Partial<OrderData>;
-    console.log(`Creating order ${orderId} for ${orderData?.customerName}`);
+    console.log(`Creating order ${orderId} for ${data?.customerName}`);
 
     return {
       data: `Order ${orderId} created successfully!`,
@@ -64,7 +63,7 @@ const createOrder: Tool<unknown, [], string, OrderData> = {
   },
 };
 
-const processPayment: Tool<unknown, [], string, PaymentData> = {
+const processPayment: Tool<unknown, UnifiedOrderData, [], string> = {
   id: "process_payment",
   description: "Process payment for an order",
   parameters: {
@@ -72,15 +71,14 @@ const processPayment: Tool<unknown, [], string, PaymentData> = {
     properties: {},
   },
   handler: ({ data }) => {
-    const paymentData = data as Partial<PaymentData>;
-    console.log(`Processing payment for order ${paymentData?.orderId}`);
+    console.log(`Processing payment for order ${data?.orderId}`);
 
     // Simulate payment processing
     const success = Math.random() > 0.1; // 90% success rate
 
     if (success) {
       return {
-        data: `Payment processed successfully! Order ${paymentData?.orderId} is now confirmed.`,
+        data: `Payment processed successfully! Order ${data?.orderId} is now confirmed.`,
         dataUpdate: {
           confirmed: true,
         },
@@ -96,8 +94,31 @@ const processPayment: Tool<unknown, [], string, PaymentData> = {
   },
 };
 
-// Create agent with persistence
-const agent = new Agent({
+// Define unified data schema for all order-related interactions
+interface UnifiedOrderData extends OrderData, PaymentData {}
+
+const orderSchema = {
+  type: "object",
+  properties: {
+    // Order fields
+    customerName: { type: "string" },
+    productType: { type: "string", enum: ["laptop", "phone", "tablet"] },
+    budget: { type: "number", minimum: 100 },
+    preferredColor: { type: "string" },
+    urgentDelivery: { type: "boolean" },
+    orderId: { type: "string" },
+    // Payment fields
+    paymentMethod: {
+      type: "string",
+      enum: ["credit_card", "paypal", "bank_transfer"],
+    },
+    amount: { type: "number" },
+    confirmed: { type: "boolean" },
+  },
+};
+
+// Create agent with persistence and agent-level schema
+const agent = new Agent<unknown, UnifiedOrderData>({
   name: "OrderBot",
   description:
     "A bot that handles multi-step order processing with session management",
@@ -105,27 +126,21 @@ const agent = new Agent({
     apiKey: process.env.GEMINI_API_KEY!,
     model: "models/gemini-2.5-flash",
   }),
+  // NEW: Agent-level schema
+  schema: orderSchema,
   persistence: {
     adapter: new MemoryAdapter(), // In production, use RedisAdapter, PrismaAdapter, etc.
   },
 });
 
 // Order collection route with sequential steps
-agent.createRoute<OrderData>({
+agent.createRoute({
   title: "Product Order",
   description: "Collect order details and create an order",
-  schema: {
-    type: "object",
-    properties: {
-      customerName: { type: "string" },
-      productType: { type: "string", enum: ["laptop", "phone", "tablet"] },
-      budget: { type: "number", minimum: 100 },
-      preferredColor: { type: "string" },
-      urgentDelivery: { type: "boolean" },
-      orderId: { type: "string" },
-    },
-    required: ["customerName", "productType", "budget"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["customerName", "productType", "budget"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["preferredColor", "urgentDelivery", "orderId"],
   // Sequential steps for order collection
   steps: [
     {
@@ -133,7 +148,7 @@ agent.createRoute<OrderData>({
       description: "Ask for customer name",
       prompt: "Hi! I'd like to help you place an order. What's your name?",
       collect: ["customerName"],
-      skipIf: (data: Partial<OrderData>) => !!data.customerName,
+      skipIf: (data: Partial<UnifiedOrderData>) => !!data.customerName,
     },
     {
       id: "ask_product",
@@ -141,7 +156,7 @@ agent.createRoute<OrderData>({
       prompt: "What would you like to order? (laptop, phone, or tablet)",
       collect: ["productType"],
       requires: ["customerName"],
-      skipIf: (data: Partial<OrderData>) => !!data.productType,
+      skipIf: (data: Partial<UnifiedOrderData>) => !!data.productType,
     },
     {
       id: "ask_budget",
@@ -149,7 +164,7 @@ agent.createRoute<OrderData>({
       prompt: "What's your budget for this purchase?",
       collect: ["budget"],
       requires: ["customerName", "productType"],
-      skipIf: (data: Partial<OrderData>) => data.budget !== undefined,
+      skipIf: (data: Partial<UnifiedOrderData>) => data.budget !== undefined,
     },
     {
       id: "ask_color",
@@ -157,7 +172,7 @@ agent.createRoute<OrderData>({
       prompt: "Do you have a preferred color?",
       collect: ["preferredColor"],
       requires: ["customerName", "productType", "budget"],
-      skipIf: (data: Partial<OrderData>) => !!data.preferredColor,
+      skipIf: (data: Partial<UnifiedOrderData>) => !!data.preferredColor,
     },
     {
       id: "ask_urgent",
@@ -165,7 +180,7 @@ agent.createRoute<OrderData>({
       prompt: "Do you need urgent delivery?",
       collect: ["urgentDelivery"],
       requires: ["customerName", "productType", "budget"],
-      skipIf: (data: Partial<OrderData>) => data.urgentDelivery !== undefined,
+      skipIf: (data: Partial<UnifiedOrderData>) => data.urgentDelivery !== undefined,
     },
     {
       id: "create_order",
@@ -182,22 +197,13 @@ agent.createRoute<OrderData>({
 });
 
 // Payment route with sequential steps
-agent.createRoute<PaymentData>({
+agent.createRoute({
   title: "Payment Processing",
   description: "Process payment for an order",
-  schema: {
-    type: "object",
-    properties: {
-      orderId: { type: "string" },
-      paymentMethod: {
-        type: "string",
-        enum: ["credit_card", "paypal", "bank_transfer"],
-      },
-      amount: { type: "number" },
-      confirmed: { type: "boolean" },
-    },
-    required: ["orderId", "paymentMethod", "amount"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["orderId", "paymentMethod", "amount"],
+  // NEW: Optional fields
+  optionalFields: ["confirmed"],
   // Sequential steps for payment processing
   steps: [
     {
@@ -206,7 +212,7 @@ agent.createRoute<PaymentData>({
       prompt:
         "Now let's process payment for your order. What payment method would you prefer?",
       collect: ["paymentMethod"],
-      skipIf: (data: Partial<PaymentData>) => !!data.paymentMethod,
+      skipIf: (data: Partial<UnifiedOrderData>) => !!data.paymentMethod,
     },
     {
       id: "ask_amount",
@@ -214,7 +220,7 @@ agent.createRoute<PaymentData>({
       prompt: "What's the payment amount?",
       collect: ["amount"],
       requires: ["paymentMethod"],
-      skipIf: (data: Partial<PaymentData>) => data.amount !== undefined,
+      skipIf: (data: Partial<UnifiedOrderData>) => data.amount !== undefined,
     },
     {
       id: "process_payment",
@@ -232,13 +238,15 @@ async function demonstrateSessionManagement() {
   console.log("=== Automatic Session Management Demo ===\n");
 
   // Create agent with automatic session management
-  const sessionAgent = new Agent({
+  const sessionAgent = new Agent<unknown, UnifiedOrderData>({
     name: "OrderBot",
     description: "A bot that handles multi-step order processing",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema
+    schema: orderSchema,
     persistence: {
       adapter: new MemoryAdapter(),
     },
@@ -258,7 +266,7 @@ async function demonstrateSessionManagement() {
 
   console.log("Bot:", response1.message);
   console.log("Session ID:", sessionAgent.session.id);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<OrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
   console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
 
@@ -269,7 +277,7 @@ async function demonstrateSessionManagement() {
   const response2 = await sessionAgent.chat("My budget is $1500");
 
   console.log("Bot:", response2.message);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<OrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
   console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
 
@@ -280,7 +288,7 @@ async function demonstrateSessionManagement() {
   const response3 = await sessionAgent.chat("I want black color and urgent delivery please");
 
   console.log("Bot:", response3.message);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<OrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
   console.log("Route complete:", response3.isRouteComplete);
   console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
@@ -292,7 +300,7 @@ async function demonstrateSessionManagement() {
   const response4 = await sessionAgent.chat("I'll pay with credit card, amount is $1599");
 
   console.log("Bot:", response4.message);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<PaymentData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
   console.log("Route complete:", response4.isRouteComplete);
   console.log("Final history length:", sessionAgent.session.getHistory().length);
 }
@@ -303,7 +311,7 @@ async function demonstrateSessionPersistence() {
 
   // Create agent with specific sessionId for demonstration
   const sessionId = "demo-session-456";
-  const persistentAgent = new Agent<OrderContext>({
+  const persistentAgent = new Agent<OrderContext, UnifiedOrderData>({
     name: "Order Assistant",
     description: "Help customers place orders with automatic persistence",
     provider: new GeminiProvider({
@@ -315,6 +323,8 @@ async function demonstrateSessionPersistence() {
       userName: "Alice",
       isVip: false,
     },
+    // NEW: Agent-level schema
+    schema: orderSchema,
     persistence: {
       adapter: new MemoryAdapter(),
       autoSave: true, // Automatic persistence
@@ -334,14 +344,14 @@ async function demonstrateSessionPersistence() {
 
   console.log("After first interaction:");
   console.log("🤖 Agent:", response1.message);
-  console.log("Session data:", JSON.stringify(persistentAgent.session.getData<OrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(persistentAgent.session.getData<UnifiedOrderData>(), null, 2));
   console.log("History length:", persistentAgent.session.getHistory().length);
   console.log("Session automatically saved to persistence ✓");
 
   // Simulate server restart - create new agent instance with same sessionId
   console.log("\n🔄 Simulating server restart - creating new agent instance...");
 
-  const restoredAgent = new Agent<OrderContext>({
+  const restoredAgent = new Agent<OrderContext, UnifiedOrderData>({
     name: "Order Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
@@ -352,6 +362,8 @@ async function demonstrateSessionPersistence() {
       userName: "Alice",
       isVip: false,
     },
+    // NEW: Agent-level schema
+    schema: orderSchema,
     persistence: {
       adapter: new MemoryAdapter(), // Same adapter instance for demo
       autoSave: true,
@@ -367,14 +379,14 @@ async function demonstrateSessionPersistence() {
   console.log("Session automatically restored:");
   console.log("- Session ID:", restoredAgent.session.id);
   console.log("- History length:", restoredAgent.session.getHistory().length);
-  console.log("- Restored data:", JSON.stringify(restoredAgent.session.getData<OrderData>(), null, 2));
+  console.log("- Restored data:", JSON.stringify(restoredAgent.session.getData<UnifiedOrderData>(), null, 2));
 
   // Continue conversation seamlessly
   const response2 = await restoredAgent.chat("Actually, make it urgent delivery");
 
   console.log("\nAfter continuing with restored session:");
   console.log("🤖 Agent:", response2.message);
-  console.log("Session data:", JSON.stringify(restoredAgent.session.getData<OrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(restoredAgent.session.getData<UnifiedOrderData>(), null, 2));
   console.log("History length:", restoredAgent.session.getHistory().length);
   console.log("Session automatically saved again ✓");
 }

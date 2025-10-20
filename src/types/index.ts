@@ -12,6 +12,8 @@ export type {
   AgentResponse,
   ContextLifecycleHooks,
   ContextProvider,
+  ValidationError,
+  ValidationResult,
 } from "./agent";
 export { CompositionMode } from "./agent";
 

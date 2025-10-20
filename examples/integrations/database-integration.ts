@@ -124,8 +124,21 @@ async function example() {
   const userId = "user_123";
   const sessionId = "session_user123_onboarding";
 
+  // Define onboarding schema
+  const onboardingSchema = {
+    type: "object",
+    properties: {
+      fullName: { type: "string" },
+      email: { type: "string" },
+      companyName: { type: "string" },
+      phoneNumber: { type: "string" },
+      industry: { type: "string" },
+    },
+    required: ["fullName", "email", "companyName"],
+  };
+
   // Create agent with SessionManager (no persistence adapter)
-  const agent = new Agent({
+  const agent = new Agent<unknown, OnboardingData>({
     name: "Onboarding Assistant",
     description: "Help new customers get started",
     goal: "Collect customer information efficiently",
@@ -133,28 +146,23 @@ async function example() {
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema
+    schema: onboardingSchema,
     // No persistence - we'll sync manually with our database
   });
 
   // Create onboarding route
-  const onboardingRoute = agent.createRoute<OnboardingData>({
+  const onboardingRoute = agent.createRoute({
     title: "Customer Onboarding",
     description: "Collect customer information",
     conditions: [
       "User is a new customer",
       "User needs to set up their account",
     ],
-    schema: {
-      type: "object",
-      properties: {
-        fullName: { type: "string" },
-        email: { type: "string" },
-        companyName: { type: "string" },
-        phoneNumber: { type: "string" },
-        industry: { type: "string" },
-      },
-      required: ["fullName", "email", "companyName"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["fullName", "email", "companyName"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["phoneNumber", "industry"],
   });
 
   // Define steps with custom IDs
@@ -251,7 +259,7 @@ async function example() {
   console.log("✅ Session synchronized:", {
     sessionId: agent.session.id,
     historyLength: agent.session.getHistory().length,
-    data: agent.session.getData<OnboardingData>(),
+    data: agent.session.getData(),
   });
 
   /**
@@ -267,7 +275,7 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Data collected:", agent.session.getData<OnboardingData>());
+  console.log("📊 Data collected:", agent.session.getData());
 
   // Add agent response to SessionManager
   await agent.session.addMessage("assistant", response1.message);
@@ -286,7 +294,7 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Data collected:", agent.session.getData<OnboardingData>());
+  console.log("📊 Data collected:", agent.session.getData());
 
   await agent.session.addMessage("assistant", response2.message);
 
@@ -297,7 +305,7 @@ async function example() {
   // Check for route completion
   if (response2.isRouteComplete) {
     console.log("\n✅ Onboarding Complete!");
-    await processOnboarding(agent.session.getData<OnboardingData>());
+    await processOnboarding(agent.session.getData());
   }
 
   /**
@@ -347,7 +355,7 @@ async function example() {
   console.log("✅ Session recovered in new agent:", {
     sessionId: newAgent.session.id,
     historyLength: newAgent.session.getHistory().length,
-    data: newAgent.session.getData<OnboardingData>(),
+    data: newAgent.session.getData(),
   });
 
   // Continue conversation with recovered session
@@ -367,7 +375,7 @@ async function example() {
  * Helper function to sync SessionManager state to custom database
  */
 async function syncSessionToDatabase(
-  agent: Agent,
+  agent: Agent<unknown, OnboardingData>,
   db: CustomDatabase,
   sessionId: string,
   userId: string
@@ -424,15 +432,28 @@ async function advancedExample() {
   const db = new CustomDatabase();
   const sessionId = "session_user456_smart_onboarding";
 
-  const agent = new Agent({
+  const smartOnboardingSchema = {
+    type: "object",
+    properties: {
+      fullName: { type: "string" },
+      email: { type: "string" },
+      companyName: { type: "string" },
+      phoneNumber: { type: "string" },
+    },
+    required: ["fullName", "email", "companyName"],
+  };
+
+  const agent = new Agent<unknown, OnboardingData>({
     name: "Smart Onboarding",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema
+    schema: smartOnboardingSchema,
     hooks: {
       // Validate and enrich collected data
-      onDataUpdate: (data: OnboardingData, _previous: OnboardingData) => {
+      onDataUpdate: (data: Partial<OnboardingData>, _previous: Partial<OnboardingData>) => {
         console.log("🔄 Data collected, validating...");
 
         // Normalize email
@@ -450,18 +471,12 @@ async function advancedExample() {
     },
   });
 
-  const route = agent.createRoute<OnboardingData>({
+  const route = agent.createRoute({
     title: "Smart Onboarding",
-    schema: {
-      type: "object",
-      properties: {
-        fullName: { type: "string" },
-        email: { type: "string" },
-        companyName: { type: "string" },
-        phoneNumber: { type: "string" },
-      },
-      required: ["fullName", "email", "companyName"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["fullName", "email", "companyName"],
+    // NEW: Optional fields
+    optionalFields: ["phoneNumber"],
   });
 
   route.initialStep.nextStep({
@@ -492,7 +507,7 @@ async function advancedExample() {
   });
 
   console.log("🤖 Agent:", response.message);
-  console.log("📊 Normalized data:", agent.session.getData<OnboardingData>());
+  console.log("📊 Normalized data:", agent.session.getData());
   // Shows: { email: "alice@example.com", phoneNumber: "5551234567", ... }
 
   await agent.session.addMessage("assistant", response.message);
@@ -518,7 +533,7 @@ async function serverEndpointExample() {
     const { sessionId, userId, message } = req;
 
     // Create agent with sessionId (loads existing or creates new)
-    const agent = new Agent({
+    const agent = new Agent<unknown, OnboardingData>({
       name: "Customer Support",
       provider: new GeminiProvider({
         apiKey: process.env.GEMINI_API_KEY!,

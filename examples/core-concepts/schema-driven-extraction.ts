@@ -24,7 +24,7 @@ interface UserProfileData {
 }
 
 // Define a tool that uses the collected data
-const saveUserProfile: Tool<unknown, [], string, UserProfileData> = {
+const saveUserProfile: Tool<unknown, UserProfileData, [], string> = {
   id: "save_user_profile",
   description: "Save the collected user profile information",
   parameters: {
@@ -37,23 +37,11 @@ const saveUserProfile: Tool<unknown, [], string, UserProfileData> = {
     // Simulate saving to database
     console.log("Profile data:", data);
 
-    const userData = data as Partial<UserProfileData>;
     return {
-      data: `Profile saved successfully! Welcome ${userData?.name}!`,
+      data: `Profile saved successfully! Welcome ${data?.name}!`,
     };
   },
 };
-
-// Create the agent
-const agent = new Agent({
-  name: "ProfileBot",
-  description:
-    "A bot that collects user profile information using schema-driven extraction",
-  provider: new GeminiProvider({
-    apiKey: process.env.GEMINI_API_KEY!,
-    model: "models/gemini-2.5-flash",
-  }),
-});
 
 // Define the schema for data validation and extraction
 const userProfileSchema = {
@@ -98,11 +86,27 @@ const userProfileSchema = {
   required: ["name", "email"],
 };
 
+// Create the agent with agent-level schema
+const agent = new Agent<unknown, UserProfileData>({
+  name: "ProfileBot",
+  description:
+    "A bot that collects user profile information using schema-driven extraction",
+  provider: new GeminiProvider({
+    apiKey: process.env.GEMINI_API_KEY!,
+    model: "models/gemini-2.5-flash",
+  }),
+  // NEW: Agent-level schema definition
+  schema: userProfileSchema,
+});
+
 // Create a route that collects profile information step by step
-agent.createRoute<UserProfileData>({
+agent.createRoute({
   title: "User Profile Collection",
   description: "Collect comprehensive user profile information",
-  schema: userProfileSchema,
+  // NEW: Required fields for route completion (instead of schema)
+  requiredFields: ["name", "email"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["age", "interests", "preferredContact", "newsletterOptIn"],
   // Use sequential steps for a linear flow with smart skipIf conditions
   steps: [
     {

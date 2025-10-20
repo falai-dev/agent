@@ -52,7 +52,7 @@ export interface BuildStepSelectionPromptParams<
   data: Partial<TData>;
   history: Event[];
   lastMessage: string;
-  agentOptions?: AgentOptions<TContext>;
+  agentOptions?: AgentOptions<TContext, TData>;
   context?: TContext;
   session?: SessionState<TData>;
 }
@@ -61,14 +61,14 @@ export interface BuildRoutingPromptParams<TContext = unknown, TData = unknown> {
   history: Event[];
   routes: Route<TContext, TData>[];
   lastMessage: string;
-  agentOptions?: AgentOptions<TContext>;
+  agentOptions?: AgentOptions<TContext, TData>;
   session?: SessionState<TData>;
   activeRouteSteps?: Step<TContext, TData>[];
   context?: TContext;
 }
 
 export class RoutingEngine<TContext = unknown, TData = unknown> {
-  constructor(private readonly options?: RoutingEngineOptions) {}
+  constructor(private readonly options?: RoutingEngineOptions) { }
 
   /**
    * Optimized decision for single-route scenarios
@@ -79,22 +79,26 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     route: Route<TContext, TData>;
     session: SessionState<TData>;
     history: Event[];
-    agentOptions?: AgentOptions<TContext>;
+    agentOptions?: AgentOptions<TContext, TData>;
     provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
   }): Promise<{
-    selectedRoute?: Route<TContext>;
-    selectedStep?: Step<TContext>;
+    selectedRoute?: Route<TContext, TData>;
+    selectedStep?: Step<TContext, TData>;
     responseDirectives?: string[];
     session: SessionState<TData>;
     isRouteComplete?: boolean;
+    completedRoutes?: Route<TContext, TData>[];
   }> {
     const { route, session, history, agentOptions, provider, context, signal } =
       params;
 
     let updatedSession = session;
     const selectedRoute = route;
+
+    // Check if this single route is complete
+    const completedRoutes = route.isComplete(session.data || {}) ? [route] : [];
 
     // Enter route if not already in it
     if (!session.currentRoute || session.currentRoute.id !== route.id) {
@@ -139,6 +143,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
           selectedStep: undefined,
           session: updatedSession,
           isRouteComplete: true,
+          completedRoutes,
         };
       } else {
         logger.debug(
@@ -149,6 +154,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
           selectedStep: candidates[0].step,
           session: updatedSession,
           isRouteComplete: false,
+          completedRoutes,
         };
       }
     }
@@ -210,6 +216,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       selectedStep: selectedStep?.step || candidates[0].step,
       responseDirectives: stepResult.structured?.responseDirectives,
       session: updatedSession,
+      completedRoutes,
     };
   }
 
@@ -217,7 +224,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
    * Recursively traverse step chain to find first non-skipped step or END_ROUTE
    * @private
    */
-  private findFirstValidStepRecursive<TData = unknown>(
+  private findFirstValidStepRecursive(
     currentStep: Step<TContext, TData>,
     data: Partial<TData>,
     visited: Set<string>
@@ -277,7 +284,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
    * Identify valid next candidate steps based on current step and collected data
    * Returns step with isRouteComplete flag if route is complete (all steps skipped + has END_ROUTE transition)
    */
-  getCandidateSteps<TData = unknown>(
+  getCandidateSteps(
     route: Route<TContext, TData>,
     currentStep: Step<TContext, TData> | undefined,
     data: Partial<TData>
@@ -397,21 +404,23 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
    * and updates the session (including initialData merge when entering a new route).
    *
    * OPTIMIZATION: If there's only 1 route, skips route scoring and only does step selection.
+   * CROSS-ROUTE COMPLETION: Evaluates all routes for completion based on collected data.
    */
   async decideRouteAndStep(params: {
     routes: Route<TContext, TData>[];
     session: SessionState<TData>;
     history: Event[];
-    agentOptions?: AgentOptions<TContext>;
+    agentOptions?: AgentOptions<TContext, TData>;
     provider: AiProvider;
     context: TContext;
     signal?: AbortSignal;
   }): Promise<{
-    selectedRoute?: Route<TContext>;
-    selectedStep?: Step<TContext>;
+    selectedRoute?: Route<TContext, TData>;
+    selectedStep?: Step<TContext, TData>;
     responseDirectives?: string[];
     session: SessionState<TData>;
     isRouteComplete?: boolean;
+    completedRoutes?: Route<TContext, TData>[];
   }> {
     const {
       routes,
@@ -427,9 +436,19 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       return { session };
     }
 
+    // CROSS-ROUTE COMPLETION EVALUATION: Check all routes for completion
+    const completedRoutes = this.evaluateRouteCompletions(routes, session.data || {});
+
+    // Log completed routes
+    if (completedRoutes.length > 0) {
+      logger.debug(
+        `[RoutingEngine] Found ${completedRoutes.length} completed routes: ${completedRoutes.map(r => r.title).join(', ')}`
+      );
+    }
+
     // OPTIMIZATION: Single route - skip route scoring, only do step selection
     if (routes.length === 1) {
-      return this.decideSingleRouteStep({
+      const result = await this.decideSingleRouteStep({
         route: routes[0],
         session,
         history,
@@ -438,6 +457,10 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         context,
         signal,
       });
+      return {
+        ...result,
+        completedRoutes,
+      };
     }
 
     const lastUserMessage = getLastMessageFromHistory(history);
@@ -505,18 +528,29 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       },
     });
 
-    let selectedRoute: Route<TContext> | undefined;
-    let selectedStep: Step<TContext> | undefined;
+    let selectedRoute: Route<TContext, TData> | undefined;
+    let selectedStep: Step<TContext, TData> | undefined;
     let responseDirectives: string[] | undefined;
     let updatedSession = session;
 
     if (routingResult.structured?.routes) {
-      const decision = this.decideRouteFromScores({
-        context: routingResult.structured.context,
-        routes: routingResult.structured.routes,
-        responseDirectives: routingResult.structured.responseDirectives,
-      });
-      selectedRoute = routes.find((r) => r.id === decision.routeId);
+      // Use cross-route completion evaluation to select optimal route
+      const optimalRoute = this.selectOptimalRoute(
+        routes,
+        updatedSession.data || {},
+        routingResult.structured.routes
+      );
+
+      // Fall back to traditional scoring if no optimal route found
+      selectedRoute = optimalRoute || (() => {
+        const decision = this.decideRouteFromScores({
+          context: routingResult.structured.context,
+          routes: routingResult.structured.routes,
+          responseDirectives: routingResult.structured.responseDirectives,
+        });
+        return routes.find((r) => r.id === decision.routeId);
+      })();
+
       responseDirectives = routingResult.structured.responseDirectives;
 
       if (
@@ -569,14 +603,95 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       responseDirectives,
       session: updatedSession,
       isRouteComplete,
+      completedRoutes,
     };
+  }
+
+  /**
+   * Evaluate all routes for completion based on collected data
+   * @param routes - All available routes
+   * @param data - Currently collected agent-level data
+   * @returns Array of routes that are complete
+   */
+  evaluateRouteCompletions(routes: Route<TContext, TData>[], data: Partial<TData>): Route<TContext, TData>[] {
+    return routes.filter(route => route.isComplete(data));
+  }
+
+  /**
+   * Get completion status for all routes
+   * @param routes - All available routes
+   * @param data - Currently collected agent-level data
+   * @returns Map of route ID to completion progress (0-1)
+   */
+  getRouteCompletionStatus(routes: Route<TContext, TData>[], data: Partial<TData>): Map<string, number> {
+    const completionStatus = new Map<string, number>();
+
+    for (const route of routes) {
+      const progress = route.getCompletionProgress(data);
+      completionStatus.set(route.id, progress);
+    }
+
+    return completionStatus;
+  }
+
+  /**
+   * Find the best route to continue based on completion status and user intent
+   * Prioritizes routes that are partially complete but not finished
+   * @param routes - All available routes
+   * @param data - Currently collected agent-level data
+   * @param routeScores - AI-generated route scores from routing decision
+   * @returns Route that should be prioritized for continuation
+   */
+  selectOptimalRoute(
+    routes: Route<TContext, TData>[],
+    data: Partial<TData>,
+    routeScores: Record<string, number>
+  ): Route<TContext, TData> | undefined {
+    const completionStatus = this.getRouteCompletionStatus(routes, data);
+
+    // Create weighted scores combining AI intent scores with completion progress
+    const weightedScores: Array<{ route: Route<TContext, TData>; score: number }> = [];
+
+    for (const route of routes) {
+      const aiScore = routeScores[route.id] || 0;
+      const completionProgress = completionStatus.get(route.id) || 0;
+
+      // Skip fully completed routes unless they have very high AI scores
+      if (completionProgress >= 1.0 && aiScore < 80) {
+        continue;
+      }
+
+      // Boost partially complete routes that match user intent
+      let weightedScore = aiScore;
+      if (completionProgress > 0 && completionProgress < 1.0) {
+        // Boost score for partially complete routes
+        weightedScore += (completionProgress * 20); // Up to 20 point boost
+      }
+
+      weightedScores.push({ route, score: weightedScore });
+    }
+
+    // Sort by weighted score and return the best option
+    weightedScores.sort((a, b) => b.score - a.score);
+
+    if (weightedScores.length > 0) {
+      logger.debug(
+        `[RoutingEngine] Selected optimal route: ${weightedScores[0].route.title} ` +
+        `(AI: ${routeScores[weightedScores[0].route.id]}, ` +
+        `Completion: ${(completionStatus.get(weightedScores[0].route.id) || 0) * 100}%, ` +
+        `Weighted: ${weightedScores[0].score})`
+      );
+      return weightedScores[0].route;
+    }
+
+    return undefined;
   }
 
   /**
    * Build prompt for step selection within a single route
    * @private
    */
-  private async buildStepSelectionPrompt<TData>(
+  private async buildStepSelectionPrompt(
     params: BuildStepSelectionPromptParams<TContext, TData>
   ): Promise<string> {
     const {
@@ -591,7 +706,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       session,
     } = params;
     const templateContext = { context, session, history };
-    const pc = new PromptComposer(templateContext);
+    const pc = new PromptComposer<TContext, TData>(templateContext);
 
     // Add agent metadata
     if (agentOptions) {
@@ -606,8 +721,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     // Add current step context
     if (currentStep) {
       await pc.addInstruction(
-        `Current Step: ${currentStep.id}\nDescription: ${
-          currentStep.description || "N/A"
+        `Current Step: ${currentStep.id}\nDescription: ${currentStep.description || "N/A"
         }`
       );
     } else {
@@ -802,7 +916,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       context,
     } = params;
     const templateContext = { context, session, history };
-    const pc = new PromptComposer(templateContext);
+    const pc = new PromptComposer<TContext, TData>(templateContext);
     if (agentOptions) {
       await pc.addAgentMeta(agentOptions);
     }
@@ -829,6 +943,41 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         "Note: User is mid-conversation. They may want to continue current route or switch to a new one based on their intent."
       );
       await pc.addInstruction(sessionInfo.join("\n"));
+
+      // Add cross-route completion status
+      const completionStatus = this.getRouteCompletionStatus(routes, session.data || {});
+      const completedRoutes = this.evaluateRouteCompletions(routes, session.data || {});
+
+      if (completionStatus.size > 0) {
+        const statusInfo = [
+          "",
+          "Route completion status based on collected data:",
+        ];
+
+        for (const route of routes) {
+          const progress = completionStatus.get(route.id) || 0;
+          const isComplete = completedRoutes.includes(route);
+          const progressPercent = Math.round(progress * 100);
+
+          statusInfo.push(
+            `- ${route.title}: ${progressPercent}% complete${isComplete ? ' ✓ COMPLETE' : ''}`
+          );
+
+          if (!isComplete && route.requiredFields) {
+            const missingFields = route.getMissingRequiredFields(session.data || {});
+            if (missingFields.length > 0) {
+              statusInfo.push(`  Missing: ${missingFields.join(', ')}`);
+            }
+          }
+        }
+
+        statusInfo.push(
+          "",
+          "Consider route completion status when scoring. Partially complete routes may be good candidates for continuation."
+        );
+
+        await pc.addInstruction(statusInfo.join("\n"));
+      }
 
       // Add available steps for the active route
       if (activeRouteSteps && activeRouteSteps.length > 0) {
@@ -869,8 +1018,6 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
     await pc.addInteractionHistory(history);
     await pc.addLastMessage(lastMessage);
-    // Cast to unknown to satisfy generic constraints in composer
-    // This is safe because PromptComposer only reads route metadata (id, title, description)
     await pc.addRoutingOverview(routes);
     await pc.addInstruction(
       [

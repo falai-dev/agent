@@ -39,8 +39,9 @@ export class Route<TContext = unknown, TData = unknown> {
     "step" | "condition" | "skipIf"
   >;
   public readonly responseOutputSchema?: StructuredSchema;
-  public readonly schema?: StructuredSchema;
   public readonly initialData?: Partial<TData>;
+  public readonly requiredFields?: (keyof TData)[];
+  public readonly optionalFields?: (keyof TData)[];
   public readonly onComplete?:
     | string
     | RouteTransitionConfig<TContext, TData>
@@ -49,7 +50,7 @@ export class Route<TContext = unknown, TData = unknown> {
   public routingExtrasSchema?: StructuredSchema;
   public guidelines: Guideline<TContext>[] = [];
   public terms: Term<TContext>[] = [];
-  public tools: Tool<TContext, unknown[], unknown, TData>[] = [];
+  public tools: Tool<TContext, TData, unknown[], unknown>[] = [];
   public knowledgeBase: Record<string, unknown> = {};
 
   constructor(options: RouteOptions<TContext, TData>) {
@@ -87,8 +88,9 @@ export class Route<TContext = unknown, TData = unknown> {
     };
     this.routingExtrasSchema = options.routingExtrasSchema;
     this.responseOutputSchema = options.responseOutputSchema;
-    this.schema = options.schema;
     this.initialData = options.initialData;
+    this.requiredFields = options.requiredFields;
+    this.optionalFields = options.optionalFields;
     this.onComplete = options.onComplete;
     this.hooks = options.hooks;
 
@@ -166,7 +168,7 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Register a tool for this route
    */
-  createTool(tool: Tool<TContext, unknown[], unknown, TData>): this {
+  createTool(tool: Tool<TContext, TData, unknown[], unknown>): this {
     this.tools.push(tool);
     return this;
   }
@@ -174,7 +176,7 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Register multiple tools for this route
    */
-  registerTools(tools: Tool<TContext, unknown[], unknown, TData>[]): this {
+  registerTools(tools: Tool<TContext, TData, unknown[], unknown>[]): this {
     tools.forEach((tool) => this.createTool(tool));
     return this;
   }
@@ -196,7 +198,7 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Get all tools for this route
    */
-  getTools(): Tool<TContext, unknown[], unknown, TData>[] {
+  getTools(): Tool<TContext, TData, unknown[], unknown>[] {
     return [...this.tools];
   }
 
@@ -351,6 +353,56 @@ export class Route<TContext = unknown, TData = unknown> {
     if (this.hooks?.onContextUpdate) {
       await this.hooks.onContextUpdate(newContext, previousContext);
     }
+  }
+
+  /**
+   * Check if this route is complete based on the provided data
+   * @param data - Currently collected agent-level data
+   * @returns true if all required fields are present, false otherwise
+   */
+  isComplete(data: Partial<TData>): boolean {
+    if (!this.requiredFields || this.requiredFields.length === 0) {
+      return true; // No required fields means route is always complete
+    }
+
+    return this.requiredFields.every(field => {
+      const value = data[field];
+      return value !== undefined && value !== null && value !== '';
+    });
+  }
+
+  /**
+   * Get the list of missing required fields for this route
+   * @param data - Currently collected agent-level data
+   * @returns Array of missing required field keys
+   */
+  getMissingRequiredFields(data: Partial<TData>): (keyof TData)[] {
+    if (!this.requiredFields || this.requiredFields.length === 0) {
+      return [];
+    }
+
+    return this.requiredFields.filter(field => {
+      const value = data[field];
+      return value === undefined || value === null || value === '';
+    });
+  }
+
+  /**
+   * Get the completion progress for this route as a percentage
+   * @param data - Currently collected agent-level data
+   * @returns Completion progress as a number between 0 and 1
+   */
+  getCompletionProgress(data: Partial<TData>): number {
+    if (!this.requiredFields || this.requiredFields.length === 0) {
+      return 1; // No required fields means 100% complete
+    }
+
+    const completedFields = this.requiredFields.filter(field => {
+      const value = data[field];
+      return value !== undefined && value !== null && value !== '';
+    });
+
+    return completedFields.length / this.requiredFields.length;
   }
 
   /**

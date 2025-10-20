@@ -58,8 +58,9 @@ The system intelligently traverses step chains:
 All routing decisions consider:
 
 - **Conversation History**: Full dialogue context
-- **Collected Data**: What information has been gathered
-- **Session State**: Current route and step position
+- **Agent-Level Data**: Centralized information gathered across all routes
+- **Session State**: Current route and step position with cross-route data access
+- **Route Completion**: Progress toward required fields for each route
 - **Agent Knowledge**: Guidelines, terms, and domain knowledge
 
 ## Route Selection API
@@ -107,20 +108,27 @@ The `getCandidateSteps()` method implements sophisticated logic:
 const candidates = routingEngine.getCandidateSteps(
   route, // Current route
   currentStep, // Current step (or null for route start)
-  collectedData // Session data collected so far
+  agentData // Agent-level data collected across all routes
 );
 ```
 
 ### SkipIf Processing
 
-Steps are automatically filtered based on conditions:
+Steps are automatically filtered based on agent-level data conditions:
 
 ```typescript
-// Step definition with skipIf
+// Step definition with skipIf using agent data
 initialStep: {
   prompt: "What's your name?",
   collect: ["name"],
-  skipIf: (data) => data.name !== undefined  // Skip if name already collected
+  skipIf: (data) => data.name !== undefined  // Skip if name already collected by any route
+}
+
+// Cross-route skipping example
+const emailStep = {
+  prompt: "What's your email?",
+  collect: ["email"],
+  skipIf: (data) => data.email !== undefined  // Skip if collected in different route
 }
 ```
 
@@ -155,8 +163,9 @@ const routingPrompt = await routingEngine.buildRoutingPrompt({
 Prompts include:
 
 - Agent identity and personality
-- Available routes with descriptions and conditions
-- Session context and collected data
+- Available routes with descriptions and required fields
+- Session context and agent-level collected data
+- Route completion progress (e.g., "2/3 required fields collected")
 - Scoring guidelines (90-100 scale)
 - Conversation history and directives
 
@@ -169,7 +178,7 @@ const stepPrompt = await routingEngine.buildStepSelectionPrompt({
   route,
   currentStep,
   candidates,
-  data: session.data,
+  data: agent.getCollectedData(), // Agent-level data
   history,
   lastMessage,
   agentOptions,

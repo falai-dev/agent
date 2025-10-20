@@ -75,8 +75,7 @@ export class SessionManager<TData = unknown> {
 
     const session: SessionState<TData> = {
       id,
-      data: {} as Partial<TData>,
-      dataByRoute: {},
+      data: {} as Partial<TData>, // Agent-level data structure
       routeHistory: [],
       history: [], // Session manages its own history
       metadata: {
@@ -186,25 +185,50 @@ export class SessionManager<TData = unknown> {
   }
 
   /**
-   * Get collected data from the current session
+   * Get agent-level collected data from the current session
    */
-  getData<T = TData>(): Partial<T> | undefined {
-    return this.currentSession?.data as unknown as Partial<T> | undefined;
+  getData(): Partial<TData> {
+    return this.currentSession?.data || ({} as Partial<TData>);
   }
 
   /**
-   * Set/merge data into the current session
+   * Set/merge agent-level data into the current session
+   * This updates the single source of truth for all collected data
    */
-  async setData<T = TData>(data: Partial<T>): Promise<void> {
+  async setData(data: Partial<TData>): Promise<void> {
     // Ensure session exists
     await this.getOrCreate();
 
     if (this.currentSession && data) {
       this.currentSession.data = {
         ...this.currentSession.data,
-        ...(data as unknown as Partial<TData>),
+        ...data,
       };
       this.currentSession.metadata!.lastUpdatedAt = new Date();
+      
+      // Auto-save to persistence
+      await this.save();
+    }
+  }
+
+  /**
+   * Update specific fields in the agent-level data
+   * Provides a more explicit method for data updates
+   */
+  async updateData(updates: Partial<TData>): Promise<void> {
+    await this.setData(updates);
+  }
+
+  /**
+   * Clear all collected data while preserving session structure
+   */
+  async clearData(): Promise<void> {
+    if (this.currentSession) {
+      this.currentSession.data = {} as Partial<TData>;
+      this.currentSession.metadata!.lastUpdatedAt = new Date();
+      
+      // Auto-save to persistence
+      await this.save();
     }
   }
 

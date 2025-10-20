@@ -8,28 +8,45 @@ The `@falai/agent` framework provides **automatic session management** through t
 
 ## 🎯 Automatic Session Management
 
-The `SessionManager` automatically tracks three key aspects of a conversation:
+The `SessionManager` automatically tracks four key aspects of a conversation:
 
 1. **Current Route** - Which conversation flow the user is in
 2. **Current Step** - Where in the flow they currently are
-3. **Collected data** - Structured data collected so far
+3. **Agent-Level Data** - Centralized structured data collected across all routes
 4. **Conversation History** - Complete message history within the session
 
 ```typescript
-// Define your data extraction type
-interface FlightData {
+// Define your agent-level data extraction type
+interface TravelData {
   destination: string;
   departureDate: string;
   passengers: number;
   cabinClass: "economy" | "business" | "first";
+  hotelPreference?: string;
+  budgetRange?: string;
+  specialRequests?: string;
 }
 
-// Agent with automatic session management
-const agent = new Agent({
+// Agent with automatic session management and agent-level schema
+const agent = new Agent<{}, TravelData>({
   name: "Travel Agent",
   provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
   persistence: { adapter: new PrismaAdapter({ prisma }) },
-  sessionId: "user-123" // Automatically loads or creates session
+  sessionId: "user-123", // Automatically loads or creates session
+  
+  // Agent-level schema for all data collection
+  schema: {
+    type: "object",
+    properties: {
+      destination: { type: "string" },
+      departureDate: { type: "string", format: "date" },
+      passengers: { type: "number", minimum: 1, maximum: 9 },
+      cabinClass: { type: "string", enum: ["economy", "business", "first"] },
+      hotelPreference: { type: "string" },
+      budgetRange: { type: "string" },
+      specialRequests: { type: "string" }
+    }
+  }
 });
 
 // Simple conversation - session managed automatically
@@ -37,7 +54,7 @@ const response = await agent.respond("I want to book a flight to Paris");
 
 // Access session information
 console.log(agent.session.id); // "user-123"
-console.log(agent.session.getData<FlightData>()); // { destination: "Paris", ... }
+console.log(agent.session.getData<TravelData>()); // { destination: "Paris", ... }
 console.log(agent.session.getHistory()); // Conversation history
 ```
 
@@ -64,12 +81,13 @@ const sessionManager = agent.session;
 await sessionManager.getOrCreate("user-123");
 await sessionManager.getOrCreate(); // Auto-generates ID
 
-// Data management
-const data = sessionManager.getData<FlightData>();
+// Agent-level data management
+const data = sessionManager.getData<TravelData>();
 await sessionManager.setData({
   destination: "Paris",
   departureDate: "2025-10-15",
   passengers: 2,
+  cabinClass: "economy"
 });
 
 // History management
@@ -128,19 +146,25 @@ const agent = new Agent({
       await saveUserData(newContext.userId, newContext);
     },
 
-    // NEW: Validate and enrich collected data
+    // Agent-level data validation and enrichment
     onDataUpdate: async (data, previousData) => {
       // Normalize passenger count
       if (data.passengers < 1) data.passengers = 1;
       if (data.passengers > 9) data.passengers = 9;
 
-      // Enrich with computed fields
-      if (data.destination) {
+      // Enrich with computed fields using agent-level data
+      if (data.destination && !data.destinationCode) {
         data.destinationCode = await lookupAirportCode(data.destination);
       }
 
-      // Auto-trigger actions
-      if (hasAllRequires(data)) {
+      // Auto-set budget range based on cabin class
+      if (data.cabinClass && !data.budgetRange) {
+        data.budgetRange = data.cabinClass === 'first' ? 'premium' : 
+                          data.cabinClass === 'business' ? 'high' : 'standard';
+      }
+
+      // Auto-trigger actions when we have complete booking data
+      if (data.destination && data.departureDate && data.passengers) {
         data.shouldSearchFlights = true;
       }
 

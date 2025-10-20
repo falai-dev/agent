@@ -104,7 +104,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   /** Initial terms for the route's domain glossary */
   terms?: Term<TContext>[];
   /** Tools available in this route */
-  tools?: Tool<TContext, unknown[], unknown, TData>[];
+  tools?: Tool<TContext, TData, unknown[], unknown>[];
   /** Absolute rules the agent must follow in this route */
   rules?: Template<TContext, TData>[];
   /** Absolute prohibitions the agent must never do in this route */
@@ -114,14 +114,20 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   /** Optional: structured response data for this route's message generation */
   responseOutputSchema?: StructuredSchema;
   /**
-   * NEW: Schema defining data to extract throughout this route
-   * This creates a type-safe contract for what data the route collects
+   * Required fields for route completion - must be valid keys from agent's TData type
+   * Route is considered complete when all required fields are present in agent data
    */
-  schema?: StructuredSchema;
+  requiredFields?: (keyof TData)[];
   /**
-   * NEW: Initial data to pre-populate when entering this route
+   * Optional fields that enhance the route but aren't required for completion
+   * Must be valid keys from agent's TData type
+   */
+  optionalFields?: (keyof TData)[];
+  /**
+   * Initial data to pre-populate when entering this route
    * Useful for restoring sessions or pre-filling known information
    * Steps with skipIf conditions will be automatically bypassed if data is present
+   * Now refers to agent-level data
    */
   initialData?: Partial<TData>;
   /**
@@ -191,37 +197,37 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
   /** Transition to a chat state with this description */
   prompt?: Template<TContext, TData>;
   /** Tools available for AI to call in this step (by ID reference or inline definition) */
-  tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
+  tools?: (string | Tool<TContext, TData, unknown[], unknown>)[];
   /** Programmatic function or tool to run before AI responds */
   prepare?:
     | string
-    | Tool<TContext, unknown[], unknown, TData>
+    | Tool<TContext, TData, unknown[], unknown>
     | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
   /** Programmatic function or tool to run after AI responds */
   finalize?:
     | string
-    | Tool<TContext, unknown[], unknown, TData>
+    | Tool<TContext, TData, unknown[], unknown>
     | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
   /** Transition to a specific step or end marker */
   step?: StepRef | symbol;
   /**
-   * NEW: Fields to collect from the conversation in this step
-   * These should match keys in the route's schema
+   * Fields to collect from the conversation in this step
+   * These should match keys in the agent's TData schema
    */
-  collect?: string[];
+  collect?: (keyof TData)[];
   /**
-   * NEW: Function to determine if this step should be skipped
+   * Function to determine if this step should be skipped
    * If returns true, the step will be bypassed
-   * @param data - Currently collected data
+   * @param data - Currently collected agent-level data
    * @returns true if step should be skipped, false otherwise
    */
   skipIf?: (data: Partial<TData>) => boolean;
   /**
-   * NEW: Required data fields that must be present before entering this step
+   * Required data fields that must be present before entering this step
    * If any required field is missing, step cannot be entered
-   * Uses string[] for developer-friendly usage (same as collect)
+   * Must be valid keys from agent's TData type
    */
-  requires?: string[];
+  requires?: (keyof TData)[];
   /**
    * Optional condition for this transition
    * Description of when this transition should be taken

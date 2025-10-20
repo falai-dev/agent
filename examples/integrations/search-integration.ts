@@ -88,8 +88,38 @@ async function example() {
   // Initialize indices
   await adapter.initialize();
 
+  // Define complaint schema
+  const complaintSchema = {
+    type: "object",
+    properties: {
+      category: {
+        type: "string",
+        description: "Complaint category",
+      },
+      severity: {
+        type: "string",
+        enum: ["low", "medium", "high", "critical"],
+        default: "medium",
+        description: "Severity level",
+      },
+      description: {
+        type: "string",
+        description: "Detailed complaint description",
+      },
+      affectedService: {
+        type: "string",
+        description: "Which service is affected",
+      },
+      requestedResolution: {
+        type: "string",
+        description: "What resolution the customer wants",
+      },
+    },
+    required: ["category", "severity", "description"],
+  };
+
   // Create agent with OpenSearch persistence
-  const agent = new Agent<ConversationContext>({
+  const agent = new Agent<ConversationContext, ComplaintData>({
     name: "Customer Service Agent",
     description: "Handle customer complaints with full-text search",
     goal: "Resolve customer issues efficiently",
@@ -102,6 +132,8 @@ async function example() {
       userName: "Alice",
       department: "customer_service",
     },
+    // NEW: Agent-level schema
+    schema: complaintSchema,
     persistence: {
       adapter,
       autoSave: true, // Auto-save session step with collected data
@@ -110,7 +142,7 @@ async function example() {
   });
 
   // Create complaint handling route
-  const complaintRoute = agent.createRoute<ComplaintData>({
+  const complaintRoute = agent.createRoute({
     title: "Handle Customer Complaint",
     description: "Process and resolve customer complaints",
     conditions: [
@@ -118,34 +150,10 @@ async function example() {
       "User reports an issue or problem",
       "User is dissatisfied",
     ],
-    schema: {
-      type: "object",
-      properties: {
-        category: {
-          type: "string",
-          description: "Complaint category",
-        },
-        severity: {
-          type: "string",
-          enum: ["low", "medium", "high", "critical"],
-          default: "medium",
-          description: "Severity level",
-        },
-        description: {
-          type: "string",
-          description: "Detailed complaint description",
-        },
-        affectedService: {
-          type: "string",
-          description: "Which service is affected",
-        },
-        requestedResolution: {
-          type: "string",
-          description: "What resolution the customer wants",
-        },
-      },
-      required: ["category", "severity", "description"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["category", "severity", "description"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["affectedService", "requestedResolution"],
   });
 
   // Step flow
@@ -177,7 +185,7 @@ async function example() {
   console.log("✨ Session ready:", agent.session.id);
   
   // Set initial data
-  await agent.session.setData<ComplaintData>({ severity: "medium" });
+  await agent.session.setData({ severity: "medium" });
 
   // Turn 1
   console.log("\n--- Turn 1 ---");
@@ -193,7 +201,7 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response1.message);
-  console.log("📊 Data:", agent.session.getData<ComplaintData>());
+  console.log("📊 Data:", agent.session.getData());
   
   await agent.session.addMessage("assistant", response1.message);
 
@@ -211,20 +219,20 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Data:", agent.session.getData<ComplaintData>());
+  console.log("📊 Data:", agent.session.getData());
 
   await agent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Complaint route complete!");
-    await createSupportTicket(agent.session.getData<ComplaintData>() as ComplaintData);
+    await createSupportTicket(agent.session.getData() as ComplaintData);
   }
 
   // Demonstrate session recovery with new agent instance
   console.log("\n--- Session Recovery Example ---");
   const sessionId = agent.session.id;
   
-  const recoveredAgent = new Agent<ConversationContext>({
+  const recoveredAgent = new Agent<ConversationContext, ComplaintData>({
     name: "Customer Service Agent",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
@@ -243,7 +251,7 @@ async function example() {
   });
 
   // Recreate the same route on recovered agent
-  recoveredAgent.createRoute<ComplaintData>({
+  recoveredAgent.createRoute({
     title: "Handle Customer Complaint",
     description: "Process and resolve customer complaints",
     conditions: [
@@ -251,28 +259,16 @@ async function example() {
       "User reports an issue or problem",
       "User is dissatisfied",
     ],
-    schema: {
-      type: "object",
-      properties: {
-        category: { type: "string", description: "Complaint category" },
-        severity: {
-          type: "string",
-          enum: ["low", "medium", "high", "critical"],
-          default: "medium",
-          description: "Severity level",
-        },
-        description: { type: "string", description: "Detailed complaint description" },
-        affectedService: { type: "string", description: "Which service is affected" },
-        requestedResolution: { type: "string", description: "What resolution the customer wants" },
-      },
-      required: ["category", "severity", "description"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["category", "severity", "description"],
+    // NEW: Optional fields
+    optionalFields: ["affectedService", "requestedResolution"],
   });
 
   console.log("📥 Recovered session:", {
     sessionId: recoveredAgent.session.id,
     historyLength: recoveredAgent.session.getHistory().length,
-    data: recoveredAgent.session.getData<ComplaintData>(),
+    data: recoveredAgent.session.getData(),
   });
 
   // Demonstrate full-text search
@@ -344,12 +340,27 @@ async function analyticsExample() {
     tags: string[];
   }
 
-  const agent = new Agent<ConversationContext>({
+  const ticketSchema = {
+    type: "object",
+    properties: {
+      ticketType: { type: "string" },
+      priority: { type: "string" },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+    required: ["ticketType", "priority"],
+  };
+
+  const agent = new Agent<ConversationContext, TicketData>({
     name: "Support Analyzer",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema
+    schema: ticketSchema,
     persistence: {
       adapter,
       autoSave: true,
@@ -357,20 +368,12 @@ async function analyticsExample() {
     },
   });
 
-  const ticketRoute = agent.createRoute<TicketData>({
+  const ticketRoute = agent.createRoute({
     title: "Analyze Support Ticket",
-    schema: {
-      type: "object",
-      properties: {
-        ticketType: { type: "string" },
-        priority: { type: "string" },
-        tags: {
-          type: "array",
-          items: { type: "string" },
-        },
-      },
-      required: ["ticketType", "priority"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["ticketType", "priority"],
+    // NEW: Optional fields
+    optionalFields: ["tags"],
   });
 
   ticketRoute.initialStep.nextStep({
@@ -380,7 +383,7 @@ async function analyticsExample() {
 
   // Create multiple sessions with different agents
   for (let i = 0; i < 3; i++) {
-    const sessionAgent = new Agent<AnalyticsContext>({
+    const sessionAgent = new Agent<AnalyticsContext, TicketData>({
       name: "Support Analyzer",
       provider: new GeminiProvider({
         apiKey: process.env.GEMINI_API_KEY!,
@@ -390,6 +393,8 @@ async function analyticsExample() {
         userId: "analyst_001",
         department: "support",
       },
+      // NEW: Agent-level schema
+      schema: ticketSchema,
       persistence: {
         adapter: new OpenSearchAdapter<AnalyticsContext>(client),
         autoSave: true,
@@ -397,20 +402,12 @@ async function analyticsExample() {
     });
 
     // Create the ticket route on each agent
-    sessionAgent.createRoute<TicketData>({
+    sessionAgent.createRoute({
       title: "Analyze Support Ticket",
-      schema: {
-        type: "object",
-        properties: {
-          ticketType: { type: "string" },
-          priority: { type: "string" },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-          },
-        },
-        required: ["ticketType", "priority"],
-      },
+      // NEW: Required fields for route completion
+      requiredFields: ["ticketType", "priority"],
+      // NEW: Optional fields
+      optionalFields: ["tags"],
     });
 
     const ticketContent = `Support ticket ${i + 1}: ${
@@ -474,7 +471,7 @@ async function timeSeriesExample() {
   const adapter = new OpenSearchAdapter<ConversationContext>(client);
   await adapter.initialize();
 
-  new Agent<ConversationContext>({
+  new Agent<ConversationContext, unknown>({
     name: "Metrics Agent",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,

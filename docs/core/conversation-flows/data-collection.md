@@ -1,20 +1,22 @@
-# Schema-Driven Data Collection
+# Agent-Level Schema-Driven Data Collection
 
-@falai/agent implements a powerful schema-first approach to data collection, enabling type-safe, structured information extraction from natural conversations. Unlike traditional form-filling, this system uses AI to naturally gather information while maintaining data integrity.
+@falai/agent implements a powerful agent-level schema-first approach to data collection, enabling type-safe, structured information extraction from natural conversations across all routes. Unlike traditional route-specific data collection, this system centralizes data schemas at the agent level while allowing routes to specify completion requirements.
 
 ## Overview
 
-The data collection system provides:
+The agent-level data collection system provides:
 
-- **JSON Schema Contracts**: Define data structures upfront with validation
+- **Centralized JSON Schema**: Define comprehensive data structures at the agent level
+- **Cross-Route Data Sharing**: Data collected by any route is available to all routes
+- **Route Completion Logic**: Routes complete when their required fields are satisfied
 - **Type-Safe Extraction**: Automatic mapping from AI responses to typed data
 - **Natural Conversations**: AI handles information gathering conversationally
-- **Validation & Enrichment**: Lifecycle hooks for data processing
-- **Session Persistence**: Data survives across conversation turns
+- **Validation & Enrichment**: Agent-level lifecycle hooks for data processing
+- **Session Persistence**: Data survives across conversation turns and route transitions
 
-## Schema Definition
+## Agent-Level Schema Definition
 
-### Basic Schema
+### Centralized Schema
 
 ```typescript
 interface UserProfile {
@@ -26,10 +28,19 @@ interface UserProfile {
     notifications: boolean;
     theme: "light" | "dark";
   };
+  // Additional fields for other routes
+  supportTicketId?: string;
+  issueType?: string;
+  feedbackRating?: number;
+  subscriptionTier?: "free" | "premium" | "enterprise";
 }
 
-const userProfileRoute = agent.createRoute<UserProfile>({
-  title: "User Profile Collection",
+// Define schema at agent level
+const agent = new Agent<{}, UserProfile>({
+  name: "User Management Agent",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  
+  // Comprehensive agent-level schema
   schema: {
     type: "object",
     properties: {
@@ -63,9 +74,32 @@ const userProfileRoute = agent.createRoute<UserProfile>({
           },
         },
       },
+      supportTicketId: { type: "string" },
+      issueType: { type: "string" },
+      feedbackRating: { type: "number", minimum: 1, maximum: 5 },
+      subscriptionTier: { type: "string", enum: ["free", "premium", "enterprise"] }
     },
     required: ["name", "email"],
-  },
+  }
+});
+
+// Routes specify required fields instead of schemas
+const profileRoute = agent.createRoute({
+  title: "User Profile Collection",
+  requiredFields: ["name", "email", "age"],
+  optionalFields: ["interests", "preferences"]
+});
+
+const supportRoute = agent.createRoute({
+  title: "Support Ticket",
+  requiredFields: ["name", "email", "issueType"],
+  optionalFields: ["supportTicketId"]
+});
+
+const feedbackRoute = agent.createRoute({
+  title: "Feedback Collection",
+  requiredFields: ["name", "email", "feedbackRating"],
+  optionalFields: ["subscriptionTier"]
 });
 ```
 
@@ -128,24 +162,33 @@ const complexSchema = {
 
 ## Step-Level Data Collection
 
-### Basic Collection
+### Basic Collection with Agent-Level Data
 
 ```typescript
 const profileRoute = agent
   .createRoute({
     title: "Profile Collection",
-    schema: userProfileSchema,
+    requiredFields: ["name", "email", "age"], // Required for route completion
+    optionalFields: ["interests"], // Optional but helpful
     initialStep: {
       prompt:
         "Hi! I'm collecting some information to personalize your experience. What's your name?",
-      collect: ["name"], // Maps to schema field
+      collect: ["name"], // Maps to agent schema field
     },
   })
   .nextStep({
     prompt: "Thanks {{name}}! What's your email address?",
     collect: ["email"],
     requires: ["name"], // Must have name before collecting email
+  })
+  .nextStep({
+    prompt: "What's your age?",
+    collect: ["age"],
+    requires: ["name", "email"],
   });
+
+// Route completes when all required fields are collected
+// Data is available to all other routes
 ```
 
 ### Multi-Field Collection
@@ -160,12 +203,12 @@ const comprehensiveStep = {
     - Your preferred theme (light/dark)
   `,
   collect: [
-    "age", // Single field
-    "interests", // Array field
+    "age", // Single field from agent schema
+    "interests", // Array field from agent schema
     "preferences.notifications", // Nested field (dot notation)
     "preferences.theme", // Another nested field
   ],
-  requires: ["name", "email"],
+  requires: ["name", "email"], // Prerequisites from agent data
 };
 ```
 
@@ -175,32 +218,67 @@ const comprehensiveStep = {
 const conditionalCollection = {
   prompt: "Would you like to set up notifications? (yes/no)",
   collect: ["preferences.notifications"],
-  skipIf: (data) => data.preferences?.notifications !== undefined,
-  requires: ["name", "email"],
+  skipIf: (data) => data.preferences?.notifications !== undefined, // Skip if already collected
+  requires: ["name", "email"], // Prerequisites from agent data
 };
+```
+
+### Cross-Route Data Sharing
+
+With agent-level data collection, routes can share data seamlessly:
+
+```typescript
+// User starts with profile collection
+const response1 = await agent.respond("Hi, I'm John Doe, email john@example.com");
+// Agent data: { name: "John Doe", email: "john@example.com" }
+
+// User switches to support - data is already available
+const response2 = await agent.respond("Actually, I need help with a technical issue");
+// Support route can access name and email, only needs to collect issue details
+// Support route: 2/3 required fields already satisfied
+
+// User provides issue details
+const response3 = await agent.respond("My account won't sync properly");
+// Support route completes: { name: "John Doe", email: "john@example.com", issueType: "technical" }
+
+// Later, user wants to give feedback
+const response4 = await agent.respond("I want to rate my support experience - 5 stars");
+// Feedback route completes immediately: already has name, email, and now rating
 ```
 
 ## Data Validation & Processing
 
-### Lifecycle Hooks
+### Agent-Level Lifecycle Hooks
 
 ```typescript
-const validatedRoute = agent.createRoute({
-  title: "Validated Collection",
+const agent = new Agent<{}, UserProfile>({
+  name: "User Management Agent",
+  schema: { /* agent schema */ },
 
-  // Agent-level data validation
+  // Agent-level data validation (applies to all routes)
   hooks: {
     onDataUpdate: (newData, previousData) => {
-      // Cross-field validation
+      // Cross-field validation using complete agent data
       if (newData.email && newData.confirmEmail) {
         if (newData.email !== newData.confirmEmail) {
           throw new Error("Email addresses don't match");
         }
       }
 
-      // Data enrichment
+      // Data enrichment based on agent-level data
       if (newData.name && !newData.displayName) {
         newData.displayName = newData.name.split(" ")[0]; // First name only
+      }
+
+      // Auto-set subscription tier based on email domain
+      if (newData.email && !newData.subscriptionTier) {
+        newData.subscriptionTier = newData.email.includes('@enterprise.com') ? 'enterprise' : 'free';
+      }
+
+      // Validate against agent schema
+      const validation = agent.validateData(newData);
+      if (!validation.valid) {
+        throw new Error(`Data validation failed: ${validation.errors.map(e => e.message).join(', ')}`);
       }
 
       return newData;

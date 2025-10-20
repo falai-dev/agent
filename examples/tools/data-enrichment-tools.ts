@@ -45,7 +45,7 @@ interface FlightData {
 // ==============================================================================
 
 // Tool 1: Convert city names to airport codes
-const enrichDestinationTool: Tool<FlightBookingContext, [], void, FlightData> =
+const enrichDestinationTool: Tool<FlightBookingContext, FlightData, [], void> =
   {
     id: "enrich_destination",
     name: "Destination Code Lookup",
@@ -84,7 +84,7 @@ const enrichDestinationTool: Tool<FlightBookingContext, [], void, FlightData> =
   };
 
 // Tool 2: Parse and validate dates
-const validateDateTool: Tool<FlightBookingContext, [], void, FlightData> = {
+const validateDateTool: Tool<FlightBookingContext, FlightData, [], void> = {
   id: "validate_date",
   name: "Date Parser & Validator",
   description:
@@ -139,7 +139,7 @@ const validateDateTool: Tool<FlightBookingContext, [], void, FlightData> = {
 };
 
 // Tool 3: Search for flights (triggered by flag)
-const searchFlightsTool: Tool<FlightBookingContext, [], void, FlightData> = {
+const searchFlightsTool: Tool<FlightBookingContext, FlightData, [], void> = {
   id: "search_flights",
   name: "Flight Availability Search",
   description: "Search for available flights based on collected data",
@@ -188,7 +188,7 @@ const searchFlightsTool: Tool<FlightBookingContext, [], void, FlightData> = {
 };
 
 // Tool 4: Book the flight
-const bookFlightTool: Tool<FlightBookingContext, [], void, FlightData> = {
+const bookFlightTool: Tool<FlightBookingContext, FlightData, [], void> = {
   id: "book_flight",
   name: "Flight Booking Processor",
   description: "Finalize the flight booking",
@@ -252,7 +252,45 @@ function onDataUpdate(
 // AGENT SETUP
 // ==============================================================================
 
-const agent = new Agent<FlightBookingContext>({
+// Define flight booking schema
+const flightBookingSchema = {
+  type: "object",
+  properties: {
+    destination: {
+      type: "string",
+      description: "City or airport the user wants to fly to",
+    },
+    destinationCode: {
+      type: "string",
+      description: "IATA airport code (enriched by tool)",
+    },
+    departureDate: {
+      type: "string",
+      description: "When the user wants to depart",
+    },
+    departureDateParsed: {
+      type: "string",
+      description: "Parsed ISO date (enriched by tool)",
+    },
+    passengers: {
+      type: "number",
+      minimum: 1,
+      maximum: 9,
+    },
+    cabinClass: {
+      type: "string",
+      enum: ["economy", "business", "first"],
+      default: "economy",
+    },
+    shouldSearchFlights: {
+      type: "boolean",
+      description: "Flag to trigger flight search",
+    },
+  },
+  required: ["destination", "departureDate", "passengers"],
+};
+
+const agent = new Agent<FlightBookingContext, FlightData>({
   name: "Flight Booking Agent",
   goal: "Help users book flights efficiently",
   description: "I help you find and book flights",
@@ -261,55 +299,25 @@ const agent = new Agent<FlightBookingContext>({
     model: "gpt-5o-mini",
   }),
   context: {},
+  // NEW: Agent-level schema
+  schema: flightBookingSchema,
   hooks: {
     onDataUpdate, // Validation & enrichment hook
   },
 });
 
 // Define route with data extraction
-const bookingRoute = agent.createRoute<FlightData>({
+const bookingRoute = agent.createRoute({
   title: "Book Flight",
   description: "Help user book a flight",
   conditions: [
     "User wants to book a flight",
     "User mentions flying, traveling, or booking",
   ],
-  schema: {
-    type: "object",
-    properties: {
-      destination: {
-        type: "string",
-        description: "City or airport the user wants to fly to",
-      },
-      destinationCode: {
-        type: "string",
-        description: "IATA airport code (enriched by tool)",
-      },
-      departureDate: {
-        type: "string",
-        description: "When the user wants to depart",
-      },
-      departureDateParsed: {
-        type: "string",
-        description: "Parsed ISO date (enriched by tool)",
-      },
-      passengers: {
-        type: "number",
-        minimum: 1,
-        maximum: 9,
-      },
-      cabinClass: {
-        type: "string",
-        enum: ["economy", "business", "first"],
-        default: "economy",
-      },
-      shouldSearchFlights: {
-        type: "boolean",
-        description: "Flag to trigger flight search",
-      },
-    },
-    required: ["destination", "departureDate", "passengers"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["destination", "departureDate", "passengers"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["destinationCode", "departureDateParsed", "cabinClass", "shouldSearchFlights"],
 });
 
 // Step 1: Collect destination
@@ -389,14 +397,14 @@ async function main() {
 
   console.log("\n=== RESPONSE ===");
   console.log("Message:", response.message);
-  console.log("Data:", agent.session.getData<FlightData>());
+  console.log("Data:", agent.session.getData());
   console.log("Context:", agent["context"]);
 
   await agent.session.addMessage("assistant", response.message);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Flight booking complete!");
-    await sendBookingConfirmation(agent.session.getData<FlightData>());
+    await sendBookingConfirmation(agent.session.getData());
   }
 
   /*

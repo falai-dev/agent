@@ -18,7 +18,7 @@ Tools are created as objects implementing the `Tool` interface:
 ```typescript
 import { Tool } from "@falai/agent";
 
-const weatherTool: Tool<unknown, [], string, WeatherData> = {
+const weatherTool: Tool<unknown, WeatherData, [], string> = {
   id: "get_weather",
   name: "Weather Forecast", // Human-readable name shown to AI models
   description: "Get current weather and forecast for a location",
@@ -48,7 +48,7 @@ const weatherTool: Tool<unknown, [], string, WeatherData> = {
 The optional `name` field provides a human-readable name for the tool that is displayed to AI models. When provided, this name takes precedence over the `id` field in AI provider interactions:
 
 ```typescript
-const calculatorTool: Tool<unknown, [], string, CalcData> = {
+const calculatorTool: Tool<unknown, CalcData, [], string> = {
   id: "math_calculator", // Internal identifier
   name: "Math Calculator", // Display name for AI models
   description: "Perform mathematical calculations",
@@ -68,7 +68,7 @@ const calculatorTool: Tool<unknown, [], string, CalcData> = {
 Tool parameters are defined using JSON Schema:
 
 ```typescript
-const searchTool: Tool<unknown, [], string, SearchData> = {
+const searchTool: Tool<unknown, SearchData, [], string> = {
   id: "web_search",
   name: "Web Search Engine",
   description: "Search the web for information",
@@ -110,7 +110,7 @@ Tools receive execution context including:
 - **Route information** - Current route and step details
 
 ```typescript
-const userProfileTool: Tool<unknown, [], string, UserData> = {
+const userProfileTool: Tool<unknown, UserData, [], string> = {
   id: "get_user_profile",
   description: "Retrieve user profile information",
   parameters: {
@@ -159,7 +159,7 @@ interface ToolResult {
 Tools can modify conversation context:
 
 ```typescript
-const locationTool: Tool<unknown, [], string, LocationData> = {
+const locationTool: Tool<unknown, LocationData, [], string> = {
   id: "set_location",
   description: "Update the user's location in context",
   parameters: {
@@ -187,7 +187,7 @@ const locationTool: Tool<unknown, [], string, LocationData> = {
 Tools can update session data collected during conversation:
 
 ```typescript
-const validationTool: Tool<unknown, [], string, BookingData> = {
+const validationTool: Tool<unknown, BookingData, [], string> = {
   id: "validate_booking",
   description: "Validate booking information and update session data",
   parameters: {
@@ -223,7 +223,7 @@ const validationTool: Tool<unknown, [], string, BookingData> = {
 Tools should handle errors gracefully:
 
 ```typescript
-const apiTool: Tool<unknown, [], string, ApiData> = {
+const apiTool: Tool<unknown, ApiData, [], string> = {
   id: "call_external_api",
   description: "Call an external API endpoint",
   parameters: {
@@ -303,7 +303,7 @@ When multiple tools with the same name exist, priority is:
 Tools support async operations and Promises:
 
 ```typescript
-const asyncTool: Tool<unknown, [], string, ProcessingData> = {
+const asyncTool: Tool<unknown, ProcessingData, [], string> = {
   id: "process_data",
   description: "Process data asynchronously with heavy computation",
   parameters: {

@@ -65,7 +65,7 @@ interface FeedbackData {
 // ==============================================================================
 
 // Tool: Fetch latest company news (context enrichment)
-const fetchNewsTool: Tool<CompanyContext, [], void> = {
+const fetchNewsTool: Tool<CompanyContext, UnifiedData, [], void> = {
   id: "fetch_news",
   name: "Company News Fetcher",
   description: "Retrieve latest company news and updates",
@@ -96,7 +96,7 @@ const fetchNewsTool: Tool<CompanyContext, [], void> = {
 };
 
 // Tool: Search knowledge base (context enrichment)
-const searchKnowledgeTool: Tool<CompanyContext, [], string> = {
+const searchKnowledgeTool: Tool<CompanyContext,UnifiedData, [], string> = {
   id: "search_knowledge",
   name: "Knowledge Base Search",
   description: "Search FAQs and documentation",
@@ -139,7 +139,28 @@ const searchKnowledgeTool: Tool<CompanyContext, [], string> = {
 // AGENT SETUP
 // ==============================================================================
 
-const agent = new Agent<CompanyContext>({
+// Define unified data schema for all interactions
+interface UnifiedData extends FeedbackData {}
+
+const unifiedSchema = {
+  type: "object",
+  properties: {
+    // Feedback fields
+    rating: {
+      type: "number",
+      description: "A rating from 1 to 5",
+      minimum: 1,
+      maximum: 5,
+    },
+    comments: { type: "string", description: "Open-ended feedback" },
+    contactPermission: {
+      type: "boolean",
+      description: "Permission to contact the user for more details",
+    },
+  },
+};
+
+const agent = new Agent<CompanyContext, UnifiedData>({
   name: "Acme Support Agent",
   goal: "Answer questions about Acme Corp and our products",
   description:
@@ -150,6 +171,8 @@ const agent = new Agent<CompanyContext>({
     apiKey: process.env.OPENAI_API_KEY || "test-key",
     model: "gpt-5o-mini",
   }),
+  // NEW: Agent-level schema
+  schema: unifiedSchema,
 
   // Initialize with company knowledge
   context: {
@@ -360,27 +383,14 @@ agent.createRoute({
 // Initial step is enough for fallback conversations
 
 // Route 7: Collect Feedback (Stepful Example)
-const feedbackRoute = agent.createRoute<FeedbackData>({
+const feedbackRoute = agent.createRoute({
   title: "Collect Feedback",
   description: "Collect user feedback about their experience",
   conditions: ["User wants to leave feedback", "User seems satisfied or upset"],
-  schema: {
-    type: "object",
-    properties: {
-      rating: {
-        type: "number",
-        description: "A rating from 1 to 5",
-        minimum: 1,
-        maximum: 5,
-      },
-      comments: { type: "string", description: "Open-ended feedback" },
-      contactPermission: {
-        type: "boolean",
-        description: "Permission to contact the user for more details",
-      },
-    },
-    required: ["rating", "comments"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["rating", "comments"],
+  // NEW: Optional fields
+  optionalFields: ["contactPermission"],
   endStep: {
     prompt:
       "Thank the user warmly for their valuable feedback and let them know we appreciate their time",
@@ -456,7 +466,7 @@ async function exampleConversations() {
     },
   ];
 
-  const response2 = await agent.respond({ history: history2, session });
+  const response2 = await agent.respond({ history: history2 });
   console.log("AI:", response2.message);
   console.log("Route:", response2.session?.currentRoute?.title);
   // Expected: "We offer two main products: Acme Widget ($99.99)..."
@@ -474,7 +484,7 @@ async function exampleConversations() {
     },
   ];
 
-  const response3 = await agent.respond({ history: history3, session });
+  const response3 = await agent.respond({ history: history3 });
   console.log("AI:", response3.message);
   console.log("Route:", response3.session?.currentRoute?.title);
   // Expected: "We offer a 30-day money-back guarantee..."
@@ -492,7 +502,7 @@ async function exampleConversations() {
     },
   ];
 
-  const response4 = await agent.respond({ history: history4, session });
+  const response4 = await agent.respond({ history: history4 });
   console.log("AI:", response4.message);
   console.log("Route:", response4.session?.currentRoute?.title);
   // Tool fetches news → Updates context → AI responds with news
@@ -512,7 +522,7 @@ async function exampleConversations() {
       name: "User",
     },
   ];
-  const resp1 = await agent.respond({ history: turn1, session });
+  const resp1 = await agent.respond({ history: turn1 });
   console.log("User: Tell me about the Acme Widget");
   console.log("AI:", resp1.message);
 
@@ -551,14 +561,13 @@ async function exampleConversations() {
 
   const feedbackResponse = await agent.respond({
     history: feedbackHistory,
-    session,
   });
   console.log("AI:", feedbackResponse.message);
   console.log("Route:", feedbackResponse.session?.currentRoute?.title);
 
   if (feedbackResponse.isRouteComplete) {
     console.log("\n✅ Feedback collection complete!");
-    await processFeedback(agent.getData(feedbackResponse.session?.id));
+    await processFeedback(agent.getCollectedData());
   } else {
     console.log("\n⏳ Feedback collection in progress...");
   }
@@ -568,7 +577,7 @@ async function exampleConversations() {
  * Mock function to process collected feedback.
  * @param data The feedback data collected from the user.
  */
-async function processFeedback(data: Partial<FeedbackData>) {
+async function processFeedback(data: Partial<UnifiedData>) {
   console.log("\n" + "=".repeat(60));
   console.log("Processing user feedback...");
   console.log("=".repeat(60));

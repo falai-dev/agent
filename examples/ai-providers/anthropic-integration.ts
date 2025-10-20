@@ -25,7 +25,7 @@ interface ResearchData {
 }
 
 // Research tool that Claude can use
-const conductResearch: Tool<unknown, unknown[], unknown, ResearchData> = {
+const conductResearch: Tool<unknown, ResearchData, unknown[], unknown> = {
   id: "conduct_research",
   description: "Conduct comprehensive research on a given topic",
   parameters: {
@@ -33,17 +33,16 @@ const conductResearch: Tool<unknown, unknown[], unknown, ResearchData> = {
     properties: {},
   },
   handler: async ({ data }) => {
-    const researchData = data as Partial<ResearchData>;
     console.log(
-      `Conducting ${researchData?.depth} research on: ${researchData?.topic}`
+      `Conducting ${data?.depth} research on: ${data?.topic}`
     );
 
     const researchId = `RES-${Date.now()}`;
 
     // Simulate research process
     const findings = {
-      overview: `Found ${researchData?.sources || 3} sources about ${
-        researchData?.topic
+      overview: `Found ${data?.sources || 3} sources about ${
+        data?.topic
       }`,
       key_points: [
         "Latest developments in the field",
@@ -62,8 +61,36 @@ const conductResearch: Tool<unknown, unknown[], unknown, ResearchData> = {
   },
 };
 
+// Define research schema
+const researchSchema = {
+  type: "object",
+  properties: {
+    topic: { type: "string", description: "The research topic" },
+    depth: {
+      type: "string",
+      enum: ["overview", "detailed", "comprehensive"],
+      default: "detailed",
+    },
+    sources: {
+      type: "number",
+      minimum: 1,
+      maximum: 20,
+      default: 5,
+      description: "Number of sources to analyze",
+    },
+    format: {
+      type: "string",
+      enum: ["summary", "bullet_points", "structured"],
+      default: "structured",
+      description: "Output format preference",
+    },
+    researchId: { type: "string" },
+  },
+  required: ["topic"],
+};
+
 // Create agent with Anthropic provider
-const agent = new Agent({
+const agent = new Agent<unknown, ResearchData>({
   name: "ClaudeResearcher",
   description: "A research assistant powered by Claude",
   provider: new AnthropicProvider({
@@ -75,38 +102,18 @@ const agent = new Agent({
       top_p: 0.9,
     },
   }),
+  // NEW: Agent-level schema
+  schema: researchSchema,
 });
 
 // Create research route
-const researchRoute = agent.createRoute<ResearchData>({
+const researchRoute = agent.createRoute({
   title: "Research Assistant",
   description: "Conduct research using Claude's analytical capabilities",
-  schema: {
-    type: "object",
-    properties: {
-      topic: { type: "string", description: "The research topic" },
-      depth: {
-        type: "string",
-        enum: ["overview", "detailed", "comprehensive"],
-        default: "detailed",
-      },
-      sources: {
-        type: "number",
-        minimum: 1,
-        maximum: 20,
-        default: 5,
-        description: "Number of sources to analyze",
-      },
-      format: {
-        type: "string",
-        enum: ["summary", "bullet_points", "structured"],
-        default: "structured",
-        description: "Output format preference",
-      },
-      researchId: { type: "string" },
-    },
-    required: ["topic"],
-  },
+  // NEW: Required fields for route completion
+  requiredFields: ["topic"],
+  // NEW: Optional fields that enhance the experience
+  optionalFields: ["depth", "sources", "format", "researchId"],
   identity: `You are Claude, an AI research assistant created by Anthropic.
                You have access to extensive knowledge and can conduct thorough research.
                Always be helpful, truthful, and provide well-reasoned analysis.`,

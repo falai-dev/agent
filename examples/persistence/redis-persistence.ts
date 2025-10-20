@@ -64,8 +64,20 @@ async function example() {
 
   const userId = "user_123";
 
+  // Define support ticket schema
+  const supportTicketSchema = {
+    type: "object",
+    properties: {
+      issue: { type: "string" },
+      category: { type: "string", enum: ["technical", "billing", "account", "other"] },
+      priority: { type: "string", enum: ["low", "medium", "high"] },
+      description: { type: "string" },
+    },
+    required: ["issue", "category", "priority", "description"],
+  };
+
   // Create agent with Redis persistence
-  const agent = new Agent<ChatContext>({
+  const agent = new Agent<ChatContext, SupportTicketData>({
     name: "Support Assistant",
     description: "Fast, real-time support assistant",
     goal: "Help users resolve issues quickly",
@@ -78,6 +90,8 @@ async function example() {
       userName: "Alice",
       chatType: "support",
     },
+    // NEW: Agent-level schema
+    schema: supportTicketSchema,
     // ✨ Redis adapter with custom options
     persistence: {
       adapter: new RedisAdapter<ChatContext>({
@@ -92,7 +106,7 @@ async function example() {
   });
 
   // Create support ticket route with data collecting
-  const ticketRoute = agent.createRoute<SupportTicketData>({
+  const ticketRoute = agent.createRoute({
     title: "Create Support Ticket",
     description: "Help user create and track support tickets",
     conditions: [
@@ -100,31 +114,10 @@ async function example() {
       "User wants to report a problem",
       "User mentions support, help, or issue",
     ],
-    schema: {
-      type: "object",
-      properties: {
-        issue: {
-          type: "string",
-          description: "Brief summary of the issue",
-        },
-        category: {
-          type: "string",
-          enum: ["technical", "billing", "account", "other"],
-          description: "Issue category",
-        },
-        priority: {
-          type: "string",
-          enum: ["low", "medium", "high"],
-          default: "medium",
-          description: "Issue priority",
-        },
-        description: {
-          type: "string",
-          description: "Detailed description of the issue",
-        },
-      },
-      required: ["issue", "category", "description"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["issue", "category", "description"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["priority"],
   });
 
   // Step flow
@@ -156,9 +149,9 @@ async function example() {
   console.log("✨ Session ready:", agent.session.id);
 
   // Set initial data
-  await agent.session.setData<SupportTicketData>({ priority: "medium" });
+  await agent.session.setData({ priority: "medium" });
 
-  console.log("📊 Initial data:", agent.session.getData<SupportTicketData>());
+  console.log("📊 Initial data:", agent.session.getData());
 
   // Turn 1: User provides issue
   console.log("\n--- Turn 1 ---");
@@ -177,11 +170,11 @@ async function example() {
   console.log("🤖 Agent:", response1.message);
 
   await agent.session.addMessage("assistant", response1.message);
-  console.log("📊 Collected data:", agent.session.getData<SupportTicketData>());
+  console.log("📊 Collected data:", agent.session.getData());
 
   // Turn 2: Provide more details
   console.log("\n--- Turn 2 ---");
-  
+
   await agent.session.addMessage(
     "user",
     "I keep getting 'Invalid credentials' error even though I reset my password",
@@ -193,20 +186,20 @@ async function example() {
   });
 
   console.log("🤖 Agent:", response2.message);
-  console.log("📊 Collected data:", agent.session.getData<SupportTicketData>());
+  console.log("📊 Collected data:", agent.session.getData());
 
   await agent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Support ticket route complete!");
-    await fileSupportTicket(agent.session.getData<SupportTicketData>() as SupportTicketData);
+    await fileSupportTicket(agent.session.getData() as SupportTicketData);
   }
 
   // Demonstrate session recovery with new agent instance
   console.log("\n--- Session Recovery Example ---");
   const sessionId = agent.session.id;
-  
-  const recoveredAgent = new Agent<ChatContext>({
+
+  const recoveredAgent = new Agent<ChatContext, SupportTicketData>({
     name: "Support Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
@@ -217,6 +210,8 @@ async function example() {
       userName: "Alice",
       chatType: "support",
     },
+    // NEW: Agent-level schema (same as original agent)
+    schema: supportTicketSchema,
     persistence: {
       adapter: new RedisAdapter<ChatContext>({
         redis,
@@ -230,7 +225,7 @@ async function example() {
   });
 
   // Recreate the same route on recovered agent
-  recoveredAgent.createRoute<SupportTicketData>({
+  recoveredAgent.createRoute({
     title: "Create Support Ticket",
     description: "Help user create and track support tickets",
     conditions: [
@@ -238,31 +233,16 @@ async function example() {
       "User wants to report a problem",
       "User mentions support, help, or issue",
     ],
-    schema: {
-      type: "object",
-      properties: {
-        issue: { type: "string", description: "Brief summary of the issue" },
-        category: {
-          type: "string",
-          enum: ["technical", "billing", "account", "other"],
-          description: "Issue category",
-        },
-        priority: {
-          type: "string",
-          enum: ["low", "medium", "high"],
-          default: "medium",
-          description: "Issue priority",
-        },
-        description: { type: "string", description: "Detailed description of the issue" },
-      },
-      required: ["issue", "category", "description"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["issue", "category", "description"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["priority"],
   });
 
   console.log("📥 Recovered session:", {
     sessionId: recoveredAgent.session.id,
     historyLength: recoveredAgent.session.getHistory().length,
-    data: recoveredAgent.session.getData<SupportTicketData>(),
+    data: recoveredAgent.session.getData(),
   });
 
   console.log("✅ Session recovery complete!");
@@ -278,15 +258,27 @@ async function example() {
 async function highThroughputExample() {
   const redis = new Redis();
 
-  const agent = new Agent<QuickChatData>({
+  // Define quick chat schema
+  const quickChatSchema = {
+    type: "object",
+    properties: {
+      topic: { type: "string" },
+      sentiment: { type: "string", enum: ["positive", "neutral", "negative"] },
+    },
+    required: ["topic", "sentiment"],
+  };
+
+  const agent = new Agent<unknown, QuickChatData>({
     name: "Chat Bot",
     description: "Fast chat responses",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema
+    schema: quickChatSchema,
     persistence: {
-      adapter: new RedisAdapter<QuickChatData>({
+      adapter: new RedisAdapter<unknown>({
         redis,
         keyPrefix: "chat:",
         sessionTTL: 60 * 60, // 1 hour for quick chats
@@ -297,23 +289,10 @@ async function highThroughputExample() {
   });
 
   // Simple chat route that extracts topic and sentiment
-  const chatRoute = agent.createRoute<QuickChatData>({
+  const chatRoute = agent.createRoute({
     title: "General Chat",
-    schema: {
-      type: "object",
-      properties: {
-        topic: {
-          type: "string",
-          description: "Main topic of conversation",
-        },
-        sentiment: {
-          type: "string",
-          enum: ["positive", "neutral", "negative"],
-          description: "User's sentiment",
-        },
-      },
-      required: ["topic", "sentiment"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["topic", "sentiment"],
   });
 
   chatRoute.initialStep
@@ -334,13 +313,13 @@ async function highThroughputExample() {
   });
 
   console.log("🤖 Response:", response.message);
-  console.log("📊 Data:", agent.session.getData<QuickChatData>());
+  console.log("📊 Data:", agent.session.getData());
 
   await agent.session.addMessage("assistant", response.message);
 
   if (response.isRouteComplete) {
     console.log("\n✅ Chat analytics route complete!");
-    await logChatAnalytics(agent.session.getData<QuickChatData>() as QuickChatData);
+    await logChatAnalytics(agent.session.getData() as QuickChatData);
   }
 
   console.log("💾 Session automatically saved to Redis!");
@@ -355,30 +334,36 @@ async function highThroughputExample() {
 async function sessionRecoveryExample() {
   const redis = new Redis();
 
-  const agent = new Agent<OrderData>({
+  // Define order schema
+  const orderSchema = {
+    type: "object",
+    properties: {
+      productId: { type: "string" },
+      quantity: { type: "number", minimum: 1 },
+      shippingAddress: { type: "string" },
+    },
+    required: ["productId", "quantity", "shippingAddress"],
+  };
+
+  const agent = new Agent<unknown, OrderData>({
     name: "Order Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema
+    schema: orderSchema,
     persistence: {
-      adapter: new RedisAdapter<OrderData>({ redis }),
+      adapter: new RedisAdapter<unknown>({ redis }),
       autoSave: true,
       userId: "user_789",
     },
   });
 
-  const orderRoute = agent.createRoute<OrderData>({
+  const orderRoute = agent.createRoute({
     title: "Place Order",
-    schema: {
-      type: "object",
-      properties: {
-        productId: { type: "string" },
-        quantity: { type: "number", minimum: 1 },
-        shippingAddress: { type: "string" },
-      },
-      required: ["productId", "quantity", "shippingAddress"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["productId", "quantity", "shippingAddress"],
   });
 
   orderRoute.initialStep
@@ -404,7 +389,7 @@ async function sessionRecoveryExample() {
   });
 
   console.log("🤖 Response:", response1.message);
-  console.log("📊 Data so far:", agent.session.getData<OrderData>());
+  console.log("📊 Data so far:", agent.session.getData());
 
   await agent.session.addMessage("assistant", response1.message);
 
@@ -412,24 +397,25 @@ async function sessionRecoveryExample() {
   console.log("\n--- User Reconnects ---");
 
   // Create new agent instance with same sessionId (simulates reconnection)
-  const reconnectedAgent = new Agent<OrderData>({
+  const reconnectedAgent = new Agent<unknown, OrderData>({
     name: "Order Assistant",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
       model: "models/gemini-2.5-flash",
     }),
+    // NEW: Agent-level schema (same as original agent)
+    schema: orderSchema,
     persistence: {
-      adapter: new RedisAdapter<OrderData>({ redis }),
+      adapter: new RedisAdapter<unknown>({ redis }),
       autoSave: true,
     },
     sessionId, // Same sessionId - will load existing session
-    routes: [orderRoute],
   });
 
   console.log("📥 Recovered session:", {
     sessionId: reconnectedAgent.session.id,
     historyLength: reconnectedAgent.session.getHistory().length,
-    data: reconnectedAgent.session.getData<OrderData>(),
+    data: reconnectedAgent.session.getData(),
   });
 
   // Continue conversation
@@ -440,13 +426,13 @@ async function sessionRecoveryExample() {
   });
 
   console.log("🤖 Response:", response2.message);
-  console.log("📊 Final collected data:", reconnectedAgent.session.getData<OrderData>());
+  console.log("📊 Final collected data:", reconnectedAgent.session.getData());
 
   await reconnectedAgent.session.addMessage("assistant", response2.message);
 
   if (response2.isRouteComplete) {
     console.log("\n✅ Order placement complete!");
-    await processOrder(reconnectedAgent.session.getData<OrderData>() as OrderData);
+    await processOrder(reconnectedAgent.session.getData() as OrderData);
   }
 
   console.log("✅ Order complete with recovered session!");

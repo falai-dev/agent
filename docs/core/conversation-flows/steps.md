@@ -1,24 +1,25 @@
 # Steps
 
-Steps are the building blocks of conversational routes in @falai/agent. This document covers step configuration, data collection, and transition logic.
+Steps are the building blocks of conversational routes in @falai/agent with agent-level data collection. This document covers step configuration, data collection into the agent schema, and transition logic based on agent data.
 
 ## Overview
 
 Steps represent individual moments in a conversation where the agent can:
 
 - Prompt the user for information
-- Collect structured data from responses
-- Execute tools or perform actions
-- Make decisions about conversation flow
+- Collect structured data into the agent-level schema
+- Execute tools that work with complete agent data
+- Make decisions about conversation flow based on agent data
+- Skip execution if required data is already available from other routes
 
 ## Step Configuration
 
 ```typescript
 const nameStep = bookingRoute.initialStep.nextStep({
   prompt: "What's your name?",
-  collect: ["firstName", "lastName"],
+  collect: ["customerName"], // Collects into agent-level schema
   requires: [], // No prerequisites
-  skipIf: (data) => data.firstName && data.lastName, // Skip if already collected
+  skipIf: (data) => data.customerName, // Skip if already collected by any route
 });
 ```
 
@@ -42,34 +43,57 @@ Steps that end the route using `END_ROUTE`.
 
 ## Data Collection
 
-Steps collect data through the `collect` array, which maps to the route's JSON schema.
+Steps collect data through the `collect` array, which maps to the agent's JSON schema and is validated against it.
 
 ```typescript
 const contactStep = nameStep.nextStep({
   prompt: "What's your email and phone number?",
-  collect: ["email", "phone"],
-  requires: ["firstName"], // Must have name first
+  collect: ["email", "phone"], // Maps to agent schema fields
+  requires: ["customerName"], // Must have name first (from agent data)
 });
 ```
 
 ## Conditional Logic
 
-Steps support various conditional behaviors:
+Steps support various conditional behaviors based on agent-level data:
 
-- `skipIf`: Skip the step if a condition is met
-- `requires`: Prerequisites that must be satisfied
+- `skipIf`: Skip the step if a condition is met (evaluates against complete agent data)
+- `requires`: Prerequisites that must be satisfied (checks agent data from any route)
 - `when`: AI-evaluated conditions for branching
 
 ## Tool Integration
 
-Steps can execute tools before generating AI responses:
+Steps can execute tools that work with complete agent-level data:
 
 ```typescript
 const weatherStep = planningStep.nextStep({
   prompt: "I'll check the weather for your destination",
-  tool: weatherLookupTool,
-  requires: ["destination", "travelDate"],
+  tool: weatherLookupTool, // Tool receives complete agent data
+  requires: ["destination", "checkIn"], // Prerequisites from agent data
 });
+
+// Tool implementation with agent data access
+const weatherLookupTool: Tool<Context, [], WeatherData, HotelData> = {
+  id: "weather_lookup",
+  description: "Look up weather for destination",
+  parameters: { type: "object", properties: {} },
+  handler: async (toolContext) => {
+    const { data } = toolContext; // Complete agent data
+    
+    if (!data.destination || !data.checkIn) {
+      return { data: undefined };
+    }
+    
+    const weather = await getWeather(data.destination, data.checkIn);
+    
+    return {
+      data: weather,
+      dataUpdate: {
+        weatherInfo: weather.summary // Update agent data
+      }
+    };
+  }
+};
 ```
 
 ## Step Transitions

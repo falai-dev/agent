@@ -31,31 +31,44 @@ const greetingRoute = agent
   });
 ```
 
-### Route with Schema
+### Route with Agent-Level Schema
 
 ```typescript
 interface UserInfo {
   name: string;
   email: string;
   interests: string[];
+  preferences?: object;
+  profileComplete?: boolean;
 }
 
+// Agent defines comprehensive schema
+const agent = new Agent<{}, UserInfo>({
+  name: "Profile Assistant",
+  provider: openaiProvider,
+  schema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      email: { type: "string", format: "email" },
+      interests: {
+        type: "array",
+        items: { type: "string" },
+      },
+      preferences: { type: "object" },
+      profileComplete: { type: "boolean" }
+    },
+    required: ["name", "email"],
+  }
+});
+
+// Route specifies required fields instead of schema
 const userProfileRoute = agent
-  .createRoute<UserInfo>({
+  .createRoute({
     title: "User Profile Collection",
     description: "Collect basic user information",
-    schema: {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        email: { type: "string", format: "email" },
-        interests: {
-          type: "array",
-          items: { type: "string" },
-        },
-      },
-      required: ["name", "email"],
-    },
+    requiredFields: ["name", "email", "interests"], // Required for completion
+    optionalFields: ["preferences"], // Nice to have
     initialStep: {
       prompt: "Let's create your profile. What's your name?",
       collect: ["name"],
@@ -64,12 +77,12 @@ const userProfileRoute = agent
   .nextStep({
     prompt: "Great, {{name}}! What's your email address?",
     collect: ["email"],
-    requires: ["name"],
+    requires: ["name"], // Prerequisites from agent data
   })
   .nextStep({
     prompt: "What are your interests? (comma-separated)",
     collect: ["interests"],
-    requires: ["name", "email"],
+    requires: ["name", "email"], // Prerequisites from agent data
   });
 ```
 
@@ -99,9 +112,9 @@ interface StepOptions<TContext, TData> {
 ```typescript
 const dataCollectionStep = {
   prompt: "What's your preferred contact method?",
-  collect: ["contactMethod"], // Maps to schema field
-  requires: ["name", "email"], // Must have these fields first
-  skipIf: (data) => data.contactMethod !== undefined, // Skip if already collected
+  collect: ["contactMethod"], // Maps to agent schema field
+  requires: ["name", "email"], // Must have these fields from agent data
+  skipIf: (data) => data.contactMethod !== undefined, // Skip if already collected by any route
 };
 ```
 
@@ -296,6 +309,10 @@ const advancedRoute = agent.createRoute({
   title: "Advanced Interaction",
   description: "Complex multi-step conversation",
 
+  // Route completion requirements
+  requiredFields: ["customerName", "email", "issueType"],
+  optionalFields: ["phone", "priority"],
+
   // Route-level identity overrides agent identity
   identity: "You are an expert consultant specializing in {{domain}}",
 
@@ -316,19 +333,25 @@ const advancedRoute = agent.createRoute({
     },
   ],
 
-  // Initial data to pre-populate
+  // Initial data to pre-populate (maps to agent schema)
   initialData: {
     sessionId: generateId(),
     startTime: new Date().toISOString(),
   },
 
-  // Lifecycle hooks
+  // Route-level lifecycle hooks (work with agent data)
   hooks: {
     onDataUpdate: (newData, previousData) => {
-      // Validate or enrich collected data
+      // Validate or enrich agent-level collected data
       if (newData.email && !isValidEmail(newData.email)) {
         throw new Error("Invalid email format");
       }
+      
+      // Auto-set priority based on issue type
+      if (newData.issueType === 'billing' && !newData.priority) {
+        newData.priority = 'high';
+      }
+      
       return newData;
     },
     onContextUpdate: (newContext, previousContext) => {

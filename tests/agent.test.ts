@@ -22,11 +22,27 @@ interface TestContext {
   sessionCount: number;
 }
 
-// interface SupportTicketData {
-//   issue: string;
-//   priority: "low" | "medium" | "high";
-//   category: string;
-// }
+// Test data types for agent-level data collection
+interface SupportTicketData {
+  issue: string;
+  priority: "low" | "medium" | "high";
+  category: string;
+  customerName?: string;
+  email?: string;
+  ticketId?: string;
+  resolution?: string;
+}
+
+interface UserProfileData {
+  name?: string;
+  email?: string;
+  phone?: string;
+  preferences?: {
+    theme: "light" | "dark";
+    notifications: boolean;
+  };
+  accountType?: "basic" | "premium";
+}
 
 // Test utilities
 function createTestAgent(provider?: MockProvider): Agent<TestContext> {
@@ -40,6 +56,71 @@ function createTestAgent(provider?: MockProvider): Agent<TestContext> {
     },
     provider: provider || MockProviderFactory.basic(),
   });
+}
+
+function createSupportAgent(): Agent<TestContext, SupportTicketData> {
+  const agent = new Agent<TestContext, SupportTicketData>({
+    name: "SupportAgent",
+    description: "Agent for testing agent-level data collection",
+    context: {
+      userId: "test-user-123",
+      sessionCount: 0,
+    },
+    provider: MockProviderFactory.basic(),
+    schema: {
+      type: "object",
+      properties: {
+        issue: { type: "string" },
+        priority: { type: "string", enum: ["low", "medium", "high"] },
+        category: { type: "string" },
+        customerName: { type: "string" },
+        email: { type: "string", format: "email" },
+        ticketId: { type: "string" },
+        resolution: { type: "string" },
+      },
+      required: ["issue", "category"],
+    },
+  });
+
+  // Add guidelines
+  agent.createGuideline({
+    condition: "User asks for help",
+    action: "Provide helpful assistance",
+    enabled: true,
+  });
+
+  // Add terms
+  agent.createTerm({
+    name: "Support Ticket",
+    description: "A request for technical assistance",
+  });
+
+  // Add a support route with required fields
+  agent.createRoute({
+    title: "Support Request",
+    description: "Handle customer support requests",
+    conditions: ["User needs help", "Technical issue"],
+    requiredFields: ["issue", "category"],
+    optionalFields: ["priority", "customerName", "email"],
+    steps: [
+      {
+        prompt: "What's the issue you're experiencing?",
+        collect: ["issue"],
+      },
+      {
+        prompt: "What category does this fall under?",
+        collect: ["category"],
+        requires: ["issue"],
+      },
+      {
+        prompt: "How would you rate the priority?",
+        collect: ["priority"],
+        requires: ["issue", "category"],
+      },
+    ],
+  });
+
+  return agent;
 }
 
 // function createSupportAgent(): Agent<TestContext> {
@@ -151,6 +232,40 @@ async function testAgentCreationAndConfiguration() {
     );
   });
 
+  await runTest("should create agent with agent-level schema", () => {
+    const agent = new Agent<TestContext, UserProfileData>({
+      name: "SchemaAgent",
+      description: "Agent with schema",
+      context: {
+        userId: "schema-test-user",
+        sessionCount: 0,
+      },
+      provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          email: { type: "string", format: "email" },
+          phone: { type: "string" },
+          preferences: {
+            type: "object",
+            properties: {
+              theme: { type: "string", enum: ["light", "dark"] },
+              notifications: { type: "boolean" },
+            },
+          },
+          accountType: { type: "string", enum: ["basic", "premium"] },
+        },
+        required: ["name", "email"],
+      },
+    });
+
+    assert(agent !== undefined, "Agent should be created");
+    assert(typeof agent.validateData === "function", "Should have validateData method");
+    assert(typeof agent.getCollectedData === "function", "Should have getCollectedData method");
+    assert(typeof agent.updateCollectedData === "function", "Should have updateCollectedData method");
+  });
+
   await runTest("should create agent with full configuration", () => {
     const agent = new Agent<TestContext>({
       name: "FullTestAgent",
@@ -193,6 +308,57 @@ async function testAgentCreationAndConfiguration() {
       agent !== undefined,
       "Agent should still exist after context update"
     );
+  });
+
+  await runTest("should validate agent-level data", async () => {
+    const agent = createSupportAgent();
+
+    // Test valid data
+    const validData: Partial<SupportTicketData> = {
+      issue: "Login problem",
+      category: "technical",
+      priority: "high",
+    };
+
+    const validResult = agent.validateData(validData);
+    assert(validResult.valid === true, "Valid data should pass validation");
+    assert(validResult.errors.length === 0, "Valid data should have no errors");
+
+    // Test invalid data (field not in schema)
+    const invalidData = {
+      issue: "Login problem",
+      invalidField: "should not be allowed",
+    };
+
+    const invalidResult = agent.validateData(invalidData as any);
+    assert(invalidResult.valid === false, "Invalid data should fail validation");
+    assert(invalidResult.errors.length > 0, "Invalid data should have errors");
+  });
+
+  await runTest("should update collected data with validation", async () => {
+    const agent = createSupportAgent();
+
+    // Test valid update
+    const validUpdate: Partial<SupportTicketData> = {
+      issue: "Cannot access account",
+      category: "technical",
+    };
+
+    await agent.updateCollectedData(validUpdate);
+    const collectedData = agent.getCollectedData();
+    assertEqual(collectedData.issue, "Cannot access account", "Issue should be updated");
+    assertEqual(collectedData.category, "technical", "Category should be updated");
+
+    // Test invalid update should throw error
+    try {
+      await agent.updateCollectedData({ invalidField: "test" } as any);
+      throw new Error("Expected validation error was not thrown");
+    } catch (error) {
+      assert(
+        error instanceof Error && error.message.includes("validation failed"),
+        "Should throw validation error for invalid data"
+      );
+    }
   });
 }
 
@@ -452,12 +618,154 @@ async function testAgentGuidelinesAndTerms() {
   );
 }
 
+async function testAgentLevelDataCollection() {
+  console.log("=== Agent-Level Data Collection Tests ===");
+
+  await runTest("should collect data across routes", async () => {
+    const agent = createSupportAgent();
+
+    // Create multiple routes that work with the same agent data
+    const infoRoute = agent.createRoute({
+      title: "Customer Info",
+      requiredFields: ["customerName", "email"],
+      steps: [
+        {
+          prompt: "What's your name?",
+          collect: ["customerName"],
+        },
+        {
+          prompt: "What's your email?",
+          collect: ["email"],
+          requires: ["customerName"],
+        },
+      ],
+    });
+
+    const ticketRoute = agent.createRoute({
+      title: "Ticket Creation",
+      requiredFields: ["issue", "category"],
+      steps: [
+        {
+          prompt: "What's the issue?",
+          collect: ["issue"],
+        },
+        {
+          prompt: "What category?",
+          collect: ["category"],
+          requires: ["issue"],
+        },
+      ],
+    });
+
+    // Test that routes can access the same agent-level data
+    assert(!!infoRoute.requiredFields?.includes("customerName"), "Info route should require customerName");
+    assert(!!ticketRoute.requiredFields?.includes("issue"), "Ticket route should require issue");
+
+    // Test route completion logic
+    const partialData: Partial<SupportTicketData> = {
+      customerName: "John Doe",
+      issue: "Login problem",
+    };
+
+    assert(infoRoute.isComplete(partialData) === false, "Info route should not be complete without email");
+    assert(ticketRoute.isComplete(partialData) === false, "Ticket route should not be complete without category");
+
+    const completeInfoData: Partial<SupportTicketData> = {
+      ...partialData,
+      email: "john@example.com",
+    };
+
+    assert(infoRoute.isComplete(completeInfoData) === true, "Info route should be complete with name and email");
+
+    const completeTicketData: Partial<SupportTicketData> = {
+      ...partialData,
+      category: "technical",
+    };
+
+    assert(ticketRoute.isComplete(completeTicketData) === true, "Ticket route should be complete with issue and category");
+  });
+
+  await runTest("should validate route field references against agent schema", () => {
+    const agent = createSupportAgent();
+
+    // Test valid field references
+    const validRoute = agent.createRoute({
+      title: "Valid Route",
+      requiredFields: ["issue", "category"], // These exist in agent schema
+      optionalFields: ["priority"], // This exists in agent schema
+    });
+
+    assert(validRoute !== undefined, "Route with valid fields should be created");
+
+    // Test invalid field references should throw error
+    try {
+      agent.createRoute({
+        title: "Invalid Route",
+        requiredFields: ["nonExistentField"] as any,
+      });
+      throw new Error("Expected route configuration error was not thrown");
+    } catch (error) {
+      assert(
+        error instanceof Error && error.message.includes("Invalid required fields"),
+        "Should throw route configuration error for invalid fields"
+      );
+    }
+  });
+
+  await runTest("should calculate route completion progress", () => {
+    const agent = createSupportAgent();
+    const route = agent.createRoute({
+      title: "Progress Route",
+      requiredFields: ["issue", "category", "priority"],
+    });
+
+    // Test 0% completion
+    const noData: Partial<SupportTicketData> = {};
+    assertEqual(route.getCompletionProgress(noData), 0, "Empty data should be 0% complete");
+
+    // Test 33% completion
+    const oneFieldData: Partial<SupportTicketData> = { issue: "Test issue" };
+    assertEqual(Math.round(route.getCompletionProgress(oneFieldData) * 100), 33, "One field should be ~33% complete");
+
+    // Test 67% completion
+    const twoFieldData: Partial<SupportTicketData> = { issue: "Test issue", category: "technical" };
+    assertEqual(Math.round(route.getCompletionProgress(twoFieldData) * 100), 67, "Two fields should be ~67% complete");
+
+    // Test 100% completion
+    const completeData: Partial<SupportTicketData> = { 
+      issue: "Test issue", 
+      category: "technical", 
+      priority: "high" 
+    };
+    assertEqual(route.getCompletionProgress(completeData), 1, "All fields should be 100% complete");
+  });
+
+  await runTest("should get missing required fields", () => {
+    const agent = createSupportAgent();
+    const route = agent.createRoute({
+      title: "Missing Fields Route",
+      requiredFields: ["issue", "category", "customerName"],
+    });
+
+    const partialData: Partial<SupportTicketData> = {
+      issue: "Test issue",
+    };
+
+    const missingFields = route.getMissingRequiredFields(partialData);
+    assert(missingFields.includes("category"), "Should identify missing category field");
+    assert(missingFields.includes("customerName"), "Should identify missing customerName field");
+    assert(!missingFields.includes("issue"), "Should not include present issue field");
+    assertEqual(missingFields.length, 2, "Should have exactly 2 missing fields");
+  });
+}
+
 // Main test runner
 async function runAllAgentTests() {
   try {
     await testAgentCreationAndConfiguration();
     await testAgentResponseGeneration();
     await testAgentGuidelinesAndTerms();
+    await testAgentLevelDataCollection();
     console.log("\n🎉 All Agent tests passed!");
   } catch (error) {
     console.error("\n❌ Agent tests failed:", error);

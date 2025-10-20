@@ -214,7 +214,7 @@ const secureTool = {
 ```typescript
 import { Tool } from "@falai/agent";
 
-const contextSecureTool: Tool<SecureContext, [], UserData> = {
+const contextSecureTool: Tool<SecureContext, UserData, [], any> = {
   id: "user_data_access",
   description: "Access user data with security checks",
   parameters: {
@@ -415,9 +415,9 @@ class ToolRegistry {
 ```typescript
 const multiTenantTool: Tool<
   { tenantId: string },
+  { query: string },
   [],
-  string,
-  { query: string }
+  string
 > = {
   id: "tenant_search",
   description: "Search within tenant's data scope",
@@ -472,7 +472,7 @@ const timeSensitiveTool = {
 ### Usage-Based Limiting
 
 ```typescript
-const limitedTool: Tool<{ userId: string }, [args: any], string, any> = {
+const limitedTool: Tool<{ userId: string }, any, [args: any], string> = {
   id: "premium_feature",
   description: "Execute premium feature with usage limits",
   parameters: {
@@ -528,7 +528,7 @@ const agent = new Agent({
 ### Access Audit Logging
 
 ```typescript
-const auditedTool: Tool<{ userId: string }, [args: any], string, any> = {
+const auditedTool: Tool<{ userId: string }, any, [args: any], string> = {
   id: "sensitive_operation",
   description: "Perform sensitive operation with audit logging",
   parameters: {

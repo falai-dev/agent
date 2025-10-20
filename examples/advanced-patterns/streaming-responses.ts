@@ -36,7 +36,7 @@ async function streamingWithAnthropic() {
   });
 
   // Create agent
-  const agent = new Agent<ConversationContext>({
+  const agent = new Agent<ConversationContext, unknown>({
     name: "StreamingAssistant",
     description: "An AI assistant that streams responses in real-time",
     goal: "Provide helpful information with streaming responses",
@@ -120,7 +120,7 @@ async function streamingWithOpenAI() {
     },
   });
 
-  const agent = new Agent<ConversationContext>({
+  const agent = new Agent<ConversationContext, unknown>({
     name: "CreativeAssistant",
     description: "A creative AI assistant",
     context: {
@@ -185,7 +185,7 @@ async function streamingWithGemini() {
     },
   });
 
-  const agent = new Agent<ConversationContext>({
+  const agent = new Agent<ConversationContext, unknown>({
     name: "AnalyticalAssistant",
     description: "An analytical AI assistant",
     context: {
@@ -247,7 +247,22 @@ async function streamingWithRoutes() {
     model: "claude-sonnet-4-5",
   });
 
-  const agent = new Agent<ConversationContext>({
+  // Define feedback data schema
+  interface FeedbackData {
+    rating: number;
+    comments: string;
+  }
+
+  const feedbackSchema = {
+    type: "object",
+    properties: {
+      rating: { type: "number", minimum: 1, maximum: 5 },
+      comments: { type: "string" },
+    },
+    required: ["rating"],
+  };
+
+  const agent = new Agent<ConversationContext, FeedbackData>({
     name: "SupportAgent",
     description: "A customer support agent with conversation routes",
     context: {
@@ -258,6 +273,8 @@ async function streamingWithRoutes() {
       },
     },
     provider: provider,
+    // NEW: Agent-level schema
+    schema: feedbackSchema,
   });
 
   // Create a route
@@ -272,21 +289,14 @@ async function streamingWithRoutes() {
   });
 
   // Create a feedback route
-  agent.createRoute<{
-    rating: number;
-    comments: string;
-  }>({
+  agent.createRoute({
     title: "Collect Feedback",
     description: "Collect user feedback on their support experience",
     conditions: ["User wants to provide feedback"],
-    schema: {
-      type: "object",
-      properties: {
-        rating: { type: "number", minimum: 1, maximum: 5 },
-        comments: { type: "string" },
-      },
-      required: ["rating"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["rating"],
+    // NEW: Optional fields
+    optionalFields: ["comments"],
     steps: [
       {
         prompt: "How would you rate your support experience from 1 to 5?",
@@ -339,12 +349,7 @@ async function streamingWithRoutes() {
         if (chunk.isRouteComplete) {
           console.log("\n✅ Route complete!");
           if (chunk.session?.currentRoute?.title === "Collect Feedback") {
-            await logFeedback(
-              agent.session.getData() as {
-                rating: number;
-                comments: string;
-              }
-            );
+            await logFeedback(agent.session.getData() as FeedbackData);
           }
         }
 
@@ -364,7 +369,7 @@ async function streamingWithAbortSignal() {
     model: "claude-sonnet-4-5",
   });
 
-  const agent = new Agent<ConversationContext>({
+  const agent = new Agent<ConversationContext, unknown>({
     name: "Assistant",
     description: "An assistant that can be interrupted",
     context: {

@@ -17,8 +17,8 @@ export interface PendingTransition {
 }
 
 /**
- * Session step tracks the current position in the conversation flow
- * and data collected during the route progression
+ * Session state tracks the current position in the conversation flow
+ * and data collected at the agent level across all routes
  */
 export interface SessionState<TData = unknown> {
   /** Unique session identifier (useful for persistence) */
@@ -39,17 +39,11 @@ export interface SessionState<TData = unknown> {
   };
 
   /**
-   * Data collected during the current route
-   * Convenience reference to dataByRoute[currentRoute.id]
+   * Agent-level data collected across all routes
+   * This is the single source of truth for all collected data
+   * Routes can access and contribute to this shared data structure
    */
-  data?: Partial<TData>;
-
-  /**
-   * Data collected organized by route ID
-   * Persists data when switching between routes
-   * Allows resuming incomplete routes where they left off
-   */
-  dataByRoute?: Record<string, Partial<TData>>;
+  data: Partial<TData>;
 
   /** History of routes visited in this session */
   routeHistory?: Array<{

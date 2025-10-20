@@ -7,6 +7,7 @@ import type { Tool } from "./tool";
 import type { RouteOptions } from "./route";
 import type { PersistenceConfig } from "./persistence";
 import type { SessionState } from "./session";
+import type { StructuredSchema } from "./schema";
 import { Template } from "./template";
 
 /**
@@ -26,7 +27,7 @@ export enum CompositionMode {
 /**
  * Context lifecycle hooks for managing step persistence
  */
-export interface ContextLifecycleHooks<TContext = unknown> {
+export interface ContextLifecycleHooks<TContext = unknown, TData = unknown> {
   /**
    * Called before respond() to get fresh context
    * Useful for loading context from a database or cache
@@ -47,13 +48,12 @@ export interface ContextLifecycleHooks<TContext = unknown> {
    * Useful for validation, enrichment, or persistence of collected data
    * Return modified collected data or the same data to keep it unchanged
    *
-   * Note: This hook works with ANY route's collected data (since an agent can have
-   * multiple routes with different extraction schemas). Use type guards or runtime
-   * checks if you need type-specific logic.
+   * Note: This hook now works with agent-level data collection (TData type)
    */
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onDataUpdate?: (data: any, previousCollected: any) => any;
+  onDataUpdate?: (
+    data: Partial<TData>,
+    previousCollected: Partial<TData>
+  ) => Partial<TData> | Promise<Partial<TData>>;
 }
 
 /**
@@ -67,7 +67,7 @@ export type ContextProvider<TContext = unknown> = () =>
 /**
  * Options for creating an Agent
  */
-export interface AgentOptions<TContext = unknown> {
+export interface AgentOptions<TContext = unknown, TData = unknown> {
   /** Display name of the agent */
   name: string;
   /** Detailed description of the agent's purpose and personality */
@@ -89,47 +89,51 @@ export interface AgentOptions<TContext = unknown> {
   /** Context provider function for always-fresh context (alternative to static context) */
   contextProvider?: ContextProvider<TContext>;
   /** Lifecycle hooks for context management */
-  hooks?: ContextLifecycleHooks<TContext>;
+  hooks?: ContextLifecycleHooks<TContext, TData>;
   /** AI provider strategy for generating responses */
   provider: AiProvider;
   /** Composition mode for response generation */
   compositionMode?: CompositionMode;
   /** Initial terms for domain glossary */
-  terms?: Term<TContext>[];
+  terms?: Term<TContext, TData>[];
   /** Initial guidelines for agent behavior */
-  guidelines?: Guideline<TContext>[];
+  guidelines?: Guideline<TContext, TData>[];
   /** Global tools available to all routes */
-  tools?: Tool<TContext, unknown[], unknown, unknown>[];
+  tools?: Tool<TContext, TData, unknown[], unknown>[];
   /** Initial routes (will be instantiated as Route objects) */
-  routes?: RouteOptions<TContext, unknown>[];
+  routes?: RouteOptions<TContext, TData>[];
   /** Optional persistence configuration for auto-saving sessions and messages */
-  persistence?: PersistenceConfig;
+  persistence?: PersistenceConfig<TData>;
   /** Knowledge base containing any JSON structure the AI should know */
   knowledgeBase?: Record<string, unknown>;
+  /** Agent-level data schema defining the complete data structure for collection */
+  schema?: StructuredSchema;
+  /** Initial data to pre-populate when creating the agent */
+  initialData?: Partial<TData>;
 }
 
 /**
  * A term in the domain glossary
  */
-export interface Term<TContext = unknown> {
+export interface Term<TContext = unknown, TData = unknown> {
   /** Name of the term */
-  name: Template<TContext>;
+  name: Template<TContext, TData>;
   /** Description/definition of the term */
-  description: Template<TContext>;
+  description: Template<TContext, TData>;
   /** Alternative names or synonyms */
-  synonyms?: Template<TContext>[];
+  synonyms?: Template<TContext, TData>[];
 }
 
 /**
  * A behavioral guideline for the agent
  */
-export interface Guideline<TContext = unknown> {
+export interface Guideline<TContext = unknown, TData = unknown> {
   /** Unique identifier */
   id?: string;
   /** Condition that triggers this guideline (optional for always-active guidelines) */
-  condition?: Template<TContext>;
+  condition?: Template<TContext, TData>;
   /** Action the agent should take when the condition is met */
-  action: Template<TContext>;
+  action: Template<TContext, TData>;
   /** Whether this guideline is currently enabled */
   enabled?: boolean;
   /** Tags for organizing and filtering guidelines */
@@ -141,9 +145,9 @@ export interface Guideline<TContext = unknown> {
 /**
  * Guideline match with rationale
  */
-export interface GuidelineMatch<TContext = unknown> {
+export interface GuidelineMatch<TContext = unknown, TData = unknown> {
   /** The matched guideline */
-  guideline: Guideline<TContext>;
+  guideline: Guideline<TContext, TData>;
   /** Explanation of why this guideline was matched */
   rationale?: string;
 }
@@ -169,4 +173,23 @@ export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
     [key: string]: unknown;
   };
   structured?: AgentStructuredResponse;
+}
+
+/**
+ * Validation error for data validation
+ */
+export interface ValidationError {
+  field: string;
+  value: unknown;
+  message: string;
+  schemaPath: string;
+}
+
+/**
+ * Result of data validation
+ */
+export interface ValidationResult {
+  valid: boolean;
+  errors: ValidationError[];
+  warnings: ValidationError[];
 }

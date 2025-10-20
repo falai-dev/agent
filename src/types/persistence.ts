@@ -45,7 +45,6 @@ export type CreateSessionData<TData = Record<string, unknown>> = Omit<
  */
 export interface CollectedStateData<TData = Record<string, unknown>> {
   data: Partial<TData>;
-  dataByRoute: Record<string, Partial<TData>>;
   routeHistory: SessionState<TData>["routeHistory"];
   history?: SessionState<TData>["history"];
   currentRouteTitle?: string;

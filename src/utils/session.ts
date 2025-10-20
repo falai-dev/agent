@@ -16,8 +16,7 @@ export function createSession<TData = Record<string, unknown>>(
 
   return {
     id,
-    data: {} as Partial<TData>,
-    dataByRoute: {},
+    data: {} as Partial<TData>, // Agent-level data structure
     routeHistory: [],
     metadata: {
       ...metadata,
@@ -44,23 +43,13 @@ export function cloneSession<TData>(
 
 /**
  * Helper to update session with new route
- * Preserves collected data per route in dataByRoute map
+ * With agent-level data, routes share the same data structure
  */
 export function enterRoute<TData = Record<string, unknown>>(
   session: SessionState<TData>,
   routeId: string,
   routeTitle: string
 ): SessionState<TData> {
-  // Save current route's collected data before switching (if any)
-  const dataByRoute = { ...session.dataByRoute };
-  if (
-    session.currentRoute &&
-    session.data &&
-    Object.keys(session.data).length > 0
-  ) {
-    dataByRoute[session.currentRoute.id] = session.data;
-  }
-
   // Exit current route if exists
   const routeHistory = [...(session.routeHistory || [])];
   if (session.currentRoute) {
@@ -72,10 +61,7 @@ export function enterRoute<TData = Record<string, unknown>>(
     }
   }
 
-  // Load collected data for new route (if resuming) or start fresh
-  const newCollected = dataByRoute[routeId] || {};
-
-  // Enter new route
+  // Enter new route - data persists across routes at agent level
   const now = new Date();
   return {
     ...session,
@@ -85,8 +71,7 @@ export function enterRoute<TData = Record<string, unknown>>(
       enteredAt: now,
     },
     currentStep: undefined,
-    data: newCollected, // Load route's data or start fresh
-    dataByRoute,
+    // data remains the same - shared across all routes
     routeHistory: [
       ...routeHistory,
       {
@@ -126,7 +111,7 @@ export function enterStep<TData = Record<string, unknown>>(
 
 /**
  * Helper to merge collected data into session
- * Updates both data and dataByRoute for current route
+ * Updates agent-level data structure
  */
 export function mergeCollected<TData = Record<string, unknown>>(
   session: SessionState<TData>,
@@ -137,16 +122,9 @@ export function mergeCollected<TData = Record<string, unknown>>(
     ...data,
   } as Partial<TData>;
 
-  // Also update the dataByRoute map for the current route
-  const dataByRoute = { ...session.dataByRoute };
-  if (session.currentRoute) {
-    dataByRoute[session.currentRoute.id] = newCollected;
-  }
-
   return {
     ...session,
-    data: newCollected,
-    dataByRoute,
+    data: newCollected, // Agent-level data update
     metadata: {
       ...session.metadata,
       lastUpdatedAt: new Date(),
@@ -170,7 +148,6 @@ export function sessionStepToData<TData = Record<string, unknown>>(
     currentStep: session.currentStep?.id,
     collectedData: {
       data: session.data || {},
-      dataByRoute: session.dataByRoute || {}, // Include per-route data
       routeHistory: session.routeHistory,
       history: session.history, // Include conversation history
       currentRouteTitle: session.currentRoute?.title,
@@ -196,7 +173,6 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
 ): SessionState<TData> {
   const collectedData: CollectedStateData<TData> = data.collectedData || {
     data: {},
-    dataByRoute: {},
     routeHistory: [],
     history: [],
     metadata: {},
@@ -221,7 +197,6 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
         }
       : undefined,
     data: collectedData.data || {},
-    dataByRoute: collectedData.dataByRoute || {},
     routeHistory: collectedData.routeHistory || [],
     history: collectedData.history || [],
     metadata: collectedData.metadata || {},

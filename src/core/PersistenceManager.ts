@@ -53,7 +53,6 @@ export class PersistenceManager<TData = Record<string, unknown>> {
       status: "active",
       collectedData: {
         data: options.initialData || {},
-        dataByRoute: {},
         routeHistory: [],
         metadata: {},
       },
@@ -235,32 +234,57 @@ export class PersistenceManager<TData = Record<string, unknown>> {
     sessionId: string,
     sessionStep: SessionState<TData>
   ): Promise<SessionData<TData> | null> {
-    const persistenceData = sessionStepToData(sessionStep);
+    // Validate input parameters
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new Error('Session ID must be a non-empty string');
+    }
 
-    // First try to find existing session
-    const existingSession = await this.sessionRepository.findById(sessionId);
+    if (!sessionStep || typeof sessionStep !== 'object') {
+      throw new Error('Session step must be a valid object');
+    }
 
-    if (existingSession) {
-      // Update existing session
-      return await this.sessionRepository.update(sessionId, {
-        currentRoute: persistenceData.currentRoute,
-        currentStep: persistenceData.currentStep,
-        collectedData: persistenceData.collectedData,
-        lastMessageAt: new Date(),
-      });
-    } else {
-      // Create new session if it doesn't exist
-      return await this.sessionRepository.create({
-        id: sessionId,
-        userId: persistenceData.collectedData.metadata?.userId
-          ? JSON.stringify(persistenceData.collectedData.metadata?.userId)
-          : this.config.userId,
-        status: "active",
-        currentRoute: persistenceData.currentRoute,
-        currentStep: persistenceData.currentStep,
-        collectedData: persistenceData.collectedData,
-        messageCount: 0,
-      });
+    // Validate session data structure
+    if (sessionStep.data && typeof sessionStep.data !== 'object') {
+      throw new Error('Session data must be an object');
+    }
+
+    let persistenceData;
+    try {
+      persistenceData = sessionStepToData(sessionStep);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to convert session step to persistence data: ${errorMessage}`);
+    }
+
+    try {
+      // First try to find existing session
+      const existingSession = await this.sessionRepository.findById(sessionId);
+
+      if (existingSession) {
+        // Update existing session
+        return await this.sessionRepository.update(sessionId, {
+          currentRoute: persistenceData.currentRoute,
+          currentStep: persistenceData.currentStep,
+          collectedData: persistenceData.collectedData,
+          lastMessageAt: new Date(),
+        });
+      } else {
+        // Create new session if it doesn't exist
+        return await this.sessionRepository.create({
+          id: sessionId,
+          userId: persistenceData.collectedData.metadata?.userId
+            ? JSON.stringify(persistenceData.collectedData.metadata?.userId)
+            : this.config.userId,
+          status: "active",
+          currentRoute: persistenceData.currentRoute,
+          currentStep: persistenceData.currentStep,
+          collectedData: persistenceData.collectedData,
+          messageCount: 0,
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to save session state to persistence: ${errorMessage}`);
     }
   }
 

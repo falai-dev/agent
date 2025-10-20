@@ -6,22 +6,28 @@ The `@falai/agent` framework provides **automatic session management** through t
 
 ## Core Design Principles
 
-### 1. 🎯 Schema-First Data Extraction
+### 1. 🎯 Agent-Level Schema-First Data Extraction
 
-Define what data to collect upfront using JSON Schema, then extract it reliably:
+Define what data to collect upfront using JSON Schema at the agent level, then extract it reliably across all routes:
 
 ```typescript
-// Define your data contract
-interface FlightData {
+// Define your agent-level data contract
+interface TravelData {
   destination: string;
   departureDate: string;
   passengers: number;
   cabinClass: "economy" | "business" | "first";
+  hotelPreference?: string;
+  budgetRange?: string;
+  specialRequests?: string;
 }
 
-const route = agent.createRoute<FlightData>({
-  title: "Book Flight",
-  description: "Help user book a flight",
+// Agent with centralized schema
+const agent = new Agent<{}, TravelData>({
+  name: "Travel Agent",
+  provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
+  
+  // Agent-level schema defines all possible data fields
   schema: {
     type: "object",
     properties: {
@@ -33,40 +39,67 @@ const route = agent.createRoute<FlightData>({
         enum: ["economy", "business", "first"],
         default: "economy",
       },
+      hotelPreference: { type: "string" },
+      budgetRange: { type: "string" },
+      specialRequests: { type: "string" }
     },
     required: ["destination", "departureDate", "passengers"],
-  },
+  }
+});
+
+// Routes specify required fields instead of schemas
+const flightRoute = agent.createRoute({
+  title: "Book Flight",
+  description: "Help user book a flight",
+  requiredFields: ["destination", "departureDate", "passengers", "cabinClass"],
+  optionalFields: ["specialRequests"]
+});
+
+const hotelRoute = agent.createRoute({
+  title: "Book Hotel", 
+  description: "Help user book accommodation",
+  requiredFields: ["destination", "departureDate", "hotelPreference"],
+  optionalFields: ["budgetRange", "specialRequests"]
 });
 ```
 
-**Why?** Schema-first extraction provides:
+**Why?** Agent-level schema-first extraction provides:
 
-- **Type Safety** - Full TypeScript types from definition to extraction
+- **Type Safety** - Full TypeScript types from definition to extraction across all routes
 - **Reliability** - Provider-enforced schemas, not prompt-based parsing
-- **Predictability** - Same data structure every time
+- **Predictability** - Same data structure every time, shared across routes
 - **Efficiency** - Extract multiple fields in one LLM call
+- **Cross-Route Data Sharing** - Data collected by any route is available to all routes
+- **Route Completion** - Routes complete when their required fields are satisfied
 
 ### 2. 🤖 Automatic Session Management
 
 Sessions are automatically managed through the `SessionManager` class integrated into every `Agent`:
 
 ```typescript
-// Server-side: Agent with automatic session management
-const agent = new Agent({
+// Server-side: Agent with automatic session management and agent-level data
+const agent = new Agent<{}, TravelData>({
   name: "Travel Agent",
   provider: new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }),
   persistence: { adapter: new PrismaAdapter({ prisma }) },
-  sessionId: "user-123" // Automatically loads or creates this session
+  sessionId: "user-123", // Automatically loads or creates this session
+  
+  // Agent-level schema
+  schema: { /* comprehensive travel data schema */ }
 });
 
 // Simple conversation - no manual session management
 const response1 = await agent.respond("I want to book a flight to Paris");
 console.log(agent.session.id); // Session ID
-console.log(agent.session.getData()); // Collected data
+console.log(agent.session.getData<TravelData>()); // Agent-level collected data
 
 // Continue conversation - session automatically maintained
 const response2 = await agent.respond("Make that Tokyo instead");
-// Session automatically updated with new data
+// Session automatically updated with new data in agent-level structure
+
+// Switch to hotel booking - data is shared
+const response3 = await agent.respond("Also book me a hotel in Tokyo");
+// Hotel route can access destination data collected by flight route
 ```
 
 **SessionManager API:**

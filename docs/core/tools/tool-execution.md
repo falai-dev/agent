@@ -17,7 +17,7 @@ The tool execution system provides:
 ### Basic Tool Structure
 
 ```typescript
-interface Tool<TContext, TArgs extends unknown[], TResult, TData> {
+interface Tool<TContext, TData, TArgs extends unknown[], TResult> {
   id: string;
   name?: string; // Human-readable name shown to AI models
   description: string;
@@ -32,7 +32,7 @@ interface Tool<TContext, TArgs extends unknown[], TResult, TData> {
 import { Tool } from "@falai/agent";
 
 // Simple data retrieval tool
-const getWeather: Tool<unknown, [], string, WeatherData> = {
+const getWeather: Tool<unknown, WeatherData, [], string> = {
   id: "get_weather",
   name: "Weather Checker",
   description: "Get current weather for a location",
@@ -56,7 +56,7 @@ const getWeather: Tool<unknown, [], string, WeatherData> = {
 };
 
 // Data modification tool
-const updateUserProfile: Tool<unknown, [], string, ProfileData> = {
+const updateUserProfile: Tool<unknown, ProfileData, [], string> = {
   id: "update_profile",
   name: "Profile Updater",
   description: "Update user profile information",
@@ -136,9 +136,9 @@ Tools can modify agent context:
 ```typescript
 const locationTracker: Tool<
   { currentLocation?: string; locationHistory?: string[] },
+  { location: string },
   [],
-  string,
-  { location: string }
+  string
 > = {
   id: "track_location",
   description: "Track and update location information",
@@ -169,9 +169,9 @@ Tools can access current context:
 ```typescript
 const contextualTool: Tool<
   { userName?: string; currentLocation?: string },
+  {},
   [],
-  string,
-  {}
+  string
 > = {
   id: "personalized_greeting",
   description: "Generate personalized greeting based on context",
@@ -196,7 +196,7 @@ const contextualTool: Tool<
 Tools can modify session-collected data:
 
 ```typescript
-const dataEnrichmentTool: Tool<{}, [], string, { email?: string }> = {
+const dataEnrichmentTool: Tool<{}, { email?: string }, [], string> = {
   id: "enrich_user_data",
   description: "Enrich user profile with additional information",
   handler: async ({ data }) => {
@@ -221,7 +221,7 @@ const dataEnrichmentTool: Tool<{}, [], string, { email?: string }> = {
 ### Validation Integration
 
 ```typescript
-const validatingTool: Tool<{}, [], string, any> = {
+const validatingTool: Tool<{}, any, [], string> = {
   id: "validate_and_save",
   description: "Validate collected data and save to database",
   handler: async ({ data }) => {
@@ -362,9 +362,9 @@ while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
 ```typescript
 const robustTool: Tool<
   { lastApiCall?: string; errorCount?: number },
+  { endpoint: string },
   [],
-  string,
-  { endpoint: string }
+  string
 > = {
   id: "api_call",
   description: "Make external API call with error handling",
@@ -400,9 +400,9 @@ const robustTool: Tool<
 ```typescript
 const fallbackTool: Tool<
   { searchFallbackUsed?: boolean },
+  { query: string },
   [],
-  string,
-  { query: string }
+  string
 > = {
   id: "fallback_search",
   description: "Search with automatic fallback mechanisms",
@@ -452,9 +452,9 @@ let toolState = { conversationId: null };
 
 const conversationalTool: Tool<
   { conversationState?: any; lastMessage?: string },
+  { message: string },
   [],
-  string,
-  { message: string }
+  string
 > = {
   id: "continue_conversation",
   description: "Continue multi-turn conversation with state management",
@@ -493,9 +493,9 @@ Tools that set up data for other tools:
 ```typescript
 const setupTool: Tool<
   { activeWorkflowId?: string; workflowType?: string; workflowStep?: number },
+  { workflowType: string },
   [],
-  string,
-  { workflowType: string }
+  string
 > = {
   id: "setup_workflow",
   description: "Initialize a new workflow process",
@@ -526,9 +526,9 @@ const setupTool: Tool<
 
 const stepTool: Tool<
   { activeWorkflowId?: string; workflowStep?: number; lastStepResult?: any },
+  {},
   [],
-  string,
-  {}
+  string
 > = {
   id: "execute_workflow_step",
   description: "Execute the next step in active workflow",
@@ -559,7 +559,7 @@ const stepTool: Tool<
 
 ```typescript
 // Cache expensive operations
-const cachedTool: Tool<{ lastCacheHit?: boolean }, [], any, { key: string }> = {
+const cachedTool: Tool<{ lastCacheHit?: boolean }, { key: string }, [], any> = {
   id: "cached_data_lookup",
   description: "Lookup data with caching for performance",
   parameters: {
@@ -592,9 +592,9 @@ const cachedTool: Tool<{ lastCacheHit?: boolean }, [], any, { key: string }> = {
 ```typescript
 const batchTool: Tool<
   {},
+  { items: string[]; processedItems?: any[]; batchCompletedAt?: string },
   [],
-  string,
-  { items: string[]; processedItems?: any[]; batchCompletedAt?: string }
+  string
 > = {
   id: "batch_process",
   description: "Process multiple items in a single batch operation",
@@ -629,7 +629,7 @@ const batchTool: Tool<
 ### Tool Permissions
 
 ```typescript
-const secureTool: Tool<{ userRole?: string }, [], any, { action: string }> = {
+const secureTool: Tool<{ userRole?: string }, { action: string }, [], any> = {
   id: "admin_action",
   description: "Perform administrative actions with permission checks",
   parameters: {
@@ -662,9 +662,9 @@ const secureTool: Tool<{ userRole?: string }, [], any, { action: string }> = {
 ```typescript
 const validatedTool: Tool<
   { userId?: string; userRole?: string },
+  { userId: string; updates: any },
   [],
-  any,
-  { userId: string; updates: any }
+  any
 > = {
   id: "user_update",
   description: "Update user data with validation and permission checks",
@@ -717,7 +717,7 @@ const agent = new Agent({
 ### Performance Monitoring
 
 ```typescript
-const monitoredTool: Tool<{}, [], any, { args: any }> = {
+const monitoredTool: Tool<{}, { args: any }, [], any> = {
   id: "monitored_operation",
   description: "Execute operation with performance monitoring",
   parameters: {

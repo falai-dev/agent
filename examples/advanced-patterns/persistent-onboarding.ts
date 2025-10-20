@@ -120,11 +120,37 @@ function createPersistentOnboardingAgent(sessionId: string) {
     model: "models/gemini-2.5-flash",
   });
 
-  const agent = new Agent<OnboardingContext>({
+  // Define the onboarding schema
+  const onboardingSchema = {
+    type: "object",
+    properties: {
+      businessName: {
+        type: "string",
+        description: "Name of the business",
+      },
+      businessDescription: {
+        type: "string",
+        description: "Brief description of what the business does",
+      },
+      industry: {
+        type: "string",
+        description: "Industry the business operates in",
+      },
+      contactEmail: {
+        type: "string",
+        description: "Contact email for the business",
+      },
+    },
+    required: ["businessName", "businessDescription"],
+  };
+
+  const agent = new Agent<OnboardingContext, OnboardingData>({
     name: "OnboardingBot",
     description: "A friendly assistant that helps businesses get started",
     goal: "Collect business information efficiently while being conversational",
     provider: provider,
+    // NEW: Agent-level schema
+    schema: onboardingSchema,
 
     // Knowledge base with onboarding best practices
     knowledgeBase: {
@@ -204,9 +230,9 @@ function createPersistentOnboardingAgent(sessionId: string) {
   // OPTION 1: Using contextUpdate in return value
   const saveBusinessInfo: Tool<
     OnboardingContext,
+    OnboardingData,
     unknown[],
-    unknown,
-    OnboardingData
+    unknown
   > = {
     id: "save_business_info",
     name: "Business Info Saver",
@@ -244,9 +270,9 @@ function createPersistentOnboardingAgent(sessionId: string) {
   // OPTION 2: Using updateContext method directly
   const saveIndustry: Tool<
     OnboardingContext,
+    OnboardingData,
     unknown[],
-    unknown,
-    OnboardingData
+    unknown
   > = {
     id: "save_industry",
     name: "Industry Classifier",
@@ -277,9 +303,9 @@ function createPersistentOnboardingAgent(sessionId: string) {
 
   const saveContactEmail: Tool<
     OnboardingContext,
+    OnboardingData,
     unknown[],
-    unknown,
-    OnboardingData
+    unknown
   > = {
     id: "save_contact_email",
     name: "Contact Email Saver",
@@ -311,32 +337,14 @@ function createPersistentOnboardingAgent(sessionId: string) {
   // ONBOARDING ROUTE WITH DATA EXTRACTION
   // ============================================================================
 
-  const onboardingRoute = agent.createRoute<OnboardingData>({
+  const onboardingRoute = agent.createRoute({
     title: "Business Onboarding",
     description: "Guide user through business information collection",
     conditions: ["User is onboarding their business"],
-    schema: {
-      type: "object",
-      properties: {
-        businessName: {
-          type: "string",
-          description: "Name of the business",
-        },
-        businessDescription: {
-          type: "string",
-          description: "Brief description of what the business does",
-        },
-        industry: {
-          type: "string",
-          description: "Industry the business operates in",
-        },
-        contactEmail: {
-          type: "string",
-          description: "Contact email for the business",
-        },
-      },
-      required: ["businessName", "businessDescription"],
-    },
+    // NEW: Required fields for route completion
+    requiredFields: ["businessName", "businessDescription"],
+    // NEW: Optional fields that enhance the experience
+    optionalFields: ["industry", "contactEmail"],
     endStep: {
       prompt:
         "Summarize all collected information warmly and confirm onboarding is complete",
@@ -428,10 +436,36 @@ function createOnboardingAgentWithProvider(sessionId: string) {
     model: "models/gemini-2.5-flash",
   });
 
-  const agent = new Agent<OnboardingContext>({
+  // Define the onboarding schema
+  const onboardingSchema = {
+    type: "object",
+    properties: {
+      businessName: {
+        type: "string",
+        description: "Name of the business",
+      },
+      businessDescription: {
+        type: "string",
+        description: "Brief description of what the business does",
+      },
+      industry: {
+        type: "string",
+        description: "Industry the business operates in",
+      },
+      contactEmail: {
+        type: "string",
+        description: "Contact email for the business",
+      },
+    },
+    required: ["businessName", "businessDescription"],
+  };
+
+  const agent = new Agent<OnboardingContext, OnboardingData>({
     name: "OnboardingBot",
     description: "A friendly assistant that helps businesses get started",
     provider: provider,
+    // NEW: Agent-level schema
+    schema: onboardingSchema,
 
     // Context is always fetched fresh from database
     contextProvider: () => {
@@ -499,7 +533,7 @@ async function main() {
   });
   
   console.log("🤖 Bot:", response1.message);
-  console.log("📊 Data after turn 1:", agent.session.getData<OnboardingData>());
+  console.log("📊 Data after turn 1:", agent.session.getData());
   console.log("📊 Route:", response1.session?.currentRoute?.title);
 
   // Check route completion after turn 1
@@ -533,7 +567,7 @@ async function main() {
       name: "Alice",
     },
   ];
-  const response2 = await agent.respond({ history: history2, session });
+  const response2 = await agent.respond({ history: history2 });
   console.log("🤖 Bot:", response2.message);
   console.log("📊 Data after turn 2:", response2.session?.data);
 
@@ -547,8 +581,6 @@ async function main() {
 
   console.log();
 
-  // Update session again
-  session = response2.session!;
 
   // Turn 3: User provides industry
   console.log("📱 Turn 3: User provides industry");
@@ -564,7 +596,7 @@ async function main() {
       name: "Alice",
     },
   ];
-  const response3 = await agent.respond({ history: history3, session });
+  const response3 = await agent.respond({ history: history3 });
   console.log("🤖 Bot:", response3.message);
   console.log("📊 Data after turn 3:", response3.session?.data);
 
@@ -577,9 +609,6 @@ async function main() {
   }
 
   console.log();
-
-  // Update session again
-  session = response3.session!;
 
   // Turn 4: User provides contact email, completing the flow
   console.log("📱 Turn 4: User provides contact email");
@@ -595,7 +624,7 @@ async function main() {
       name: "Alice",
     },
   ];
-  const response4 = await agent.respond({ history: history4, session });
+  const response4 = await agent.respond({ history: history4 });
   console.log("🤖 Bot:", response4.message);
   console.log("📊 Data after turn 4:", response4.session?.data);
 
@@ -603,7 +632,7 @@ async function main() {
   if (response4.isRouteComplete) {
     console.log("\n✅ Onboarding complete!");
     await finalizeOnboarding(
-      agent.getData(response4.session?.id) as unknown as OnboardingData
+      agent.getData() as unknown as OnboardingData
     );
   }
 

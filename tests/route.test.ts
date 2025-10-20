@@ -14,20 +14,26 @@ import {
 } from "../src/index";
 import { MockProviderFactory } from "./mock-provider";
 
-// Test data types
+// Test data types for agent-level data collection
 interface OrderData {
   item: string;
   quantity: number;
   deliveryAddress: string;
   paymentMethod: "credit_card" | "paypal" | "bank_transfer";
   total: number;
+  customerName?: string;
+  email?: string;
+  orderId?: string;
 }
 
-interface FeedbackData {
-  rating: number;
-  comments: string;
-  wouldRecommend: boolean;
-}
+// interface FeedbackData {
+//   rating: number;
+//   comments: string;
+//   wouldRecommend: boolean;
+//   customerName?: string;
+//   email?: string;
+//   orderReference?: string;
+// }
 
 interface SupportTicketData {
   issue: string;
@@ -35,23 +41,28 @@ interface SupportTicketData {
   priority: "low" | "medium" | "high";
   resolution?: string;
   field1?: string;
+  field2?: string;
   input?: string;
+  customerName?: string;
+  email?: string;
+  ticketId?: string;
+  billing_issue?: string;
 }
 
 // Test utilities
-function createRouteTestAgent(): Agent {
-  return new Agent({
+function createRouteTestAgent<TData = unknown>(): Agent<unknown, TData> {
+  return new Agent<unknown, TData>({
     name: "RouteTestAgent",
     description: "Agent for testing route functionality",
     provider: MockProviderFactory.basic(),
   });
 }
 
-function createOrderFulfillmentRoute(agent: Agent) {
-  return agent.createRoute<OrderData>({
-    title: "Order Fulfillment",
-    description: "Complete customer order process",
-    conditions: ["Customer wants to place an order", "Shopping inquiry"],
+function createOrderTestAgent(): Agent<unknown, OrderData> {
+  return new Agent<unknown, OrderData>({
+    name: "OrderTestAgent",
+    description: "Agent for testing order functionality",
+    provider: MockProviderFactory.basic(),
     schema: {
       type: "object",
       properties: {
@@ -63,9 +74,22 @@ function createOrderFulfillmentRoute(agent: Agent) {
           enum: ["credit_card", "paypal", "bank_transfer"],
         },
         total: { type: "number", minimum: 0 },
+        customerName: { type: "string" },
+        email: { type: "string", format: "email" },
+        orderId: { type: "string" },
       },
       required: ["item", "quantity", "deliveryAddress", "paymentMethod"],
     },
+  });
+}
+
+function createOrderFulfillmentRoute(agent: Agent<unknown, OrderData>) {
+  return agent.createRoute({
+    title: "Order Fulfillment",
+    description: "Complete customer order process",
+    conditions: ["Customer wants to place an order", "Shopping inquiry"],
+    requiredFields: ["item", "quantity", "deliveryAddress", "paymentMethod"],
+    optionalFields: ["total"],
     steps: [
       {
         id: "select_item",
@@ -145,7 +169,7 @@ function createOrderFulfillmentRoute(agent: Agent) {
 
 describe("Route Creation and Configuration", () => {
   test("should create route with basic configuration", () => {
-    const agent = createRouteTestAgent();
+    const agent = createRouteTestAgent<OrderData>();
 
     const route = agent.createRoute({
       title: "Simple Route",
@@ -156,33 +180,54 @@ describe("Route Creation and Configuration", () => {
     expect(route.title).toBe("Simple Route");
     expect(route.description).toBe("A simple test route");
     expect(route.conditions).toHaveLength(1);
-    expect(route.schema).toBeUndefined();
+    expect(route.requiredFields).toBeUndefined();
+    expect(route.optionalFields).toBeUndefined();
   });
 
-  test("should create route with complex schema", () => {
-    const agent = createRouteTestAgent();
+  test("should create route with required and optional fields", () => {
+    const agent = createOrderTestAgent();
 
-    const route = agent.createRoute<OrderData>({
+    const route = agent.createRoute({
       title: "Complex Order Route",
-      description: "Route with complex schema",
-      schema: {
-        type: "object",
-        properties: {
-          item: { type: "string", minLength: 1 },
-          quantity: { type: "number", minimum: 1, maximum: 100 },
-          total: { type: "number" },
-        },
-        required: ["item", "quantity"],
-      },
+      description: "Route with required and optional fields",
+      requiredFields: ["item", "quantity"],
+      optionalFields: ["total", "customerName"],
     });
 
-    const schema = route.schema;
-    expect(schema).toBeDefined();
-    expect(schema?.required).toEqual(["item", "quantity"]);
+    expect(route.requiredFields).toEqual(["item", "quantity"]);
+    expect(route.optionalFields).toEqual(["total", "customerName"]);
+  });
+
+  test("should validate required fields against agent schema", () => {
+    const agent = createOrderTestAgent();
+
+    // Valid fields should work
+    const validRoute = agent.createRoute({
+      title: "Valid Route",
+      requiredFields: ["item", "quantity"], // These exist in schema
+      optionalFields: ["total"], // This exists in schema
+    });
+
+    expect(validRoute.requiredFields).toEqual(["item", "quantity"]);
+
+    // Invalid fields should throw error
+    expect(() => {
+      agent.createRoute({
+        title: "Invalid Route",
+        requiredFields: ["nonExistentField"] as any,
+      });
+    }).toThrow("Invalid required fields");
+
+    expect(() => {
+      agent.createRoute({
+        title: "Invalid Optional Route",
+        optionalFields: ["invalidOptional"] as any,
+      });
+    }).toThrow("Invalid optional fields");
   });
 
   test("should create route with sequential steps", () => {
-    const agent = createRouteTestAgent();
+    const agent = createOrderTestAgent();
 
     const route = createOrderFulfillmentRoute(agent);
 
@@ -192,7 +237,20 @@ describe("Route Creation and Configuration", () => {
   });
 
   test("should handle route step requirements", () => {
-    const agent = createRouteTestAgent();
+    const agent = new Agent<unknown, SupportTicketData>({
+      name: "RequirementTestAgent",
+      description: "Agent for testing step requirements",
+      provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          field1: { type: "string" },
+          field2: { type: "string" },
+          issue: { type: "string" },
+          category: { type: "string" },
+        },
+      },
+    });
 
     const route = agent.createRoute({
       title: "Requirement Test",
@@ -218,7 +276,7 @@ describe("Route Creation and Configuration", () => {
 
 describe("Route Execution and Step Progression", () => {
   test("should execute route steps sequentially", async () => {
-    const agent = createRouteTestAgent();
+    const agent = createOrderTestAgent();
     const route = createOrderFulfillmentRoute(agent);
 
     let session = createSession<OrderData>();
@@ -232,10 +290,26 @@ describe("Route Execution and Step Progression", () => {
 
     // Mock provider for step responses
     const provider = MockProviderFactory.basic();
-    const agentWithProvider = new Agent<OrderData>({
-      ...agent,
+    const agentWithProvider = new Agent<unknown, OrderData>({
       name: "RouteTestAgent",
       provider,
+      schema: {
+        type: "object",
+        properties: {
+          item: { type: "string" },
+          quantity: { type: "number", minimum: 1 },
+          deliveryAddress: { type: "string" },
+          paymentMethod: {
+            type: "string",
+            enum: ["credit_card", "paypal", "bank_transfer"],
+          },
+          total: { type: "number", minimum: 0 },
+          customerName: { type: "string" },
+          email: { type: "string", format: "email" },
+          orderId: { type: "string" },
+        },
+        required: ["item", "quantity", "deliveryAddress", "paymentMethod"],
+      },
     });
 
     // Step 1: Execute first step
@@ -258,7 +332,7 @@ describe("Route Execution and Step Progression", () => {
   });
 
   test("should collect data at each step", () => {
-    const agent = createRouteTestAgent();
+    const agent = createOrderTestAgent();
     const route = createOrderFulfillmentRoute(agent);
 
     // Simulate step progression with data collection
@@ -271,9 +345,22 @@ describe("Route Execution and Step Progression", () => {
   });
 
   test("should handle step prerequisites", () => {
-    const agent = createRouteTestAgent();
+    const agent = new Agent<unknown, SupportTicketData>({
+      name: "PrerequisiteTestAgent",
+      description: "Agent for testing step prerequisites",
+      provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          field1: { type: "string" },
+          field2: { type: "string" },
+          issue: { type: "string" },
+          category: { type: "string" },
+        },
+      },
+    });
 
-    const route = agent.createRoute<SupportTicketData>({
+    const route = agent.createRoute({
       title: "Prerequisite Test",
       steps: [
         {
@@ -297,7 +384,21 @@ describe("Route Execution and Step Progression", () => {
   });
 
   test("should complete route when all steps finished", async () => {
-    const agent = createRouteTestAgent();
+    interface QuickRouteData {
+      start?: boolean;
+    }
+
+    const agent = new Agent<unknown, QuickRouteData>({
+      name: "QuickRouteAgent",
+      description: "Agent for testing quick route completion",
+      provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          start: { type: "boolean" },
+        },
+      },
+    });
 
     // Create a simple route that ends
     const route = agent.createRoute({
@@ -313,7 +414,7 @@ describe("Route Execution and Step Progression", () => {
     });
     route.initialStep.endRoute();
 
-    const session = createSession();
+    const session = createSession<QuickRouteData>();
 
     const response = await agent.respond({
       history: [
@@ -333,7 +434,20 @@ describe("Route Execution and Step Progression", () => {
 
 describe("Route Branching and Conditional Logic", () => {
   test("should create branching routes", () => {
-    const agent = createRouteTestAgent();
+    const agent = new Agent<unknown, SupportTicketData>({
+      name: "BranchingTestAgent",
+      description: "Agent for testing branching routes",
+      provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          issue: { type: "string" },
+          billing_issue: { type: "string" },
+          category: { type: "string" },
+          priority: { type: "string" },
+        },
+      },
+    });
 
     const route = agent.createRoute({
       title: "Support Route",
@@ -381,9 +495,21 @@ describe("Route Branching and Conditional Logic", () => {
   });
 
   test("should handle conditional step skipping", () => {
-    const agent = createRouteTestAgent();
+    const agent = new Agent<unknown, SupportTicketData>({
+      name: "ConditionalTestAgent",
+      description: "Agent for testing conditional step skipping",
+      provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: {
+          issue: { type: "string" },
+          category: { type: "string", enum: ["technical", "billing", "account", "general"] },
+          priority: { type: "string", enum: ["low", "medium", "high"] },
+        },
+      },
+    });
 
-    const route = agent.createRoute<SupportTicketData>({
+    const route = agent.createRoute({
       title: "Conditional Route",
       steps: [
         {
@@ -508,48 +634,104 @@ describe("Route Tools and Finalization", () => {
 });
 
 describe("Route Data Collection and Validation", () => {
-  test("should validate data against schema", () => {
-    const agent = createRouteTestAgent();
+  test("should validate route fields against agent schema", () => {
+    const agent = createOrderTestAgent();
 
-    const route = agent.createRoute<OrderData>({
+    const route = agent.createRoute({
       title: "Validation Route",
-      schema: {
-        type: "object",
-        properties: {
-          quantity: { type: "number", minimum: 1, maximum: 100 },
-          paymentMethod: {
-            type: "string",
-            enum: ["credit_card", "paypal", "bank_transfer"],
-          },
-        },
-        required: ["quantity", "paymentMethod"],
-      },
+      requiredFields: ["quantity", "paymentMethod"],
+      optionalFields: ["total", "customerName"],
     });
 
-    const schema = route.schema;
-    expect(schema).toBeDefined();
-    expect(schema?.required).toEqual(["quantity", "paymentMethod"]);
+    expect(route.requiredFields).toEqual(["quantity", "paymentMethod"]);
+    expect(route.optionalFields).toEqual(["total", "customerName"]);
   });
 
-  test("should handle default values in schema", () => {
-    const agent = createRouteTestAgent();
+  test("should handle route completion logic with agent-level data", () => {
+    const agent = createOrderTestAgent();
 
-    const route = agent.createRoute<FeedbackData>({
-      title: "Feedback Route",
-      schema: {
-        type: "object",
-        properties: {
-          rating: { type: "number", minimum: 1, maximum: 5 },
-          wouldRecommend: { type: "boolean", default: true },
-          comments: { type: "string", default: "" },
-        },
-        required: ["rating"],
-      },
+    const route = agent.createRoute({
+      title: "Completion Route",
+      requiredFields: ["item", "quantity"],
+      optionalFields: ["total"],
     });
 
-    const schema = route.schema;
-    expect(schema?.properties?.wouldRecommend?.default).toBe(true);
-    expect(schema?.properties?.comments?.default).toBe("");
+    // Test completion logic
+    const incompleteData: Partial<OrderData> = { item: "Widget" };
+    expect(route.isComplete(incompleteData)).toBe(false);
+    expect(route.getMissingRequiredFields(incompleteData)).toEqual(["quantity"]);
+    expect(route.getCompletionProgress(incompleteData)).toBe(0.5);
+
+    const completeData: Partial<OrderData> = { item: "Widget", quantity: 2 };
+    expect(route.isComplete(completeData)).toBe(true);
+    expect(route.getMissingRequiredFields(completeData)).toEqual([]);
+    expect(route.getCompletionProgress(completeData)).toBe(1);
+  });
+
+  test("should handle cross-route data sharing", () => {
+    const agent = createOrderTestAgent();
+
+    // Create two routes that share data fields
+    const customerRoute = agent.createRoute({
+      title: "Customer Info",
+      requiredFields: ["customerName", "email"],
+      optionalFields: ["deliveryAddress"],
+    });
+
+    const orderRoute = agent.createRoute({
+      title: "Order Details",
+      requiredFields: ["item", "quantity"],
+      optionalFields: ["total"],
+    });
+
+    // Test that both routes can work with the same agent-level data
+    const sharedData: Partial<OrderData> = {
+      customerName: "John Doe",
+      email: "john@example.com",
+      item: "Widget",
+      quantity: 2,
+      deliveryAddress: "123 Main St",
+    };
+
+    // Customer route should be complete with name and email
+    expect(customerRoute.isComplete(sharedData)).toBe(true);
+    expect(customerRoute.getMissingRequiredFields(sharedData)).toEqual([]);
+
+    // Order route should be complete with item and quantity
+    expect(orderRoute.isComplete(sharedData)).toBe(true);
+    expect(orderRoute.getMissingRequiredFields(sharedData)).toEqual([]);
+  });
+
+  test("should reject invalid field references", () => {
+    const agent = createOrderTestAgent();
+
+    expect(() => {
+      agent.createRoute({
+        title: "Invalid Route",
+        requiredFields: ["invalidField"] as any,
+      });
+    }).toThrow("Invalid required fields");
+
+    expect(() => {
+      agent.createRoute({
+        title: "Invalid Optional Route",
+        optionalFields: ["invalidOptional"] as any,
+      });
+    }).toThrow("Invalid optional fields");
+  });
+
+  test("should handle routes with no required fields", () => {
+    const agent = createOrderTestAgent();
+
+    const route = agent.createRoute({
+      title: "Optional Only Route",
+      optionalFields: ["customerName", "email"],
+    });
+
+    // Route with no required fields should always be complete
+    expect(route.isComplete({})).toBe(true);
+    expect(route.getMissingRequiredFields({})).toEqual([]);
+    expect(route.getCompletionProgress({})).toBe(1);
   });
 });
 
@@ -600,11 +782,10 @@ describe("Route Guidelines and Context", () => {
 
 describe("Complex Route Scenarios", () => {
   test("should handle multi-step order fulfillment", () => {
-    const agent = createRouteTestAgent();
-
-    const route = agent.createRoute<OrderData>({
-      title: "Complete Order Flow",
-      description: "Full order fulfillment process",
+    // Create agent with extended schema for this test
+    const agent = new Agent<unknown, OrderData & { orderId?: string }>({
+      name: "ExtendedOrderAgent",
+      provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
         properties: {
@@ -617,6 +798,13 @@ describe("Complex Route Scenarios", () => {
         },
         required: ["item", "quantity", "deliveryAddress", "paymentMethod"],
       },
+    });
+
+    const route = agent.createRoute({
+      title: "Complete Order Flow",
+      description: "Full order fulfillment process",
+      requiredFields: ["item", "quantity", "deliveryAddress", "paymentMethod"],
+      optionalFields: ["total", "orderId"],
       steps: [
         {
           id: "item_selection",
@@ -687,21 +875,20 @@ describe("Complex Route Scenarios", () => {
     });
 
     expect(route.getAllSteps()).toHaveLength(6);
-    expect(route.schema?.required).toEqual([
+    expect(route.requiredFields).toEqual([
       "item",
       "quantity",
       "deliveryAddress",
       "paymentMethod",
     ]);
+    expect(route.optionalFields).toEqual(["total", "orderId"]);
   });
 
   test("should handle branching support scenarios", () => {
-    const agent = createRouteTestAgent();
-
-    const route = agent.createRoute<SupportTicketData>({
-      title: "Advanced Support",
-      description: "Complex support with branching logic",
-      conditions: ["User needs help", "Support request"],
+    // Create agent with support ticket schema
+    const agent = new Agent<unknown, SupportTicketData>({
+      name: "SupportAgent",
+      provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
         properties: {
@@ -712,9 +899,19 @@ describe("Complex Route Scenarios", () => {
           },
           priority: { type: "string", enum: ["low", "medium", "high"] },
           resolution: { type: "string" },
+          field1: { type: "string" },
+          input: { type: "string" },
         },
         required: ["issue", "category"],
       },
+    });
+
+    const route = agent.createRoute({
+      title: "Advanced Support",
+      description: "Complex support with branching logic",
+      conditions: ["User needs help", "Support request"],
+      requiredFields: ["issue", "category"],
+      optionalFields: ["priority", "resolution"],
       guidelines: [
         {
           condition: "High priority issue",

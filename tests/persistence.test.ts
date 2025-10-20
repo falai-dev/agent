@@ -86,13 +86,38 @@ interface ComplexData {
 // Test utilities
 function createPersistenceTestAgent(
   adapter?: PersistenceAdapter<TestSessionData>
-): Agent {
-  return new Agent({
+): Agent<unknown, TestSessionData> {
+  return new Agent<unknown, TestSessionData>({
     name: "PersistenceTestAgent",
     description: "Agent for testing persistence functionality",
     provider: MockProviderFactory.basic(),
     persistence: {
       adapter: adapter || new MemoryAdapter(),
+    },
+    schema: {
+      type: "object",
+      properties: {
+        userId: { type: "string" },
+        step: { type: "number" },
+        preferences: { type: "object" },
+        metadata: { type: "object" },
+        orders: { type: "array" },
+        userProfile: { type: "object" },
+        sessionStats: { type: "object" },
+        index: { type: "number" },
+        data: {},
+        counter: { type: "number" },
+        testId: { type: "string" },
+        batch: { type: "number" },
+        circular: {},
+        functions: {},
+        undefined: {},
+        null: {},
+        date: { type: "string", format: "date-time" },
+        regex: {},
+        array: { type: "array" },
+        object: { type: "object" },
+      },
     },
   });
 }
@@ -122,7 +147,6 @@ function sessionStateToAdapterData(
     status: "active",
     collectedData: {
       data: session.data!,
-      dataByRoute: session.dataByRoute || {},
       routeHistory: session.routeHistory,
       currentRouteTitle: session.currentRoute?.title,
       currentStepDescription: session.currentStep?.description,
@@ -267,85 +291,106 @@ describe("PersistenceManager Integration", () => {
     expect(manager?.getAdapter()).toBeInstanceOf(MemoryAdapter);
   });
 
-  test("should handle persistence in agent responses", async () => {
+  test("should handle persistence in agent responses with agent-level data", async () => {
     const agent = createPersistenceTestAgent();
-    const session = createTestSession();
 
-    // First response
-    const response1 = await agent.respond({
-      history: [
-        {
-          role: "user" as const,
-          content: "Hello",
-          name: "TestUser",
-        },
-      ],
-      session,
+    // Set some agent-level data
+    await agent.updateCollectedData({
+      userId: "test-user",
+      step: 1,
+      preferences: { theme: "dark" },
     });
+
+    // First response using chat method (which properly manages sessions)
+    const response1 = await agent.chat("Hello");
 
     expect(response1.session).toBeDefined();
 
     // Session should be automatically persisted
     const manager = agent.getPersistenceManager()!;
-    const persistedSession = await manager.loadSessionState(
-      response1.session!.id
-    );
+    const currentSession = agent.session.current!;
+    const persistedSession = await manager.loadSessionState(currentSession.id);
 
     expect(persistedSession).toBeDefined();
-    expect(persistedSession?.id).toBe(response1.session!.id);
+    expect(persistedSession?.id).toBe(currentSession.id);
+
+    // Agent-level data should be persisted
+    expect(persistedSession?.data?.userId).toBe("test-user");
+    expect(persistedSession?.data?.step).toBe(1);
   });
 
-  test("should maintain session data across multiple responses", async () => {
+  test("should maintain agent-level data across multiple responses", async () => {
     const agent = createPersistenceTestAgent();
-    let session = createTestSession();
 
-    // First interaction
-    const response1 = await agent.respond({
-      history: [
-        {
-          role: "user" as const,
-          content: "Start",
-          name: "TestUser",
-        },
-      ],
-      session,
+    // Set initial agent-level data
+    await agent.updateCollectedData({
+      userId: "test-user",
+      step: 1,
+      preferences: { theme: "dark" },
     });
 
-    session = response1.session!;
+    // First interaction using chat method
+    const response1 = await agent.chat("Start");
 
-    // Add some data manually (simulating route data collection)
-    session.data = { ...session.data, step: 1, preferences: { theme: "dark" } };
-
-    // Second interaction
-    const response2 = await agent.respond({
-      history: [
-        {
-          role: "user" as const,
-          content: "Start",
-          name: "TestUser",
-        },
-        {
-          role: "assistant" as const,
-          content: response1.message,
-        },
-        {
-          role: "user" as const,
-          content: "Continue",
-          name: "TestUser",
-        },
-      ],
-      session,
+    // Update agent-level data
+    await agent.updateCollectedData({
+      step: 2,
+      preferences: { theme: "light", notifications: true },
     });
 
-    session = response2.session!;
+    // Second interaction using chat method
+    const response2 = await agent.chat("Continue");
 
-    // Verify data persistence
+    // Verify agent-level data persistence
     const manager = agent.getPersistenceManager()!;
-    const persisted = await manager.loadSessionState(session.id);
+    const currentSession = agent.session.current!;
+    const persisted = await manager.loadSessionState(currentSession.id);
 
-    expect(persisted?.data?.step).toBe(1);
-    // @ts-expect-error - persisted?.data is of type Partial<TestSessionData>
-    expect(persisted?.data?.preferences?.theme).toBe("dark");
+    expect(persisted?.data?.userId).toBe("test-user");
+    expect(persisted?.data?.step).toBe(2);
+    expect((persisted?.data?.preferences as any)?.theme).toBe("light");
+    expect((persisted?.data?.preferences as any)?.notifications).toBe(true);
+
+    // Verify agent's collected data is in sync
+    const agentData = agent.getCollectedData();
+    expect(agentData.userId).toBe("test-user");
+    expect(agentData.step).toBe(2);
+    expect(agentData.preferences?.theme).toBe("light");
+  });
+
+  test("should validate agent-level data during persistence", async () => {
+    const agent = createPersistenceTestAgent();
+
+    // Test valid data update
+    await agent.updateCollectedData({
+      userId: "valid-user",
+      step: 1,
+    });
+
+    const response = await agent.respond({
+      history: [
+        {
+          role: "user" as const,
+          content: "Test",
+          name: "TestUser",
+        },
+      ],
+      // Don't pass a session with conflicting data - let agent use its collected data
+    });
+
+    expect(response.session?.data?.userId).toBe("valid-user");
+    expect(response.session?.data?.step).toBe(1);
+
+    // Test invalid data should throw validation error
+    try {
+      await agent.updateCollectedData({
+        invalidField: "should not be allowed",
+      } as any);
+      throw new Error("Expected validation error was not thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("validation failed");
+    }
   });
 });
 
@@ -565,7 +610,7 @@ describe("Persistence Error Handling", () => {
     // Create session with potentially problematic data
     session.data = {
       circular: {} as Record<string, unknown>,
-      functions: () => {},
+      functions: () => { },
       undefined: undefined,
       null: null,
       date: new Date(),

@@ -24,27 +24,31 @@ export class Step<TContext = unknown, TData = unknown> {
   private nextSteps: Step<TContext, TData>[] = [];
   private guidelines: Guideline<TContext>[] = [];
   public readonly routeId: string;
-  public collect?: string[];
+  public collect?: (keyof TData)[];
   public description?: string;
   public when?: Template<TContext, TData>;
   public skipIf?: (data: Partial<TData>) => boolean;
-  public requires?: string[];
+  public requires?: (keyof TData)[];
   public prompt?: Template<TContext, TData>;
   public prepare?:
     | string
-    | Tool<TContext, unknown[], unknown, TData>
+    | Tool<TContext, TData, unknown[], unknown>
     | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
   public finalize?:
     | string
-    | Tool<TContext, unknown[], unknown, TData>
+    | Tool<TContext, TData, unknown[], unknown>
     | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
-  public tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
+  public tools?: (string | Tool<TContext, TData, unknown[], unknown>)[];
 
-  constructor(routeId: string, options: StepOptions<TContext, TData> = {}) {
+  constructor(
+    routeId: string, 
+    options: StepOptions<TContext, TData> = {}
+  ) {
     // Use provided ID or generate a deterministic one
     this.id = options.id || generateStepId(routeId, options.description);
     this.routeId = routeId;
     this.description = options.description;
+
     this.collect = options.collect;
     this.skipIf = options.skipIf;
     this.requires = options.requires;
@@ -61,32 +65,36 @@ export class Step<TContext = unknown, TData = unknown> {
    */
   configure(config: {
     description?: string;
-    collect?: string[];
+    collect?: (keyof TData)[];
     skipIf?: (data: Partial<TData>) => boolean;
-    requires?: string[];
+    requires?: (keyof TData)[];
     prompt?: Template<TContext, TData>;
     prepare?:
       | string
-      | Tool<TContext, unknown[], unknown, TData>
+      | Tool<TContext, TData, unknown[], unknown>
       | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
     finalize?:
       | string
-      | Tool<TContext, unknown[], unknown, TData>
+      | Tool<TContext, TData, unknown[], unknown>
       | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
-    tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
+    tools?: (string | Tool<TContext, TData, unknown[], unknown>)[];
   }): this {
     if (config.description !== undefined) {
       this.description = config.description;
     }
+    
     if (config.collect !== undefined) {
       this.collect = config.collect;
     }
+    
     if (config.skipIf !== undefined) {
       this.skipIf = config.skipIf;
     }
+    
     if (config.requires !== undefined) {
       this.requires = config.requires;
     }
+    
     if (config.prompt !== undefined) {
       this.prompt = config.prompt;
     }
@@ -214,7 +222,7 @@ export class Step<TContext = unknown, TData = unknown> {
    */
   hasRequires(data: Partial<TData>): boolean {
     if (!this.requires || this.requires.length === 0) return true;
-    return this.requires.every((key) => data[key as keyof TData] !== undefined);
+    return this.requires.every((key) => data[key] !== undefined);
   }
 
   /**

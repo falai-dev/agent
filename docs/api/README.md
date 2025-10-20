@@ -17,14 +17,14 @@ Complete API documentation for `@falai/agent`. This framework provides a strongl
 
 ## Core Classes
 
-### `Agent<TContext>`
+### `Agent<TContext, TData>`
 
-Main agent class for managing conversational AI.
+Main agent class for managing conversational AI with agent-level data collection.
 
 #### Constructor
 
 ```typescript
-new Agent<TContext>(options: AgentOptions<TContext>)
+new Agent<TContext, TData>(options: AgentOptions<TContext, TData>)
 ```
 
 See [Agent](./AGENT.md) for full details.
@@ -33,7 +33,38 @@ See [Agent](./AGENT.md) for full details.
 
 ##### `createRoute(options: RouteOptions): Route`
 
-Creates a new conversation route.
+Creates a new conversation route with required fields specification.
+
+##### `getCollectedData(): Partial<TData>`
+
+Gets the current agent-level collected data.
+
+```typescript
+const data = agent.getCollectedData();
+console.log(data); // { customerName: "John", email: "john@example.com" }
+```
+
+##### `updateCollectedData(updates: Partial<TData>): Promise<void>`
+
+Updates agent-level collected data and triggers validation.
+
+```typescript
+await agent.updateCollectedData({
+  customerId: "CUST-12345",
+  priority: "high"
+});
+```
+
+##### `validateData(data: Partial<TData>): ValidationResult`
+
+Validates data against the agent-level schema.
+
+```typescript
+const validation = agent.validateData({ email: "invalid-email" });
+if (!validation.valid) {
+  console.log(validation.errors); // Detailed validation errors
+}
+```
 
 ##### `createTerm(term: Term): this`
 

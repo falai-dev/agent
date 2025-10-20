@@ -20,26 +20,33 @@ AI responses are parsed to extract:
 3. **Tool Calls** - Instructions to execute tools
 4. **Routing Decisions** - Route or step transitions
 
-## Schema-Driven Extraction
+## Agent-Level Schema-Driven Extraction
 
-When steps specify `collect` fields, the AI response is validated against JSON schemas:
+When steps specify `collect` fields, the AI response is validated against the agent-level JSON schema:
 
 ```typescript
-const step = route.initialStep.nextStep({
-  prompt: "What's your name and email?",
-  collect: ["name", "email"],
+// Agent defines comprehensive schema
+const agent = new Agent<{}, UserData>({
   schema: {
     type: "object",
     properties: {
       name: { type: "string" },
       email: { type: "string", format: "email" },
+      phone: { type: "string" },
+      preferences: { type: "object" }
     },
-    required: ["name", "email"],
-  },
+    required: ["name", "email"]
+  }
+});
+
+// Steps collect into agent schema
+const step = route.initialStep.nextStep({
+  prompt: "What's your name and email?",
+  collect: ["name", "email"], // Maps to agent schema fields
 });
 ```
 
-The AI receives instructions to return structured data alongside natural language responses.
+The AI receives instructions to return structured data that matches the agent-level schema, enabling cross-route data sharing.
 
 ## Tool Execution Pipeline
 
@@ -65,26 +72,30 @@ When tools are called, the response engine:
 
 ## Data Validation
 
-Extracted data is validated against route schemas:
+Extracted data is validated against the agent-level schema:
 
-- **Type checking** - Ensures correct data types
-- **Required fields** - Validates mandatory data presence
-- **Format validation** - Email, dates, custom formats
-- **Business rules** - Custom validation logic
+- **Type checking** - Ensures correct data types against agent schema
+- **Required fields** - Validates mandatory data presence for route completion
+- **Format validation** - Email, dates, custom formats from agent schema
+- **Business rules** - Custom validation logic in agent-level hooks
+- **Cross-route consistency** - Ensures data consistency across all routes
 
 ## Context Updates
 
 Response processing updates multiple context layers:
 
-### Session Data
+### Agent-Level Data
 
 ```typescript
-// Collected data merged into session
-session.data = {
-  ...session.data,
+// Collected data merged into agent-level data structure
+agent.collectedData = {
+  ...agent.collectedData,
   ...extractedData,
   ...toolResults,
 };
+
+// Session references agent data
+session.data = agent.collectedData;
 ```
 
 ### Route Context

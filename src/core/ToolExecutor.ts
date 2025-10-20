@@ -17,18 +17,20 @@ export interface ToolExecutionResult {
 }
 
 export interface ExecuteToolParams<TContext = unknown, TData = unknown> {
-  tool: Tool<TContext, unknown[], unknown>;
+  tool: Tool<TContext, TData, unknown[], unknown>;
   context: TContext;
   updateContext: (updates: Partial<TContext>) => Promise<void>;
+  updateData: (updates: Partial<TData>) => Promise<void>;
   history: Event[];
   data?: Partial<TData>;
   toolArguments?: Record<string, unknown>;
 }
 
 export interface ExecuteToolsParams<TContext = unknown, TData = unknown> {
-  tools: Array<Tool<TContext, unknown[], unknown>>;
+  tools: Array<Tool<TContext, TData, unknown[], unknown>>;
   context: TContext;
   updateContext: (updates: Partial<TContext>) => Promise<void>;
+  updateData: (updates: Partial<TData>) => Promise<void>;
   history: Event[];
   data?: Partial<TData>;
 }
@@ -41,19 +43,25 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
   async executeTool(
     params: ExecuteToolParams<TContext, TData>
   ): Promise<ToolExecutionResult> {
-    const { tool, context, updateContext, history, data, toolArguments } =
+    const { tool, context, updateContext, updateData, history, data, toolArguments } =
       params;
     try {
-      // Build tool context with collected data
+      // Build tool context with complete agent data
       const toolContext: ToolContext<TContext, TData> = {
         context,
         updateContext,
+        updateData,
         history,
         data,
       };
 
       // Execute tool
       const result = await tool.handler(toolContext, toolArguments);
+
+      // Apply data updates from tool result
+      if (result.dataUpdate) {
+        await updateData(result.dataUpdate);
+      }
 
       // Return execution result
       return {
@@ -79,7 +87,7 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
   async executeTools(
     params: ExecuteToolsParams<TContext, TData>
   ): Promise<ToolExecutionResult[]> {
-    const { tools, context, updateContext, history, data } = params;
+    const { tools, context, updateContext, updateData, history, data } = params;
     const results: ToolExecutionResult[] = [];
 
     for (const tool of tools) {
@@ -87,6 +95,7 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
         tool,
         context,
         updateContext,
+        updateData,
         history,
         data,
       });
@@ -104,6 +113,11 @@ export class ToolExecutor<TContext = unknown, TData = unknown> {
       // Apply context updates from tool result
       if (result.contextUpdate) {
         await updateContext(result.contextUpdate as Partial<TContext>);
+      }
+
+      // Apply data updates from tool result
+      if (result.dataUpdate) {
+        await updateData(result.dataUpdate as Partial<TData>);
       }
     }
 

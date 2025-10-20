@@ -12,11 +12,13 @@ export interface ToolContext<TContext = unknown, TData = unknown> {
   context: TContext;
   /** Update the agent's context (triggers lifecycle hooks if configured) */
   updateContext: (updates: Partial<TContext>) => Promise<void>;
+  /** Update the agent's collected data (triggers lifecycle hooks if configured) */
+  updateData: (updates: Partial<TData>) => Promise<void>;
   /** Current step reference (if in a route) */
   step?: StepRef;
   /** Interaction history */
   history: Event[];
-  /** Data collected so far in the current route */
+  /** Complete agent-level data collected so far */
   data?: Partial<TData>;
   /** Additional metadata */
   metadata?: Record<string, unknown>;
@@ -31,11 +33,15 @@ export interface ToolResult<
   TData = unknown
 > {
   /** The result data */
-  data: TResultData;
+  data?: TResultData;
   /** Optional context update to be merged with current context */
   contextUpdate?: Partial<TContext>;
-  /** Optional collected data update to be merged with session step */
+  /** Optional agent-level data update to be merged with collected data */
   dataUpdate?: Partial<TData>;
+  /** Success indicator */
+  success?: boolean;
+  /** Error message if operation failed */
+  error?: string;
   /** Optional metadata about the execution */
   meta?: Record<string, unknown>;
 }
@@ -45,9 +51,9 @@ export interface ToolResult<
  */
 export type ToolHandler<
   TContext,
-  TArgs extends unknown[],
-  TResult,
-  TData = unknown
+  TData = unknown,
+  TArgs extends unknown[] = unknown[],
+  TResult = unknown
 > = (
   context: ToolContext<TContext, TData>,
   ...args: TArgs
@@ -60,16 +66,16 @@ export type ToolHandler<
  */
 export interface Tool<
   TContext = unknown,
+  TData = unknown,
   TArgs extends unknown[] = unknown[],
-  TResult = unknown,
-  TData = unknown
+  TResult = unknown
 > {
   /** Tool identifier */
   id: string;
   /** Tool display name (shown to AI models) */
   name?: string;
   /** Tool handler function */
-  handler: ToolHandler<TContext, TArgs, TResult, TData>;
+  handler: ToolHandler<TContext, TData, TArgs, TResult>;
   /** Description of what the tool does (for AI discovery) */
   description?: string;
   /** Parameter schema or description */

@@ -128,7 +128,7 @@ interface BookingData {
 }
 ```
 
-### Create a Schema-Driven Route
+### Create an Agent with Centralized Data Schema
 
 ```typescript
 import { Agent, GeminiProvider, type Tool } from "@falai/agent";
@@ -154,53 +154,66 @@ const checkAvailability: Tool<{}, [], string, BookingData> = {
   },
 };
 
-// Create agent
-const agent = new Agent({
+// Create agent with centralized data schema
+const agent = new Agent<{}, BookingData>({
   name: "TravelAgent",
   provider: new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
   }),
+  
+  // Agent-level schema defines all possible data fields
+  schema: {
+    type: "object",
+    properties: {
+      destination: { type: "string", description: "Travel destination" },
+      travelDate: { type: "string", description: "Travel date" },
+      travelers: { type: "number", minimum: 1, maximum: 10 },
+      budget: { type: "number", description: "Budget in USD" },
+    },
+    required: ["destination", "travelers"],
+  },
+  
+  // Agent-level tools available to all routes
+  tools: [checkAvailability],
+  
+  // Agent-level data validation and enrichment
+  hooks: {
+    onDataUpdate: async (data, previousData) => {
+      // Auto-set budget range based on travelers
+      if (data.travelers && !data.budget) {
+        data.budget = data.travelers * 500; // Default $500 per person
+      }
+      return data;
+    }
+  }
 });
 
-// Data collection schema
-const bookingSchema = {
-  type: "object",
-  properties: {
-    destination: { type: "string", description: "Travel destination" },
-    travelDate: { type: "string", description: "Travel date" },
-    travelers: { type: "number", minimum: 1, maximum: 10 },
-    budget: { type: "number", description: "Budget in USD" },
-  },
-  required: ["destination", "travelers"],
-} as const;
-
-// Create route with schema
-const bookingRoute = agent.createRoute<BookingData>({
+// Routes specify required fields instead of schemas
+const bookingRoute = agent.createRoute({
   title: "Travel Booking",
   description: "Help users book travel",
-  schema: bookingSchema,
   conditions: ["User wants to book travel"],
+  requiredFields: ["destination", "travelDate", "travelers"], // Required for completion
+  optionalFields: ["budget"], // Nice to have but not required
+  
   initialStep: {
     prompt: "I'd love to help you book a trip! Where would you like to go?",
     collect: ["destination"],
   },
 });
 
-// Add tool to route
-bookingRoute.createTool(checkAvailability);
-
-// Build conversation flow
+// Build conversation flow with agent-level data awareness
 const askDate = bookingRoute.initialStep.nextStep({
   prompt: "When would you like to travel?",
   collect: ["travelDate"],
-  requires: ["destination"],
-  skipIf: (data) => !!data.travelDate,
+  requires: ["destination"], // Must have destination from agent data
+  skipIf: (data) => !!data.travelDate, // Skip if already collected
 });
 
 const askTravelers = askDate.nextStep({
   prompt: "How many people are traveling?",
   collect: ["travelers"],
-  requires: ["destination"],
+  requires: ["destination"], // Prerequisites from agent data
   skipIf: (data) => data.travelers !== undefined,
 });
 
@@ -213,22 +226,27 @@ const askBudget = askTravelers.nextStep({
 
 const checkAndBook = askBudget.nextStep({
   prompt: "Let me check availability for your trip.",
-  tool: checkAvailability,
-  requires: ["destination", "travelers"],
+  tool: checkAvailability, // Tool accesses complete agent data
+  requires: ["destination", "travelers"], // Minimum data needed
 });
 ```
 
-### Test the Data-Driven Agent
+### Test the Agent-Level Data Collection
 
 ```typescript
 async function testBookingAgent() {
-  // Create agent with automatic session management
-  const sessionAgent = new Agent({
+  // Create agent with automatic session management and agent-level schema
+  const sessionAgent = new Agent<{}, BookingData>({
     name: "TravelAgent",
     provider: new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY!,
     }),
     sessionId: "user-alice", // Automatically manages this session
+    
+    // Same agent-level schema and configuration
+    schema: agent.schema,
+    tools: agent.tools,
+    hooks: agent.hooks
   });
 
   // Copy the route to the session agent
@@ -238,13 +256,17 @@ async function testBookingAgent() {
   const response1 = await sessionAgent.respond("I want to go to Paris");
 
   console.log("Bot:", response1.message);
-  console.log("Collected:", sessionAgent.session.getData<BookingData>());
+  console.log("Agent data:", sessionAgent.getCollectedData()); // Agent-level data access
 
   // User provides more details - session automatically maintained
   const response2 = await sessionAgent.respond("Next Friday, 2 people, $2000 budget");
 
   console.log("Bot:", response2.message);
-  console.log("Final data:", sessionAgent.session.getData<BookingData>());
+  console.log("Final agent data:", sessionAgent.getCollectedData());
+  
+  // Check route completion
+  console.log("Route complete:", bookingRoute.isComplete(sessionAgent.getCollectedData()));
+  console.log("Progress:", Math.round(bookingRoute.getCompletionProgress(sessionAgent.getCollectedData()) * 100) + "%");
 }
 
 testBookingAgent();

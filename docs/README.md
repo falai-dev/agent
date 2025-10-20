@@ -35,7 +35,7 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 
 - **[Routes](./core/conversation-flows/routes.md)** - Route definition, lifecycle & completion
 - **[Steps](./core/conversation-flows/steps.md)** - Step configuration, data collection & validation
-- **[Data Collection](./core/conversation-flows/data-collection.md)** - Schema-driven data extraction
+- **[Data Collection](./core/conversation-flows/data-collection.md)** - Agent-level schema-driven data extraction
 
 #### AI Integration
 
@@ -74,7 +74,7 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 → See [Route DSL](./core/conversation-flows/route-dsl.md), [Intelligent Routing](./core/routing/intelligent-routing.md), and [Step Transitions](./core/conversation-flows/step-transitions.md)
 
 **🎯 Collecting structured data?**
-→ Learn [Data Collection](./core/conversation-flows/data-collection.md) and [Schema-Driven Extraction](../examples/core-concepts/schema-driven-extraction.ts)
+→ Learn [Agent-Level Data Collection](./core/conversation-flows/data-collection.md) and [Schema-Driven Extraction](../examples/core-concepts/schema-driven-extraction.ts)
 
 **🔧 Working with tools?**
 → See [Tool Definition](./core/tools/tool-definition.md), [Tool Execution](./core/tools/tool-execution.md), and [Tool Scoping](./core/tools/tool-scoping.md)
@@ -89,7 +89,7 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 
 - **Agent Architecture**: [Agent](./core/agent/README.md) | [Context](./core/agent/context-management.md) | [Sessions](./core/agent/session-management.md)
 - **AI Routing System**: [Intelligent Routing](./core/routing/intelligent-routing.md) | [Route DSL](./core/conversation-flows/route-dsl.md) | [Step Transitions](./core/conversation-flows/step-transitions.md)
-- **Conversation Flows**: [Routes](./core/conversation-flows/routes.md) | [Steps](./core/conversation-flows/steps.md) | [Data Collection](./core/conversation-flows/data-collection.md)
+- **Conversation Flows**: [Routes](./core/conversation-flows/routes.md) | [Steps](./core/conversation-flows/steps.md) | [Agent-Level Data Collection](./core/conversation-flows/data-collection.md)
 - **AI Integration**: [Providers](./core/ai-integration/providers.md) | [Prompts](./core/ai-integration/prompt-composition.md) | [Responses](./core/ai-integration/response-processing.md)
 - **Tools & Execution**: [Tool Definition](./core/tools/tool-definition.md) | [Tool Execution](./core/tools/tool-execution.md) | [Tool Scoping](./core/tools/tool-scoping.md)
 - **Persistence**: [Session Storage](./core/persistence/session-storage.md) | [Adapters](./core/persistence/adapters.md)

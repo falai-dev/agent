@@ -13,7 +13,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
 
   // Specific, typed sections tailored to the framework
 
-  async addAgentMeta(agent: AgentOptions<TContext>): Promise<this> {
+  async addAgentMeta(agent: AgentOptions<TContext, TData>): Promise<this> {
     const lines: string[] = [];
     lines.push("## Agent");
     lines.push(`**Name:** ${agent.name}`);

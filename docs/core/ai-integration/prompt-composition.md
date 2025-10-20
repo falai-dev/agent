@@ -103,35 +103,59 @@ Assistant: Great! Let me check flights for next week. Could you tell me which ai
 Current session information including:
 
 - Active route and step
-- Collected data (with privacy filtering)
+- Agent-level collected data (with privacy filtering)
 - Route progress and completion status
+- Cross-route data availability
+
+```
+Current Session:
+- Route: Flight Booking (2/3 required fields collected)
+- Step: ask_passengers
+- Agent Data: { destination: "Paris", departureDate: "2025-01-15" }
+- Missing Required: passengers
+- Available from other routes: { hotelPreference: "luxury" }
+```
 
 ## Dynamic Schema Generation
 
-For data collection steps, the prompt includes JSON schemas:
+For data collection steps, the prompt includes agent-level JSON schemas:
 
 ```typescript
-// Route schema
-schema: {
-  type: "object",
-  properties: {
-    destination: { type: "string" },
-    departureDate: { type: "string", format: "date" },
-    passengers: { type: "number", minimum: 1 }
-  },
-  required: ["destination", "departureDate"]
-}
+// Agent-level schema
+const agent = new Agent<{}, TravelData>({
+  schema: {
+    type: "object",
+    properties: {
+      destination: { type: "string" },
+      departureDate: { type: "string", format: "date" },
+      passengers: { type: "number", minimum: 1 },
+      hotelPreference: { type: "string" },
+      budgetRange: { type: "string" }
+    },
+    required: ["destination", "departureDate"]
+  }
+});
+
+// Route specifies which fields to collect
+const flightRoute = agent.createRoute({
+  title: "Flight Booking",
+  requiredFields: ["destination", "departureDate", "passengers"],
+  optionalFields: ["budgetRange"]
+});
 ```
 
 Generates:
 
 ```
-Extract the following information from the user's response:
+Extract the following information from the user's response based on the agent schema:
 - destination: string - Where the user wants to fly
 - departureDate: string (date format) - When they want to depart
 - passengers: number (minimum 1) - How many people are traveling
+- budgetRange: string (optional) - Budget preference for the trip
 
-Return extracted data as valid JSON matching this schema.
+Return extracted data as valid JSON matching the agent schema.
+Current route requires: destination, departureDate, passengers
+Route completion: 2/3 required fields collected
 ```
 
 ## Tool Integration

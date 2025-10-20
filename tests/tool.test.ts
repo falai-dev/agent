@@ -15,9 +15,8 @@ import {
 } from "../src/index";
 import { MockProviderFactory } from "./mock-provider";
 
-// Test data types
+// Test data types for agent-level data collection
 interface UserProfile {
-  location?: string;
   userId: string;
   name: string;
   email: string;
@@ -25,6 +24,7 @@ interface UserProfile {
     theme: "light" | "dark";
     notifications: boolean;
   };
+  location?: string;
   rawOrder?: OrderData;
   apiResponse?: {
     status: number;
@@ -40,11 +40,13 @@ interface OrderData {
   items: Array<{ name: string; quantity: number; price: number }>;
   total: number;
   status: "pending" | "processing" | "shipped" | "delivered";
+  customerName?: string;
+  email?: string;
 }
 
 // Test utilities
-function createToolTestAgent(): Agent<UserProfile> {
-  return new Agent<UserProfile>({
+function createToolTestAgent(): Agent<UserProfile, OrderData> {
+  return new Agent<UserProfile, OrderData>({
     name: "ToolTestAgent",
     description: "Agent for testing tool functionality",
     context: {
@@ -57,6 +59,31 @@ function createToolTestAgent(): Agent<UserProfile> {
       },
     },
     provider: MockProviderFactory.basic(),
+    schema: {
+      type: "object",
+      properties: {
+        product: { type: "string" },
+        qty: { type: "number", minimum: 1 },
+        cost: { type: "number", minimum: 0 },
+        orderId: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              quantity: { type: "number" },
+              price: { type: "number" },
+            },
+          },
+        },
+        total: { type: "number", minimum: 0 },
+        status: { type: "string", enum: ["pending", "processing", "shipped", "delivered"] },
+        customerName: { type: "string" },
+        email: { type: "string", format: "email" },
+      },
+      required: ["product", "qty"],
+    },
   });
 }
 
@@ -66,7 +93,8 @@ function createMockToolContext<TContext = unknown, TData = unknown>(
 ): ToolContext<TContext, TData> {
   return {
     context: context || ({} as TContext),
-    updateContext: async () => {},
+    updateContext: async () => { },
+    updateData: async () => { },
     history: [],
     data: data || {},
   };
@@ -74,11 +102,11 @@ function createMockToolContext<TContext = unknown, TData = unknown>(
 
 async function executeToolForTest<
   TContext = unknown,
+  TData = unknown,
   TArgs extends unknown[] = unknown[],
-  TResult = unknown,
-  TData = unknown
+  TResult = unknown
 >(
-  tool: Tool<TContext, TArgs, TResult, TData>,
+  tool: Tool<TContext, TData, TArgs, TResult>,
   args: TArgs,
   context?: TContext,
   data?: Partial<TData>
@@ -89,7 +117,7 @@ async function executeToolForTest<
 
 describe("Tool Creation and Configuration", () => {
   test("should create tool with basic configuration", () => {
-    const tool: Tool<unknown, [input: string], string, { input?: string }> = {
+    const tool: Tool<unknown, { input?: string }, [input: string], string> = {
       id: "basic_tool",
       description: "A basic test tool",
       parameters: {
@@ -99,8 +127,8 @@ describe("Tool Creation and Configuration", () => {
         },
         required: ["input"],
       },
-      handler: (toolContext, input: string) => ({
-        data: `Processed: ${input}`,
+      handler: (toolContext, ...args) => ({
+        data: `Processed: ${args[0]}`,
       }),
     };
 
@@ -114,9 +142,9 @@ describe("Tool Creation and Configuration", () => {
   test("should create tool with complex parameter schema", () => {
     const tool: Tool<
       unknown,
+      any,
       [userId: string, orderData: any, options?: any],
-      string,
-      any
+      string
     > = {
       id: "complex_tool",
       description: "Tool with complex parameters",
@@ -183,7 +211,7 @@ describe("Tool Creation and Configuration", () => {
   });
 
   test("should create tool with no parameters", () => {
-    const tool: Tool<unknown, [], string, object> = {
+    const tool: Tool<unknown, object, [], string> = {
       id: "no_params_tool",
       description: "Tool with no parameters",
       parameters: {
@@ -205,9 +233,9 @@ describe("Tool Execution", () => {
   test("should execute tool and return data", async () => {
     const tool: Tool<
       unknown,
+      { message?: string },
       [message?: string],
-      string,
-      { message?: string }
+      string
     > = {
       id: "echo_tool",
       description: "Echoes input data",
@@ -227,7 +255,7 @@ describe("Tool Execution", () => {
   });
 
   test("should execute tool with data updates", async () => {
-    const tool: Tool<unknown, [], string, Partial<OrderData>> = {
+    const tool: Tool<unknown, Partial<OrderData>, [], string> = {
       id: "order_processor",
       description: "Processes orders",
       parameters: {
@@ -254,7 +282,7 @@ describe("Tool Execution", () => {
   });
 
   test("should handle tool execution errors", () => {
-    const tool: Tool<unknown, [], unknown, unknown> = {
+    const tool: Tool<unknown, unknown, [], unknown> = {
       id: "error_tool",
       description: "Tool that throws errors",
       parameters: {
@@ -274,9 +302,9 @@ describe("Tool Execution", () => {
   test("should execute async tools", async () => {
     const asyncTool: Tool<
       unknown,
+      { delay?: number },
       [delay?: number],
-      string,
-      { delay?: number }
+      string
     > = {
       id: "async_tool",
       description: "Asynchronous tool",
@@ -307,7 +335,7 @@ describe("Tool Context Access", () => {
   test("should access context in tool execution", async () => {
     const agent = createToolTestAgent();
 
-    const contextTool: Tool<UserProfile, [], string, object> = {
+    const contextTool: Tool<UserProfile, object, [], string> = {
       id: "context_reader",
       description: "Reads user context",
       parameters: {
@@ -327,7 +355,7 @@ describe("Tool Context Access", () => {
   test("should access nested context properties", async () => {
     const agent = createToolTestAgent();
 
-    const preferenceTool: Tool<UserProfile, [], string, object> = {
+    const preferenceTool: Tool<UserProfile, object, [], string> = {
       id: "preference_reader",
       description: "Reads user preferences",
       parameters: {
@@ -345,7 +373,7 @@ describe("Tool Context Access", () => {
   });
 
   test("should handle missing context gracefully", async () => {
-    const contextTool: Tool<UserProfile | undefined, [], string, object> = {
+    const contextTool: Tool<UserProfile | undefined, object, [], string> = {
       id: "safe_context_tool",
       description: "Handles missing context",
       parameters: {
@@ -366,9 +394,9 @@ describe("Tool Parameter Validation", () => {
   test("should validate required parameters", async () => {
     const tool: Tool<
       unknown,
+      { requiredField?: string; optionalField?: number },
       [requiredField: string, optionalField?: number],
-      string,
-      { requiredField?: string; optionalField?: number }
+      string
     > = {
       id: "validation_tool",
       description: "Requires specific parameters",
@@ -385,9 +413,8 @@ describe("Tool Parameter Validation", () => {
         requiredField: string,
         optionalField?: number
       ) => ({
-        data: `Required: ${requiredField}, Optional: ${
-          optionalField ?? "not provided"
-        }`,
+        data: `Required: ${requiredField}, Optional: ${optionalField ?? "not provided"
+          }`,
       }),
     };
 
@@ -404,24 +431,24 @@ describe("Tool Parameter Validation", () => {
   });
 
   test("should handle array parameters", async () => {
-    const tool: Tool<unknown, [items: string[]], string, { items?: string[] }> =
-      {
-        id: "array_tool",
-        description: "Processes arrays",
-        parameters: {
-          type: "object",
-          properties: {
-            items: {
-              type: "array",
-              items: { type: "string" },
-            },
+    const tool: Tool<unknown, { items?: string[] }, [items: string[]], string> =
+    {
+      id: "array_tool",
+      description: "Processes arrays",
+      parameters: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: { type: "string" },
           },
-          required: ["items"],
         },
-        handler: (toolContext, items: string[]) => ({
-          data: `Processed ${items.length} items: ${items.join(", ")}`,
-        }),
-      };
+        required: ["items"],
+      },
+      handler: (toolContext, items: string[]) => ({
+        data: `Processed ${items.length} items: ${items.join(", ")}`,
+      }),
+    };
 
     const result = await executeToolForTest(tool, [
       ["item1", "item2", "item3"],
@@ -432,9 +459,9 @@ describe("Tool Parameter Validation", () => {
   test("should handle enum parameters", async () => {
     const tool: Tool<
       unknown,
+      { priority?: string },
       [priority: "low" | "medium" | "high"],
-      string,
-      { priority?: string }
+      string
     > = {
       id: "enum_tool",
       description: "Validates enum values",
@@ -462,14 +489,14 @@ describe("Tool Integration with Agents", () => {
   test("should add tools to agent", () => {
     const agent = createToolTestAgent();
 
-    const tool1: Tool = {
+    const tool1: Tool<UserProfile, OrderData, [], string> = {
       id: "tool1",
       description: "First tool",
       parameters: { type: "object", properties: {} },
       handler: () => ({ data: "Tool 1 executed" }),
     };
 
-    const tool2: Tool = {
+    const tool2: Tool<UserProfile, OrderData, [], string> = {
       id: "tool2",
       description: "Second tool",
       parameters: { type: "object", properties: {} },
@@ -484,10 +511,10 @@ describe("Tool Integration with Agents", () => {
     expect(tools.map((t) => t.id)).toEqual(["tool1", "tool2"]);
   });
 
-  test("should execute agent tools", async () => {
+  test("should execute agent tools with agent-level data", async () => {
     const agent = createToolTestAgent();
 
-    const calculatorTool: Tool = {
+    const calculatorTool: Tool<UserProfile, OrderData, [], string> = {
       id: "calculator",
       description: "Performs calculations",
       parameters: {
@@ -529,7 +556,7 @@ describe("Tool Integration with Agents", () => {
 
         return {
           data: `Result: ${result}`,
-          dataUpdate: { lastCalculation: result },
+          dataUpdate: { total: result }, // Update agent-level data
         };
       },
     };
@@ -544,13 +571,15 @@ describe("Tool Integration with Agents", () => {
       },
     ]);
 
-    const agentWithProvider = new Agent({
-      ...agent,
+    const agentWithProvider = new Agent<UserProfile, OrderData>({
       name: "Calculator Agent",
+      context: await agent.getContext(),
+      schema: await agent.getSchema(),
       provider,
+      tools: [calculatorTool],
     });
 
-    const session = createSession();
+    const session = createSession<OrderData>();
     const response = await agentWithProvider.respond({
       history: [
         {
@@ -566,10 +595,10 @@ describe("Tool Integration with Agents", () => {
     expect(response.toolCalls![0].toolName).toBe("calculator");
   });
 
-  test("should handle multiple tool calls", async () => {
+  test("should handle multiple tool calls with agent-level data", async () => {
     const agent = createToolTestAgent();
 
-    const tools: Tool<unknown, [], string, { location?: string }>[] = [
+    const tools: Tool<UserProfile, OrderData, [], string>[] = [
       {
         id: "get_weather",
         description: "Gets weather information",
@@ -577,8 +606,9 @@ describe("Tool Integration with Agents", () => {
           type: "object",
           properties: { location: { type: "string" } },
         },
-        handler: ({ data }) => ({
-          data: `Weather for ${data?.location}: Sunny, 72°F`,
+        handler: ({ context }) => ({
+          data: `Weather for ${context?.name}: Sunny, 72°F`,
+          dataUpdate: { customerName: context?.name }, // Update agent data
         }),
       },
       {
@@ -604,13 +634,15 @@ describe("Tool Integration with Agents", () => {
       },
     ]);
 
-    const agentWithProvider2 = new Agent({
-      ...agent,
+    const agentWithProvider2 = new Agent<UserProfile, OrderData>({
       name: "Weather and Time Agent",
+      context: await agent.getContext(),
+      schema: agent.getSchema(),
       provider,
+      tools,
     });
 
-    const session = createSession();
+    const session = createSession<OrderData>();
     const response = await agentWithProvider2.respond({
       history: [
         {
@@ -722,7 +754,7 @@ describe("Complex Tool Scenarios", () => {
   test("should handle data transformation tools", async () => {
     const agent = createToolTestAgent();
 
-    const transformTool: Tool<UserProfile, unknown[], unknown, unknown> = {
+    const transformTool: Tool<UserProfile, unknown, unknown[], unknown> = {
       id: "data_transformer",
       description: "Transforms raw data into structured format",
       parameters: {
@@ -759,7 +791,7 @@ describe("Complex Tool Scenarios", () => {
           dataUpdate: transformed,
         };
       },
-    } as Tool<UserProfile, unknown[], unknown, unknown>;
+    } as Tool<UserProfile, unknown, unknown[], unknown>;
 
     agent.createTool(transformTool);
 
@@ -786,7 +818,7 @@ describe("Complex Tool Scenarios", () => {
   test("should handle API integration tools", async () => {
     const agent = createToolTestAgent();
 
-    const apiTool: Tool<UserProfile, unknown[], unknown, unknown> = {
+    const apiTool: Tool<UserProfile, unknown, unknown[], unknown> = {
       id: "api_integrator",
       description: "Makes external API calls",
       parameters: {
@@ -818,7 +850,7 @@ describe("Complex Tool Scenarios", () => {
           },
         };
       },
-    } as Tool<UserProfile, unknown[], unknown, unknown>;
+    } as Tool<UserProfile, unknown, unknown[], unknown>;
 
     agent.createTool(apiTool);
 
@@ -843,7 +875,7 @@ describe("Complex Tool Scenarios", () => {
   test("should handle conditional tool logic", async () => {
     const agent = createToolTestAgent();
 
-    const conditionalTool: Tool<UserProfile, unknown[], unknown, unknown> = {
+    const conditionalTool: Tool<UserProfile, unknown, unknown[], unknown> = {
       id: "conditional_processor",
       description: "Processes data based on conditions",
       parameters: {
@@ -879,7 +911,7 @@ describe("Complex Tool Scenarios", () => {
           data: result,
         };
       },
-    } as Tool<UserProfile, unknown[], unknown, unknown>;
+    } as Tool<UserProfile, unknown, unknown[], unknown>;
 
     agent.createTool(conditionalTool);
 
