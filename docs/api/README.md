@@ -1230,6 +1230,109 @@ Step description (readonly).
 
 ---
 
+### `StepResult`
+
+Result interface returned by step transition methods that enables fluent chaining of conversation flows. Combines step reference with the ability to chain transitions and create branches.
+
+#### Interface
+
+```typescript
+interface StepResult<TContext = unknown, TData = unknown> extends StepRef {
+  /** Allow chaining transitions */
+  nextStep: (spec: StepOptions<TContext, TData>) => StepResult<TContext, TData>;
+  /** Create multiple branches from this step */
+  branch: (
+    branches: BranchSpec<TContext, TData>[]
+  ) => BranchResult<TContext, TData>;
+  /** Shortcut to end the current route */
+  endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) => StepResult<TContext, TData>;
+}
+```
+
+#### Methods
+
+##### `nextStep(spec: StepOptions<TContext, TData>): StepResult<TContext, TData>`
+
+Creates a transition from this step and returns a chainable result for building linear flows.
+
+**Example:**
+
+```typescript
+// Linear flow chaining
+const flow = route.initialStep
+  .nextStep({
+    prompt: "Ask for destination",
+    collect: ["destination"]
+  })
+  .nextStep({
+    prompt: "Ask for dates", 
+    collect: ["departureDate", "returnDate"]
+  })
+  .nextStep({
+    prompt: "Confirm booking details"
+  });
+```
+
+##### `branch(branches: BranchSpec<TContext, TData>[]): BranchResult<TContext, TData>`
+
+Creates multiple conditional branches from this step for complex conversation flows.
+
+**Example:**
+
+```typescript
+// Branching flow
+const branches = askIssueType.branch([
+  {
+    name: "technical",
+    step: {
+      prompt: "Let me help with your technical issue",
+      when: "issue type is technical"
+    }
+  },
+  {
+    name: "billing", 
+    step: {
+      prompt: "I'll connect you with billing support",
+      when: "issue type is billing"
+    }
+  }
+]);
+
+// Continue each branch independently
+branches.technical.nextStep({ prompt: "What device are you using?" });
+branches.billing.nextStep({ prompt: "What's your account number?" });
+```
+
+##### `endRoute(options?: Omit<StepOptions<TContext, TData>, "step">): StepResult<TContext, TData>`
+
+Shortcut method to end the current route with optional completion configuration.
+
+**Example:**
+
+```typescript
+// Simple route completion
+askConfirmation.endRoute();
+
+// Route completion with final message
+askConfirmation.endRoute({
+  prompt: "Thank you! Your booking is confirmed."
+});
+```
+
+#### Properties
+
+Inherits all properties from `StepRef`:
+
+##### `id: string`
+
+Step identifier (readonly).
+
+##### `routeId: string`
+
+Route this step belongs to (readonly).
+
+---
+
 ---
 
 ## Tool Execution

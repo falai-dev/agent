@@ -394,9 +394,9 @@ configure(config: Partial<StepOptions<TContext, TData>>): this
 ##### Transitions
 
 ```typescript
-nextStep(spec: StepOptions<TContext, TData>): Step<TContext, TData>
+nextStep(spec: StepOptions<TContext, TData>): StepResult<TContext, TData>
 branch(branches: BranchSpec<TContext, TData>[]): BranchResult<TContext, TData>
-endRoute(options?: Omit<StepOptions<TContext, TData>, 'step'>): Step<TContext, TData>
+endRoute(options?: Omit<StepOptions<TContext, TData>, 'step'>): StepResult<TContext, TData>
 ```
 
 ##### Validation
@@ -419,6 +419,55 @@ getTransitions(): Step<TContext, TData>[]
 ```typescript
 getRef(): StepRef
 ```
+
+---
+
+### StepResult
+
+Result interface returned by step transition methods that enables fluent chaining of conversation flows.
+
+#### Interface
+
+```typescript
+interface StepResult<TContext = unknown, TData = unknown> extends StepRef {
+  nextStep: (spec: StepOptions<TContext, TData>) => StepResult<TContext, TData>;
+  branch: (branches: BranchSpec<TContext, TData>[]) => BranchResult<TContext, TData>;
+  endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) => StepResult<TContext, TData>;
+}
+```
+
+#### Methods
+
+##### Chaining
+
+```typescript
+nextStep(spec: StepOptions<TContext, TData>): StepResult<TContext, TData>
+```
+
+Creates a transition and returns a chainable result for building linear flows.
+
+##### Branching
+
+```typescript
+branch(branches: BranchSpec<TContext, TData>[]): BranchResult<TContext, TData>
+```
+
+Creates multiple conditional branches for complex conversation flows.
+
+##### Route Completion
+
+```typescript
+endRoute(options?: Omit<StepOptions<TContext, TData>, "step">): StepResult<TContext, TData>
+```
+
+Shortcut method to end the current route with optional completion configuration.
+
+#### Properties
+
+Inherits from `StepRef`:
+
+- `id: string` - Step identifier
+- `routeId: string` - Route this step belongs to
 
 ---
 
@@ -765,6 +814,31 @@ interface StepOptions<TContext = unknown, TData = unknown> {
     data?: Partial<TData>
   ) => void | Promise<void>);
   tools?: (string | Tool<TContext, unknown[], unknown, TData>)[];
+}
+
+interface StepResult<TContext = unknown, TData = unknown> extends StepRef {
+  nextStep: (spec: StepOptions<TContext, TData>) => StepResult<TContext, TData>;
+  branch: (branches: BranchSpec<TContext, TData>[]) => BranchResult<TContext, TData>;
+  endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) => StepResult<TContext, TData>;
+}
+
+interface BranchResult<TContext = unknown, TData = unknown> {
+  [branchName: string]: StepResult<TContext, TData>;
+}
+
+interface BranchSpec<TContext = unknown, TData = unknown> {
+  name: string;
+  id?: string;
+  step: StepOptions<TContext, TData>;
+}
+
+interface StepRef {
+  id: string;
+  routeId: string;
+}
+
+interface RouteRef {
+  id: string;
 }
 
 // ==============================================================================
