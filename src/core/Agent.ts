@@ -10,7 +10,6 @@ import type {
   Event,
   RouteOptions,
   SessionState,
-  AgentStructuredResponse,
   Template,
   StepRef,
   History,
@@ -20,17 +19,12 @@ import type {
   ValidationError,
   ValidationResult,
 } from "../types";
-import { EventKind, MessageRole } from "../types/history";
+import type { StreamOptions, GenerateOptions, RespondParams } from "./ResponseModal";
 import {
-  enterRoute,
-  enterStep,
   mergeCollected,
   logger,
   LoggerLevel,
   render,
-  getLastMessageFromHistory,
-  normalizeHistory,
-  cloneDeep,
 } from "../utils";
 
 import { Route } from "./Route";
@@ -38,10 +32,8 @@ import { Step } from "./Step";
 import { PersistenceManager } from "./PersistenceManager";
 import { SessionManager } from "./SessionManager";
 import { RoutingEngine } from "./RoutingEngine";
-import { ResponseEngine } from "./ResponseEngine";
 import { ToolExecutor } from "./ToolExecutor";
-import { ResponsePipeline } from "./ResponsePipeline";
-import { END_ROUTE_ID } from "../constants";
+import { ResponseModal } from "./ResponseModal";
 
 /**
  * Error thrown when data validation fails
@@ -75,8 +67,7 @@ export class Agent<TContext = any, TData = any> {
   private context: TContext | undefined;
   private persistenceManager: PersistenceManager<TData> | undefined;
   private routingEngine: RoutingEngine<TContext, TData>;
-  private responseEngine: ResponseEngine<TContext, TData>;
-  private responsePipeline: ResponsePipeline<TContext, TData>;
+  private responseModal: ResponseModal<TContext, TData>;
   private currentSession?: SessionState<TData>;
   private knowledgeBase: Record<string, unknown> = {};
   private schema?: StructuredSchema;
@@ -125,22 +116,15 @@ export class Agent<TContext = any, TData = any> {
     // Initialize current session if provided
     this.currentSession = options.session;
 
-    // Initialize routing and response engines
+    // Initialize routing engine
     this.routingEngine = new RoutingEngine<TContext, TData>({
       maxCandidates: 5,
       allowRouteSwitch: true,
       switchThreshold: 70,
     });
-    this.responseEngine = new ResponseEngine<TContext, TData>();
-    this.responsePipeline = new ResponsePipeline<TContext, TData>(
-      options,
-      this.routes,
-      this.tools,
-      this.routingEngine,
-      this.updateContext.bind(this),
-      this.updateData.bind(this),
-      this.updateCollectedData.bind(this)
-    );
+
+    // Initialize ResponseModal for handling all response generation
+    this.responseModal = new ResponseModal<TContext, TData>(this);
 
     // Initialize persistence if configured
     if (options.persistence) {
@@ -560,1265 +544,17 @@ export class Agent<TContext = any, TData = any> {
   /**
    * Generate a response based on history and context as a stream
    */
-  async *respondStream(params: {
-    history: History;
-    step?: StepRef;
-    session?: SessionState<TData>;
-    contextOverride?: Partial<TContext>;
-    signal?: AbortSignal;
-  }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-    const { history: simpleHistory, signal } = params;
-    const history = normalizeHistory(simpleHistory);
-
-    // Prepare context and session using the response pipeline
-    this.responsePipeline.setContext(this.context);
-    this.responsePipeline.setCurrentSession(this.currentSession);
-    let session: SessionState;
-    const responseContext = await this.responsePipeline.prepareResponseContext({
-      contextOverride: params.contextOverride,
-      session: params.session ? cloneDeep(params.session) : undefined,
-    });
-    const { effectiveContext } = responseContext;
-    session = responseContext.session;
-    
-    // Merge agent's collected data into session (agent data takes precedence)
-    if (Object.keys(this.collectedData).length > 0) {
-      session = mergeCollected(session, this.collectedData);
-      logger.debug("[Agent] Merged agent collected data into session:", this.collectedData);
-    }
-    
-    // Update our stored context if it was modified by beforeRespond hook
-    this.context = this.responsePipeline.getStoredContext();
-
-    // PHASE 1: PREPARE - Execute prepare function if current step has one
-    if (session.currentRoute && session.currentStep) {
-      const currentRoute = this.routes.find(
-        (r) => r.id === session.currentRoute?.id
-      );
-      if (currentRoute) {
-        const currentStep = currentRoute.getStep(session.currentStep.id);
-        if (currentStep?.prepare) {
-          logger.debug(`[Agent] Executing prepare for step: ${currentStep.id}`);
-          await this.executePrepareFinalize(
-            currentStep.prepare,
-            effectiveContext,
-            session.data,
-            currentRoute,
-            currentStep
-          );
-        }
-      }
-    }
-
-    // PHASE 2: ROUTING + STEP SELECTION - Use response pipeline
-    const routingResult =
-      await this.responsePipeline.handleRoutingAndStepSelection({
-        session,
-        history,
-        context: effectiveContext,
-        signal,
-      });
-    const selectedRoute = routingResult.selectedRoute;
-    const selectedStep = routingResult.selectedStep;
-    const responseDirectives = routingResult.responseDirectives;
-    const isRouteComplete = routingResult.isRouteComplete;
-    session = routingResult.session;
-
-    // PHASE 3: DETERMINE NEXT STEP - Use pipeline method
-    const stepResult = this.responsePipeline.determineNextStep({
-      selectedRoute,
-      selectedStep,
-      session,
-      isRouteComplete,
-    });
-    const nextStep = stepResult.nextStep;
-    session = stepResult.session;
-
-    if (selectedRoute && !isRouteComplete) {
-      // PHASE 4: RESPONSE GENERATION - Stream message using selected route and step
-      // Get last user message
-      const lastUserMessage = getLastMessageFromHistory(history);
-
-      // Build response schema for this route (with collect fields from step)
-      const responseSchema = this.responseEngine.responseSchemaForRoute(
-        selectedRoute,
-        nextStep,
-        this.schema
-      );
-
-      // Check if selected route and next step are defined
-      if (!selectedRoute || !nextStep) {
-        logger.error("[Agent] Selected route or next step is not defined", {
-          selectedRoute,
-          nextStep,
-        });
-        throw new Error("Selected route or next step is not defined");
-      }
-
-      // Build response prompt
-      const responsePrompt = await this.responseEngine.buildResponsePrompt({
-        route: selectedRoute,
-        currentStep: nextStep,
-        rules: selectedRoute.getRules(),
-        prohibitions: selectedRoute.getProhibitions(),
-        directives: responseDirectives,
-        history,
-        lastMessage: lastUserMessage,
-        agentOptions: this.options,
-        // Combine agent and route properties according to the specified logic
-        combinedGuidelines: [
-          ...this.getGuidelines(),
-          ...selectedRoute.getGuidelines(),
-        ],
-        combinedTerms: this.mergeTerms(
-          this.getTerms(),
-          selectedRoute.getTerms()
-        ),
-        context: effectiveContext,
-        session,
-        agentSchema: this.schema,
-      });
-
-      // Collect available tools for AI
-      const availableTools = this.collectAvailableTools(
-        selectedRoute,
-        nextStep
-      );
-
-      // Generate message stream using AI provider
-      const stream = this.options.provider.generateMessageStream({
-        prompt: responsePrompt,
-        history,
-        context: effectiveContext,
-        tools: availableTools,
-        signal,
-        parameters: {
-          jsonSchema: responseSchema,
-          schemaName: "response_stream_output",
-        },
-      });
-
-      // Stream chunks to caller
-      for await (const chunk of stream) {
-        let toolCalls:
-          | Array<{ toolName: string; arguments: Record<string, unknown> }>
-          | undefined = undefined;
-
-        // Extract tool calls from AI response on final chunk
-        if (chunk.done && chunk.structured?.toolCalls) {
-          toolCalls = chunk.structured.toolCalls;
-
-          // Execute dynamic tool calls
-          if (toolCalls.length > 0) {
-            logger.debug(
-              `[Agent] Executing ${toolCalls.length} dynamic tool calls`
-            );
-
-            for (const toolCall of toolCalls) {
-              const tool = this.findAvailableTool(
-                toolCall.toolName,
-                selectedRoute
-              );
-              if (!tool) {
-                logger.warn(`[Agent] Tool not found: ${toolCall.toolName}`);
-                continue;
-              }
-
-              const toolExecutor = new ToolExecutor<TContext, TData>();
-              const result = await toolExecutor.executeTool({
-                tool: tool,
-                context: effectiveContext,
-                updateContext: this.updateContext.bind(this),
-                updateData: this.updateCollectedData.bind(this),
-                history,
-                data: session.data,
-                toolArguments: toolCall.arguments,
-              });
-
-              // Update context with tool results
-              if (result.contextUpdate) {
-                await this.updateContext(
-                  result.contextUpdate as Partial<TContext>
-                );
-              }
-
-              // Update collected data with tool results
-              if (result.dataUpdate) {
-                session = await this.updateData(session, result.dataUpdate as Partial<TData>);
-                logger.debug(
-                  `[Agent] Tool updated collected data:`,
-                  result.dataUpdate
-                );
-              }
-
-              logger.debug(
-                `[Agent] Executed dynamic tool: ${result.toolName} (success: ${result.success})`
-              );
-            }
-          }
-        }
-
-        // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution (streaming)
-        const MAX_TOOL_LOOPS = 5;
-        let toolLoopCount = 0;
-        let hasToolCalls = toolCalls && toolCalls.length > 0;
-
-        while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
-          toolLoopCount++;
-          logger.debug(
-            `[Agent] Starting streaming tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS}`
-          );
-
-          // Add tool execution results to history so AI knows what happened
-          const toolResultsEvents: Event[] = [];
-          for (const toolCall of toolCalls || []) {
-            const tool = this.findAvailableTool(
-              toolCall.toolName,
-              selectedRoute
-            );
-            if (tool) {
-              toolResultsEvents.push({
-                kind: EventKind.TOOL,
-                source: MessageRole.AGENT,
-                timestamp: new Date().toISOString(),
-                data: {
-                  tool_calls: [
-                    {
-                      tool_id: toolCall.toolName,
-                      arguments: toolCall.arguments,
-                      result: {
-                        data: "Tool executed successfully",
-                      },
-                    },
-                  ],
-                },
-              });
-            }
-          }
-
-          // Create updated history with tool results
-          const updatedHistory = [...history, ...toolResultsEvents];
-
-          // Make follow-up streaming AI call to see if more tools are needed
-          const followUpStream = this.options.provider.generateMessageStream({
-            prompt: responsePrompt,
-            history: updatedHistory,
-            context: effectiveContext,
-            tools: availableTools,
-            parameters: {
-              jsonSchema: responseSchema,
-              schemaName: "tool_followup",
-            },
-            signal,
-          });
-
-          let followUpToolCalls:
-            | Array<{ toolName: string; arguments: Record<string, unknown> }>
-            | undefined;
-
-          for await (const followUpChunk of followUpStream) {
-            // Extract tool calls from follow-up stream
-            if (followUpChunk.done && followUpChunk.structured?.toolCalls) {
-              followUpToolCalls = followUpChunk.structured.toolCalls;
-            }
-          }
-
-          hasToolCalls = followUpToolCalls && followUpToolCalls.length > 0;
-
-          if (hasToolCalls) {
-            logger.debug(
-              `[Agent] Follow-up streaming call produced ${followUpToolCalls!.length
-              } additional tool calls`
-            );
-
-            // Execute the follow-up tool calls
-            for (const toolCall of followUpToolCalls!) {
-              const tool = this.findAvailableTool(
-                toolCall.toolName,
-                selectedRoute
-              );
-              if (!tool) {
-                logger.warn(
-                  `[Agent] Tool not found in streaming follow-up: ${toolCall.toolName}`
-                );
-                continue;
-              }
-
-              const toolExecutor = new ToolExecutor<TContext, TData>();
-              const result = await toolExecutor.executeTool({
-                tool: tool,
-                context: effectiveContext,
-                updateContext: this.updateContext.bind(this),
-                updateData: this.updateCollectedData.bind(this),
-                history: updatedHistory,
-                data: session.data,
-                toolArguments: toolCall.arguments,
-              });
-
-              // Update context with follow-up tool results
-              if (result.contextUpdate) {
-                await this.updateContext(
-                  result.contextUpdate as Partial<TContext>
-                );
-              }
-
-              if (result.dataUpdate) {
-                session = await this.updateData(session, result.dataUpdate as Partial<TData>);
-                logger.debug(
-                  `[Agent] Streaming follow-up tool updated collected data:`,
-                  result.dataUpdate
-                );
-              }
-
-              logger.debug(
-                `[Agent] Executed streaming follow-up tool: ${result.toolName} (success: ${result.success})`
-              );
-            }
-
-            // Update toolCalls for next iteration
-            toolCalls = followUpToolCalls;
-          } else {
-            logger.debug(
-              `[Agent] Streaming tool loop completed after ${toolLoopCount} iterations`
-            );
-            // Update toolCalls for final response
-            toolCalls = followUpToolCalls || [];
-            break;
-          }
-        }
-
-        if (toolLoopCount >= MAX_TOOL_LOOPS) {
-          logger.warn(
-            `[Agent] Streaming tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`
-          );
-        }
-
-        // Extract collected data on final chunk
-        if (chunk.done && chunk.structured && nextStep.collect) {
-          const collectedData: Record<string, unknown> = {};
-          // The structured response includes both base fields and collected extraction fields
-          const structuredData = chunk.structured as AgentStructuredResponse &
-            Record<string, unknown>;
-
-          for (const field of nextStep.collect) {
-            const fieldKey = String(field);
-            if (fieldKey in structuredData) {
-              collectedData[fieldKey] = structuredData[fieldKey];
-            }
-          }
-
-          // Merge collected data into session using agent-level data validation
-          if (Object.keys(collectedData).length > 0) {
-            // Update agent-level collected data with validation
-            await this.updateCollectedData(collectedData as Partial<TData>);
-
-            // Update session with validated data
-            session = await this.updateData(session, collectedData as Partial<TData>);
-            logger.debug(`[Agent] Collected data:`, collectedData);
-          }
-        }
-
-        // Extract any additional data from structured response on final chunk
-        if (
-          chunk.done &&
-          chunk.structured &&
-          typeof chunk.structured === "object" &&
-          "contextUpdate" in chunk.structured
-        ) {
-          await this.updateContext(
-            (chunk.structured as { contextUpdate?: Partial<TContext> })
-              .contextUpdate as Partial<TContext>
-          );
-        }
-
-        // Auto-save session step on final chunk
-        if (
-          chunk.done &&
-          this.persistenceManager &&
-          session.id &&
-          this.options.persistence?.autoSave !== false
-        ) {
-          await this.persistenceManager.saveSessionState(session.id, session);
-          logger.debug(
-            `[Agent] Auto-saved session step to persistence: ${session.id}`
-          );
-        }
-
-        // Execute finalize function on final chunk
-        if (chunk.done && session.currentRoute && session.currentStep) {
-          const currentRoute = this.routes.find(
-            (r) => r.id === session.currentRoute?.id
-          );
-          if (currentRoute) {
-            const currentStep = currentRoute.getStep(session.currentStep.id);
-            if (currentStep?.finalize) {
-              logger.debug(
-                `[Agent] Executing finalize for step: ${currentStep.id}`
-              );
-              await this.executePrepareFinalize(
-                currentStep.finalize,
-                effectiveContext,
-                session.data,
-                currentRoute,
-                currentStep
-              );
-            }
-          }
-        }
-
-        // Update current session if we have one
-        if (chunk.done && this.currentSession) {
-          this.currentSession = session;
-        }
-
-        yield {
-          delta: chunk.delta,
-          accumulated: chunk.accumulated,
-          done: chunk.done,
-          session, // Return updated session
-          toolCalls,
-          isRouteComplete,
-          metadata: chunk.metadata,
-          structured: chunk.structured,
-        };
-      }
-    } else if (isRouteComplete && selectedRoute) {
-      // Route is complete - generate completion message then check for onComplete transition
-      const lastUserMessage = getLastMessageFromHistory(history);
-
-      // Get endStep spec from route
-      const endStepSpec = selectedRoute.endStepSpec;
-
-      // Create a temporary step for completion message generation using endStep configuration
-      const completionStep = new Step<TContext, TData>(selectedRoute.id, {
-        description: endStepSpec.description,
-        id: endStepSpec.id || END_ROUTE_ID,
-        collect: endStepSpec.collect,
-        requires: endStepSpec.requires,
-        prompt:
-          endStepSpec.prompt ||
-          "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
-      });
-
-      // Build response schema for completion
-      const responseSchema = this.responseEngine.responseSchemaForRoute(
-        selectedRoute,
-        completionStep,
-        this.schema
-      );
-      const templateContext = {
-        context: effectiveContext,
-        session,
-        history,
-      };
-
-      // Build completion response prompt
-      const completionPrompt = await this.responseEngine.buildResponsePrompt({
-        route: selectedRoute,
-        currentStep: completionStep,
-        rules: selectedRoute.getRules(),
-        prohibitions: selectedRoute.getProhibitions(),
-        directives: undefined, // No directives for completion
-        history,
-        lastMessage: lastUserMessage,
-        agentOptions: this.options,
-        // Combine agent and route properties according to the specified logic
-        combinedGuidelines: [
-          ...this.getGuidelines(),
-          ...selectedRoute.getGuidelines(),
-        ],
-        combinedTerms: this.mergeTerms(
-          this.getTerms(),
-          selectedRoute.getTerms()
-        ),
-        context: effectiveContext,
-        session,
-        agentSchema: this.schema,
-      });
-
-      // Stream completion message using AI provider
-      const stream = this.options.provider.generateMessageStream({
-        prompt: completionPrompt,
-        history,
-        context: effectiveContext,
-        signal,
-        parameters: {
-          jsonSchema: responseSchema,
-          schemaName: "completion_message_stream",
-        },
-      });
-
-      logger.debug(
-        `[Agent] Streaming completion message for route: ${selectedRoute.title}`
-      );
-
-      // Check for onComplete transition
-      const transitionConfig = await selectedRoute.evaluateOnComplete(
-        { data: session.data },
-        effectiveContext
-      );
-
-      if (transitionConfig) {
-        // Find target route by ID or title
-        const targetRoute = this.routes.find(
-          (r) =>
-            r.id === transitionConfig.nextStep ||
-            r.title === transitionConfig.nextStep
-        );
-
-        if (targetRoute) {
-          const renderedCondition = await render(
-            transitionConfig.condition,
-            templateContext
-          );
-          // Set pending transition in session
-          session = {
-            ...session,
-            pendingTransition: {
-              targetRouteId: targetRoute.id,
-              condition: renderedCondition,
-              reason: "route_complete",
-            },
-          };
-          logger.debug(
-            `[Agent] Route ${selectedRoute.title} completed with pending transition to: ${targetRoute.title}`
-          );
-        } else {
-          logger.warn(
-            `[Agent] Route ${selectedRoute.title} completed but target route not found: ${transitionConfig.nextStep}`
-          );
-        }
-      }
-
-      // Set step to END_ROUTE marker
-      session = enterStep(session, END_ROUTE_ID, "Route completed");
-      logger.debug(
-        `[Agent] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`
-      );
-
-      // Stream completion chunks
-      for await (const chunk of stream) {
-        // Update current session if we have one
-        if (chunk.done && this.currentSession) {
-          this.currentSession = session;
-        }
-
-        yield {
-          delta: chunk.delta,
-          accumulated: chunk.accumulated,
-          done: chunk.done,
-          session,
-          toolCalls: undefined,
-          isRouteComplete: true,
-          metadata: chunk.metadata,
-          structured: chunk.structured,
-        };
-      }
-    } else {
-      // Fallback: No routes defined, stream a simple response
-      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
-        history,
-        agentOptions: this.options,
-        terms: this.terms,
-        guidelines: this.guidelines,
-        context: effectiveContext,
-        session,
-      });
-
-      const stream = this.options.provider.generateMessageStream({
-        prompt: fallbackPrompt,
-        history,
-        context: effectiveContext,
-        signal,
-        parameters: {
-          jsonSchema: {
-            type: "object",
-            properties: {
-              message: { type: "string" },
-            },
-            required: ["message"],
-            additionalProperties: false,
-          },
-          schemaName: "fallback_stream_response",
-        },
-      });
-
-      for await (const chunk of stream) {
-        // Update current session if we have one
-        if (chunk.done && this.currentSession) {
-          this.currentSession = session;
-        }
-
-        yield {
-          delta: chunk.delta,
-          accumulated: chunk.accumulated,
-          done: chunk.done,
-          session, // Return updated session
-          toolCalls: undefined,
-          isRouteComplete: false,
-          metadata: chunk.metadata,
-          structured: chunk.structured,
-        };
-      }
-    }
+  async *respondStream(params: RespondParams<TContext, TData>): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+    // Delegate to ResponseModal
+    yield* this.responseModal.respondStream(params);
   }
 
   /**
    * Generate a response based on history and context
    */
-  async respond(params: {
-    history: History;
-    step?: StepRef;
-    session?: SessionState<TData>;
-    contextOverride?: Partial<TContext>;
-    signal?: AbortSignal;
-  }): Promise<AgentResponse<TData>> {
-    const { history: simpleHistory, contextOverride, signal } = params;
-    const history = normalizeHistory(simpleHistory);
-
-    // Get current context (may fetch from provider)
-    let currentContext = await this.getContext();
-
-    // Call beforeRespond hook if configured
-    if (this.options.hooks?.beforeRespond && currentContext !== undefined) {
-      currentContext = await this.options.hooks.beforeRespond(currentContext);
-      // Update stored context with the result from beforeRespond
-      this.context = currentContext;
-    }
-
-    // Merge context with override
-    const effectiveContext = {
-      ...(currentContext as Record<string, unknown>),
-      ...(contextOverride as Record<string, unknown>),
-    } as TContext;
-
-    // Initialize or get session (use current session if available)
-    let session =
-      cloneDeep(params.session) ||
-      cloneDeep(this.currentSession) ||
-      (await this.session.getOrCreate());
-
-    // Merge agent's collected data into session (agent data takes precedence)
-    if (Object.keys(this.collectedData).length > 0) {
-      session = mergeCollected(session, this.collectedData);
-      logger.debug("[Agent] Merged agent collected data into session:", this.collectedData);
-    }
-
-    // PHASE 1: PREPARE - Execute prepare function if current step has one
-    if (session.currentRoute && session.currentStep) {
-      const currentRoute = this.routes.find(
-        (r) => r.id === session.currentRoute?.id
-      );
-      if (currentRoute) {
-        const currentStep = currentRoute.getStep(session.currentStep.id);
-        if (currentStep?.prepare) {
-          logger.debug(`[Agent] Executing prepare for step: ${currentStep.id}`);
-          await this.executePrepareFinalize(
-            currentStep.prepare,
-            effectiveContext,
-            session.data,
-            currentRoute,
-            currentStep
-          );
-        }
-      }
-    }
-
-    // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use (combined)
-    let selectedRoute: Route<TContext, TData> | undefined;
-    let responseDirectives: string[] | undefined;
-    let selectedStep: Step<TContext, TData> | undefined;
-    let isRouteComplete = false;
-
-    // Check for pending transition from previous route completion
-    if (session.pendingTransition) {
-      const targetRoute = this.routes.find(
-        (r) => r.id === session.pendingTransition?.targetRouteId
-      );
-
-      if (targetRoute) {
-        logger.debug(
-          `[Agent] Auto-transitioning from pending transition to route: ${targetRoute.title}`
-        );
-        // Clear pending transition and enter new route
-        session = {
-          ...session,
-          pendingTransition: undefined,
-        };
-        session = enterRoute(session, targetRoute.id, targetRoute.title);
-
-        // Merge initial data if available
-        if (targetRoute.initialData) {
-          session = mergeCollected(session, targetRoute.initialData);
-        }
-
-        selectedRoute = targetRoute;
-      } else {
-        logger.warn(
-          `[Agent] Pending transition target route not found: ${session.pendingTransition.targetRouteId}`
-        );
-        // Clear invalid transition
-        session = {
-          ...session,
-          pendingTransition: undefined,
-        };
-      }
-    }
-
-    // If no pending transition or transition handled, do normal routing
-    if (this.routes.length > 0 && !selectedRoute) {
-      const orchestration = await this.routingEngine.decideRouteAndStep({
-        routes: this.routes,
-        session,
-        history,
-        agentOptions: this.options,
-        provider: this.options.provider,
-        context: effectiveContext,
-        signal,
-      });
-
-      selectedRoute = orchestration.selectedRoute;
-      selectedStep = orchestration.selectedStep;
-      responseDirectives = orchestration.responseDirectives;
-      session = orchestration.session;
-      isRouteComplete = orchestration.isRouteComplete || false;
-
-      // Log if route is complete
-      if (isRouteComplete) {
-        logger.debug(
-          `[Agent] Route complete: all required data collected, END_ROUTE reached`
-        );
-      }
-    }
-
-    // PHASE 3: DETERMINE NEXT STEP - Use step from combined decision or get initial step
-    let message: string;
-    let toolCalls:
-      | Array<{ toolName: string; arguments: Record<string, unknown> }>
-      | undefined = undefined;
-    let responsePrompt: string;
-    let availableTools: Array<{
-      id: string;
-      name: string;
-      description?: string;
-      parameters?: unknown;
-    }> = [];
-    let responseSchema: StructuredSchema | undefined;
-    let nextStep: Step<TContext, TData> | undefined;
-
-    // Get last user message (needed for both route and completion handling)
-    const lastUserMessage = getLastMessageFromHistory(history);
-
-    if (selectedRoute && !isRouteComplete) {
-      // If we have a selected step from the combined routing decision, use it
-      if (selectedStep) {
-        nextStep = selectedStep;
-      } else {
-        // New route or no step selected - get initial step or first valid step
-        const candidates = this.routingEngine.getCandidateSteps(
-          selectedRoute,
-          undefined,
-          session.data || {}
-        );
-        if (candidates.length > 0) {
-          nextStep = candidates[0].step;
-          logger.debug(
-            `[Agent] Using first valid step: ${nextStep.id} for new route`
-          );
-        } else {
-          // Fallback to initial step even if it should be skipped
-          nextStep = selectedRoute.initialStep;
-          logger.warn(
-            `[Agent] No valid steps found, using initial step: ${nextStep.id}`
-          );
-        }
-      }
-
-      // Update session with next step
-      session = enterStep(session, nextStep.id, nextStep.description);
-      logger.debug(`[Agent] Entered step: ${nextStep.id}`);
-
-      // PHASE 4: RESPONSE GENERATION - Generate message using selected route and step
-      // Get last user message
-      const lastUserMessage = getLastMessageFromHistory(history);
-
-      // Build response schema for this route (with collect fields from step)
-      responseSchema = this.responseEngine.responseSchemaForRoute(
-        selectedRoute,
-        nextStep,
-        this.schema
-      );
-
-      // Build response prompt
-      responsePrompt = await this.responseEngine.buildResponsePrompt({
-        route: selectedRoute,
-        currentStep: nextStep,
-        rules: selectedRoute.getRules(),
-        prohibitions: selectedRoute.getProhibitions(),
-        directives: responseDirectives,
-        history,
-        lastMessage: lastUserMessage,
-        agentOptions: this.options,
-        // Combine agent and route properties according to the specified logic
-        combinedGuidelines: [
-          ...this.getGuidelines(),
-          ...selectedRoute.getGuidelines(),
-        ],
-        combinedTerms: this.mergeTerms(
-          this.getTerms(),
-          selectedRoute.getTerms()
-        ),
-        context: effectiveContext,
-        session,
-        agentSchema: this.schema,
-      });
-
-      // Collect available tools for AI
-      availableTools = this.collectAvailableTools(
-        selectedRoute,
-        nextStep
-      );
-    } else {
-      // No route selected - generate basic response without route context
-      logger.debug(`[Agent] No route selected, generating basic response`);
-
-      // Build basic response prompt without route context
-      responsePrompt = await this.responseEngine.buildFallbackPrompt({
-        history,
-        agentOptions: this.options,
-        terms: this.getTerms(),
-        guidelines: this.getGuidelines(),
-        context: effectiveContext,
-        session,
-      });
-
-      // Use agent-level tools only
-      availableTools = this.collectAvailableTools();
-      responseSchema = undefined;
-    }
-
-    // Generate message using AI provider (common for both route and no-route cases)
-    const result = await this.options.provider.generateMessage({
-      prompt: responsePrompt,
-      history,
-      context: effectiveContext,
-      tools: availableTools,
-      signal,
-      parameters: responseSchema
-        ? {
-          jsonSchema: responseSchema,
-          schemaName: "response_output",
-        }
-        : undefined,
-    });
-
-    message = result.structured?.message || result.message;
-
-    // Process dynamic tool calls from AI response (common for both route and no-route cases)
-    if (result.structured?.toolCalls) {
-      toolCalls = result.structured.toolCalls;
-
-      // Execute dynamic tool calls
-      if (toolCalls.length > 0) {
-        logger.debug(
-          `[Agent] Executing ${toolCalls.length} dynamic tool calls`
-        );
-
-        for (const toolCall of toolCalls) {
-          const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
-          if (!tool) {
-            logger.warn(`[Agent] Tool not found: ${toolCall.toolName}`);
-            continue;
-          }
-
-          const toolExecutor = new ToolExecutor<TContext, TData>();
-          const toolResult = await toolExecutor.executeTool({
-            tool: tool,
-            context: effectiveContext,
-            updateContext: this.updateContext.bind(this),
-            updateData: this.updateCollectedData.bind(this),
-            history,
-            data: session.data,
-            toolArguments: toolCall.arguments,
-          });
-
-          // Update context with tool results
-          if (toolResult.contextUpdate) {
-            await this.updateContext(
-              toolResult.contextUpdate as Partial<TContext>
-            );
-          }
-
-          // Update collected data with tool results
-          if (toolResult.dataUpdate) {
-            session = await this.updateData(session, toolResult.dataUpdate as Partial<TData>);
-            logger.debug(
-              `[Agent] Tool updated collected data:`,
-              toolResult.dataUpdate
-            );
-          }
-
-          logger.debug(
-            `[Agent] Executed dynamic tool: ${toolResult.toolName} (success: ${toolResult.success})`
-          );
-        }
-      }
-    }
-
-    // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution
-    const MAX_TOOL_LOOPS = 5;
-    let toolLoopCount = 0;
-    let hasToolCalls = toolCalls && toolCalls.length > 0;
-
-    while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
-      toolLoopCount++;
-      logger.debug(
-        `[Agent] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS}`
-      );
-
-      // Add tool execution results to history so AI knows what happened
-      const toolResultsEvents: Event[] = [];
-      for (const toolCall of toolCalls || []) {
-        const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
-        if (tool) {
-          toolResultsEvents.push({
-            kind: EventKind.TOOL,
-            source: MessageRole.AGENT,
-            timestamp: new Date().toISOString(),
-            data: {
-              tool_calls: [
-                {
-                  tool_id: toolCall.toolName,
-                  arguments: toolCall.arguments,
-                  result: {
-                    data: "Tool executed successfully",
-                  },
-                },
-              ],
-            },
-          });
-        }
-      }
-
-      // Create updated history with tool results
-      const updatedHistory = [...history, ...toolResultsEvents];
-
-      // Make follow-up AI call to see if more tools are needed
-      const followUpResult = await this.options.provider.generateMessage({
-        prompt: responsePrompt,
-        history: updatedHistory,
-        context: effectiveContext,
-        tools: availableTools,
-        parameters: {
-          jsonSchema: responseSchema as StructuredSchema,
-          schemaName: "tool_followup",
-        },
-        signal,
-      });
-
-      // Check if follow-up call has more tool calls
-      const followUpToolCalls = followUpResult.structured?.toolCalls;
-      hasToolCalls = followUpToolCalls && followUpToolCalls.length > 0;
-
-      if (hasToolCalls) {
-        logger.debug(
-          `[Agent] Follow-up call produced ${followUpToolCalls!.length
-          } additional tool calls`
-        );
-
-        // Execute the follow-up tool calls
-        for (const toolCall of followUpToolCalls!) {
-          const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
-          if (!tool) {
-            logger.warn(
-              `[Agent] Tool not found in follow-up: ${toolCall.toolName}`
-            );
-            continue;
-          }
-
-          const toolExecutor = new ToolExecutor<TContext, TData>();
-          const toolResult = await toolExecutor.executeTool({
-            tool: tool,
-            context: effectiveContext,
-            updateContext: this.updateContext.bind(this),
-            updateData: this.updateCollectedData.bind(this),
-            history: updatedHistory,
-            data: session.data,
-            toolArguments: toolCall.arguments,
-          });
-
-          // Update context with follow-up tool results
-          if (toolResult.contextUpdate) {
-            await this.updateContext(
-              toolResult.contextUpdate as Partial<TContext>
-            );
-          }
-
-          if (toolResult.dataUpdate) {
-            session = await this.updateData(session, toolResult.dataUpdate as Partial<TData>);
-            logger.debug(
-              `[Agent] Follow-up tool updated collected data:`,
-              toolResult.dataUpdate
-            );
-          }
-
-          logger.debug(
-            `[Agent] Executed follow-up tool: ${toolResult.toolName} (success: ${toolResult.success})`
-          );
-        }
-
-        // Update toolCalls for next iteration or final response
-        toolCalls = followUpToolCalls;
-      } else {
-        logger.debug(
-          `[Agent] Tool loop completed after ${toolLoopCount} iterations`
-        );
-        // Update final message and toolCalls from follow-up result if no more tools
-        message = followUpResult.structured?.message || followUpResult.message;
-        toolCalls = followUpToolCalls || [];
-        break;
-      }
-    }
-
-    if (toolLoopCount >= MAX_TOOL_LOOPS) {
-      logger.warn(
-        `[Agent] Tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`
-      );
-    }
-
-    // Extract collected data from final response (only for route-based interactions)
-    if (selectedRoute && result.structured && nextStep?.collect) {
-      const collectedData: Record<string, unknown> = {};
-      // The structured response includes both base fields and collected extraction fields
-      const structuredData = result.structured as AgentStructuredResponse &
-        Record<string, unknown>;
-
-      for (const field of nextStep.collect) {
-        const fieldKey = String(field);
-        if (fieldKey in structuredData) {
-          collectedData[fieldKey] = structuredData[fieldKey];
-        }
-      }
-
-      // Merge collected data into session using agent-level data validation
-      if (Object.keys(collectedData).length > 0) {
-        // Update agent-level collected data with validation
-        await this.updateCollectedData(collectedData as Partial<TData>);
-
-        // Update session with validated data
-        session = await this.updateData(session, collectedData as Partial<TData>);
-        logger.debug(`[Agent] Collected data:`, collectedData);
-      }
-    }
-
-    // Extract any additional data from structured response
-    if (
-      result.structured &&
-      typeof result.structured === "object" &&
-      "contextUpdate" in result.structured
-    ) {
-      await this.updateContext(
-        (result.structured as { contextUpdate?: Partial<TContext> })
-          .contextUpdate as Partial<TContext>
-      );
-    }
-
-    // Handle route completion if route is complete
-    if (isRouteComplete) {
-      // Route is complete - generate completion message then check for onComplete transition
-
-      // Get endStep spec from route
-      const endStepSpec = selectedRoute!.endStepSpec;
-
-      // Create a temporary step for completion message generation using endStep configuration
-      const completionStep = new Step<TContext, TData>(selectedRoute!.id, {
-        description: endStepSpec.description,
-        id: endStepSpec.id || END_ROUTE_ID,
-        collect: endStepSpec.collect,
-        requires: endStepSpec.requires,
-        prompt:
-          endStepSpec.prompt ||
-          "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
-      });
-
-      if (!selectedRoute) {
-        throw new Error("Selected route is not defined");
-      }
-
-      // Build response schema for completion
-      const responseSchema = this.responseEngine.responseSchemaForRoute(
-        selectedRoute,
-        completionStep,
-        this.schema
-      );
-      const templateContext = {
-        context: effectiveContext,
-        session,
-        history,
-      };
-
-      // Build completion response prompt
-      const completionPrompt = await this.responseEngine.buildResponsePrompt({
-        route: selectedRoute,
-        currentStep: completionStep,
-        rules: selectedRoute.getRules(),
-        prohibitions: selectedRoute.getProhibitions(),
-        directives: undefined, // No directives for completion
-        history,
-        lastMessage: lastUserMessage,
-        agentOptions: this.options,
-        // Combine agent and route properties according to the specified logic
-        combinedGuidelines: [
-          ...this.getGuidelines(),
-          ...selectedRoute.getGuidelines(),
-        ],
-        combinedTerms: this.mergeTerms(
-          this.getTerms(),
-          selectedRoute.getTerms()
-        ),
-        context: effectiveContext,
-        session,
-        agentSchema: this.schema,
-      });
-
-      // Generate completion message using AI provider
-      const completionResult = await this.options.provider.generateMessage({
-        prompt: completionPrompt,
-        history,
-        context: effectiveContext,
-        signal,
-        parameters: {
-          jsonSchema: responseSchema,
-          schemaName: "completion_message",
-        },
-      });
-
-      message =
-        completionResult.structured?.message || completionResult.message;
-      logger.debug(
-        `[Agent] Generated completion message for route: ${selectedRoute.title}`
-      );
-
-      // Check for onComplete transition
-      const transitionConfig = await selectedRoute.evaluateOnComplete(
-        { data: session.data },
-        effectiveContext
-      );
-
-      if (transitionConfig) {
-        // Find target route by ID or title
-        const targetRoute = this.routes.find(
-          (r) =>
-            r.id === transitionConfig.nextStep ||
-            r.title === transitionConfig.nextStep
-        );
-
-        if (targetRoute) {
-          const renderedCondition = await render(
-            transitionConfig.condition,
-            templateContext
-          );
-          // Set pending transition in session
-          session = {
-            ...session,
-            pendingTransition: {
-              targetRouteId: targetRoute.id,
-              condition: renderedCondition,
-              reason: "route_complete",
-            },
-          };
-          logger.debug(
-            `[Agent] Route ${selectedRoute.title} completed with pending transition to: ${targetRoute.title}`
-          );
-        } else {
-          logger.warn(
-            `[Agent] Route ${selectedRoute.title} completed but target route not found: ${transitionConfig.nextStep}`
-          );
-        }
-      }
-
-      // Set step to END_ROUTE marker
-      session = enterStep(session, END_ROUTE_ID, "Route completed");
-      logger.debug(
-        `[Agent] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`
-      );
-    } else {
-      // Fallback: No routes defined, generate a simple response
-      const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
-        history,
-        agentOptions: this.options,
-        terms: this.terms,
-        guidelines: this.guidelines,
-        context: effectiveContext,
-        session,
-      });
-
-      const result = await this.options.provider.generateMessage({
-        prompt: fallbackPrompt,
-        history,
-        context: effectiveContext,
-        signal,
-        parameters: {
-          jsonSchema: {
-            type: "object",
-            properties: {
-              message: { type: "string" },
-            },
-            required: ["message"],
-            additionalProperties: false,
-          },
-          schemaName: "fallback_response",
-        },
-      });
-
-      message = result.structured?.message || result.message;
-    }
-
-    // Auto-save session step to persistence if configured
-    if (
-      this.persistenceManager &&
-      session.id &&
-      this.options.persistence?.autoSave !== false
-    ) {
-      await this.persistenceManager.saveSessionState(session.id, session);
-      logger.debug(
-        `[Agent] Auto-saved session step to persistence: ${session.id}`
-      );
-    }
-
-    // Execute finalize function
-    if (session.currentRoute && session.currentStep) {
-      const currentRoute = this.routes.find(
-        (r) => r.id === session.currentRoute?.id
-      );
-      if (currentRoute) {
-        const currentStep = currentRoute.getStep(session.currentStep.id);
-        if (currentStep?.finalize) {
-          logger.debug(
-            `[Agent] Executing finalize for step: ${currentStep.id}`
-          );
-          await this.executePrepareFinalize(
-            currentStep.finalize,
-            effectiveContext,
-            session.data,
-            currentRoute,
-            currentStep
-          );
-        }
-      }
-    }
-
-    // Update current session if we have one
-    if (this.currentSession) {
-      this.currentSession = session;
-    }
-
-    return {
-      message,
-      session, // Return updated session with route/step info
-      toolCalls,
-      isRouteComplete, // Indicates if the route has reached END_ROUTE with all data collected
-    };
+  async respond(params: RespondParams<TContext, TData>): Promise<AgentResponse<TData>> {
+    // Delegate to ResponseModal
+    return this.responseModal.respond(params);
   }
 
   /**
@@ -1827,6 +563,32 @@ export class Agent<TContext = any, TData = any> {
   getRoutes(): Route<TContext, TData>[] {
     return [...this.routes];
   }
+
+  /**
+   * Get agent options
+   * @internal Used by ResponseModal
+   */
+  getAgentOptions(): AgentOptions<TContext, TData> {
+    return this.options;
+  }
+
+  /**
+   * Get routing engine
+   * @internal Used by ResponseModal
+   */
+  getRoutingEngine(): RoutingEngine<TContext, TData> {
+    return this.routingEngine;
+  }
+
+  /**
+   * Get the updateData method bound to this agent
+   * @internal Used by ResponseModal
+   */
+  getUpdateDataMethod(): (session: SessionState<TData>, dataUpdate: Partial<TData>) => Promise<SessionState<TData>> {
+    return this.updateData.bind(this);
+  }
+
+
 
   /**
    * Get all terms
@@ -1842,114 +604,62 @@ export class Agent<TContext = any, TData = any> {
     return [...this.tools];
   }
 
-  /**
-   * Find an available tool by name for the given route
-   * Route-level tools take precedence over agent-level tools
-   * @private
-   */
-  private findAvailableTool(
-    toolName: string,
-    route?: Route<TContext, TData>
-  ): Tool<TContext, TData, unknown[], unknown> | undefined {
-    // Check route-level tools first (if route provided)
-    if (route) {
-      const routeTool = route
-        .getTools()
-        .find((tool) => tool.id === toolName || tool.name === toolName);
-      if (routeTool) return routeTool;
-    }
 
-    // Fall back to agent-level tools
-    return this.tools.find(
-      (tool) => tool.id === toolName || tool.name === toolName
-    );
+
+
+
+
+
+  /**
+   * Get all guidelines
+   */
+  getGuidelines(): Guideline<TContext, TData>[] {
+    return [...this.guidelines];
   }
 
   /**
-   * Collect all available tools for the given route and step context
-   * @private
+   * Get the agent's knowledge base
    */
-  private collectAvailableTools(
-    route?: Route<TContext, TData>,
-    step?: Step<TContext, TData>
-  ): Array<{
-    id: string;
-    name: string;
-    description?: string;
-    parameters?: unknown;
-  }> {
-    const availableTools = new Map<
-      string,
-      Tool<TContext, TData, unknown[], unknown>
-    >();
+  getKnowledgeBase(): Record<string, unknown> {
+    return { ...this.knowledgeBase };
+  }
 
-    // Add agent-level tools
-    this.tools.forEach((tool) => {
-      availableTools.set(tool.id, tool);
-    });
 
-    // Add route-level tools (these take precedence)
-    if (route) {
-      route.getTools().forEach((tool) => {
-        availableTools.set(tool.id, tool);
-      });
-    }
 
-    // Filter by step-level allowed tools if specified
-    if (step?.tools) {
-      const allowedToolIds = new Set<string>();
-      const stepTools: Tool<TContext, TData, unknown[], unknown>[] = [];
+  /**
+   * Get the persistence manager (if configured)
+   */
+  getPersistenceManager(): PersistenceManager<TData> | undefined {
+    return this.persistenceManager;
+  }
 
-      for (const toolRef of step.tools) {
-        if (typeof toolRef === "string") {
-          // Reference to registered tool
-          allowedToolIds.add(toolRef);
-        } else {
-          // Inline tool definition
-          if (toolRef.id) {
-            allowedToolIds.add(toolRef.id);
-            stepTools.push(toolRef);
-          }
-        }
-      }
+  /**
+   * Check if persistence is enabled
+   */
+  hasPersistence(): boolean {
+    return this.persistenceManager !== undefined;
+  }
 
-      // If step specifies tools, only include those
-      if (allowedToolIds.size > 0) {
-        const filteredTools = new Map<
-          string,
-          Tool<TContext, TData, unknown[], unknown>
-        >();
-        for (const toolId of allowedToolIds) {
-          const tool = availableTools.get(toolId);
-          if (tool) {
-            filteredTools.set(toolId, tool);
-          }
-        }
-        // Add inline tools
-        stepTools.forEach((tool) => {
-          if (tool.id) {
-            filteredTools.set(tool.id, tool);
-          }
-        });
-        availableTools.clear();
-        filteredTools.forEach((tool, id) => availableTools.set(id, tool));
-      }
-    }
+  /**
+   * Set the current session for convenience methods
+   * @param session - Session step to use for subsequent calls
+   */
+  setCurrentSession(session: SessionState): void {
+    this.currentSession = session;
+  }
 
-    // Convert to the format expected by AI providers
-    return Array.from(availableTools.values()).map((tool) => ({
-      id: tool.id,
-      name: tool.name || tool.id,
-      description: tool.description,
-      parameters: tool.parameters,
-    }));
+  /**
+   * Get the current session (if set)
+   */
+  getCurrentSession(): SessionState | undefined {
+    return this.currentSession;
   }
 
   /**
    * Execute a prepare or finalize function/tool
-   * @private
+   * @internal Used by ResponseModal
    */
-  private async executePrepareFinalize(
+  async executePrepareFinalize(
     prepareOrFinalize:
       | string
       | Tool<TContext, TData, unknown[], unknown>
@@ -1971,10 +681,7 @@ export class Agent<TContext = any, TData = any> {
 
       if (typeof prepareOrFinalize === "string") {
         // Tool ID - find it in available tools
-        const availableTools = new Map<
-          string,
-          Tool<TContext, TData, unknown[], unknown>
-        >();
+        const availableTools = new Map<string, Tool<TContext, TData, unknown[], unknown>>();
 
         // Add agent-level tools
         this.tools.forEach((t) => {
@@ -2031,76 +738,6 @@ export class Agent<TContext = any, TData = any> {
         );
       }
     }
-  }
-
-  /**
-   * Get all guidelines
-   */
-  getGuidelines(): Guideline<TContext, TData>[] {
-    return [...this.guidelines];
-  }
-
-  /**
-   * Get the agent's knowledge base
-   */
-  getKnowledgeBase(): Record<string, unknown> {
-    return { ...this.knowledgeBase };
-  }
-
-  /**
-   * Merge terms with route-specific taking precedence on conflicts
-   * @private
-   */
-  private mergeTerms(
-    agentTerms: Term<TContext, TData>[],
-    routeTerms: Term<TContext, TData>[]
-  ): Term<TContext, TData>[] {
-    const merged = new Map<string, Term<TContext, TData>>();
-
-    // Add agent terms first
-    agentTerms.forEach((term) => {
-      const name =
-        typeof term.name === "string" ? term.name : term.name.toString();
-      merged.set(name, term);
-    });
-
-    // Add route terms (these take precedence)
-    routeTerms.forEach((term) => {
-      const name =
-        typeof term.name === "string" ? term.name : term.name.toString();
-      merged.set(name, term);
-    });
-
-    return Array.from(merged.values());
-  }
-
-  /**
-   * Get the persistence manager (if configured)
-   */
-  getPersistenceManager(): PersistenceManager<TData> | undefined {
-    return this.persistenceManager;
-  }
-
-  /**
-   * Check if persistence is enabled
-   */
-  hasPersistence(): boolean {
-    return this.persistenceManager !== undefined;
-  }
-
-  /**
-   * Set the current session for convenience methods
-   * @param session - Session step to use for subsequent calls
-   */
-  setCurrentSession(session: SessionState): void {
-    this.currentSession = session;
-  }
-
-  /**
-   * Get the current session (if set)
-   */
-  getCurrentSession(): SessionState | undefined {
-    return this.currentSession;
   }
 
   /**
@@ -2205,53 +842,25 @@ export class Agent<TContext = any, TData = any> {
    */
   async chat(
     message?: string,
-    options?: {
-      history?: History; // Optional: override session history for this response
-      contextOverride?: Partial<TContext>;
-      signal?: AbortSignal;
-    }
+    options?: GenerateOptions<TContext>
   ): Promise<AgentResponse<TData>> {
-    // Determine which history to use
-    let history: History;
-    if (options?.history) {
-      // Use provided history for this response only
-      history = options.history;
-    } else {
-      // Add user message to session history if provided
-      if (message) {
-        await this.session.addMessage("user", message);
-      }
-      history = this.session.getHistory();
-    }
+    // Delegate to ResponseModal.generate()
+    return this.responseModal.generate(message, options);
+  }
 
-    // Get or create session
-    let session = await this.session.getOrCreate();
-
-    // Merge agent's collected data into session (agent data takes precedence)
-    if (Object.keys(this.collectedData).length > 0) {
-      session = mergeCollected(session, this.collectedData);
-      // Update the session manager with the merged data
-      await this.session.setData(this.collectedData);
-      logger.debug("[Agent] Merged agent collected data into chat session:", this.collectedData);
-    }
-
-    // Use existing respond method with session-managed history
-    const result = await this.respond({
-      history,
-      session,
+  /**
+   * Modern streaming API - simple interface like chat() but returns a stream
+   * Automatically manages conversation history through the session
+   */
+  async *stream(
+    message?: string,
+    options?: StreamOptions<TContext>
+  ): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+    // Delegate to ResponseModal with the same options structure as chat()
+    yield* this.responseModal.stream(message, {
+      history: options?.history,
       contextOverride: options?.contextOverride,
       signal: options?.signal,
     });
-
-    // Add agent response to session history (only if not using override history)
-    if (!options?.history) {
-      await this.session.addMessage("assistant", result.message);
-    }
-
-    // Ensure the result includes the current session
-    return {
-      ...result,
-      session: result.session || this.session.current,
-    };
   }
 }

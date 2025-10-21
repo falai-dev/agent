@@ -173,6 +173,7 @@ export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
     [key: string]: unknown;
   };
   structured?: AgentStructuredResponse;
+  error?: Error;
 }
 
 /**

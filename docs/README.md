@@ -58,6 +58,7 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 
 - **[Building Agents](./guides/building-agents/)** - Complete agent construction patterns
 - **[Advanced Patterns](./guides/advanced-patterns/)** - Complex use cases & integrations
+- **[Migration Guides](./guides/migration/)** - Upgrade guides for major changes
 - **[API Reference](./api/README.md)** - Complete API documentation
 
 ## 🎯 Quick Links
@@ -93,7 +94,7 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 - **AI Integration**: [Providers](./core/ai-integration/providers.md) | [Prompts](./core/ai-integration/prompt-composition.md) | [Responses](./core/ai-integration/response-processing.md)
 - **Tools & Execution**: [Tool Definition](./core/tools/tool-definition.md) | [Tool Execution](./core/tools/tool-execution.md) | [Tool Scoping](./core/tools/tool-scoping.md)
 - **Persistence**: [Session Storage](./core/persistence/session-storage.md) | [Adapters](./core/persistence/adapters.md)
-- **Advanced**: [Building Agents](./guides/building-agents/) | [Patterns](./guides/advanced-patterns/) | [API Reference](./api/)
+- **Advanced**: [Building Agents](./guides/building-agents/) | [Patterns](./guides/advanced-patterns/) | [Migration](./guides/migration/) | [API Reference](./api/)
 
 ## 💡 Examples by Domain
 

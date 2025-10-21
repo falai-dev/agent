@@ -393,6 +393,26 @@ async function testAgentResponseGeneration() {
     assert(response.toolCalls === undefined, "Tool calls should be undefined");
   });
 
+  await runTest("should delegate respond() to ResponseModal", async () => {
+    const agent = createTestAgent();
+    const session = await agent.session.getOrCreate();
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "Test delegation",
+        name: "TestUser",
+      },
+    ];
+
+    // Test that respond method works (delegation is internal)
+    const response = await agent.respond({ history, session });
+
+    assert(response !== undefined, "Response should be defined");
+    assertEqual(response.message, MOCK_RESPONSES.GREETING, "Response should match mock");
+    assert(response.session !== undefined, "Session should be defined");
+  });
+
   await runTest("should handle provider errors gracefully", async () => {
     const errorProvider = MockProviderFactory.withError("Test error");
     const agent = createTestAgent(errorProvider);
@@ -506,6 +526,76 @@ async function testAgentResponseGeneration() {
     assertEqual(history[2].content, "How are you?", "Third message content should match");
     assertEqual(history[3].role, "assistant", "Fourth message should be from assistant");
   });
+
+  await runTest("should delegate chat() to ResponseModal.generate()", async () => {
+    const agent = createTestAgent();
+
+    // Test that chat method works (delegation is internal)
+    const response = await agent.chat("Test chat delegation");
+
+    assert(response !== undefined, "Response should be defined");
+    assertEqual(response.message, MOCK_RESPONSES.GREETING, "Response should match mock");
+    assert(response.session !== undefined, "Session should be defined");
+
+    // Check that message was added to session history
+    const history = agent.session.getHistory();
+    assert(history.length >= 2, "Should have at least 2 messages in history");
+    assertEqual(history[0].role, "user", "First message should be from user");
+    assertEqual(history[0].content, "Test chat delegation", "User message should match");
+  });
+
+  await runTest("should delegate respondStream() to ResponseModal", async () => {
+    const agent = createTestAgent();
+    const session = await agent.session.getOrCreate();
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "Test streaming delegation",
+        name: "TestUser",
+      },
+    ];
+
+    const chunks: any[] = [];
+    let finalChunk;
+
+    for await (const chunk of agent.respondStream({ history, session })) {
+      chunks.push(chunk);
+      if (chunk.done) {
+        finalChunk = chunk;
+      }
+    }
+
+    assert(chunks.length > 0, "Should receive streaming chunks");
+    assert(finalChunk !== undefined, "Should have final chunk");
+    assert(finalChunk.done === true, "Final chunk should be marked as done");
+    assertEqual(finalChunk.accumulated, MOCK_RESPONSES.GREETING, "Final message should match mock");
+  });
+
+  await runTest("should support new stream() method", async () => {
+    const agent = createTestAgent();
+
+    const chunks: any[] = [];
+    let finalChunk;
+
+    for await (const chunk of agent.stream("Test new stream API")) {
+      chunks.push(chunk);
+      if (chunk.done) {
+        finalChunk = chunk;
+      }
+    }
+
+    assert(chunks.length > 0, "Should receive streaming chunks");
+    assert(finalChunk !== undefined, "Should have final chunk");
+    assert(finalChunk.done === true, "Final chunk should be marked as done");
+    assertEqual(finalChunk.accumulated, MOCK_RESPONSES.GREETING, "Final message should match mock");
+
+    // Check that message was added to session history
+    const history = agent.session.getHistory();
+    assert(history.length >= 2, "Should have at least 2 messages in history");
+    assertEqual(history[0].role, "user", "First message should be from user");
+    assertEqual(history[0].content, "Test new stream API", "User message should match");
+  });
 }
 
 async function testAgentGuidelinesAndTerms() {
@@ -616,6 +706,100 @@ async function testAgentGuidelinesAndTerms() {
       );
     }
   );
+}
+
+async function testAgentBackwardCompatibility() {
+  console.log("=== Agent Backward Compatibility Tests ===");
+
+  await runTest("should maintain backward compatibility for respond()", async () => {
+    const agent = createTestAgent();
+    const session = await agent.session.getOrCreate();
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "Backward compatibility test",
+        name: "TestUser",
+      },
+    ];
+
+    // This should work exactly as before the refactor
+    const response = await agent.respond({ history, session });
+
+    // Verify the response structure matches the original API
+    assert(typeof response === "object", "Response should be an object");
+    assert(typeof response.message === "string", "Response should have message string");
+    assert(response.session !== undefined, "Response should have session");
+    assert(typeof response.isRouteComplete === "boolean", "Response should have isRouteComplete boolean");
+    assertEqual(response.message, MOCK_RESPONSES.GREETING, "Response message should match mock");
+  });
+
+  await runTest("should maintain backward compatibility for respondStream()", async () => {
+    const agent = createTestAgent();
+    const session = await agent.session.getOrCreate();
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "Streaming backward compatibility test",
+        name: "TestUser",
+      },
+    ];
+
+    // This should work exactly as before the refactor
+    const chunks: any = [];
+    let chunkCount = 0;
+    let finalChunk;
+
+    for await (const chunk of agent.respondStream({ history, session })) {
+      chunks.push(chunk);
+      chunkCount++;
+
+      // Verify chunk structure matches original API
+      assert(typeof chunk === "object", "Chunk should be an object");
+      assert(typeof chunk.delta === "string", "Chunk should have delta string");
+      assert(typeof chunk.accumulated === "string", "Chunk should have accumulated string");
+      assert(typeof chunk.done === "boolean", "Chunk should have done boolean");
+      assert(chunk.session !== undefined, "Chunk should have session");
+
+      if (chunk.done) {
+        finalChunk = chunk;
+      }
+    }
+
+    assert(chunkCount > 0, "Should receive at least one chunk");
+    assert(finalChunk !== undefined, "Should have final chunk");
+    assertEqual(finalChunk.accumulated, MOCK_RESPONSES.GREETING, "Final accumulated should match mock");
+  });
+
+  await runTest("should maintain exact method signatures", async () => {
+    const agent = createTestAgent();
+    const session = await agent.session.getOrCreate();
+
+    // Test that all method signatures are preserved
+    assert(typeof agent.respond === "function", "respond should be a function");
+    assert(typeof agent.respondStream === "function", "respondStream should be a function");
+    assert(typeof agent.chat === "function", "chat should be a function");
+    assert(typeof agent.stream === "function", "stream should be a function");
+
+    // Test parameter compatibility
+    const params = {
+      history: [{ role: "user" as const, content: "test", name: "TestUser" }],
+      session,
+      contextOverride: { userId: "test-override" },
+    };
+
+    // These should all work without type errors
+    const response = await agent.respond(params);
+    assert(response !== undefined, "respond should work with full params");
+
+    const streamChunks: any[] = [];
+    for await (const chunk of agent.respondStream(params)) {
+      streamChunks.push(chunk);
+      if (chunk.done) break;
+    }
+    assert(streamChunks.length > 0, "respondStream should work with full params");
+  });
 }
 
 async function testAgentLevelDataCollection() {
@@ -764,6 +948,7 @@ async function runAllAgentTests() {
   try {
     await testAgentCreationAndConfiguration();
     await testAgentResponseGeneration();
+    await testAgentBackwardCompatibility();
     await testAgentGuidelinesAndTerms();
     await testAgentLevelDataCollection();
     console.log("\n🎉 All Agent tests passed!");

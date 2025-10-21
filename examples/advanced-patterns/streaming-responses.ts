@@ -1,9 +1,12 @@
 /**
  * Example: Streaming Responses
- * Updated for v2 architecture with session step management
+ * Updated for ResponseModal architecture with modern streaming APIs
  *
- * This example demonstrates how to use the respondStream method
- * to stream AI responses in real-time for better user experience
+ * This example demonstrates both the new modern stream() API and the legacy
+ * respondStream() method for streaming AI responses in real-time.
+ * 
+ * NEW: The modern stream() API provides automatic session management and
+ * a simpler interface similar to chat() but with streaming.
  */
 
 import {
@@ -22,8 +25,8 @@ interface ConversationContext {
   };
 }
 
-async function streamingWithAnthropic() {
-  console.log("\n🤖 Example 1: Streaming with Anthropic (Claude)\n");
+async function modernStreamingWithAnthropic() {
+  console.log("\n🤖 Example 1: Modern Streaming API with Anthropic (Claude)\n");
 
   // Initialize Anthropic provider
   const provider = new AnthropicProvider({
@@ -56,34 +59,91 @@ async function streamingWithAnthropic() {
     enabled: true,
   });
 
-  // Create conversation history
-  const history = [
-    {
-      role: "user" as const,
-      content: "Explain quantum computing in simple terms.",
-      name: "User",
-    },
-  ];
-
   try {
-    console.log("📤 Streaming response from Claude...\n");
+    console.log("📤 Modern streaming API - automatic session management...\n");
     console.log("Response: ");
 
     // Session is automatically managed by the agent
     console.log("✨ Session ready:", agent.session.id);
 
-    // Add user message to session history
-    await agent.session.addMessage("user", "What's the weather like today?");
-
-    // Use respondStream for real-time streaming with session history
-    let fullMessage = "";
-    for await (const chunk of agent.respondStream({ 
-      history: agent.session.getHistory() 
-    })) {
+    // NEW: Modern stream() API - automatically manages session history
+    for await (const chunk of agent.stream("Explain quantum computing in simple terms.")) {
       // chunk.delta contains the new text
       // chunk.accumulated contains the full text so far
       // chunk.done indicates if this is the final chunk
 
+      if (chunk.delta) {
+        process.stdout.write(chunk.delta);
+      }
+
+      if (chunk.done) {
+        console.log("\n\n✅ Stream complete!");
+        console.log(`\n📊 Metadata:`);
+        console.log(
+          `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
+        );
+        console.log(`   - Data:`, agent.session.getData() || "None");
+        console.log(`   - Tool Calls: ${chunk.toolCalls?.length || 0}`);
+
+        // Session history is automatically updated - no manual management needed!
+        console.log(`   - Session Messages: ${agent.session.getHistory().length}`);
+      }
+    }
+
+    console.log("\n💡 Benefits of modern stream() API:");
+    console.log("   - Automatic session management");
+    console.log("   - Simple interface: agent.stream('message')");
+    console.log("   - No need to manually manage history");
+    console.log("   - Same performance as respondStream()");
+
+  } catch (error) {
+    console.error("❌ Error:", error);
+  }
+}
+
+async function legacyStreamingWithAnthropic() {
+  console.log("\n🤖 Example 2: Legacy Streaming API (respondStream) - Still Supported\n");
+
+  // Initialize Anthropic provider
+  const provider = new AnthropicProvider({
+    apiKey: process.env.ANTHROPIC_API_KEY || "",
+    model: "claude-sonnet-4-5",
+    config: {
+      temperature: 0.7,
+      max_tokens: 1000,
+    },
+  });
+
+  // Create agent
+  const agent = new Agent<ConversationContext, unknown>({
+    name: "LegacyStreamingAssistant",
+    description: "An AI assistant using legacy streaming API",
+    goal: "Demonstrate backward compatibility",
+    context: {
+      userId: "user123",
+      sessionId: "session456-legacy",
+      preferences: {
+        streamingEnabled: true,
+      },
+    },
+    provider: provider,
+  });
+
+  try {
+    console.log("📤 Legacy respondStream API - manual session management...\n");
+    console.log("Response: ");
+
+    // Session is automatically managed by the agent
+    console.log("✨ Session ready:", agent.session.id);
+
+    // Add user message to session history manually
+    await agent.session.addMessage("user", "What's the weather like today?");
+
+    // Legacy respondStream API - requires manual session management
+    let fullMessage = "";
+    for await (const chunk of agent.respondStream({ 
+      history: agent.session.getHistory() 
+    })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
         fullMessage += chunk.delta;
@@ -97,24 +157,30 @@ async function streamingWithAnthropic() {
         );
         console.log(`   - Data:`, agent.session.getData() || "None");
         console.log(`   - Tool Calls: ${chunk.toolCalls?.length || 0}`);
-
-        console.log(`   - Full Message: ${fullMessage}`);
         
-        // Add assistant response to session history
+        // Manual session history management required
         await agent.session.addMessage("assistant", fullMessage);
+        console.log(`   - Session Messages: ${agent.session.getHistory().length}`);
       }
     }
+
+    console.log("\n💡 Legacy respondStream() API characteristics:");
+    console.log("   - Manual session management required");
+    console.log("   - More complex parameter structure");
+    console.log("   - Full backward compatibility maintained");
+    console.log("   - Still fully supported for existing code");
+
   } catch (error) {
     console.error("❌ Error:", error);
   }
 }
 
-async function streamingWithOpenAI() {
-  console.log("\n🤖 Example 2: Streaming with OpenAI\n");
+async function modernStreamingWithOpenAI() {
+  console.log("\n🤖 Example 3: Modern Streaming with OpenAI\n");
 
   const provider = new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY || "",
-    model: "gpt-5",
+    model: "gpt-4",
     config: {
       temperature: 0.8,
     },
@@ -133,26 +199,16 @@ async function streamingWithOpenAI() {
     provider: provider,
   });
 
-  const history = [
-    {
-      role: "user" as const,
-      content: "Write a short poem about TypeScript",
-      name: "User",
-    },
-  ];
-
   try {
-    console.log("📤 Streaming response from OpenAI...\n");
+    console.log("📤 Modern streaming with OpenAI...\n");
     console.log("Response: ");
 
     // Session is automatically managed by the agent
     console.log("✨ Session ready:", agent.session.id);
 
-    // Add user message to session history
-    await agent.session.addMessage("user", "What's the weather like today?");
-
-    for await (const chunk of agent.respondStream({ 
-      history: agent.session.getHistory() 
+    // NEW: Modern stream() API with context override
+    for await (const chunk of agent.stream("Write a short poem about TypeScript", {
+      contextOverride: { preferences: { streamingEnabled: true } }
     })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
@@ -164,9 +220,9 @@ async function streamingWithOpenAI() {
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
         console.log(`   - Data:`, agent.session.getData() || "None");
-
-        // Add assistant response to session history
-        await agent.session.addMessage("assistant", chunk.accumulated || "");
+        
+        // Session automatically updated - no manual work needed!
+        console.log(`   - Session Messages: ${agent.session.getHistory().length}`);
       }
     }
   } catch (error) {
@@ -174,8 +230,8 @@ async function streamingWithOpenAI() {
   }
 }
 
-async function streamingWithGemini() {
-  console.log("\n🤖 Example 3: Streaming with Google Gemini\n");
+async function modernStreamingComparison() {
+  console.log("\n🤖 Example 4: Side-by-Side API Comparison\n");
 
   const provider = new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY || "",
@@ -186,8 +242,8 @@ async function streamingWithGemini() {
   });
 
   const agent = new Agent<ConversationContext, unknown>({
-    name: "AnalyticalAssistant",
-    description: "An analytical AI assistant",
+    name: "ComparisonAssistant",
+    description: "Demonstrates API differences",
     context: {
       userId: "user123",
       sessionId: "session101",
@@ -198,49 +254,73 @@ async function streamingWithGemini() {
     provider: provider,
   });
 
-  const history = [
-    {
-      role: "user" as const,
-      content: "What are the key differences between REST and GraphQL?",
-      name: "User",
-    },
-  ];
+  const userMessage = "What are the key differences between REST and GraphQL?";
 
   try {
-    console.log("📤 Streaming response from Gemini...\n");
+    console.log("📤 Comparing old vs new streaming APIs...\n");
+
+    // ========================================================================
+    // OLD WAY: respondStream() - Manual session management
+    // ========================================================================
+    console.log("🔸 OLD WAY: respondStream() with manual session management");
     console.log("Response: ");
 
-    // Session is automatically managed by the agent
-    console.log("✨ Session ready:", agent.session.id);
-
-    // Add user message to session history
-    await agent.session.addMessage("user", "What are the key differences between REST and GraphQL?");
-
+    // Manual session management
+    await agent.session.addMessage("user", userMessage);
+    
+    let oldWayMessage = "";
     for await (const chunk of agent.respondStream({ 
       history: agent.session.getHistory() 
     })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
+        oldWayMessage += chunk.delta;
       }
 
       if (chunk.done) {
-        console.log("\n\n✅ Stream complete!");
-        console.log(
-          `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
-        );
-        console.log(`   - Data:`, agent.session.getData() || "None");
-
-        // Add assistant response to session history
-        await agent.session.addMessage("assistant", chunk.accumulated || "");
+        // Manual history update required
+        await agent.session.addMessage("assistant", oldWayMessage);
+        console.log("\n   ✅ Manual session update completed");
       }
     }
+
+    console.log("\n" + "=".repeat(60));
+
+    // ========================================================================
+    // NEW WAY: stream() - Automatic session management
+    // ========================================================================
+    console.log("🔸 NEW WAY: stream() with automatic session management");
+    console.log("Response: ");
+
+    // Automatic session management - just pass the message!
+    for await (const chunk of agent.stream("Can you explain that in more detail?")) {
+      if (chunk.delta) {
+        process.stdout.write(chunk.delta);
+      }
+
+      if (chunk.done) {
+        console.log("\n   ✅ Automatic session update - no manual work needed!");
+        console.log(`   📊 Total messages in session: ${agent.session.getHistory().length}`);
+      }
+    }
+
+    console.log("\n💡 Key Differences:");
+    console.log("   OLD: agent.respondStream({ history: agent.session.getHistory() })");
+    console.log("   NEW: agent.stream('message')");
+    console.log("   ");
+    console.log("   OLD: Manual session.addMessage() calls required");
+    console.log("   NEW: Automatic session management");
+    console.log("   ");
+    console.log("   OLD: Complex parameter structure");
+    console.log("   NEW: Simple message + optional options");
+
   } catch (error) {
     console.error("❌ Error:", error);
   }
 }
 
-async function streamingWithRoutes() {
-  console.log("\n🤖 Example 4: Streaming with Routes and Steps\n");
+async function modernStreamingWithRoutes() {
+  console.log("\n🤖 Example 5: Modern Streaming with Routes and Steps\n");
 
   const provider = new AnthropicProvider({
     apiKey: process.env.ANTHROPIC_API_KEY || "",
@@ -327,12 +407,8 @@ async function streamingWithRoutes() {
     // Session is automatically managed by the agent
     console.log("✨ Session ready:", agent.session.id);
 
-    // Add user message to session history
-    await agent.session.addMessage("user", "How do I reset my password?");
-
-    for await (const chunk of agent.respondStream({ 
-      history: agent.session.getHistory() 
-    })) {
+    // NEW: Modern stream() API with routes - automatic session management
+    for await (const chunk of agent.stream("How do I reset my password?")) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
       }
@@ -353,7 +429,7 @@ async function streamingWithRoutes() {
           }
         }
 
-        // Session is automatically updated by the agent
+        // Session is automatically updated by the modern stream() API
       }
     }
   } catch (error) {
@@ -361,8 +437,8 @@ async function streamingWithRoutes() {
   }
 }
 
-async function streamingWithAbortSignal() {
-  console.log("\n🤖 Example 5: Streaming with Abort Control\n");
+async function modernStreamingWithAbortSignal() {
+  console.log("\n🤖 Example 6: Modern Streaming with Abort Control\n");
 
   const provider = new AnthropicProvider({
     apiKey: process.env.ANTHROPIC_API_KEY || "",
@@ -406,11 +482,8 @@ async function streamingWithAbortSignal() {
     // Session is automatically managed by the agent
     console.log("✨ Session ready:", agent.session.id);
 
-    // Add user message to session history
-    await agent.session.addMessage("user", "Tell me a very long story about space exploration.");
-
-    for await (const chunk of agent.respondStream({
-      history: agent.session.getHistory(),
+    // NEW: Modern stream() API with abort signal
+    for await (const chunk of agent.stream("Tell me a very long story about space exploration.", {
       signal: abortController.signal,
     })) {
       if (chunk.delta) {
@@ -425,10 +498,7 @@ async function streamingWithAbortSignal() {
         );
         console.log(`   - Data:`, agent.session.getData() || "None");
 
-        // Add assistant response to session history
-        await agent.session.addMessage("assistant", chunk.accumulated || "");
-
-        // Session is automatically updated by the agent
+        // Session is automatically updated by the modern stream() API - no manual work needed!
 
         clearTimeout(timeout);
       }
@@ -463,11 +533,12 @@ async function main() {
   console.log("=".repeat(60));
 
   const examples = [
-    { name: "Anthropic Streaming", fn: streamingWithAnthropic },
-    { name: "OpenAI Streaming", fn: streamingWithOpenAI },
-    { name: "Gemini Streaming", fn: streamingWithGemini },
-    { name: "Streaming with Routes", fn: streamingWithRoutes },
-    { name: "Streaming with Abort", fn: streamingWithAbortSignal },
+    { name: "Modern Streaming API (Anthropic)", fn: modernStreamingWithAnthropic },
+    { name: "Legacy Streaming API (Anthropic)", fn: legacyStreamingWithAnthropic },
+    { name: "Modern Streaming (OpenAI)", fn: modernStreamingWithOpenAI },
+    { name: "API Comparison (Gemini)", fn: modernStreamingComparison },
+    { name: "Modern Streaming with Routes", fn: modernStreamingWithRoutes },
+    { name: "Modern Streaming with Abort", fn: modernStreamingWithAbortSignal },
   ];
 
   console.log("\nAvailable Examples:");
@@ -477,19 +548,21 @@ async function main() {
 
   console.log("\n💡 Tips:");
   console.log("   - Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY");
+  console.log("   - NEW: Use agent.stream('message') for automatic session management");
+  console.log("   - OLD: agent.respondStream() still supported for backward compatibility");
   console.log("   - Streaming provides real-time responses for better UX");
   console.log("   - Use AbortSignal to cancel long-running streams");
   console.log("   - Access chunk.route and chunk.step for flow information");
 
   console.log("\n" + "=".repeat(60));
 
-  // Run first example if API key is available
+  // Run modern streaming example if API key is available
   if (process.env.ANTHROPIC_API_KEY) {
-    await streamingWithAnthropic();
+    await modernStreamingWithAnthropic();
   } else if (process.env.OPENAI_API_KEY) {
-    await streamingWithOpenAI();
+    await modernStreamingWithOpenAI();
   } else if (process.env.GEMINI_API_KEY) {
-    await streamingWithGemini();
+    await modernStreamingComparison();
   } else {
     console.log(
       "\n⚠️  No API keys found. Set one of the environment variables to run examples."

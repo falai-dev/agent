@@ -78,6 +78,8 @@ Adds a behavioral guideline. Returns `this` for chaining.
 
 Generates an AI response with session step management, tool execution, data extraction, and intelligent routing.
 
+**Note:** This method now delegates to the internal `ResponseModal` class for improved architecture and maintainability.
+
 **Enhanced Response Pipeline:**
 
 1. **Tool Execution** - Execute tools if current step has `tool` (enriches context before AI response)
@@ -454,6 +456,8 @@ See also: [Custom Database Integration Example](../examples/custom-database-pers
 
 Generates an AI response as a real-time stream for better user experience. Provides the same structured output as `respond()` but delivers it incrementally.
 
+**Note:** This method now delegates to the internal `ResponseModal` class for improved architecture and maintainability.
+
 ```typescript
 interface StreamChunk {
   /** The incremental text delta */
@@ -512,6 +516,68 @@ for await (const chunk of agent.respondStream({ history, session })) {
       console.log("Tool calls:", chunk.toolCalls.length);
     }
   }
+}
+```
+
+##### `stream(message?: string, options?: StreamOptions<TContext>): AsyncGenerator<AgentResponseStreamChunk<TData>>`
+
+**NEW:** Modern streaming API that provides a simple interface similar to `chat()` but returns a stream. This is the recommended way to implement streaming responses.
+
+```typescript
+interface StreamOptions<TContext = unknown> {
+  contextOverride?: Partial<TContext>;
+  signal?: AbortSignal;
+  history?: History; // Optional: override session history
+}
+```
+
+**Key Features:**
+
+- 🎯 **Simple Interface**: Just `agent.stream("message")` - no complex parameters
+- 🔄 **Automatic Session Management**: Handles conversation history automatically
+- 🌊 **Real-time Streaming**: Same performance as `respondStream()` but easier to use
+- 🛑 **Cancellable**: Supports AbortSignal for cancellation
+
+**Example:**
+
+```typescript
+// Simple streaming - automatically manages session history
+for await (const chunk of agent.stream("Hello, how are you?")) {
+  if (chunk.delta) {
+    process.stdout.write(chunk.delta);
+  }
+  
+  if (chunk.done) {
+    console.log("\n✅ Stream complete!");
+    // Session history is automatically updated
+  }
+}
+
+// With cancellation
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5000); // Cancel after 5s
+
+for await (const chunk of agent.stream("Tell me a long story", {
+  signal: controller.signal
+})) {
+  process.stdout.write(chunk.delta);
+}
+```
+
+**Migration from `respondStream()`:**
+
+```typescript
+// Old way (still supported)
+for await (const chunk of agent.respondStream({
+  history: agent.session.getHistory(),
+  session: await agent.session.getOrCreate()
+})) {
+  // Handle chunk
+}
+
+// New way (recommended)
+for await (const chunk of agent.stream("Your message")) {
+  // Handle chunk - session management is automatic
 }
 ```
 
@@ -579,6 +645,100 @@ Agent's goal (readonly).
 ##### `identity(): Template<TContext> | undefined`
 
 Agent's identity template (readonly).
+
+---
+
+### `ResponseModal<TContext, TData>`
+
+**NEW:** Internal class that handles all response generation logic for the Agent. This class centralizes response processing, provides unified streaming and non-streaming APIs, and improves maintainability.
+
+**Note:** This class is primarily used internally by the Agent class. Most users should use the Agent's response methods (`respond`, `respondStream`, `stream`, `chat`) rather than accessing ResponseModal directly.
+
+#### Constructor
+
+```typescript
+new ResponseModal<TContext, TData>(
+  agent: Agent<TContext, TData>,
+  options?: ResponseModalOptions
+)
+
+interface ResponseModalOptions {
+  /** Maximum number of tool loops allowed during response generation */
+  maxToolLoops?: number;
+  /** Enable automatic session saving after response generation */
+  enableAutoSave?: boolean;
+  /** Enable debug mode for detailed logging */
+  debugMode?: boolean;
+}
+```
+
+#### Methods
+
+##### `respond(params: RespondParams<TContext, TData>): Promise<AgentResponse<TData>>`
+
+Generates a non-streaming response using unified logic. This method consolidates all response generation logic including routing, tool execution, and data collection.
+
+##### `respondStream(params: RespondParams<TContext, TData>): AsyncGenerator<AgentResponseStreamChunk<TData>>`
+
+Generates a streaming response using unified logic. Provides the same functionality as `respond()` but delivers results incrementally.
+
+##### `stream(message?: string, options?: StreamOptions<TContext>): AsyncGenerator<AgentResponseStreamChunk<TData>>`
+
+Modern streaming API with automatic session management. This is the recommended way to implement streaming responses.
+
+```typescript
+// Simple usage
+for await (const chunk of responseModal.stream("Hello")) {
+  console.log(chunk.delta);
+}
+
+// With options
+for await (const chunk of responseModal.stream("Hello", {
+  contextOverride: { userId: "123" },
+  signal: abortController.signal
+})) {
+  console.log(chunk.delta);
+}
+```
+
+##### `generate(message?: string, options?: GenerateOptions<TContext>): Promise<AgentResponse<TData>>`
+
+Modern non-streaming API equivalent to `chat()` but more explicit. Provides automatic session management for non-streaming responses.
+
+```typescript
+// Simple usage
+const response = await responseModal.generate("Hello");
+console.log(response.message);
+
+// With options
+const response = await responseModal.generate("Hello", {
+  contextOverride: { userId: "123" }
+});
+```
+
+#### Error Handling
+
+ResponseModal includes comprehensive error handling with the `ResponseGenerationError` class:
+
+```typescript
+try {
+  const response = await responseModal.respond(params);
+} catch (error) {
+  if (ResponseGenerationError.isResponseGenerationError(error)) {
+    console.log("Response generation failed:", error.message);
+    console.log("Phase:", error.details?.phase);
+    console.log("Original error:", error.details?.originalError);
+  }
+}
+```
+
+#### Architecture Benefits
+
+- **Separation of Concerns**: Agent focuses on configuration and orchestration, ResponseModal handles response generation
+- **Unified Logic**: Both streaming and non-streaming responses use the same underlying logic
+- **Modern APIs**: Provides simple `stream()` and `generate()` methods alongside legacy compatibility
+- **Error Handling**: Comprehensive error handling with detailed context
+- **Performance**: Optimized response pipeline with minimal duplication
 
 ---
 

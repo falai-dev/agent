@@ -8,6 +8,13 @@
 export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
 export { Step } from "./core/Step";
+export { ResponseModal } from "./core/ResponseModal";
+export type { 
+  ResponseModalOptions, 
+  RespondParams, 
+  StreamOptions, 
+  GenerateOptions 
+} from "./core/ResponseModal";
 export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
 export { SessionManager } from "./core/SessionManager";

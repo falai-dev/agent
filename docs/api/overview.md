@@ -6,6 +6,7 @@ Complete API documentation for `@falai/agent`. This framework provides a strongl
 
 - [Core Classes](#core-classes)
   - [Agent](#agent)
+  - [ResponseModal](#responsemodal)
   - [Route](#route)
   - [Step](#step)
   - [RoutingEngine](#routingengine)
@@ -117,7 +118,20 @@ respondStream(params: {
 }>
 ```
 
-Generates a streaming response with real-time updates.
+Generates a streaming response with real-time updates. **Note:** Now delegates to internal ResponseModal class.
+
+```typescript
+stream(message?: string, options?: StreamOptions<TContext>): AsyncGenerator<AgentResponseStreamChunk<TData>>
+```
+
+**NEW:** Modern streaming API with automatic session management. Recommended for new implementations.
+
+```typescript
+// Simple streaming
+for await (const chunk of agent.stream("Hello")) {
+  console.log(chunk.delta);
+}
+```
 
 ##### Tool Management
 
@@ -165,6 +179,57 @@ Manually transitions to a different route.
 getPersistenceManager(): PersistenceManager | undefined
 hasPersistence(): boolean
 ```
+
+---
+
+### ResponseModal
+
+**NEW:** Internal class that centralizes all response generation logic for improved architecture and maintainability.
+
+#### Constructor
+
+```typescript
+new ResponseModal<TContext = unknown, TData = unknown>(
+  agent: Agent<TContext, TData>,
+  options?: ResponseModalOptions
+)
+```
+
+#### Methods
+
+##### Modern APIs (Recommended)
+
+```typescript
+stream(message?: string, options?: StreamOptions<TContext>): AsyncGenerator<AgentResponseStreamChunk<TData>>
+generate(message?: string, options?: GenerateOptions<TContext>): Promise<AgentResponse<TData>>
+```
+
+Modern streaming and non-streaming APIs with automatic session management.
+
+##### Legacy APIs (Backward Compatible)
+
+```typescript
+respond(params: RespondParams<TContext, TData>): Promise<AgentResponse<TData>>
+respondStream(params: RespondParams<TContext, TData>): AsyncGenerator<AgentResponseStreamChunk<TData>>
+```
+
+Legacy APIs that maintain full backward compatibility with existing code.
+
+##### Error Handling
+
+```typescript
+ResponseGenerationError: Error class for response-specific errors
+```
+
+Comprehensive error handling with detailed context and phase information.
+
+#### Key Features
+
+- **Unified Logic**: Both streaming and non-streaming use the same underlying logic
+- **Modern APIs**: Simple `stream()` and `generate()` methods for new code
+- **Backward Compatibility**: Existing `respond()` and `respondStream()` methods work unchanged
+- **Error Handling**: Detailed error context with phase and original error information
+- **Performance**: Optimized response pipeline with minimal code duplication
 
 ---
 
