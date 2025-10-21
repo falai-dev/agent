@@ -99,7 +99,7 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
   /** Initial guidelines for agent behavior */
   guidelines?: Guideline<TContext, TData>[];
   /** Global tools available to all routes */
-  tools?: Tool<TContext, TData, unknown[], unknown>[];
+  tools?: Tool<TContext, TData, unknown>[];
   /** Initial routes (will be instantiated as Route objects) */
   routes?: RouteOptions<TContext, TData>[];
   /** Optional persistence configuration for auto-saving sessions and messages */

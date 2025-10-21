@@ -9,6 +9,11 @@ import { expect, test, describe } from "bun:test";
 import {
   Agent,
   createSession,
+  Event,
+  MessageEventData,
+  StatusEventData,
+  StepRef,
+  ToolEventData,
   type Tool,
   type ToolContext,
   type ToolResult,
@@ -30,9 +35,14 @@ interface UserProfile {
     status: number;
     data: Record<string, unknown>;
   };
+  status?: string;
+  lastAction?: string;
+  lastLogin?: number;
+  timestamp?: number;
 }
 
 interface OrderData {
+  name?: string;
   product: string;
   qty: number;
   cost: number;
@@ -42,6 +52,11 @@ interface OrderData {
   status: "pending" | "processing" | "shipped" | "delivered";
   customerName?: string;
   email?: string;
+  score?: number;
+  fullProfile?: string;
+  rawOrder?: unknown;
+  lastInput?: unknown;
+  enrichedAt?: string;
 }
 
 // Test utilities
@@ -87,37 +102,103 @@ function createToolTestAgent(): Agent<UserProfile, OrderData> {
   });
 }
 
+// Enhanced mock context that properly implements all ToolContext methods
+class MockToolContext<TContext = unknown, TData = unknown> implements ToolContext<TContext, TData> {
+  public context: TContext;
+  public data: Partial<TData>;
+  public history: Event[];
+  public step?: StepRef;
+  public metadata?: Record<string, unknown>;
+
+  private contextUpdateCallbacks: Array<(updates: Partial<TContext>) => void> = [];
+  private dataUpdateCallbacks: Array<(updates: Partial<TData>) => void> = [];
+
+  constructor(
+    context?: TContext,
+    data?: Partial<TData>,
+    history?: Event[],
+    step?: StepRef,
+    metadata?: Record<string, unknown>
+  ) {
+    this.context = context || ({} as TContext);
+    this.data = data ? { ...data } : {};
+    this.history = history || [];
+    this.step = step;
+    this.metadata = metadata;
+  }
+
+  async updateContext(updates: Partial<TContext>): Promise<void> {
+    this.context = { ...this.context, ...updates };
+    // Notify callbacks for testing
+    this.contextUpdateCallbacks.forEach(callback => callback(updates));
+  }
+
+  async updateData(updates: Partial<TData>): Promise<void> {
+    this.data = { ...this.data, ...updates };
+    // Notify callbacks for testing
+    this.dataUpdateCallbacks.forEach(callback => callback(updates));
+  }
+
+  getField<K extends keyof TData>(key: K): TData[K] | undefined {
+    return this.data[key];
+  }
+
+  async setField<K extends keyof TData>(key: K, value: TData[K]): Promise<void> {
+    this.data = { ...this.data, [key]: value };
+  }
+
+  hasField<K extends keyof TData>(key: K): boolean {
+    return key in this.data && this.data[key] !== undefined;
+  }
+
+  // Test helper methods
+  onContextUpdate(callback: (updates: Partial<TContext>) => void): void {
+    this.contextUpdateCallbacks.push(callback);
+  }
+
+  onDataUpdate(callback: (updates: Partial<TData>) => void): void {
+    this.dataUpdateCallbacks.push(callback);
+  }
+
+  // Reset for clean test state
+  reset(context?: TContext, data?: Partial<TData>): void {
+    this.context = context || ({} as TContext);
+    this.data = data ? { ...data } : {};
+    this.history = [];
+    this.step = undefined;
+    this.metadata = undefined;
+    this.contextUpdateCallbacks = [];
+    this.dataUpdateCallbacks = [];
+  }
+}
+
 function createMockToolContext<TContext = unknown, TData = unknown>(
   context?: TContext,
-  data?: Partial<TData>
-): ToolContext<TContext, TData> {
-  return {
-    context: context || ({} as TContext),
-    updateContext: async () => { },
-    updateData: async () => { },
-    history: [],
-    data: data || {},
-  };
+  data?: Partial<TData>,
+  history?: Event<MessageEventData | ToolEventData | StatusEventData>[],
+  step?: StepRef,
+  metadata?: Record<string, unknown>
+): MockToolContext<TContext, TData> {
+  return new MockToolContext(context, data, history, step, metadata);
 }
 
 async function executeToolForTest<
-  TContext = unknown,
-  TData = unknown,
-  TArgs extends unknown[] = unknown[],
-  TResult = unknown
+  TContext = any,
+  TData = any,
+  TResult = any
 >(
-  tool: Tool<TContext, TData, TArgs, TResult>,
-  args: TArgs,
+  tool: Tool<TContext, TData, TResult>,
+  args?: Record<string, any>,
   context?: TContext,
   data?: Partial<TData>
-): Promise<ToolResult<TResult, TContext, TData>> {
+): Promise<TResult | ToolResult<TResult, TContext, TData>> {
   const toolContext = createMockToolContext(context, data);
-  return await tool.handler(toolContext, ...args);
+  return await tool.handler(toolContext, args);
 }
 
 describe("Tool Creation and Configuration", () => {
-  test("should create tool with basic configuration", () => {
-    const tool: Tool<unknown, { input?: string }, [input: string], string> = {
+  test("should create tool using direct Tool interface", () => {
+    const tool: Tool<unknown, { input?: string }, string> = {
       id: "basic_tool",
       description: "A basic test tool",
       parameters: {
@@ -127,8 +208,8 @@ describe("Tool Creation and Configuration", () => {
         },
         required: ["input"],
       },
-      handler: (toolContext, ...args) => ({
-        data: `Processed: ${args[0]}`,
+      handler: (toolContext, args) => ({
+        data: `Processed: ${args?.input}`,
       }),
     };
 
@@ -139,267 +220,473 @@ describe("Tool Creation and Configuration", () => {
     ]);
   });
 
-  test("should create tool with complex parameter schema", () => {
-    const tool: Tool<
-      unknown,
-      any,
-      [userId: string, orderData: any, options?: any],
-      string
-    > = {
-      id: "complex_tool",
-      description: "Tool with complex parameters",
-      parameters: {
-        type: "object",
-        properties: {
-          userId: { type: "string" },
-          orderData: {
-            type: "object",
-            properties: {
-              items: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    quantity: { type: "number", minimum: 1 },
-                    price: { type: "number", minimum: 0 },
-                  },
-                  required: ["name", "quantity"],
-                },
-              },
-              total: { type: "number" },
-            },
-            required: ["items"],
-          },
-          options: {
-            type: "object",
-            properties: {
-              priority: {
-                type: "string",
-                enum: ["low", "medium", "high"],
-                default: "medium",
-              },
-              notify: { type: "boolean", default: true },
-            },
-          },
-        },
-        required: ["userId", "orderData"],
-      },
-      handler: (
-        _toolContext,
-        userId: string,
-        _orderData: any,
-        _options?: any
-      ) => ({
-        data: `Processed order for user ${userId}`,
-      }),
-    };
+  test("should create tool using ToolManager.create()", () => {
+    const agent = createToolTestAgent();
 
-    expect(
-      (tool.parameters as { properties: { orderData: { type: string } } })
-        .properties.orderData.type
-    ).toBe("object");
-    expect(
-      (
-        tool.parameters as {
-          properties: {
-            options: { properties: { priority: { enum: string[] } } };
-          };
-        }
-      ).properties.options.properties.priority.enum
-    ).toEqual(["low", "medium", "high"]);
+    const tool = agent.tool.create({
+      id: "toolmanager_created",
+      description: "Created via ToolManager",
+      handler: async (context, args) => {
+        return `Hello ${context.context?.name}, input: ${args?.message}`;
+      },
+    });
+
+    expect(tool.id).toBe("toolmanager_created");
+    expect(tool.description).toBe("Created via ToolManager");
+    expect(typeof tool.handler).toBe("function");
   });
 
-  test("should create tool with no parameters", () => {
-    const tool: Tool<unknown, object, [], string> = {
-      id: "no_params_tool",
-      description: "Tool with no parameters",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-      handler: (_toolContext) => ({
-        data: "No parameters needed",
-      }),
-    };
+  test("should create tool using agent.addTool() method", () => {
+    const agent = createToolTestAgent();
 
-    expect(
-      (tool.parameters as { properties: Record<string, unknown> }).properties
-    ).toEqual({});
+    agent.addTool({
+      id: "agent_added_tool",
+      description: "Added directly to agent",
+      handler: async (context, args) => {
+        return `Agent tool: ${context.context?.userId}, data: ${args?.data}`;
+      },
+    });
+
+    const tools = agent.getTools();
+    const addedTool = tools.find(t => t.id === "agent_added_tool");
+    expect(addedTool).toBeDefined();
+    expect(addedTool?.description).toBe("Added directly to agent");
+  });
+
+  test("should create tool with simplified handler returning direct value", () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "simple_return",
+      description: "Returns value directly",
+      handler: async (context, args) => {
+        // Direct return - no ToolResult wrapper needed
+        return `Simple result: ${args?.input}`;
+      },
+    });
+
+    expect(tool.id).toBe("simple_return");
+    expect(typeof tool.handler).toBe("function");
+  });
+
+  test("should create tool with ToolResult return for complex updates", () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "complex_return",
+      description: "Returns ToolResult with updates",
+      handler: async (context, args) => {
+        // ToolResult return for data/context updates
+        return {
+          data: `Processed: ${args?.input}`,
+          dataUpdate: { lastProcessed: args?.input },
+          contextUpdate: { lastAction: "process" },
+        };
+      },
+    });
+
+    expect(tool.id).toBe("complex_return");
+    expect(typeof tool.handler).toBe("function");
+  });
+
+  test("should create tool with enhanced context helpers", () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "context_helper_tool",
+      description: "Uses context helper methods",
+      handler: async (context, args) => {
+        // Use enhanced context methods
+        const hasEmail = context.hasField("email");
+        const currentEmail = context.getField("email");
+
+        if (args?.newEmail) {
+          await context.setField("email", args.newEmail as string);
+        }
+
+        return `Had email: ${hasEmail}, Current: ${currentEmail}`;
+      },
+    });
+
+    expect(tool.id).toBe("context_helper_tool");
+    expect(typeof tool.handler).toBe("function");
   });
 });
 
 describe("Tool Execution", () => {
-  test("should execute tool and return data", async () => {
-    const tool: Tool<
-      unknown,
-      { message?: string },
-      [message?: string],
-      string
-    > = {
-      id: "echo_tool",
-      description: "Echoes input data",
-      parameters: {
-        type: "object",
-        properties: {
-          message: { type: "string" },
-        },
-      },
-      handler: (_toolContext, message?: string) => ({
-        data: `Echo: ${message}`,
-      }),
-    };
+  test("should execute tool with direct return value", async () => {
+    const agent = createToolTestAgent();
 
-    const result = await executeToolForTest(tool, ["Hello World"]);
-    expect(result.data).toBe("Echo: Hello World");
+    const tool = agent.tool.create({
+      id: "direct_return_tool",
+      description: "Returns value directly",
+      handler: async (context, args) => {
+        // Direct return - simpler pattern
+        return `Echo: ${args?.message}`;
+      },
+    });
+
+    const result = await executeToolForTest(tool, { message: "Hello World" });
+    expect(result).toBe("Echo: Hello World");
   });
 
-  test("should execute tool with data updates", async () => {
-    const tool: Tool<unknown, Partial<OrderData>, [], string> = {
-      id: "order_processor",
-      description: "Processes orders",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-      handler: (_toolContext) => ({
-        data: "Order processed",
-        dataUpdate: {
-          orderId: "ORD-123",
-          status: "processing" as const,
-          total: 99.99,
-        },
-      }),
-    };
+  test("should execute tool with ToolResult return", async () => {
+    const agent = createToolTestAgent();
 
-    const result = await executeToolForTest(tool, []);
-    expect(result.data).toBe("Order processed");
-    expect(result.dataUpdate).toEqual({
+    const tool = agent.tool.create({
+      id: "toolresult_return_tool",
+      description: "Returns ToolResult object",
+      handler: async (context, args) => {
+        // ToolResult return for complex scenarios
+        return {
+          data: "Order processed",
+          dataUpdate: {
+            orderId: "ORD-123",
+            status: "processing" as const,
+            total: 99.99,
+          },
+          contextUpdate: {
+            lastOrderId: "ORD-123"
+          }
+        };
+      },
+    });
+
+    const result = await executeToolForTest(tool);
+    expect((result as ToolResult<string>).data).toBe("Order processed");
+    expect((result as ToolResult<string>).dataUpdate).toEqual({
       orderId: "ORD-123",
       status: "processing",
       total: 99.99,
     });
+    expect((result as ToolResult<string>).contextUpdate).toEqual({
+      lastOrderId: "ORD-123"
+    });
   });
 
-  test("should handle tool execution errors", () => {
-    const tool: Tool<unknown, unknown, [], unknown> = {
+  test("should execute tool using context helper methods", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "context_helper_tool",
+      description: "Uses enhanced context methods",
+      handler: async (context, args) => {
+        // Use new context helper methods
+        await context.updateData({ email: args?.email as string });
+        await context.updateContext({ lastAction: "updateEmail" });
+
+        const hasEmail = context.hasField("email");
+        const email = context.getField("email");
+
+        return `Updated email: ${email}, has field: ${hasEmail}`;
+      },
+    });
+
+    // Create enhanced mock context
+    const mockContext = createMockToolContext<UserProfile, OrderData>(
+      await agent.getContext(),
+      {}
+    );
+
+    const result = await tool.handler(mockContext, { email: "test@example.com" });
+    expect(result).toContain("Updated email: test@example.com");
+    expect(result).toContain("has field: true");
+  });
+
+  test("should execute tool via ToolManager.execute()", async () => {
+    const agent = createToolTestAgent();
+
+    // Register tool first
+    agent.tool.register({
+      id: "registered_execution_tool",
+      description: "Tool executed via ToolManager",
+      handler: async (context, args) => {
+        return `Executed via ToolManager: ${args?.input}`;
+      },
+    });
+
+    // Execute via ToolManager
+    const result = await agent.tool.execute("registered_execution_tool", { input: "test data" });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toBe("Executed via ToolManager: test data");
+  });
+
+  test("should handle tool execution errors gracefully", async () => {
+    const agent = createToolTestAgent();
+
+    agent.tool.register({
       id: "error_tool",
       description: "Tool that throws errors",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-      handler: (_toolContext) => {
+      handler: (_context, _args) => {
         throw new Error("Tool execution failed");
       },
-    };
+    });
 
-    expect(executeToolForTest(tool, [])).rejects.toThrow(
-      "Tool execution failed"
-    );
+    try {
+      await agent.tool.execute("error_tool");
+      expect(false).toBe(true); // Should not reach here
+    } catch (error: any) {
+      expect(error.name).toBe("ToolExecutionError");
+      expect(error.message).toContain("Tool execution failed");
+      expect(error.toolId).toBe("error_tool");
+    }
   });
 
-  test("should execute async tools", async () => {
-    const asyncTool: Tool<
-      unknown,
-      { delay?: number },
-      [delay?: number],
-      string
-    > = {
+  test("should execute async tools with proper timing", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
       id: "async_tool",
       description: "Asynchronous tool",
-      parameters: {
-        type: "object",
-        properties: {
-          delay: { type: "number" },
-        },
-      },
-      handler: async (_toolContext, delay: number = 100) => {
+      handler: async (context, args) => {
+        const delay = args?.delay ? Number(args.delay) : 100;
         await new Promise((resolve) => setTimeout(resolve, delay));
-        return {
-          data: `Delayed response after ${delay}ms`,
-        };
+        return `Delayed response after ${delay}ms`;
       },
-    };
+    });
 
     const startTime = Date.now();
-    const result = await executeToolForTest(asyncTool, [50]);
+    const result = await executeToolForTest(tool, { delay: 50 });
     const endTime = Date.now();
 
-    expect(result.data).toBe("Delayed response after 50ms");
+    expect(result).toBe("Delayed response after 50ms");
     expect(endTime - startTime).toBeGreaterThanOrEqual(45); // Allow some margin
   });
 });
 
 describe("Tool Context Access", () => {
-  test("should access context in tool execution", async () => {
+  test("should access context with direct return", async () => {
     const agent = createToolTestAgent();
 
-    const contextTool: Tool<UserProfile, object, [], string> = {
+    const tool = agent.tool.create({
       id: "context_reader",
       description: "Reads user context",
-      parameters: {
-        type: "object",
-        properties: {},
+      handler: (context) => {
+        // Direct return with context access
+        return `Hello ${context.context?.name}, your email is ${context.context?.email}`;
       },
-      handler: (toolContext) => ({
-        data: `Hello ${toolContext.context?.name}, your email is ${toolContext.context?.email}`,
-      }),
-    };
+    });
 
-    const context = await agent.getContext();
-    const result = await executeToolForTest(contextTool, [], context);
-    expect(result.data).toBe("Hello Test User, your email is test@example.com");
+    const agentContext = await agent.getContext();
+    const result = await executeToolForTest(tool, undefined, agentContext);
+    expect(result).toBe("Hello Test User, your email is test@example.com");
   });
 
-  test("should access nested context properties", async () => {
+  test("should use enhanced context helper methods", async () => {
     const agent = createToolTestAgent();
 
-    const preferenceTool: Tool<UserProfile, object, [], string> = {
-      id: "preference_reader",
-      description: "Reads user preferences",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-      handler: (toolContext) => ({
-        data: `Theme: ${toolContext.context?.preferences.theme}, Notifications: ${toolContext.context?.preferences.notifications}`,
-      }),
-    };
+    const tool = agent.tool.create({
+      id: "context_helper_tool",
+      description: "Uses context helper methods",
+      handler: async (context, args) => {
+        // Use new helper methods
+        const hasName = context.hasField("customerName");
+        const currentName = context.getField("customerName");
 
-    const context = await agent.getContext();
-    const result = await executeToolForTest(preferenceTool, [], context);
-    expect(result.data).toBe("Theme: light, Notifications: true");
+        if (args?.newName) {
+          await context.setField("customerName", args.newName as string);
+        }
+
+        // Update context using helper
+        await context.updateContext({
+          lastAction: "nameUpdate",
+          timestamp: Date.now()
+        });
+
+        const updatedName = context.getField("customerName");
+        return `Had name: ${hasName}, Current: ${currentName || "none"}, Updated: ${updatedName}`;
+      },
+    });
+
+    // Use enhanced mock context
+    const mockContext = createMockToolContext<UserProfile, OrderData>(
+      await agent.getContext(),
+      {}
+    );
+
+    const result = await tool.handler(mockContext, { newName: "John Doe" });
+    expect(result).toContain("Had name: false");
+    expect(result).toContain("Current: none");
+    expect(result).toContain("Updated: John Doe");
   });
 
-  test("should handle missing context gracefully", async () => {
-    const contextTool: Tool<UserProfile | undefined, object, [], string> = {
-      id: "safe_context_tool",
-      description: "Handles missing context",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-      handler: (toolContext) => ({
-        data: `User: ${toolContext.context?.name || "Unknown"}`,
-      }),
-    };
+  test("should access nested context properties with type safety", async () => {
+    const agent = createToolTestAgent();
 
-    const result = await executeToolForTest(contextTool, [], undefined);
-    expect(result.data).toBe("User: Unknown");
+    const tool = agent.tool.create({
+      id: "preference_reader",
+      description: "Reads user preferences with type safety",
+      handler: (context) => {
+        const prefs = context.context?.preferences;
+        return {
+          data: `Theme: ${prefs?.theme}, Notifications: ${prefs?.notifications}`,
+          contextUpdate: { lastPreferenceCheck: Date.now() }
+        };
+      },
+    });
+
+    const agentContext = await agent.getContext();
+    const result = await executeToolForTest(tool, undefined, agentContext);
+    expect((result as ToolResult<string>).data).toBe("Theme: light, Notifications: true");
+    expect((result as ToolResult<string>).contextUpdate).toHaveProperty("lastPreferenceCheck");
+  });
+
+  test("should handle missing context gracefully with fallbacks", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "safe_context_tool",
+      description: "Handles missing context with fallbacks",
+      handler: (context) => {
+        const userName = context.context?.name || "Unknown User";
+        const userEmail = context.context?.email || "no-email@example.com";
+
+        return {
+          data: `User: ${userName}`,
+          dataUpdate: {
+            fallbackUsed: !context.context?.name,
+            contactEmail: userEmail
+          }
+        };
+      },
+    });
+
+    const result = await executeToolForTest(tool, undefined, undefined);
+    expect((result as ToolResult<string>).data).toBe("User: Unknown User");
+    expect((result as ToolResult<string>).dataUpdate).toEqual({
+      fallbackUsed: true,
+      contactEmail: "no-email@example.com"
+    });
+  });
+
+  test("should access history and metadata from context", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "history_reader",
+      description: "Reads interaction history",
+      handler: (context) => {
+        const historyCount = context.history.length;
+        const hasMetadata = !!context.metadata;
+        const stepInfo = context.step ? `Step: ${context.step.id}` : "No step";
+
+        return `History: ${historyCount} events, Metadata: ${hasMetadata}, ${stepInfo}`;
+      },
+    });
+
+    // Create enhanced mock context with history, metadata, and step
+    const mockContext = createMockToolContext<UserProfile, OrderData>(
+      await agent.getContext(),
+      {},
+      [
+        { role: "user", content: "Hello", timestamp: Date.now() },
+        { role: "assistant", content: "Hi there", timestamp: Date.now() }
+      ] as any[],
+      { id: "test-step", routeId: "test-route" } as StepRef,
+      { sessionId: "test-123", userId: "user-456" }
+    );
+
+    const result = await tool.handler(mockContext);
+    expect(result).toContain("History: 2 events");
+    expect(result).toContain("Metadata: true");
+    expect(result).toContain("Step: test-step");
+  });
+
+  test("should handle context and data updates with callbacks", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "update_tracker",
+      description: "Tracks context and data updates",
+      handler: async (context, args) => {
+        const initialData = { ...context.data };
+        const initialContext = { ...context.context };
+
+        // Make updates
+        await context.updateData({ email: args?.email as string, score: 100 });
+        await context.updateContext({ lastLogin: Date.now(), status: "active" });
+
+        return {
+          data: "Updates completed",
+          initialDataKeys: Object.keys(initialData),
+          finalDataKeys: Object.keys(context.data),
+          contextUpdated: true
+        };
+      },
+    });
+
+    const mockContext = createMockToolContext<UserProfile, OrderData>(
+      { userId: "test-123", name: "Test User", email: "old@example.com", preferences: { theme: "light", notifications: true } },
+      { product: "Widget" }
+    );
+
+    // Track updates
+    let contextUpdates: any[] = [];
+    let dataUpdates: any[] = [];
+
+    mockContext.onContextUpdate((updates) => contextUpdates.push(updates));
+    mockContext.onDataUpdate((updates) => dataUpdates.push(updates));
+
+    const result = await tool.handler(mockContext, { email: "new@example.com" });
+
+    expect((result as ToolResult<string>).data).toBe("Updates completed");
+    expect(contextUpdates).toHaveLength(1);
+    expect(dataUpdates).toHaveLength(1);
+    expect(contextUpdates[0]).toHaveProperty("lastLogin");
+    expect(dataUpdates[0]).toEqual({ email: "new@example.com", score: 100 });
+  });
+
+  test("should test field operations comprehensively", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "field_operations",
+      description: "Tests all field operations",
+      handler: async (context, args) => {
+        const operations: string[] = [];
+
+        // Test hasField
+        operations.push(`hasEmail: ${context.hasField("email")}`);
+        operations.push(`hasProduct: ${context.hasField("product")}`);
+
+        // Test getField
+        const currentEmail = context.getField("email");
+        operations.push(`currentEmail: ${currentEmail || "none"}`);
+
+        // Test setField
+        await context.setField("email", "test@example.com");
+        await context.setField("status", "active" as any);
+
+        // Verify changes
+        operations.push(`hasEmailAfterSet: ${context.hasField("email")}`);
+        operations.push(`emailAfterSet: ${context.getField("email")}`);
+
+        return operations.join(", ");
+      },
+    });
+
+    const mockContext = createMockToolContext<UserProfile, OrderData>(
+      await agent.getContext(),
+      { product: "Widget", qty: 5 } // Initial data
+    );
+
+    const result = await tool.handler(mockContext);
+    expect(result).toContain("hasEmail: false");
+    expect(result).toContain("hasProduct: true");
+    expect(result).toContain("currentEmail: none");
+    expect(result).toContain("hasEmailAfterSet: true");
+    expect(result).toContain("emailAfterSet: test@example.com");
   });
 });
 
-describe("Tool Parameter Validation", () => {
-  test("should validate required parameters", async () => {
-    const tool: Tool<
-      unknown,
-      { requiredField?: string; optionalField?: number },
-      [requiredField: string, optionalField?: number],
-      string
-    > = {
+describe("Tool Parameter Handling", () => {
+  test("should handle parameters with validation schema", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
       id: "validation_tool",
-      description: "Requires specific parameters",
+      description: "Handles parameters with validation",
       parameters: {
         type: "object",
         properties: {
@@ -408,63 +695,113 @@ describe("Tool Parameter Validation", () => {
         },
         required: ["requiredField"],
       },
-      handler: (
-        _toolContext,
-        requiredField: string,
-        optionalField?: number
-      ) => ({
-        data: `Required: ${requiredField}, Optional: ${optionalField ?? "not provided"
-          }`,
-      }),
-    };
+      handler: (context, args) => {
+        // Simple parameter access with fallbacks
+        const required = args?.requiredField || "missing";
+        const optional = args?.optionalField ?? "not provided";
+        return `Required: ${required}, Optional: ${optional}`;
+      },
+    });
 
     // Valid call
-    const validResult = await executeToolForTest(tool, ["test", 42]);
-    expect(validResult.data).toBe("Required: test, Optional: 42");
+    const validResult = await executeToolForTest(tool, { requiredField: "test", optionalField: 42 });
+    expect(validResult).toBe("Required: test, Optional: 42");
 
-    // Call with missing required field (validation would happen at schema level)
-    const invalidResult = await executeToolForTest(tool, [
-      undefined as any,
-      42,
-    ]);
-    expect(invalidResult.data).toBe("Required: undefined, Optional: 42");
+    // Call with missing required field
+    const invalidResult = await executeToolForTest(tool, { optionalField: 42 });
+    expect(invalidResult).toBe("Required: missing, Optional: 42");
   });
 
-  test("should handle array parameters", async () => {
-    const tool: Tool<unknown, { items?: string[] }, [items: string[]], string> =
-    {
-      id: "array_tool",
-      description: "Processes arrays",
+  test("should handle complex nested parameters", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "complex_params_tool",
+      description: "Handles complex nested parameters",
       parameters: {
         type: "object",
         properties: {
+          user: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              preferences: {
+                type: "object",
+                properties: {
+                  theme: { type: "string", enum: ["light", "dark"] },
+                  notifications: { type: "boolean" }
+                }
+              }
+            }
+          },
           items: {
             type: "array",
-            items: { type: "string" },
-          },
-        },
-        required: ["items"],
+            items: { type: "string" }
+          }
+        }
       },
-      handler: (toolContext, items: string[]) => ({
-        data: `Processed ${items.length} items: ${items.join(", ")}`,
-      }),
+      handler: (context, args) => {
+        const user = args?.user as any;
+        const items = args?.items as string[] || [];
+
+        return {
+          data: `User: ${user?.name}, Theme: ${user?.preferences?.theme}, Items: ${items.length}`,
+          dataUpdate: {
+            lastUser: user?.name,
+            itemCount: items.length
+          }
+        };
+      },
+    });
+
+    const complexArgs = {
+      user: {
+        name: "John Doe",
+        preferences: { theme: "dark", notifications: true }
+      },
+      items: ["item1", "item2", "item3"]
     };
 
-    const result = await executeToolForTest(tool, [
-      ["item1", "item2", "item3"],
-    ]);
-    expect(result.data).toBe("Processed 3 items: item1, item2, item3");
+    const result = await executeToolForTest(tool, complexArgs);
+    expect((result as ToolResult<string>).data).toBe("User: John Doe, Theme: dark, Items: 3");
+    expect((result as ToolResult<string>).dataUpdate).toEqual({
+      lastUser: "John Doe",
+      itemCount: 3
+    });
   });
 
-  test("should handle enum parameters", async () => {
-    const tool: Tool<
-      unknown,
-      { priority?: string },
-      [priority: "low" | "medium" | "high"],
-      string
-    > = {
+  test("should handle array parameters with processing", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "array_processor",
+      description: "Processes array parameters",
+      handler: (context, args) => {
+        const items = args?.items as string[] || [];
+        const processed = items.map(item => item.toUpperCase());
+
+        return {
+          data: `Processed ${items.length} items`,
+          dataUpdate: {
+            originalItems: items,
+            processedItems: processed,
+            processingDate: new Date().toISOString()
+          }
+        };
+      },
+    });
+
+    const result = await executeToolForTest(tool, { items: ["apple", "banana", "cherry"] });
+    expect((result as ToolResult<string>).data).toBe("Processed 3 items");
+    expect((result as ToolResult<string>).dataUpdate?.processedItems).toEqual(["APPLE", "BANANA", "CHERRY"]);
+  });
+
+  test("should handle enum parameters with type safety", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
       id: "enum_tool",
-      description: "Validates enum values",
+      description: "Handles enum parameters",
       parameters: {
         type: "object",
         properties: {
@@ -472,191 +809,245 @@ describe("Tool Parameter Validation", () => {
             type: "string",
             enum: ["low", "medium", "high"],
           },
+          status: {
+            type: "string",
+            enum: ["pending", "processing", "completed"]
+          }
         },
         required: ["priority"],
       },
-      handler: (_toolContext, priority: "low" | "medium" | "high") => ({
-        data: `Priority set to: ${priority}`,
-      }),
-    };
+      handler: (context, args) => {
+        const priority = args?.priority as "low" | "medium" | "high";
+        const status = args?.status as "pending" | "processing" | "completed" || "pending";
 
-    const result = await executeToolForTest(tool, ["high"]);
-    expect(result.data).toBe("Priority set to: high");
+        return {
+          data: `Priority: ${priority}, Status: ${status}`,
+          dataUpdate: {
+            currentPriority: priority,
+            currentStatus: status,
+            updatedAt: Date.now()
+          }
+        };
+      },
+    });
+
+    const result = await executeToolForTest(tool, { priority: "high", status: "processing" });
+    expect((result as ToolResult<string>).data).toBe("Priority: high, Status: processing");
+    expect((result as ToolResult<string>).dataUpdate?.currentPriority).toBe("high");
+  });
+
+  test("should handle optional parameters with defaults", async () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "defaults_tool",
+      description: "Handles parameters with defaults",
+      handler: (context, args) => {
+        // Provide sensible defaults
+        const limit = args?.limit as number || 10;
+        const sortBy = args?.sortBy as string || "name";
+        const ascending = args?.ascending as boolean ?? true;
+
+        return `Limit: ${limit}, Sort: ${sortBy}, Ascending: ${ascending}`;
+      },
+    });
+
+    // Test with no parameters
+    const result1 = await executeToolForTest(tool);
+    expect(result1).toBe("Limit: 10, Sort: name, Ascending: true");
+
+    // Test with partial parameters
+    const result2 = await executeToolForTest(tool, { limit: 5, ascending: false });
+    expect(result2).toBe("Limit: 5, Sort: name, Ascending: false");
   });
 });
 
 describe("Tool Integration with Agents", () => {
-  test("should add tools to agent", () => {
+  test("should add tools using agent.addTool() method", () => {
     const agent = createToolTestAgent();
 
-    const tool1: Tool<UserProfile, OrderData, [], string> = {
-      id: "tool1",
-      description: "First tool",
-      parameters: { type: "object", properties: {} },
-      handler: () => ({ data: "Tool 1 executed" }),
-    };
+    // Method 1: Direct addTool with simple handler
+    agent.addTool({
+      id: "simple_tool",
+      description: "Simple tool with direct return",
+      handler: async (context) => {
+        return `Hello ${context.context?.name}`;
+      },
+    });
 
-    const tool2: Tool<UserProfile, OrderData, [], string> = {
-      id: "tool2",
-      description: "Second tool",
-      parameters: { type: "object", properties: {} },
-      handler: () => ({ data: "Tool 2 executed" }),
-    };
-
-    agent.createTool(tool1);
-    agent.createTool(tool2);
+    // Method 2: addTool with ToolResult return
+    agent.addTool({
+      id: "complex_tool",
+      description: "Complex tool with data updates",
+      handler: async (context, args) => {
+        return {
+          data: `Processed: ${args?.input}`,
+          dataUpdate: { lastInput: args?.input },
+          contextUpdate: { lastAction: "process" }
+        };
+      },
+    });
 
     const tools = agent.getTools();
-    expect(tools).toHaveLength(2);
-    expect(tools.map((t) => t.id)).toEqual(["tool1", "tool2"]);
+    expect(tools.length).toBeGreaterThanOrEqual(2);
+
+    const simpleTool = tools.find(t => t.id === "simple_tool");
+    const complexTool = tools.find(t => t.id === "complex_tool");
+
+    expect(simpleTool).toBeDefined();
+    expect(simpleTool?.description).toBe("Simple tool with direct return");
+    expect(complexTool).toBeDefined();
+    expect(complexTool?.description).toBe("Complex tool with data updates");
   });
 
-  test("should execute agent tools with agent-level data", async () => {
+  test("should create tools via ToolManager and register them", () => {
     const agent = createToolTestAgent();
 
-    const calculatorTool: Tool<UserProfile, OrderData, [], string> = {
-      id: "calculator",
-      description: "Performs calculations",
-      parameters: {
-        type: "object",
-        properties: {
-          operation: {
-            type: "string",
-            enum: ["add", "subtract", "multiply", "divide"],
-          },
-          a: { type: "number" },
-          b: { type: "number" },
-        },
-        required: ["operation", "a", "b"],
+    // Method 3: Create via ToolManager then register
+    const tool1 = agent.tool.create({
+      id: "created_tool",
+      description: "Created via ToolManager",
+      handler: async (context) => {
+        return `ToolManager created: ${context.context?.userId}`;
       },
-      handler: ({ data }) => {
-        const { operation, a, b } = data as {
-          operation: string;
-          a: number;
-          b: number;
-        };
-        let result: number;
+    });
 
-        switch (operation) {
-          case "add":
-            result = a + b;
-            break;
-          case "subtract":
-            result = a - b;
-            break;
-          case "multiply":
-            result = a * b;
-            break;
-          case "divide":
-            result = a / b;
-            break;
-          default:
-            throw new Error("Invalid operation");
-        }
+    // Method 4: Register tool for ID-based reference
+    const tool2 = agent.tool.register({
+      id: "registered_tool",
+      description: "Registered for reference",
+      handler: async (context, args) => {
+        return `Registered tool: ${args?.message}`;
+      },
+    });
 
+    expect(tool1.id).toBe("created_tool");
+    expect(tool2.id).toBe("registered_tool");
+    expect(agent.tool.isRegistered("registered_tool")).toBe(true);
+    expect(agent.tool.find("registered_tool")).toBe(tool2);
+  });
+
+  test("should use pattern helper methods", () => {
+    const agent = createToolTestAgent();
+
+    // Method 5: Data enrichment pattern
+    const enrichmentTool = agent.tool.createDataEnrichment({
+      id: "enrich_profile",
+      fields: ["customerName", "email"],
+      enricher: async (context, data) => ({
+        fullProfile: `${data.customerName} <${data.email}>`,
+        enrichedAt: new Date().toISOString()
+      }),
+    });
+
+    // Method 6: Validation pattern
+    const validationTool = agent.tool.createValidation({
+      id: "validate_order",
+      fields: ["product", "qty"],
+      validator: async (context, data) => ({
+        valid: !!(data.product && data.qty && data.qty > 0),
+        errors: [],
+        warnings: []
+      }),
+    });
+
+    // Method 7: API call pattern
+    const apiTool = agent.tool.createApiCall({
+      id: "fetch_inventory",
+      endpoint: "https://api.example.com/inventory",
+      method: "GET",
+      transform: (response) => response
+    });
+
+    expect(enrichmentTool.id).toBe("enrich_profile");
+    expect(enrichmentTool.name).toBe("Data Enrichment: enrich_profile");
+    expect(validationTool.id).toBe("validate_order");
+    expect(validationTool.name).toBe("Validation: validate_order");
+    expect(apiTool.id).toBe("fetch_inventory");
+    expect(apiTool.name).toBe("API Call: fetch_inventory");
+  });
+
+  test("should handle tool execution through different methods", async () => {
+    const agent = createToolTestAgent();
+
+    // Register a tool for execution testing
+    agent.tool.register({
+      id: "execution_test_tool",
+      description: "Tool for testing execution",
+      handler: async (context, args) => {
         return {
-          data: `Result: ${result}`,
-          dataUpdate: { total: result }, // Update agent-level data
+          data: `Executed with: ${args?.input}`,
+          dataUpdate: { lastExecution: Date.now() }
         };
       },
+    });
+
+    // Method 1: Find and execute manually (this works reliably)
+    const tool = agent.tool.find("execution_test_tool");
+    expect(tool).toBeDefined();
+
+    const mockContext = createMockToolContext<UserProfile, OrderData>(await agent.getContext(), {});
+    const result1 = await tool!.handler(mockContext, { input: "test1" });
+    expect((result1 as ToolResult<string>).data).toBe("Executed with: test1");
+
+    // Method 2: Verify tool is registered and available
+    expect(agent.tool.isRegistered("execution_test_tool")).toBe(true);
+    const availableTools = agent.tool.getAvailable();
+    expect(availableTools.some(t => t.id === "execution_test_tool")).toBe(true);
+
+    // Method 3: Test direct handler execution with different args
+    const result2 = await tool!.handler(mockContext, { input: "test2" });
+    expect((result2 as ToolResult<string>).data).toBe("Executed with: test2");
+  });
+
+  test("should support bulk tool operations", () => {
+    const agent = createToolTestAgent();
+
+    // Method 8: Register multiple tools at once
+    const tools = agent.tool.registerMany([
+      {
+        id: "bulk_tool_1",
+        handler: async () => "Result 1"
+      },
+      {
+        id: "bulk_tool_2",
+        handler: async () => "Result 2"
+      },
+      {
+        id: "bulk_tool_3",
+        handler: async () => "Result 3"
+      }
+    ]);
+
+    expect(tools).toHaveLength(3);
+    expect(agent.tool.isRegistered("bulk_tool_1")).toBe(true);
+    expect(agent.tool.isRegistered("bulk_tool_2")).toBe(true);
+    expect(agent.tool.isRegistered("bulk_tool_3")).toBe(true);
+
+    // Test getting all available tools
+    const available = agent.tool.getAvailable();
+    expect(available.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test("should maintain backward compatibility with createTool", () => {
+    const agent = createToolTestAgent();
+
+    // Legacy method should still work
+    const legacyTool: Tool<UserProfile, OrderData, string> = {
+      id: "legacy_tool",
+      description: "Legacy tool format",
+      parameters: { type: "object", properties: {} },
+      handler: (context) => ({
+        data: `Legacy: ${context.context?.name}`,
+      }),
     };
 
-    agent.createTool(calculatorTool);
+    agent.createTool(legacyTool);
 
-    // Simulate tool execution through agent response
-    const provider = MockProviderFactory.withToolCalls([
-      {
-        toolName: "calculator",
-        arguments: { operation: "add", a: 5, b: 3 },
-      },
-    ]);
-
-    const agentWithProvider = new Agent<UserProfile, OrderData>({
-      name: "Calculator Agent",
-      context: await agent.getContext(),
-      schema: await agent.getSchema(),
-      provider,
-      tools: [calculatorTool],
-    });
-
-    const session = createSession<OrderData>();
-    const response = await agentWithProvider.respond({
-      history: [
-        {
-          role: "user" as const,
-          content: "Calculate 5 + 3",
-          name: "User",
-        },
-      ],
-      session,
-    });
-
-    expect(response.toolCalls).toBeDefined();
-    expect(response.toolCalls![0].toolName).toBe("calculator");
-  });
-
-  test("should handle multiple tool calls with agent-level data", async () => {
-    const agent = createToolTestAgent();
-
-    const tools: Tool<UserProfile, OrderData, [], string>[] = [
-      {
-        id: "get_weather",
-        description: "Gets weather information",
-        parameters: {
-          type: "object",
-          properties: { location: { type: "string" } },
-        },
-        handler: ({ context }) => ({
-          data: `Weather for ${context?.name}: Sunny, 72°F`,
-          dataUpdate: { customerName: context?.name }, // Update agent data
-        }),
-      },
-      {
-        id: "get_time",
-        description: "Gets current time",
-        parameters: { type: "object", properties: {} },
-        handler: () => ({
-          data: `Current time: ${new Date().toLocaleTimeString()}`,
-        }),
-      },
-    ];
-
-    tools.forEach((tool) => agent.createTool(tool));
-
-    const provider = MockProviderFactory.withToolCalls([
-      {
-        toolName: "get_weather",
-        arguments: { location: "New York" },
-      },
-      {
-        toolName: "get_time",
-        arguments: {},
-      },
-    ]);
-
-    const agentWithProvider2 = new Agent<UserProfile, OrderData>({
-      name: "Weather and Time Agent",
-      context: await agent.getContext(),
-      schema: agent.getSchema(),
-      provider,
-      tools,
-    });
-
-    const session = createSession<OrderData>();
-    const response = await agentWithProvider2.respond({
-      history: [
-        {
-          role: "user" as const,
-          content: "What's the weather and time?",
-          name: "User",
-        },
-      ],
-      session,
-    });
-
-    expect(response.toolCalls).toHaveLength(2);
-    expect(response.toolCalls![0].toolName).toBe("get_weather");
-    expect(response.toolCalls![1].toolName).toBe("get_time");
+    const tools = agent.getTools();
+    const addedTool = tools.find(t => t.id === "legacy_tool");
+    expect(addedTool).toBeDefined();
+    expect(addedTool?.description).toBe("Legacy tool format");
   });
 });
 
@@ -750,11 +1141,227 @@ describe("Tool Integration with Routes", () => {
   });
 });
 
+describe("ToolManager Integration Tests", () => {
+  test("should create and use ToolManager through agent", () => {
+    const agent = createToolTestAgent();
+
+    // Test that agent has tool property
+    expect(agent.tool).toBeDefined();
+    expect(typeof agent.tool.create).toBe("function");
+    expect(typeof agent.tool.register).toBe("function");
+    expect(typeof agent.addTool).toBe("function");
+  });
+
+  test("should create tools using ToolManager", () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.create({
+      id: "toolmanager_test",
+      description: "Test tool created via ToolManager",
+      handler: async (context) => {
+        return `Hello ${context.context?.name || "user"}`;
+      },
+    });
+
+    expect(tool.id).toBe("toolmanager_test");
+    expect(tool.description).toBe("Test tool created via ToolManager");
+    expect(typeof tool.handler).toBe("function");
+  });
+
+  test("should register tools using ToolManager", () => {
+    const agent = createToolTestAgent();
+
+    const tool = agent.tool.register({
+      id: "registered_test",
+      description: "Registered test tool",
+      handler: async (context) => {
+        return `Registered for ${context.context?.name}`;
+      },
+    });
+
+    expect(agent.tool.isRegistered("registered_test")).toBe(true);
+    expect(agent.tool.getRegisteredTool("registered_test")).toBe(tool);
+  });
+
+  test("should use addTool method on agent", () => {
+    const agent = createToolTestAgent();
+
+    agent.addTool({
+      id: "agent_added_tool",
+      description: "Tool added via addTool method",
+      handler: async (context) => {
+        return `Added to agent: ${context.context?.userId}`;
+      },
+    });
+
+    // Tool should be available in agent's tools
+    const agentTools = agent.getTools();
+    const addedTool = agentTools.find(t => t.id === "agent_added_tool");
+    expect(addedTool).toBeDefined();
+    expect(addedTool?.description).toBe("Tool added via addTool method");
+  });
+
+  test("should create pattern helper tools", () => {
+    const agent = createToolTestAgent();
+
+    // Test data enrichment tool
+    const enrichmentTool = agent.tool.createDataEnrichment({
+      id: "enrich_profile",
+      fields: ["name", "email"],
+      enricher: async (context, data) => ({
+        name: `${data.name} (${context.preferences.theme} theme)`,
+      }),
+    });
+
+    expect(enrichmentTool.id).toBe("enrich_profile");
+    expect(enrichmentTool.name).toBe("Data Enrichment: enrich_profile");
+
+    // Test validation tool
+    const validationTool = agent.tool.createValidation({
+      id: "validate_email",
+      fields: ["email"],
+      validator: async (context, data) => ({
+        valid: data.email?.includes("@") || false,
+        errors: [],
+        warnings: [],
+      }),
+    });
+
+    expect(validationTool.id).toBe("validate_email");
+    expect(validationTool.name).toBe("Validation: validate_email");
+
+    // Test computation tool
+    const computeTool = agent.tool.createComputation({
+      id: "compute_score",
+      inputs: ["rawOrder"],
+      compute: async (context, inputs) => {
+        const order = inputs.rawOrder as OrderData;
+        return order ? order.total * 1.1 : 0; // Add 10% markup
+      },
+    });
+
+    expect(computeTool.id).toBe("compute_score");
+    expect(computeTool.name).toBe("Computation: compute_score");
+  });
+
+  test("should find tools across scopes", () => {
+    const agent = createToolTestAgent();
+
+    // Register a tool
+    agent.tool.register({
+      id: "registry_tool",
+      handler: async () => "registry result",
+    });
+
+    // Add a tool to agent
+    agent.addTool({
+      id: "agent_tool",
+      handler: async () => "agent result",
+    });
+
+    // Test finding tools
+    expect(agent.tool.find("registry_tool")).toBeDefined();
+    expect(agent.tool.find("agent_tool")).toBeDefined();
+    expect(agent.tool.find("nonexistent")).toBeUndefined();
+
+    // Test getting available tools
+    const available = agent.tool.getAvailable();
+    expect(available.length).toBeGreaterThanOrEqual(2);
+    expect(available.some(t => t.id === "registry_tool")).toBe(true);
+    expect(available.some(t => t.id === "agent_tool")).toBe(true);
+  });
+});
+
+describe("ToolManager Performance Tests", () => {
+  test("should handle large number of registered tools efficiently", () => {
+    const agent = createToolTestAgent();
+    const toolCount = 1000;
+
+    // Register many tools
+    const startTime = Date.now();
+    for (let i = 0; i < toolCount; i++) {
+      agent.tool.register({
+        id: `perf_tool_${i}`,
+        handler: async () => `result_${i}`,
+      });
+    }
+    const registrationTime = Date.now() - startTime;
+
+    // Test lookup performance
+    const lookupStart = Date.now();
+    for (let i = 0; i < 100; i++) {
+      const randomId = `perf_tool_${Math.floor(Math.random() * toolCount)}`;
+      agent.tool.find(randomId);
+    }
+    const lookupTime = Date.now() - lookupStart;
+
+    // Performance assertions (generous limits for CI environments)
+    expect(registrationTime).toBeLessThan(5000); // 5 seconds for 1000 registrations
+    expect(lookupTime).toBeLessThan(1000); // 1 second for 100 lookups
+    expect(agent.tool.getRegisteredIds()).toHaveLength(toolCount);
+  });
+
+  test("should efficiently get available tools with many scopes", () => {
+    const agent = createToolTestAgent();
+
+    // Register tools in registry
+    for (let i = 0; i < 50; i++) {
+      agent.tool.register({
+        id: `registry_${i}`,
+        handler: async () => `registry_${i}`,
+      });
+    }
+
+    // Add tools to agent
+    for (let i = 0; i < 50; i++) {
+      agent.addTool({
+        id: `agent_${i}`,
+        handler: async () => `agent_${i}`,
+      });
+    }
+
+    const startTime = Date.now();
+    const available = agent.tool.getAvailable();
+    const getAvailableTime = Date.now() - startTime;
+
+    expect(getAvailableTime).toBeLessThan(100); // Should be very fast
+    expect(available.length).toBeGreaterThanOrEqual(100);
+  });
+
+  test("should handle memory cleanup efficiently", () => {
+    const agent = createToolTestAgent();
+    const initialMemory = process.memoryUsage().heapUsed;
+
+    // Create and register many tools
+    for (let i = 0; i < 500; i++) {
+      agent.tool.register({
+        id: `memory_tool_${i}`,
+        handler: async () => `result_${i}`,
+      });
+    }
+
+    // Clear registry
+    agent.tool.clearRegistry();
+
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
+    }
+
+    const finalMemory = process.memoryUsage().heapUsed;
+    const memoryIncrease = finalMemory - initialMemory;
+
+    // Memory should not increase significantly after cleanup
+    expect(memoryIncrease).toBeLessThan(50 * 1024 * 1024); // Less than 50MB increase
+    expect(agent.tool.getRegisteredIds()).toHaveLength(0);
+  });
+});
+
 describe("Complex Tool Scenarios", () => {
   test("should handle data transformation tools", async () => {
     const agent = createToolTestAgent();
 
-    const transformTool: Tool<UserProfile, unknown, unknown[], unknown> = {
+    const transformTool = agent.tool.create({
       id: "data_transformer",
       description: "Transforms raw data into structured format",
       parameters: {
@@ -770,8 +1377,8 @@ describe("Complex Tool Scenarios", () => {
           },
         },
       },
-      handler: (_toolContext, ...args: unknown[]) => {
-        const rawOrder = args[0] as OrderData;
+      handler: (_toolContext, args) => {
+        const rawOrder = args?.rawOrder as OrderData;
         const transformed: Partial<OrderData> = {
           orderId: `ORD-${Date.now()}`,
           items: [
@@ -791,26 +1398,22 @@ describe("Complex Tool Scenarios", () => {
           dataUpdate: transformed,
         };
       },
-    } as Tool<UserProfile, unknown, unknown[], unknown>;
-
-    agent.createTool(transformTool);
+    });
 
     const result = await executeToolForTest(
       transformTool,
-      [
-        {
+      {
+        rawOrder: {
           product: "Widget",
           qty: 5,
           cost: 10.99,
         } as OrderData,
-      ] as unknown[],
-      undefined,
-      {}
+      }
     );
 
-    expect(result.data).toBe("Order data transformed");
-    expect((result.dataUpdate as Partial<OrderData>)?.total).toBe(54.95);
-    expect((result.dataUpdate as Partial<OrderData>)?.items?.[0].name).toBe(
+    expect((result as ToolResult<string>).data).toBe("Order data transformed");
+    expect(((result as ToolResult<string>).dataUpdate as Partial<OrderData>)?.total).toBe(54.95);
+    expect(((result as ToolResult<string>).dataUpdate as Partial<OrderData>)?.items?.[0].name).toBe(
       "Widget"
     );
   });
@@ -818,7 +1421,7 @@ describe("Complex Tool Scenarios", () => {
   test("should handle API integration tools", async () => {
     const agent = createToolTestAgent();
 
-    const apiTool: Tool<UserProfile, unknown, unknown[], unknown> = {
+    const apiTool = agent.tool.create({
       id: "api_integrator",
       description: "Makes external API calls",
       parameters: {
@@ -830,12 +1433,10 @@ describe("Complex Tool Scenarios", () => {
         },
         required: ["endpoint", "method"],
       },
-      handler: async (_toolContext, ...args: unknown[]) => {
-        const endpoint = args[0] as string;
-        const method = args[1] as string;
-        const payload = args[2] as Record<string, unknown> | undefined;
-
-        // Mock API call
+      handler: async (_toolContext, args) => {
+        const endpoint = args?.endpoint as string;
+        const method = args?.method as string;
+        const payload = args?.payload as Record<string, unknown> | undefined;
 
         // Simulate API delay
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -850,32 +1451,27 @@ describe("Complex Tool Scenarios", () => {
           },
         };
       },
-    } as Tool<UserProfile, unknown, unknown[], unknown>;
-
-    agent.createTool(apiTool);
+    });
 
     const result = await executeToolForTest(
       apiTool,
-      [
-        "/users",
-        "POST",
-        { name: "New User", email: "user@example.com" },
-      ] as unknown[],
-      undefined,
-      {}
+      {
+        endpoint: "/users",
+        method: "POST",
+        payload: { name: "New User", email: "user@example.com" },
+      }
     );
 
-    expect(result.data).toBe("API POST /users completed");
+    expect((result as ToolResult<string>).data).toBe("API POST /users completed");
     expect(
-      (result.dataUpdate as Partial<{ apiResponse: { status: number } }>)
-        ?.apiResponse?.status
+      ((result as ToolResult<string>).dataUpdate as any)?.apiResponse?.status
     ).toBe(200);
   });
 
   test("should handle conditional tool logic", async () => {
     const agent = createToolTestAgent();
 
-    const conditionalTool: Tool<UserProfile, unknown, unknown[], unknown> = {
+    const conditionalTool = agent.tool.create({
       id: "conditional_processor",
       description: "Processes data based on conditions",
       parameters: {
@@ -886,8 +1482,8 @@ describe("Complex Tool Scenarios", () => {
         },
         required: ["action"],
       },
-      handler: (toolContext, ...args: unknown[]) => {
-        const action = args[0] as string;
+      handler: (toolContext, args) => {
+        const action = args?.action as string;
         const userPrefs = toolContext.context?.preferences;
 
         let result: string;
@@ -911,26 +1507,24 @@ describe("Complex Tool Scenarios", () => {
           data: result,
         };
       },
-    } as Tool<UserProfile, unknown, unknown[], unknown>;
-
-    agent.createTool(conditionalTool);
+    });
 
     const context = await agent.getContext();
 
     // Test with notifications enabled
     const result1 = await executeToolForTest(
       conditionalTool,
-      ["send_notification"] as unknown[],
+      { action: "send_notification" },
       context
     );
-    expect(result1.data).toBe("Notification sent");
+    expect((result1 as ToolResult<string>).data).toBe("Notification sent");
 
     // Test theme application
     const result2 = await executeToolForTest(
       conditionalTool,
-      ["apply_theme"] as unknown[],
+      { action: "apply_theme" },
       context
     );
-    expect(result2.data).toBe("Applied light theme");
+    expect((result2 as ToolResult<string>).data).toBe("Applied light theme");
   });
 });

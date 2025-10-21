@@ -8,8 +8,9 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 - 🎯 **Schema-First Data Collection**: Type-safe, structured data extraction from natural conversations
 - 🔀 **Route DSL**: Fluent, composable API for building complex multi-step conversation flows
 - 🏗️ **Type-Safe Context**: Generic context management with lifecycle hooks and dynamic providers
-- 🔄 **Streaming & Tools**: Real-time streaming responses with dynamic tool execution
+- 🔄 **Streaming & Tools**: Real-time streaming responses with dynamic tool execution using unified Tool interface
 - 💾 **Comprehensive Persistence**: Database-agnostic session and message storage across multiple adapters
+- 🛠️ **Unified Tool System**: Simplified tool creation with flexible return types and powerful pattern helpers
 
 ## 📖 Documentation Structure
 
@@ -54,6 +55,11 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 - **[Session Storage](./core/persistence/session-storage.md)** - Session persistence patterns
 - **[Database Adapters](./core/persistence/adapters.md)** - Built-in adapter configurations
 
+#### Error Handling
+
+- **[Error Handling](./core/error-handling.md)** - Comprehensive error handling patterns and recovery strategies
+- **[Error Handling Patterns](./guides/error-handling-patterns.md)** - Practical patterns for streaming, routing, and data sync errors
+
 ### 🚀 Advanced Guides
 
 - **[Building Agents](./guides/building-agents/)** - Complete agent construction patterns
@@ -94,6 +100,7 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 - **AI Integration**: [Providers](./core/ai-integration/providers.md) | [Prompts](./core/ai-integration/prompt-composition.md) | [Responses](./core/ai-integration/response-processing.md)
 - **Tools & Execution**: [Tool Definition](./core/tools/tool-definition.md) | [Tool Execution](./core/tools/tool-execution.md) | [Tool Scoping](./core/tools/tool-scoping.md)
 - **Persistence**: [Session Storage](./core/persistence/session-storage.md) | [Adapters](./core/persistence/adapters.md)
+- **Error Handling**: [Core Error Handling](./core/error-handling.md) | [Error Patterns](./guides/error-handling-patterns.md)
 - **Advanced**: [Building Agents](./guides/building-agents/) | [Patterns](./guides/advanced-patterns/) | [Migration](./guides/migration/) | [API Reference](./api/)
 
 ## 💡 Examples by Domain
@@ -129,10 +136,10 @@ Check out the [`examples/`](../examples/) directory for complete, runnable examp
 
 ### 🔧 Tools & Execution
 
-- **[Basic Tools](../examples/tools/basic-tools.ts)** - Simple tool creation and execution
-- **[Data Enrichment Tools](../examples/tools/data-enrichment-tools.ts)** - Tools that modify collected data
-- **[Context Updating Tools](../examples/tools/context-updating-tools.ts)** - Tools that modify agent context
-- **[Domain Scoped Tools](../examples/tools/domain-scoped-tools.ts)** - Tool security and access control
+- **[Basic Tools](../examples/tools/basic-tools.ts)** - Unified Tool interface with simple return values
+- **[Data Enrichment Tools](../examples/tools/data-enrichment-tools.ts)** - Pattern helpers for data modification
+- **[Context Updating Tools](../examples/tools/context-updating-tools.ts)** - Advanced ToolResult patterns with context updates
+- **[Domain Scoped Tools](../examples/tools/domain-scoped-tools.ts)** - Tool registry and scoping with agent.tool.register()
 
 ### 💾 Persistence
 

@@ -65,11 +65,11 @@ interface FeedbackData {
 // ==============================================================================
 
 // Tool: Fetch latest company news (context enrichment)
-const fetchNewsTool: Tool<CompanyContext, UnifiedData, [], void> = {
+const fetchNewsTool: Tool<CompanyContext, UnifiedData> = {
   id: "fetch_news",
   name: "Company News Fetcher",
   description: "Retrieve latest company news and updates",
-  handler: () => {
+  handler: (context, args) => {
     // Simulate API call to news service
     const news = [
       {
@@ -87,7 +87,7 @@ const fetchNewsTool: Tool<CompanyContext, UnifiedData, [], void> = {
     console.log(`[Tool] Fetched ${news.length} news articles`);
 
     return {
-      data: undefined,
+      data: `Fetched ${news.length} latest news articles`,
       contextUpdate: {
         recentNews: news,
       },
@@ -96,12 +96,12 @@ const fetchNewsTool: Tool<CompanyContext, UnifiedData, [], void> = {
 };
 
 // Tool: Search knowledge base (context enrichment)
-const searchKnowledgeTool: Tool<CompanyContext,UnifiedData, [], string> = {
+const searchKnowledgeTool: Tool<CompanyContext, UnifiedData> = {
   id: "search_knowledge",
   name: "Knowledge Base Search",
   description: "Search FAQs and documentation",
-  handler: (context) => {
-    const { history } = context;
+  handler: (toolContext, args) => {
+    const { history } = toolContext;
 
     // Get last user message
     const lastMessage = history

@@ -18,6 +18,7 @@ import type {
 } from "../types";
 
 import { Step } from "./Step";
+import { Agent } from './Agent'
 import { generateRouteId } from "../utils/id";
 import { END_ROUTE } from "../constants";
 
@@ -50,10 +51,13 @@ export class Route<TContext = unknown, TData = unknown> {
   public routingExtrasSchema?: StructuredSchema;
   public guidelines: Guideline<TContext>[] = [];
   public terms: Term<TContext>[] = [];
-  public tools: Tool<TContext, TData, unknown[], unknown>[] = [];
+  public tools: Tool<TContext, TData>[] = [];
   public knowledgeBase: Record<string, unknown> = {};
 
-  constructor(options: RouteOptions<TContext, TData>) {
+  // Reference to parent agent for ToolManager access
+  private parentAgent?: Agent<TContext, TData>; 
+
+  constructor(options: RouteOptions<TContext, TData>, parentAgent?: Agent<TContext, TData>) {
     // Use provided ID or generate a deterministic one from the title
     this.id = options.id || generateRouteId(options.title);
     this.title = options.title;
@@ -63,6 +67,9 @@ export class Route<TContext = unknown, TData = unknown> {
     this.conditions = options.conditions || [];
     this.rules = options.rules || [];
     this.prohibitions = options.prohibitions || [];
+
+    // Store reference to parent agent for ToolManager access
+    this.parentAgent = parentAgent;
 
     // Handle initial step logic
     let initialStepOptions = options.initialStep;
@@ -79,7 +86,7 @@ export class Route<TContext = unknown, TData = unknown> {
       }
     }
 
-    this.initialStep = new Step<TContext, TData>(this.id, initialStepOptions);
+    this.initialStep = new Step<TContext, TData>(this.id, initialStepOptions, this.parentAgent);
 
     // Store endStep spec (will be used when route completes)
     this.endStepSpec = options.endStep || {
@@ -133,14 +140,13 @@ export class Route<TContext = unknown, TData = unknown> {
   private buildSequentialSteps(
     steps: Array<StepOptions<TContext, TData> | typeof END_ROUTE>
   ): void {
-    let currentStep: StepResult<TContext, TData> =
-      this.initialStep.asStepResult();
+    let currentStepResult: StepResult<TContext, TData> = this.initialStep.asStepResult();
 
     for (const step of steps) {
       if (step === END_ROUTE) {
-        currentStep.nextStep({ step: END_ROUTE });
+        currentStepResult.nextStep({ step: END_ROUTE });
       } else {
-        currentStep = currentStep.nextStep(step);
+        currentStepResult = currentStepResult.nextStep(step);
       }
     }
   }
@@ -168,7 +174,12 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Register a tool for this route
    */
-  createTool(tool: Tool<TContext, TData, unknown[], unknown>): this {
+  createTool(tool: Tool<TContext, TData>): this {
+    // Validate tool before adding
+    if (!tool || !tool.id || !tool.handler) {
+      throw new Error(`Invalid tool: must have id and handler properties`);
+    }
+    
     this.tools.push(tool);
     return this;
   }
@@ -176,8 +187,25 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Register multiple tools for this route
    */
-  registerTools(tools: Tool<TContext, TData, unknown[], unknown>[]): this {
+  registerTools(tools: Tool<TContext, TData>[]): this {
     tools.forEach((tool) => this.createTool(tool));
+    return this;
+  }
+
+  /**
+   * Add a tool to this route using the ToolManager API
+   * Creates and adds the tool to route scope in one operation
+   */
+  addTool(
+    tool: Tool<TContext, TData>
+  ): this {
+    if (this.parentAgent && this.parentAgent.tool) {
+      // Use ToolManager to add to route scope - no casting needed with unified interface
+      this.parentAgent.tool.addToRoute(this, tool);
+    } else {
+      // Fallback: add tool directly to route tools
+      this.createTool(tool);
+    }
     return this;
   }
 
@@ -198,7 +226,7 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Get all tools for this route
    */
-  getTools(): Tool<TContext, TData, unknown[], unknown>[] {
+  getTools(): Tool<TContext, TData>[] {
     return [...this.tools];
   }
 
@@ -311,8 +339,7 @@ export class Route<TContext = unknown, TData = unknown> {
       const transitions = step.getTransitions();
       for (const transition of transitions) {
         lines.push(
-          `    -> ${transition.id}${
-            transition.description ? `: ${transition.description}` : ""
+          `    -> ${transition.id}${transition.description ? `: ${transition.description}` : ""
           }`
         );
       }

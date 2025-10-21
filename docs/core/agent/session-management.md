@@ -104,7 +104,7 @@ const response3 = await agent.respond("Also book me a hotel in Tokyo");
 
 **SessionManager API:**
 
-The `SessionManager` provides a clean API for session operations:
+The `SessionManager` provides a clean API for session operations with comprehensive error handling:
 
 ```typescript
 // Access the session manager
@@ -114,13 +114,19 @@ const sessionManager = agent.session;
 await sessionManager.getOrCreate("user-123");
 await sessionManager.getOrCreate(); // Auto-generates ID
 
-// History management
-await sessionManager.addMessage("user", "Hello");
-await sessionManager.addMessage("assistant", "Hi there!");
+// History management with error handling
+try {
+  await sessionManager.addMessage("user", "Hello");
+  await sessionManager.addMessage("assistant", "Hi there!");
+} catch (error) {
+  console.error("Failed to add message to history:", error);
+  // Message will be rolled back automatically
+}
+
 const history = sessionManager.getHistory();
 sessionManager.clearHistory();
 
-// Data access
+// Data access with synchronization
 const data = sessionManager.getData<FlightData>();
 await sessionManager.setData({ destination: "Paris" });
 
@@ -128,6 +134,147 @@ await sessionManager.setData({ destination: "Paris" });
 await sessionManager.save(); // Manual save (auto-saves on addMessage)
 await sessionManager.delete();
 const newSession = await sessionManager.reset(true); // Preserve history
+```
+
+### Agent-Session Data Synchronization
+
+The framework ensures bidirectional synchronization between agent collected data and session data:
+
+```typescript
+// Agent data updates automatically sync with session
+const agent = new Agent<{}, BookingData>({
+  sessionId: "user-123",
+  // ... other config
+});
+
+try {
+  // Update agent data - automatically syncs with session
+  await agent.updateCollectedData({
+    destination: "Tokyo",
+    passengers: 2
+  });
+  
+  // Session data is automatically updated
+  const sessionData = agent.session.getData<BookingData>();
+  console.log(sessionData.destination); // "Tokyo"
+  
+  // Update session data - automatically syncs with agent
+  await agent.session.setData({
+    checkInDate: "2025-03-15"
+  });
+  
+  // Agent data is automatically updated
+  const agentData = agent.getCollectedData();
+  console.log(agentData.checkInDate); // "2025-03-15"
+  
+} catch (error) {
+  console.error("Data synchronization failed:", error);
+  // Both agent and session data remain in consistent state
+}
+```
+
+### Error Handling in Data Synchronization
+
+```typescript
+class SessionManager<TData> {
+  async setData(data: Partial<TData>): Promise<void> {
+    const previousData = { ...this.session.data };
+    
+    try {
+      // Validate data if schema is available
+      if (this.schema) {
+        this.validateData(data);
+      }
+      
+      // Update session data
+      this.session.data = { ...this.session.data, ...data };
+      
+      // Sync with agent collected data
+      if (this.agent) {
+        await this.agent.updateCollectedData(data);
+      }
+      
+      // Persist changes
+      await this.save();
+      
+    } catch (error) {
+      // Rollback session data on any failure
+      this.session.data = previousData;
+      
+      console.error("Session data update failed, rolled back:", error);
+      throw new Error(`Data synchronization failed: ${error.message}`);
+    }
+  }
+  
+  async addMessage(role: "user" | "assistant", content: string): Promise<void> {
+    const message: HistoryItem = {
+      role,
+      content,
+      timestamp: new Date().toISOString()
+    };
+    
+    try {
+      // Add to session history
+      this.session.history.push(message);
+      
+      // Persist immediately for reliability
+      await this.save();
+      
+    } catch (error) {
+      // Remove message from history on persistence failure
+      this.session.history.pop();
+      
+      console.error("Failed to persist message:", error);
+      throw new Error(`Message persistence failed: ${error.message}`);
+    }
+  }
+}
+```
+
+### Chat Method with Proper Error Handling
+
+```typescript
+class Agent<TContext, TData> {
+  async chat(message: string, sessionId?: string): Promise<AgentResponse<TData>> {
+    try {
+      // Ensure session is loaded
+      if (!this.session || this.session.id !== sessionId) {
+        await this.loadSession(sessionId);
+      }
+      
+      // Add user message to history BEFORE processing
+      await this.session.addMessage("user", message);
+      
+      // Process the message
+      const response = await this.respond({
+        message,
+        sessionId: this.session.id
+      });
+      
+      // Add assistant response to history
+      if (response.message) {
+        await this.session.addMessage("assistant", response.message);
+      }
+      
+      return response;
+      
+    } catch (error) {
+      console.error("Chat method failed:", error);
+      
+      // Try to remove the user message if response failed
+      try {
+        const history = this.session.getHistory();
+        if (history.length > 0 && history[history.length - 1].role === "user") {
+          await this.session.removeLastMessage();
+        }
+      } catch (rollbackError) {
+        console.error("Failed to rollback user message:", rollbackError);
+      }
+      
+      throw new Error(`Chat failed: ${error.message}`);
+    }
+  }
+}
 ```
 
 **Why?** Automatic session management provides:

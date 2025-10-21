@@ -23,22 +23,22 @@ interface UserProfileData {
   newsletterOptIn: boolean;
 }
 
-// Define a tool that uses the collected data
-const saveUserProfile: Tool<unknown, UserProfileData, [], string> = {
+// Define a tool that uses the collected data - using unified Tool interface
+const saveUserProfileTool: Tool<unknown, UserProfileData> = {
   id: "save_user_profile",
   description: "Save the collected user profile information",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: ({ data }) => {
-    console.log("Saving user profile:", data);
+  handler: async (context, args) => {
+    console.log("Saving user profile:", context.data);
 
     // Simulate saving to database
-    console.log("Profile data:", data);
+    console.log("Profile data:", context.data);
 
     return {
-      data: `Profile saved successfully! Welcome ${data?.name}!`,
+      data: `Profile saved successfully! Welcome ${context.data?.name}!`,
     };
   },
 };
@@ -98,6 +98,9 @@ const agent = new Agent<unknown, UserProfileData>({
   // NEW: Agent-level schema definition
   schema: userProfileSchema,
 });
+
+// Add tool using unified interface
+agent.addTool(saveUserProfileTool);
 
 // Create a route that collects profile information step by step
 agent.createRoute({
@@ -163,7 +166,7 @@ agent.createRoute({
       description: "Save the collected profile",
       prompt:
         "Thanks for providing your information! Let me save your profile.",
-      tools: [saveUserProfile],
+      tools: ["save_user_profile"], // Reference by ID
       requires: ["name", "email"],
     },
   ],

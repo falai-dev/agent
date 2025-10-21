@@ -16,6 +16,7 @@ import type {
   StructuredSchema,
   ValidationError,
   ValidationResult,
+
 } from "../types";
 import type { StreamOptions, GenerateOptions, RespondParams } from "./ResponseModal";
 import {
@@ -30,8 +31,9 @@ import { Step } from "./Step";
 import { PersistenceManager } from "./PersistenceManager";
 import { SessionManager } from "./SessionManager";
 import { RoutingEngine } from "./RoutingEngine";
-import { ToolExecutor } from "./ToolExecutor";
+
 import { ResponseModal } from "./ResponseModal";
+import { ToolManager } from "./ToolManager";
 
 /**
  * Error thrown when data validation fails
@@ -60,7 +62,7 @@ class RouteConfigurationError extends Error {
 export class Agent<TContext = any, TData = any> {
   private terms: Term<TContext, TData>[] = [];
   private guidelines: Guideline<TContext, TData>[] = [];
-  private tools: Tool<TContext, TData, unknown[], unknown>[] = [];
+  private tools: Tool<TContext, TData>[] = [];
   private routes: Route<TContext, TData>[] = [];
   private context: TContext | undefined;
   private persistenceManager: PersistenceManager<TData> | undefined;
@@ -73,6 +75,9 @@ export class Agent<TContext = any, TData = any> {
 
   /** Public session manager for easy session management */
   public session: SessionManager<TData>;
+
+  /** Public tool manager for simplified tool creation and management */
+  public tool: ToolManager<TContext, TData>;
 
   constructor(private readonly options: AgentOptions<TContext, TData>) {
     // Set log level based on debug option
@@ -188,13 +193,23 @@ export class Agent<TContext = any, TData = any> {
       this.knowledgeBase = { ...options.knowledgeBase };
     }
 
-    // Initialize session manager
-    this.session = new SessionManager<TData>(this.persistenceManager);
+    // Initialize session manager with reference to this agent for bidirectional sync
+    this.session = new SessionManager<TData>(this.persistenceManager, this);
+
+    // Initialize tool manager with proper type inference
+    this.tool = new ToolManager<TContext, TData>(this);
 
     // Store sessionId for later use in getOrCreate calls
     if (options.sessionId) {
+      this.session.setDefaultSessionId(options.sessionId);
       // The session will be loaded on first getOrCreate call
-      this.session.getOrCreate(options.sessionId).catch((err) => {
+      this.session.getOrCreate(options.sessionId).then((session) => {
+        // Sync session data to agent collected data
+        if (session.data && Object.keys(session.data).length > 0) {
+          this.collectedData = { ...session.data };
+          logger.debug("[Agent] Synced session data to collected data:", this.collectedData);
+        }
+      }).catch((err) => {
         logger.error("Failed to start session", err);
       });
     }
@@ -294,6 +309,8 @@ export class Agent<TContext = any, TData = any> {
    * Get the current collected data
    */
   getCollectedData(): Partial<TData> {
+    // Ensure agent collected data is synced with session
+    this.syncSessionDataToCollectedData();
     return { ...this.collectedData };
   }
 
@@ -332,6 +349,13 @@ export class Agent<TContext = any, TData = any> {
     // Update current session if it exists to keep it in sync
     if (this.currentSession) {
       this.currentSession = mergeCollected(this.currentSession, this.collectedData);
+    }
+
+    // Also update the session manager's session data (avoid circular call)
+    const sessionManagerSession = this.session.current;
+    if (sessionManagerSession) {
+      sessionManagerSession.data = { ...this.collectedData };
+      sessionManagerSession.metadata!.lastUpdatedAt = new Date();
     }
 
     logger.debug("[Agent] Collected data updated:", updates);
@@ -401,7 +425,7 @@ export class Agent<TContext = any, TData = any> {
       }
     }
 
-    const route = new Route<TContext, TData>(options);
+    const route = new Route<TContext, TData>(options, this);
     this.routes.push(route);
     return route;
   }
@@ -428,18 +452,53 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Register a tool at the agent level
+   * Add a tool to the agent using the unified Tool interface
+   * Creates and adds the tool to agent scope in one operation (BREAKING CHANGE: replaces createTool)
    */
-  createTool(tool: Tool<TContext, TData, unknown[], unknown>): this {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  addTool<TResult = any>(
+    tool: Tool<TContext, TData, TResult>
+  ): this {
+    // Validate tool before adding
+    if (!tool || !tool.id || !tool.handler) {
+      throw new Error('Invalid tool: must have id and handler properties');
+    }
+    
+    // Add directly to agent's tools array, preserving the TResult type
     this.tools.push(tool);
+    logger.debug(`[Agent] Added tool to agent scope: ${tool.id}`);
+    return this;
+  }
+
+  /**
+   * Register a tool at the agent level (legacy method for backward compatibility)
+   * @deprecated Use addTool() with Tool interface instead
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  createTool<TResult = any>(tool: Tool<TContext, TData, TResult>): this {
+    // Validate tool before adding
+    if (!tool || !tool.id || !tool.handler) {
+      throw new Error('Invalid tool: must have id and handler properties');
+    }
+    
+    this.tools.push(tool);
+    logger.debug(`[Agent] Created tool (legacy): ${tool.id}`);
     return this;
   }
 
   /**
    * Register multiple tools at the agent level
    */
-  registerTools(tools: Tool<TContext, TData, unknown[], unknown>[]): this {
-    tools.forEach((tool) => this.createTool(tool));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registerTools<TResult = any>(tools: Tool<TContext, TData, TResult>[]): this {
+    tools.forEach((tool) => {
+      // Validate each tool before adding
+      if (!tool || !tool.id || !tool.handler) {
+        throw new Error(`Invalid tool in batch: must have id and handler properties (tool: ${tool?.id || 'unknown'})`);
+      }
+      this.tools.push(tool);
+    });
+    logger.debug(`[Agent] Registered ${tools.length} tools`);
     return this;
   }
 
@@ -598,7 +657,7 @@ export class Agent<TContext = any, TData = any> {
   /**
    * Get all tools
    */
-  getTools(): Tool<TContext, TData, unknown[], unknown>[] {
+  getTools(): Tool<TContext, TData>[] {
     return [...this.tools];
   }
 
@@ -660,7 +719,7 @@ export class Agent<TContext = any, TData = any> {
   async executePrepareFinalize(
     prepareOrFinalize:
       | string
-      | Tool<TContext, TData, unknown[], unknown>
+      | Tool<TContext, TData>
       | ((context: TContext, data?: Partial<TData>) => void | Promise<void>)
       | undefined,
     context: TContext,
@@ -675,44 +734,24 @@ export class Agent<TContext = any, TData = any> {
       await prepareOrFinalize(context, data);
     } else {
       // It's a tool reference - find and execute the tool
-      let tool: Tool<TContext, TData, unknown[], unknown> | undefined;
+      let tool: Tool<TContext, TData> | undefined;
 
       if (typeof prepareOrFinalize === "string") {
-        // Tool ID - find it in available tools
-        const availableTools = new Map<string, Tool<TContext, TData, unknown[], unknown>>();
-
-        // Add agent-level tools
-        this.tools.forEach((t) => {
-          availableTools.set(t.id, t);
-        });
-
-        // Add route-level tools
-        if (route) {
-          route.getTools().forEach((t) => {
-            availableTools.set(t.id, t);
-          });
-        }
-
-        // Add step-level tools
-        if (step?.tools) {
-          for (const toolRef of step.tools) {
-            if (typeof toolRef === "string") {
-              // Keep as is
-            } else if (toolRef.id) {
-              availableTools.set(toolRef.id, toolRef);
-            }
-          }
-        }
-
-        tool = availableTools.get(prepareOrFinalize);
+        // Tool ID - use ToolManager to find it across all scopes
+        tool = this.tool.find(prepareOrFinalize, undefined, step, route);
       } else {
-        // Tool object - use directly
-        tool = prepareOrFinalize;
+        // Tool object - validate it has required properties
+        if (prepareOrFinalize.id && typeof prepareOrFinalize.handler === 'function') {
+          tool = prepareOrFinalize;
+        } else {
+          logger.error(`[Agent] Invalid tool object for prepare/finalize: missing id or invalid handler`);
+          return;
+        }
       }
 
       if (tool) {
-        const toolExecutor = new ToolExecutor<TContext, TData>();
-        const result = await toolExecutor.executeTool({
+        // Use ToolManager for execution
+        const result = await this.tool.executeTool({
           tool,
           context,
           updateContext: this.updateContext.bind(this),
@@ -746,11 +785,26 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
+   * Sync session data to agent collected data
+   * @internal Used to keep agent and session data in sync
+   */
+  private syncSessionDataToCollectedData(): void {
+    const sessionData = this.session.getData();
+    if (sessionData && Object.keys(sessionData).length > 0) {
+      this.collectedData = { ...sessionData };
+      logger.debug("[Agent] Synced session data to collected data:", this.collectedData);
+    }
+  }
+
+  /**
    * Get collected data from current session or agent-level collected data
    * @param routeId - Optional route ID to get data for (uses current route if not provided)
    * @returns The collected data from the current session or agent-level data
    */
   getData(): Partial<TData> {
+    // Ensure agent collected data is synced with session
+    this.syncSessionDataToCollectedData();
+    
     // If we have a current session, use session data
     if (this.currentSession) {
       // With agent-level data, all routes share the same data structure

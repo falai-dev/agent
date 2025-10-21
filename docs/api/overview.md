@@ -12,7 +12,7 @@ Complete API documentation for `@falai/agent`. This framework provides a strongl
   - [RoutingEngine](#routingengine)
   - [ResponseEngine](#responseengine)
   - [PromptComposer](#promptcomposer)
-  - [ToolExecutor](#toolexecutor)
+
 - [AI Providers](#ai-providers)
 - [Persistence Adapters](#persistence-adapters)
 - [Types & Interfaces](#types--interfaces)
@@ -136,9 +136,58 @@ for await (const chunk of agent.stream("Hello")) {
 ##### Tool Management
 
 ```typescript
-createTool(tool: Tool<TContext, unknown[], unknown, unknown>): this
-registerTools(tools: Tool<TContext, unknown[], unknown, unknown>[]): this
-getTools(): Tool<TContext, unknown[], unknown, unknown>[]
+addTool(definition: Tool<TContext, TData, TResult>): this
+tool: ToolManager<TContext, TData> // Access to ToolManager instance
+```
+
+**Comprehensive Tool Examples:**
+
+```typescript
+// 1. Simple return value (most common)
+agent.addTool({
+  id: "calculate_tip",
+  description: "Calculate tip amount",
+  handler: async ({ context, data }, args) => {
+    const tip = args.amount * args.percentage;
+    return `Tip: $${tip.toFixed(2)}`; // Simple string return
+  }
+});
+
+// 2. Complex ToolResult pattern
+agent.addTool({
+  id: "process_order",
+  description: "Process customer order",
+  handler: async ({ context, data }, args) => {
+    const order = await orderService.process(args.items);
+    return {
+      data: `Order ${order.id} processed successfully`,
+      success: true,
+      contextUpdate: { lastOrderId: order.id },
+      dataUpdate: { orderStatus: 'processed' }
+    }; // Detailed ToolResult object
+  }
+});
+
+// 3. Registry for reuse
+agent.tool.register({
+  id: "send_notification",
+  description: "Send notification to user",
+  handler: async ({ context }, args) => {
+    await notificationService.send(context.userId, args.message);
+    return "Notification sent"; // Simple return
+  }
+});
+
+// 4. Pattern helper
+const validationTool = agent.tool.createValidation({
+  id: "validate_email",
+  fields: ['email'],
+  validator: async (context, data) => ({
+    valid: /\S+@\S+\.\S+/.test(data.email),
+    errors: []
+  })
+});
+agent.tool.register(validationTool);
 ```
 
 ##### Domain Knowledge
@@ -301,9 +350,7 @@ getRoutingExtrasSchema(): StructuredSchema | undefined
 ##### Tool Management
 
 ```typescript
-createTool(tool: Tool<TContext, unknown[], unknown, TData>): this
-registerTools(tools: Tool<TContext, unknown[], unknown, TData>[]): this
-getTools(): Tool<TContext, unknown[], unknown, TData>[]
+addTool(definition: Tool<TContext, TData, TResult>): this
 ```
 
 ##### Lifecycle Hooks
@@ -347,9 +394,9 @@ configure(config: Partial<StepOptions<TContext, TData>>): this
 ##### Transitions
 
 ```typescript
-nextStep(spec: StepOptions<TContext, TData>): StepResult<TContext, TData>
+nextStep(spec: StepOptions<TContext, TData>): Step<TContext, TData>
 branch(branches: BranchSpec<TContext, TData>[]): BranchResult<TContext, TData>
-endRoute(options?: Omit<StepOptions<TContext, TData>, 'step'>): StepResult<TContext, TData>
+endRoute(options?: Omit<StepOptions<TContext, TData>, 'step'>): Step<TContext, TData>
 ```
 
 ##### Validation
@@ -371,7 +418,6 @@ getTransitions(): Step<TContext, TData>[]
 
 ```typescript
 getRef(): StepRef
-asStepResult(): StepResult<TContext, TData>
 ```
 
 ---
@@ -505,23 +551,7 @@ addDirectives(directives?: string[]): Promise<this>
 build(): Promise<string>
 ```
 
----
 
-### ToolExecutor
-
-Handles tool execution with context updates and data collection.
-
-#### Methods
-
-```typescript
-executeTool(params: {
-  tool: Tool;
-  context: unknown;
-  updateContext: (updates: Partial<unknown>) => Promise<void>;
-  history: Event[];
-  data: unknown;
-}): Promise<ToolExecutionResult>
-```
 
 ---
 
@@ -756,21 +786,33 @@ interface StepOptions<TContext = unknown, TData = unknown> {
   }
 }
 
-// Example: Using existing tools (new approach)
+// Example: Using existing tools (unified Tool interface)
 {
-  prepare: "validate_user_data",  // Tool ID string
-  finalize: myCustomTool,         // Tool object
+  prepare: "validate_user_data",  // Tool ID string - simple return value
+  finalize: "send_notification",  // Tool ID string - ToolResult pattern
 }
 
-// Example: Inline tool definition
+// Example: Inline tool definition with flexible returns
 {
   prepare: {
     id: "setup_step_context",
     description: "Prepare context for this step",
     parameters: { type: "object", properties: {} },
     handler: ({ context, data }) => {
-      // Custom logic here
-      return { data: "Setup complete" };
+      // Simple return value
+      return "Setup complete";
+    }
+  },
+  finalize: {
+    id: "cleanup_step_context", 
+    description: "Clean up after step completion",
+    handler: ({ context, data }) => {
+      // Complex ToolResult pattern
+      return {
+        data: "Cleanup complete",
+        success: true,
+        contextUpdate: { lastCleanup: new Date() }
+      };
     }
   }
 }

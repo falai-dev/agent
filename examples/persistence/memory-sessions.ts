@@ -38,15 +38,15 @@ interface SupportContext {
 }
 
 // Support tools
-const createTicket: Tool<unknown, SupportTicketData, [], string> = {
+const createTicket: Tool<unknown, SupportTicketData> = {
   id: "create_support_ticket",
   description: "Create a new support ticket",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: ({ data }) => {
-    const ticketData = data as Partial<SupportTicketData>;
+  handler: (context, args) => {
+    const ticketData = context.data;
     const ticketId = `TICKET-${Date.now()}`;
     console.log(
       `Creating ticket ${ticketId} for ${ticketData?.category} issue`

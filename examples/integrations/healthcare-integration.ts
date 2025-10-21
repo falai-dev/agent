@@ -39,7 +39,7 @@ interface SatisfactionData {
 
 // Tools
 
-const getUpcomingSlots: Tool<HealthcareContext, HealthcareData, unknown[], unknown> = {
+const getUpcomingSlots: Tool<HealthcareContext, HealthcareData> = {
   id: "get_upcoming_slots",
   name: "Available Appointment Slots",
   description: "Get upcoming appointment slots",
@@ -47,12 +47,12 @@ const getUpcomingSlots: Tool<HealthcareContext, HealthcareData, unknown[], unkno
     type: "object",
     properties: {},
   },
-  handler: () => {
-    return { data: ["Monday 10 AM", "Tuesday 2 PM", "Wednesday 1 PM"] };
+  handler: (context, args) => {
+    return { data: "Available slots: Monday 10 AM, Tuesday 2 PM, Wednesday 1 PM" };
   },
 };
 
-const getLaterSlots: Tool<HealthcareContext, HealthcareData, unknown[], unknown> = {
+const getLaterSlots: Tool<HealthcareContext, HealthcareData> = {
   id: "get_later_slots",
   name: "Extended Appointment Slots",
   description: "Get later appointment slots",
@@ -60,17 +60,12 @@ const getLaterSlots: Tool<HealthcareContext, HealthcareData, unknown[], unknown>
     type: "object",
     properties: {},
   },
-  handler: () => {
-    return { data: ["November 3, 11:30 AM", "November 12, 3 PM"] };
+  handler: (context, args) => {
+    return { data: "Later slots: November 3, 11:30 AM, November 12, 3 PM" };
   },
 };
 
-const scheduleAppointment: Tool<
-  HealthcareContext,
-  HealthcareData,
-  unknown[],
-  unknown
-> = {
+const scheduleAppointment: Tool<HealthcareContext, HealthcareData> = {
   id: "schedule_appointment",
   name: "Appointment Scheduler",
   description: "Schedule an appointment with a healthcare provider",
@@ -81,26 +76,21 @@ const scheduleAppointment: Tool<
     },
     required: ["datetime"],
   },
-  handler: ({ data }) => {
-    if (!data?.preferredDate || !data?.preferredTime) {
+  handler: (context, args) => {
+    if (!context.data?.preferredDate || !context.data?.preferredTime) {
       return {
         data: "Please specify preferred date and time for the appointment",
       };
     }
     return {
-      data: `Appointment scheduled for ${data.preferredDate} at ${
-        data.preferredTime
-      } for ${data.appointmentReason || "consultation"}`,
+      data: `Appointment scheduled for ${context.data.preferredDate} at ${
+        context.data.preferredTime
+      } for ${context.data.appointmentReason || "consultation"}`,
     };
   },
 };
 
-const getLabResults: Tool<
-  HealthcareContext,
-  HealthcareData,
-  unknown[],
-  unknown
-> = {
+const getLabResults: Tool<HealthcareContext, HealthcareData> = {
   id: "get_lab_results",
   name: "Lab Results Retriever",
   description: "Get lab test results",
@@ -108,13 +98,9 @@ const getLabResults: Tool<
     type: "object",
     properties: {},
   },
-  handler: ({ context, data }) => {
+  handler: (context, args) => {
     return {
-      data: {
-        report: `Lab results for ${data?.testType || "general"} tests`,
-        prognosis: "All tests are within the valid range",
-        patientName: context.patientName,
-      },
+      data: `Lab results for ${context.data?.testType || "general"} tests: All tests are within the valid range for ${context.context.patientName}`,
     };
   },
 };

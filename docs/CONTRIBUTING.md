@@ -39,6 +39,46 @@ This project and everyone participating in it is governed by our commitment to f
 
 ---
 
+## Tool System Overview
+
+@falai/agent features a unified Tool interface that supports both simple return values and complex ToolResult patterns:
+
+### Unified Tool Interface
+
+```typescript
+interface Tool<TContext = unknown, TData = unknown, TResult = unknown> {
+  id: string;
+  name?: string;
+  description?: string;
+  parameters?: unknown;
+  handler: (
+    context: ToolContext<TContext, TData>,
+    args?: Record<string, unknown>
+  ) => Promise<TResult | ToolResult<TResult, TContext, TData>> | TResult | ToolResult<TResult, TContext, TData>;
+}
+```
+
+### Tool Creation Methods
+
+- **`agent.addTool()`** - Direct addition to agent scope
+- **`agent.tool.register()`** - Registry for ID-based reference
+- **`agent.tool.create()`** - Create without adding to scope
+- **Pattern helpers** - `createDataEnrichment()`, `createValidation()`, etc.
+
+### Return Value Flexibility
+
+```typescript
+// Simple return value
+handler: async () => "Simple result"
+
+// Complex ToolResult object
+handler: async () => ({
+  data: "Result data",
+  success: true,
+  contextUpdate: { lastAction: "completed" }
+})
+```
+
 ## How Can I Contribute?
 
 ### 🐛 Reporting Bugs

@@ -81,7 +81,7 @@ function createSessionTestAgent(): Agent<unknown, SupportTicketData> {
   });
 }
 
-async function createSupportSession(sessionManager: SessionManager): Promise<SessionState<SupportTicketData>> {
+async function createSupportSession(sessionManager: SessionManager<SupportTicketData>): Promise<SessionState<SupportTicketData>> {
   const session = await sessionManager.getOrCreate("support-session-123");
   session.metadata = {
     ...session.metadata,
@@ -92,7 +92,7 @@ async function createSupportSession(sessionManager: SessionManager): Promise<Ses
   return session as SessionState<SupportTicketData>;
 }
 
-async function createShoppingSession(sessionManager: SessionManager): Promise<SessionState<ShoppingCartData>> {
+async function createShoppingSession(sessionManager: SessionManager<ShoppingCartData>): Promise<SessionState<ShoppingCartData>> {
   const session = await sessionManager.getOrCreate("shopping-session-456");
   session.metadata = {
     ...session.metadata,
@@ -105,7 +105,7 @@ async function createShoppingSession(sessionManager: SessionManager): Promise<Se
 
 describe("SessionManager Creation and Configuration", () => {
   test("should create session with default configuration", async () => {
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     const session = await sessionManager.getOrCreate();
 
     expect(session.id).toBeDefined();
@@ -121,7 +121,7 @@ describe("SessionManager Creation and Configuration", () => {
   });
 
   test("should create session with custom ID", async () => {
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     const customId = "custom-session-123";
     const session = await sessionManager.getOrCreate(customId);
 
@@ -162,7 +162,7 @@ describe("SessionManager Creation and Configuration", () => {
 
   test("should handle session timestamps", async () => {
     const beforeCreate = new Date();
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     const session = await sessionManager.getOrCreate();
     const afterCreate = new Date();
 
@@ -277,7 +277,7 @@ describe("SessionManager Data Collection and Management", () => {
 
 describe("SessionManager State Management", () => {
   test("should track current route and step", async () => {
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     const session = await sessionManager.getOrCreate();
 
     expect(session.currentRoute).toBeUndefined();
@@ -302,7 +302,7 @@ describe("SessionManager State Management", () => {
 
   test("should handle route progression", async () => {
     const agent = createSessionTestAgent();
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     const session = await sessionManager.getOrCreate();
 
     // Create a simple route
@@ -578,7 +578,7 @@ describe("Multi-User SessionManager Management", () => {
 
 describe("SessionManager Lifecycle and Cleanup", () => {
   test("should handle session metadata updates", async () => {
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     const session = await sessionManager.getOrCreate();
 
     // Initial metadata should include timestamps
@@ -942,6 +942,7 @@ describe("SessionManager Integration with Agent", () => {
         properties: {
           issue: { type: "string" },
           important: { type: "string" },
+          category: { type: "string" },
         },
       },
     });
@@ -1013,7 +1014,7 @@ describe("SessionManager Integration with Agent", () => {
 
     // Simulate data collection across routes
     const session = await agent.session.getOrCreate();
-    
+
     // Update agent-level data that both routes can use
     await agent.updateCollectedData({
       customerName: "John Doe",
@@ -1031,7 +1032,7 @@ describe("SessionManager Integration with Agent", () => {
 
 describe("SessionManager History Management", () => {
   test("should add and retrieve conversation history", async () => {
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     await sessionManager.getOrCreate();
 
     // Add messages
@@ -1057,7 +1058,7 @@ describe("SessionManager History Management", () => {
   });
 
   test("should set and clear conversation history", async () => {
-    const sessionManager = new SessionManager();
+    const sessionManager = new SessionManager<SupportTicketData>();
     await sessionManager.getOrCreate();
 
     // Set initial history

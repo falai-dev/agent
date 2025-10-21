@@ -25,8 +25,8 @@ interface WeatherData {
   condition?: string;
 }
 
-// Define a tool that can access collected data
-const getWeather: Tool<CustomerContext, WeatherData, unknown[], unknown> = {
+// Define a tool that can access collected data - using unified Tool interface
+const getWeatherTool: Tool<CustomerContext, WeatherData> = {
   id: "get_weather",
   description: "Get current weather for a location",
   parameters: {
@@ -36,14 +36,15 @@ const getWeather: Tool<CustomerContext, WeatherData, unknown[], unknown> = {
     },
     required: ["location"],
   },
-  handler: ({ data }, location) => {
+  handler: async (context, args) => {
     // Use data location if available, otherwise use args
-    const finalLocation = data?.location || location;
+    const finalLocation = context.data?.location || args?.location;
 
     // Simulate API call
     return {
-      data: {
-        location: finalLocation,
+      data: `Weather in ${finalLocation}: 72°F and Sunny`,
+      dataUpdate: {
+        location: finalLocation as string,
         temperature: 72,
         condition: "Sunny",
       },
@@ -104,6 +105,9 @@ async function main() {
     },
   });
 
+  // Add tool using unified interface
+  agent.addTool(getWeatherTool);
+
   // Add domain knowledge
   agent
     .createTerm({
@@ -139,7 +143,7 @@ async function main() {
 
   // Step 2: Get weather data
   const fetchWeather = askLocation.nextStep({
-    tools: [getWeather],
+    tools: ["get_weather"], // Reference by ID
     requires: ["location"],
   });
 

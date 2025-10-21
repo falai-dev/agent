@@ -74,6 +74,72 @@ Adds a domain glossary term. Returns `this` for chaining.
 
 Adds a behavioral guideline. Returns `this` for chaining.
 
+##### `addTool(definition: Tool<TContext, TData, TResult>): this`
+
+Creates and adds a tool to agent scope using the unified Tool interface. Returns `this` for chaining.
+
+```typescript
+// Simple return value approach
+agent.addTool({
+  id: "weather_check",
+  description: "Get current weather",
+  parameters: {
+    type: "object",
+    properties: {
+      location: { type: "string", description: "City name" }
+    },
+    required: ["location"]
+  },
+  handler: async ({ context, data }, args) => {
+    const weather = await weatherAPI.get(args.location);
+    return `Weather in ${args.location}: ${weather.condition}`;
+  }
+});
+
+// Advanced ToolResult pattern
+agent.addTool({
+  id: "user_lookup",
+  description: "Look up user information",
+  handler: async ({ context, data }, args) => {
+    const user = await userAPI.find(args.userId);
+    return {
+      data: `Found user: ${user.name}`,
+      success: true,
+      contextUpdate: { currentUser: user },
+      dataUpdate: { userName: user.name }
+    };
+  }
+});
+```
+
+##### `tool: ToolManager<TContext, TData>`
+
+Access to the ToolManager instance for advanced tool operations.
+
+```typescript
+// Register tools for ID-based reference
+agent.tool.register({
+  id: "reusable_search",
+  description: "Search across data sources",
+  handler: async ({ context, data }, args) => "Search results"
+});
+
+// Create tools without adding to scope
+const customTool = agent.tool.create({
+  id: "standalone_tool",
+  handler: async () => "Custom result"
+});
+
+// Use pattern helpers
+const enrichmentTool = agent.tool.createDataEnrichment({
+  id: "enrich_profile",
+  fields: ['name', 'email'],
+  enricher: async (context, data) => ({
+    displayName: `${data.name} <${data.email}>`
+  })
+});
+```
+
 ##### `respond(input: RespondInput<TContext>): Promise<RespondOutput>`
 
 Generates an AI response with session step management, tool execution, data extraction, and intelligent routing.
@@ -957,7 +1023,7 @@ Represents a step within a conversation route.
 
 #### Methods
 
-##### `nextStep(spec: StepOptions): StepResult`
+##### `nextStep(spec: StepOptions): Step`
 
 Creates a transition from this step and returns a chainable result.
 
@@ -982,10 +1048,14 @@ interface StepOptions<TData = unknown> {
   condition?: string;
 }
 
-interface StepResult<TData = unknown> {
+interface Step<TContext = unknown, TData = unknown> {
   id: string; // Step identifier
   routeId: string; // Route identifier
-  nextStep: (spec: StepOptions<TData>) => StepResult<TData>;
+  nextStep: (spec: StepOptions<TContext, TData>) => Step<TContext, TData>;
+  description?: string; // Step description
+  collect?: (keyof TData)[]; // Fields to collect in this step
+  skipIf?: (data: Partial<TData>) => boolean; // Skip condition function
+  requires?: (keyof TData)[]; // Required data prerequisites
 }
 ```
 
@@ -993,7 +1063,7 @@ interface StepResult<TData = unknown> {
 
 - `spec`: The transition specification (see `StepOptions` above). Can include an optional `condition` property for AI-evaluated step selection guidance.
 
-**Returns:** A `StepResult` that includes the target step's reference (`id`, `routeId`) and a `nextStep` method for chaining additional transitions.
+**Returns:** A `Step` that includes the target step's reference (`id`, `routeId`) and a `nextStep` method for chaining additional transitions.
 
 **Example:**
 
@@ -1110,14 +1180,7 @@ if (step.hasRequires(session.data)) {
 }
 ```
 
-##### `asStepResult(): StepResult<TContext, TData>`
 
-Creates a transition result for this step that supports chaining.
-
-```typescript
-const result = step.asStepResult();
-// Returns StepResult with nextStep method for chaining
-```
 
 ##### `configure(config): this`
 
@@ -1563,39 +1626,6 @@ Builds a comprehensive prompt for AI response generation including context, guid
 ##### `buildFallbackPrompt(params): Promise<string>`
 
 Builds a fallback prompt when no routes are configured.
-
----
-
-### `ToolExecutor<TContext, TData>`
-
-Executes tools with context and security enforcement.
-
-#### Constructor
-
-```typescript
-new ToolExecutor<TContext, TData>();
-```
-
-#### Methods
-
-##### `executeTool(params): Promise<ToolExecutionResult>`
-
-Executes a single tool with domain security enforcement.
-
-**Parameters:**
-
-- `tool`: Tool reference to execute
-- `context`: Agent context
-- `updateContext`: Function to update context
-- `history`: Conversation history
-- `data`: Collected session data
-- `allowedDomains`: Array of allowed domain names
-
-**Returns:** Tool execution result with success status and data
-
-##### `executeTools(params): Promise<ToolExecutionResult[]>`
-
-Executes multiple tools in sequence, stopping on first failure.
 
 ---
 

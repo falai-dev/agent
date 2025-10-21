@@ -118,10 +118,121 @@ agentContext.lastResponseTime = Date.now();
 
 Robust error handling for various failure scenarios:
 
-- **Schema validation failures** - Graceful fallback to manual extraction
-- **Tool execution errors** - Error recovery and user notification
-- **Context update failures** - Rollback and logging
-- **Routing errors** - Safe fallback to default behavior
+### Schema Validation Failures
+
+When AI responses don't match expected schemas, the system gracefully falls back:
+
+```typescript
+const processResponse = async (response: string, schema: JSONSchema) => {
+  try {
+    // Try schema-based extraction first
+    const extracted = await extractWithSchema(response, schema);
+    return { success: true, data: extracted };
+  } catch (schemaError) {
+    console.warn("Schema extraction failed, falling back to manual parsing:", schemaError.message);
+    
+    // Fallback to manual extraction
+    try {
+      const manualData = await manualExtraction(response);
+      return { success: true, data: manualData, fallback: true };
+    } catch (fallbackError) {
+      return { 
+        success: false, 
+        error: `Both schema and manual extraction failed: ${fallbackError.message}` 
+      };
+    }
+  }
+};
+```
+
+### Tool Execution Errors
+
+Tool failures are handled gracefully with proper error propagation:
+
+```typescript
+const executeTool = async (tool: Tool, params: any) => {
+  try {
+    const result = await tool.handler(params);
+    return { success: true, result };
+  } catch (error) {
+    console.error(`Tool ${tool.id} execution failed:`, error);
+    
+    return {
+      success: false,
+      error: error.message,
+      fallbackMessage: "I encountered an issue while processing your request. Please try again."
+    };
+  }
+};
+```
+
+### Context Update Failures
+
+Context updates include rollback mechanisms:
+
+```typescript
+const updateContext = async (newContext: any, previousContext: any) => {
+  try {
+    await persistContext(newContext);
+    return { success: true };
+  } catch (error) {
+    console.error("Context update failed, rolling back:", error);
+    
+    try {
+      await persistContext(previousContext);
+      return { success: false, rolledBack: true, error: error.message };
+    } catch (rollbackError) {
+      return { 
+        success: false, 
+        rolledBack: false, 
+        error: `Update and rollback both failed: ${rollbackError.message}` 
+      };
+    }
+  }
+};
+```
+
+### Streaming Error Propagation
+
+Streaming responses properly propagate provider errors:
+
+```typescript
+async function* processStreamingResponse(provider: AIProvider, prompt: string) {
+  try {
+    for await (const chunk of provider.generateMessageStream(prompt)) {
+      yield { success: true, chunk };
+    }
+  } catch (error) {
+    // Ensure streaming errors are properly propagated
+    yield { success: false, error: error.message };
+    throw error; // Re-throw to stop the stream
+  }
+}
+```
+
+### Routing Errors
+
+Safe fallback to default behavior when routing fails:
+
+```typescript
+const selectRoute = async (routes: Route[], context: any) => {
+  try {
+    const selectedRoute = await aiRouting.selectBestRoute(routes, context);
+    return { success: true, route: selectedRoute };
+  } catch (routingError) {
+    console.warn("AI routing failed, using default route:", routingError.message);
+    
+    // Fallback to first available route or default
+    const fallbackRoute = routes.find(r => r.isDefault) || routes[0];
+    return { 
+      success: true, 
+      route: fallbackRoute, 
+      fallback: true,
+      error: routingError.message 
+    };
+  }
+};
+```
 
 ## Streaming Response Processing
 

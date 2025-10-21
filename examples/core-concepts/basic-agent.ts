@@ -13,9 +13,10 @@
 import {
   Agent,
   GeminiProvider,
+  Tool,
+  ValidationError,
   type Term,
   type Guideline,
-  type Tool,
   type RouteOptions,
 } from "../../src/index";
 
@@ -40,98 +41,71 @@ interface LabData {
   resultsNeeded: boolean;
 }
 
-// Define tools using the new Tool interface
-const getInsuranceProviders: Tool<HealthcareContext, HealthcareData, [], string[]> = {
+// Define tools using unified Tool interface
+const getInsuranceProvidersTool: Tool<HealthcareContext, HealthcareData> = {
   id: "healthcare_insurance_providers",
   description: "Retrieves list of accepted insurance providers",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: () => {
+  handler: async (context, args) => {
     return {
-      data: ["MegaCare Insurance", "HealthFirst", "WellnessPlus"],
+      data: "Available insurance providers: MegaCare Insurance, HealthFirst, WellnessPlus",
     };
   },
 };
 
-const getAvailableSlots: Tool<
-  HealthcareContext,
-  HealthcareData,
-  [],
-  { date: string; time: string }[]
-> = {
+const getAvailableSlotsTool: Tool<HealthcareContext, HealthcareData> = {
   id: "healthcare_available_slots",
   description: "Gets available appointment slots",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: () => {
+  handler: async (context, args) => {
     return {
-      data: [
-        { date: "2025-10-20", time: "10:00 AM" },
-        { date: "2025-10-20", time: "2:00 PM" },
-        { date: "2025-10-21", time: "1:00 PM" },
-      ],
+      data: "Available slots: Oct 20 at 10:00 AM, Oct 20 at 2:00 PM, Oct 21 at 1:00 PM",
     };
   },
 };
 
-const getLabResults: Tool<
-  HealthcareContext,
-  HealthcareData,
-  [],
-  { report: string; status: string }
-> = {
+const getLabResultsTool: Tool<HealthcareContext, HealthcareData> = {
   id: "healthcare_lab_results",
   description: "Retrieves patient lab results",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: ({ context, data }) => {
+  handler: async (toolContext, args) => {
     // Tools can access collected data and context
-    if (data?.testType) {
+    if (toolContext.data?.testType) {
       return {
-        data: {
-          report: `${data.testType} results for ${context.patientName}`,
-          status: "All values within normal range",
-        },
+        data: `${toolContext.data.testType} results for ${toolContext.context.patientName}: All values within normal range`,
       };
     }
 
     return {
-      data: {
-        report: `Lab results for ${context.patientName}`,
-        status: "All values within normal range",
-      },
+      data: `Lab results for ${toolContext.context.patientName}: All values within normal range`,
     };
   },
 };
 
-const scheduleAppointment: Tool<
-  HealthcareContext,
-  HealthcareData,
-  [],
-  { confirmation: string }
-> = {
+const scheduleAppointmentTool: Tool<HealthcareContext, HealthcareData> = {
   id: "healthcare_schedule_appointment",
   description: "Schedules patient appointments",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: ({ data }) => {
+  handler: async (context, args) => {
     // Tools access collected appointment data
-    if (!data?.preferredDate || !data?.preferredTime) {
-      return { data: { confirmation: "Please provide appointment details" } };
+    if (!context.data?.preferredDate || !context.data?.preferredTime) {
+      return { data: "Please provide appointment details" };
     }
 
     return {
-      data: {
-        confirmation: `Appointment scheduled for ${data.preferredDate} at ${data.preferredTime}`,
-      },
+      data: `Appointment scheduled for ${context.data.preferredDate} at ${context.data.preferredTime}`,
     };
   },
 };
@@ -175,7 +149,7 @@ const guidelines: Guideline<HealthcareContext>[] = [
   },
 ];
 
-const routes: RouteOptions<HealthcareContext, HealthcareData>[] = [
+const routes = [
   {
     id: "route_schedule_appointment",
     title: "Schedule Appointment",
@@ -221,27 +195,13 @@ const routes: RouteOptions<HealthcareContext, HealthcareData>[] = [
         id: "schedule_appointment",
         description: "Schedule the appointment",
         prompt: "I'll schedule your appointment now.",
-        tools: [scheduleAppointment], // Use the scheduling tool
+        tools: ["healthcare_schedule_appointment"], // Reference by ID
         requires: ["preferredDate", "preferredTime"],
-        prepare: getInsuranceProviders, // Use existing tool to prepare insurance info
-        finalize: {
-          // Inline tool to handle appointment finalization
-          id: "finalize_appointment",
-          description: "Complete the appointment booking process",
-          parameters: { type: "object", properties: {} },
-          handler: ({ context, data }) => {
-            console.log(`✅ Appointment finalized for ${context.patientName}`);
-            console.log(`📅 Details: ${JSON.stringify(data, null, 2)}`);
-
-            // Could send confirmation email, update calendar, etc.
-            return {
-              data: `Appointment confirmed for ${context.patientName}`,
-            };
-          },
-        },
+        prepare: "healthcare_insurance_providers", // Reference by ID
+        finalize: "finalize_appointment", // Reference by ID - will be registered later
       },
     ],
-    tools: [getAvailableSlots], // Route-level tools available to all steps
+    tools: ["healthcare_available_slots"], // Reference by ID
   },
   {
     id: "route_check_lab_results",
@@ -260,7 +220,7 @@ const routes: RouteOptions<HealthcareContext, HealthcareData>[] = [
         tags: ["escalation"],
       },
     ],
-    tools: [getLabResults], // Route-level tools
+    tools: ["healthcare_lab_results"], // Reference by ID
   },
   {
     title: "General Healthcare Questions",
@@ -334,8 +294,87 @@ const agent = new Agent<HealthcareContext, HealthcareData>({
   // Declarative initialization
   terms,
   guidelines,
-  tools: [getInsuranceProviders], // Agent-level tools
-  routes,
+});
+
+// Demonstrate different tool registration approaches
+
+// Method 1: Register tools for ID-based reference in routes
+agent.tool.registerMany([
+  getInsuranceProvidersTool,
+  getAvailableSlotsTool,
+  getLabResultsTool,
+  scheduleAppointmentTool,
+]);
+
+// Method 2: Create and register specialized tools
+const appointmentValidator = agent.tool.createValidation({
+  id: "validate_appointment",
+  fields: ["appointmentType", "preferredDate", "preferredTime"] as const,
+  validator: async (context, data) => {
+    const errors: ValidationError[] = [];
+    if (!data.appointmentType) errors.push({ 
+      field: "appointmentType", 
+      value: data.appointmentType,
+      message: "Appointment type is required",
+      schemaPath: "appointmentType"
+    });
+    if (!data.preferredDate) errors.push({ 
+      field: "preferredDate", 
+      value: data.preferredDate,
+      message: "Preferred date is required",
+      schemaPath: "preferredDate"
+    });
+    if (!data.preferredTime) errors.push({ 
+      field: "preferredTime", 
+      value: data.preferredTime,
+      message: "Preferred time is required",
+      schemaPath: "preferredTime"
+    });
+    
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings: [],
+    };
+  },
+});
+
+// Method 3: Create data enrichment tool
+const patientDataEnricher = agent.tool.createDataEnrichment({
+  id: "enrich_patient_data",
+  fields: ["appointmentType", "symptoms"] as const,
+  enricher: async (context, data) => {
+    // Add urgency classification based on symptoms - return fields that exist in HealthcareData
+    const urgentKeywords = ["chest pain", "difficulty breathing", "severe", "emergency"];
+    const hasUrgentSymptoms = data.symptoms && urgentKeywords.some(keyword => 
+      data.symptoms!.toLowerCase().includes(keyword)
+    );
+    
+    return {
+      urgency: hasUrgentSymptoms ? "high" : "medium", // This matches the urgency field in HealthcareData
+    };
+  },
+});
+
+// Method 4: Create tool using tool.create()
+const finalizeAppointmentTool = agent.tool.create({
+  id: "finalize_appointment",
+  description: "Complete the appointment booking process",
+  parameters: { type: "object", properties: {} },
+  handler: async (context, args) => {
+    console.log(`✅ Appointment finalized for ${context.context.patientName}`);
+    console.log(`📅 Details: ${JSON.stringify(context.data, null, 2)}`);
+
+    // Could send confirmation email, update calendar, etc.
+    return {
+      data: `Appointment confirmed for ${context.context.patientName}`,
+    };
+  },
+});
+
+// Add routes after tools are registered
+routes.forEach((route: any) => {
+  agent.createRoute(route);
 });
 
 // You can still add more dynamically after construction

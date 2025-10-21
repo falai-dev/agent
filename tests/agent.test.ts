@@ -20,6 +20,8 @@ import {
 interface TestContext {
   userId: string;
   sessionCount: number;
+  lastUpdatedAt?: string;
+  lastAction?: string;
 }
 
 // Test data types for agent-level data collection
@@ -360,6 +362,93 @@ async function testAgentCreationAndConfiguration() {
       );
     }
   });
+
+  await runTest("should support new addTool method with unified interface", () => {
+    const agent = createSupportAgent();
+
+    // Test that addTool method exists
+    assert(typeof agent.addTool === "function", "Agent should have addTool method");
+
+    // Test adding a tool using unified interface with direct return
+    agent.addTool({
+      id: "support_helper",
+      description: "Helps with support tickets",
+      handler: async (context) => {
+        return `Helping ${context.context?.userId} with support`;
+      },
+    });
+
+    // Test adding a tool with ToolResult return
+    agent.addTool({
+      id: "ticket_processor",
+      description: "Processes support tickets",
+      handler: async (context) => {
+        return {
+          dataUpdate: { lastTicketId: context.data?.ticketId },
+          contextUpdate: { lastAction: "processTicket" }
+        };
+      },
+    });
+
+    // Verify tools were added to agent
+    const tools = agent.getTools();
+    const helperTool = tools.find(t => t.id === "support_helper");
+    const processorTool = tools.find(t => t.id === "ticket_processor");
+
+    assert(helperTool !== undefined, "Helper tool should be added to agent");
+    assertEqual(helperTool?.description, "Helps with support tickets", "Helper tool description should match");
+    assert(processorTool !== undefined, "Processor tool should be added to agent");
+    assertEqual(processorTool?.description, "Processes support tickets", "Processor tool description should match");
+  });
+
+  await runTest("should access ToolManager through agent.tool property", () => {
+    const agent = createSupportAgent();
+
+    // Test that ToolManager is accessible
+    assert(agent.tool !== undefined, "Agent should have tool property");
+    assert(typeof agent.tool.create === "function", "ToolManager should have create method");
+    assert(typeof agent.tool.register === "function", "ToolManager should have register method");
+    assert(typeof agent.tool.find === "function", "ToolManager should have find method");
+    assert(typeof agent.tool.getAvailable === "function", "ToolManager should have getAvailable method");
+
+    // Test creating tool through ToolManager
+    const tool = agent.tool.create({
+      id: "toolmanager_test",
+      description: "Created via ToolManager",
+      handler: async (context) => {
+        return `ToolManager result for ${context.context?.userId}`;
+      },
+    });
+
+    assertEqual(tool.id, "toolmanager_test", "Tool ID should match");
+    assertEqual(tool.description, "Created via ToolManager", "Tool description should match");
+    assert(typeof tool.handler === "function", "Tool should have handler function");
+  });
+
+  await runTest("should register and find tools using ToolManager", () => {
+    const agent = createSupportAgent();
+
+    // Register a tool
+    const registeredTool = agent.tool.register({
+      id: "registered_support_tool",
+      description: "Registered support tool",
+      handler: async (context) => {
+        return `Registered tool for ${context.context?.userId}`;
+      },
+    });
+
+    // Test tool is registered
+    assert(agent.tool.isRegistered("registered_support_tool"), "Tool should be registered");
+    assertEqual(agent.tool.getRegisteredTool("registered_support_tool"), registeredTool, "Should return registered tool");
+
+    // Test finding the tool
+    const foundTool = agent.tool.find("registered_support_tool");
+    assertEqual(foundTool, registeredTool, "Should find registered tool");
+
+    // Test tool appears in available tools
+    const availableTools = agent.tool.getAvailable();
+    assert(availableTools.includes(registeredTool), "Registered tool should be available");
+  });
 }
 
 async function testAgentResponseGeneration() {
@@ -619,7 +708,7 @@ async function testAgentGuidelinesAndTerms() {
 
     agent.createGuideline(guideline);
     assert(agent.getGuidelines().length === 1, "Should have 1 guideline");
-    
+
     const createdGuideline = agent.getGuidelines()[0];
     assert(createdGuideline.condition === guideline.condition, "Condition should match");
     assert(createdGuideline.action === guideline.action, "Action should match");
@@ -666,8 +755,8 @@ async function testAgentGuidelinesAndTerms() {
       );
       const context = await agent.getContext();
       assertEqual(
-        (term.description as (context: TestContext) => string)(
-          context as TestContext
+        (term.description as (params: { context?: TestContext }) => string)(
+          { context: context as TestContext }
         ),
         "Session for user test-user-123",
         "Dynamic description should work"
@@ -698,8 +787,8 @@ async function testAgentGuidelinesAndTerms() {
       );
       const context = await agent.getContext();
       assertEqual(
-        (guideline.action as (context: TestContext) => string)(
-          context as TestContext
+        (guideline.action as (params: { context?: TestContext }) => string)(
+          { context: context as TestContext }
         ),
         "I'll help you, test-user-123",
         "Dynamic action should work"
@@ -916,10 +1005,10 @@ async function testAgentLevelDataCollection() {
     assertEqual(Math.round(route.getCompletionProgress(twoFieldData) * 100), 67, "Two fields should be ~67% complete");
 
     // Test 100% completion
-    const completeData: Partial<SupportTicketData> = { 
-      issue: "Test issue", 
-      category: "technical", 
-      priority: "high" 
+    const completeData: Partial<SupportTicketData> = {
+      issue: "Test issue",
+      category: "technical",
+      priority: "high"
     };
     assertEqual(route.getCompletionProgress(completeData), 1, "All fields should be 100% complete");
   });

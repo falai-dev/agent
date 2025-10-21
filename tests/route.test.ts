@@ -589,6 +589,62 @@ describe("Route Tools and Finalization", () => {
     expect(route.getAllSteps()[0].tools).toContain(tool);
   });
 
+  test("should add tools to route using new addTool method", () => {
+    const agent = createOrderTestAgent();
+
+    const route = agent.createRoute({
+      title: "Route with Tools",
+      description: "Testing route tool addition",
+    });
+
+    // Test that route has addTool method
+    expect(typeof route.addTool).toBe("function");
+
+    // Add tool to route using new method
+    route.addTool({
+      id: "route_specific_tool",
+      description: "Tool specific to this route",
+      handler: async (context) => {
+        return `Route tool result for order: ${context.data.item || "none"}`;
+      },
+    });
+
+    // Verify tool was added to route
+    const routeTools = route.getTools();
+    const addedTool = routeTools.find(t => t.id === "route_specific_tool");
+    expect(addedTool).toBeDefined();
+    expect(addedTool?.description).toBe("Tool specific to this route");
+  });
+
+  test("should access ToolManager through route's parent agent", () => {
+    const agent = createOrderTestAgent();
+
+    const route = agent.createRoute({
+      title: "ToolManager Access Route",
+    });
+
+    // Route should be able to access agent's ToolManager
+    expect(agent.tool).toBeDefined();
+    
+    // Register a tool through agent's ToolManager
+    agent.tool.register({
+      id: "shared_route_tool",
+      description: "Tool shared across routes",
+      handler: async (context) => {
+        return `Shared tool for ${context.context?.userId || "user"}`;
+      },
+    });
+
+    // Tool should be findable through ToolManager
+    const foundTool = agent.tool.find("shared_route_tool");
+    expect(foundTool).toBeDefined();
+    expect(foundTool?.id).toBe("shared_route_tool");
+
+    // Tool should appear in available tools
+    const availableTools = agent.tool.getAvailable();
+    expect(availableTools.some(t => t.id === "shared_route_tool")).toBe(true);
+  });
+
   test("should handle route finalization", () => {
     const agent = createRouteTestAgent();
 

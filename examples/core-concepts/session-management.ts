@@ -17,6 +17,7 @@ import {
   GeminiProvider,
   MemoryAdapter,
   type Tool,
+  ValidationError,
 } from "../../src/index";
 
 // Define data types for our multi-step process
@@ -36,23 +37,23 @@ interface OrderContext {
 }
 
 interface PaymentData {
-  orderId: string;
+  orderId?: string; // Make this optional to match OrderData
   paymentMethod: "credit_card" | "paypal" | "bank_transfer";
   amount: number;
   confirmed: boolean;
 }
 
-// Tools for order processing
-const createOrder: Tool<unknown, UnifiedOrderData, [], string> = {
+// Tools for order processing - using unified Tool interface
+const createOrderTool: Tool<unknown, UnifiedOrderData> = {
   id: "create_order",
   description: "Create a new order from the collected order data",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: ({ data }) => {
+  handler: (context, args) => {
     const orderId = `ORD-${Date.now()}`;
-    console.log(`Creating order ${orderId} for ${data?.customerName}`);
+    console.log(`Creating order ${orderId} for ${context.data?.customerName}`);
 
     return {
       data: `Order ${orderId} created successfully!`,
@@ -63,22 +64,22 @@ const createOrder: Tool<unknown, UnifiedOrderData, [], string> = {
   },
 };
 
-const processPayment: Tool<unknown, UnifiedOrderData, [], string> = {
+const processPaymentTool: Tool<unknown, UnifiedOrderData> = {
   id: "process_payment",
   description: "Process payment for an order",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: ({ data }) => {
-    console.log(`Processing payment for order ${data?.orderId}`);
+  handler: (context, args) => {
+    console.log(`Processing payment for order ${context.data?.orderId}`);
 
     // Simulate payment processing
     const success = Math.random() > 0.1; // 90% success rate
 
     if (success) {
       return {
-        data: `Payment processed successfully! Order ${data?.orderId} is now confirmed.`,
+        data: `Payment processed successfully! Order ${context.data?.orderId} is now confirmed.`,
         dataUpdate: {
           confirmed: true,
         },
@@ -130,6 +131,58 @@ const agent = new Agent<unknown, UnifiedOrderData>({
   schema: orderSchema,
   persistence: {
     adapter: new MemoryAdapter(), // In production, use RedisAdapter, PrismaAdapter, etc.
+  },
+});
+
+// Demonstrate different tool registration patterns
+
+// Method 1: Register tools for ID-based reference in steps
+agent.tool.register(createOrderTool);
+agent.tool.register(processPaymentTool);
+
+// Method 2: Create specialized validation tool
+const orderValidationTool = agent.tool.createValidation({
+  id: "validate_order",
+  fields: ["customerName", "productType", "budget"] as const,
+  validator: async (context, data) => {
+    const errors: ValidationError[] = [];
+    if (!data.customerName || data.customerName.length < 2) {
+      errors.push({ 
+        field: "customerName", 
+        value: data.customerName,
+        message: "Customer name must be at least 2 characters",
+        schemaPath: "customerName"
+      });
+    }
+    if (!data.budget || data.budget < 100) {
+      errors.push({ 
+        field: "budget", 
+        value: data.budget,
+        message: "Budget must be at least $100",
+        schemaPath: "budget"
+      });
+    }
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings: [],
+    };
+  },
+});
+
+// Method 3: Create data enrichment tool
+const orderEnrichmentTool = agent.tool.createDataEnrichment({
+  id: "enrich_order",
+  fields: ["productType", "budget"] as const,
+  enricher: async (context, data) => {
+    // Enrich with fields that exist in UnifiedOrderData
+    const urgentDelivery = data.budget > 1000; // Premium orders get urgent delivery
+    const preferredColor = data.productType === "laptop" ? "silver" : "black";
+    
+    return {
+      urgentDelivery,
+      preferredColor,
+    };
   },
 });
 
@@ -186,7 +239,7 @@ agent.createRoute({
       id: "create_order",
       description: "Create the order",
       prompt: "Great! Let me create your order.",
-      tools: [createOrder],
+      tools: ["create_order"], // Reference by ID
       requires: ["customerName", "productType", "budget"],
     },
   ],
@@ -226,7 +279,7 @@ agent.createRoute({
       id: "process_payment",
       description: "Process the payment",
       prompt: "Processing your payment...",
-      tools: [processPayment],
+      tools: ["process_payment"], // Reference by ID
       requires: ["orderId", "paymentMethod", "amount"],
     },
   ],
@@ -266,7 +319,7 @@ async function demonstrateSessionManagement() {
 
   console.log("Bot:", response1.message);
   console.log("Session ID:", sessionAgent.session.id);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData(), null, 2));
   console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
 
@@ -277,7 +330,7 @@ async function demonstrateSessionManagement() {
   const response2 = await sessionAgent.chat("My budget is $1500");
 
   console.log("Bot:", response2.message);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData(), null, 2));
   console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
 
@@ -288,7 +341,7 @@ async function demonstrateSessionManagement() {
   const response3 = await sessionAgent.chat("I want black color and urgent delivery please");
 
   console.log("Bot:", response3.message);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData(), null, 2));
   console.log("Route complete:", response3.isRouteComplete);
   console.log("History length:", sessionAgent.session.getHistory().length);
   console.log();
@@ -300,7 +353,7 @@ async function demonstrateSessionManagement() {
   const response4 = await sessionAgent.chat("I'll pay with credit card, amount is $1599");
 
   console.log("Bot:", response4.message);
-  console.log("Session data:", JSON.stringify(sessionAgent.session.getData<UnifiedOrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(sessionAgent.session.getData(), null, 2));
   console.log("Route complete:", response4.isRouteComplete);
   console.log("Final history length:", sessionAgent.session.getHistory().length);
 }
@@ -344,7 +397,7 @@ async function demonstrateSessionPersistence() {
 
   console.log("After first interaction:");
   console.log("🤖 Agent:", response1.message);
-  console.log("Session data:", JSON.stringify(persistentAgent.session.getData<UnifiedOrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(persistentAgent.session.getData(), null, 2));
   console.log("History length:", persistentAgent.session.getHistory().length);
   console.log("Session automatically saved to persistence ✓");
 
@@ -379,14 +432,14 @@ async function demonstrateSessionPersistence() {
   console.log("Session automatically restored:");
   console.log("- Session ID:", restoredAgent.session.id);
   console.log("- History length:", restoredAgent.session.getHistory().length);
-  console.log("- Restored data:", JSON.stringify(restoredAgent.session.getData<UnifiedOrderData>(), null, 2));
+  console.log("- Restored data:", JSON.stringify(restoredAgent.session.getData(), null, 2));
 
   // Continue conversation seamlessly
   const response2 = await restoredAgent.chat("Actually, make it urgent delivery");
 
   console.log("\nAfter continuing with restored session:");
   console.log("🤖 Agent:", response2.message);
-  console.log("Session data:", JSON.stringify(restoredAgent.session.getData<UnifiedOrderData>(), null, 2));
+  console.log("Session data:", JSON.stringify(restoredAgent.session.getData(), null, 2));
   console.log("History length:", restoredAgent.session.getHistory().length);
   console.log("Session automatically saved again ✓");
 }

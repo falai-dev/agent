@@ -31,15 +31,15 @@ interface BookingData {
 }
 
 // Booking confirmation tool
-const confirmBooking: Tool<unknown, BookingData, [], string> = {
+const confirmBooking: Tool<unknown, BookingData> = {
     id: "confirm_booking",
     description: "Confirm the hotel booking with all details",
     parameters: {
         type: "object",
         properties: {},
     },
-    handler: ({ data }) => {
-        const bookingData = data as Partial<BookingData>;
+    handler: (context, args) => {
+        const bookingData = context.data;
         const bookingId = `BK-${Date.now()}`;
 
         console.log(`📋 Confirming booking ${bookingId} for ${bookingData.customerName}`);

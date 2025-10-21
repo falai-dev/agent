@@ -185,7 +185,7 @@ const agent = new Agent({
   name: "Assistant",
   description: "A helpful assistant",
   provider: new GeminiProvider({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: process.env.GEMINI_API_KEY!,
     model: "models/gemini-2.5-flash",
   }),
 });
@@ -216,44 +216,41 @@ console.log(response.message);
 
 ## 🔧 Advanced Step Configuration
 
-### Using Tools as Prepare/Finalize Hooks
+### Simple Tool Creation
 
-Steps can use tools for `prepare` and `finalize` lifecycle hooks, enabling powerful data processing and side effects:
+Create tools with minimal boilerplate using the unified Tool interface:
 
 ```typescript
-// Define a preparation tool
-const validateUser = {
+// Create a simple tool with the unified interface
+agent.addTool({
   id: "validate_user",
+  name: "User Data Validator",
   description: "Validate user data before processing",
   parameters: { type: "object", properties: {} },
-  handler: ({ context, data }) => {
-    // Validation logic
+  handler: async ({ context, data, updateData }) => {
+    // Validation logic with helper methods
     if (!data.email?.includes("@")) {
       throw new Error("Invalid email address");
     }
-    return { data: "User validated" };
+    
+    // Mark as validated using helper method
+    await updateData({ emailValidated: true });
+    
+    return "User validation completed successfully";
   },
-};
+});
 
-// Use tools in step lifecycle
+// Use tools in conversation flows and step lifecycle
 agent.createRoute({
   title: "User Registration",
-  schema: {
-    /* ... */
-  },
   steps: [
     {
       id: "collect_info",
       description: "Collect user information",
       collect: ["name", "email"],
       prompt: "Please provide your name and email.",
-      finalize: validateUser, // Tool validates data after collection
-    },
-    {
-      id: "send_welcome",
-      description: "Send welcome email",
-      prompt: "Welcome! Check your email for confirmation.",
-      prepare: "send_welcome_email", // Tool ID string - sends email before AI responds
+      prepare: "validate_user", // Tool executes before AI response
+      tools: ["validate_user"], // Tool available during conversation
     },
   ],
 });
@@ -261,10 +258,11 @@ agent.createRoute({
 
 **Benefits:**
 
-- ✅ **Reusable Logic** - Tools can be shared across steps and routes
-- ✅ **Error Handling** - Tool execution includes automatic error handling
-- ✅ **Context Access** - Tools receive full context and collected data
-- ✅ **Data Updates** - Tools can modify collected data or agent context
+- ✅ **Simple API** - Unified Tool interface with minimal complexity
+- ✅ **Type Safety** - Full TypeScript support with automatic inference
+- ✅ **Flexible Returns** - Return simple values or complex ToolResult objects
+- ✅ **Helper Methods** - Built-in context and data update utilities
+- ✅ **Lifecycle Integration** - Use tools as prepare/finalize hooks in steps
 
 ---
 
@@ -278,7 +276,6 @@ import {
   OpenAIProvider,
   createMessageEvent,
   EventSource,
-  type Tool,
 } from "@falai/agent";
 
 // 1️⃣ Define the data you want to collect
@@ -320,18 +317,29 @@ const agent = new Agent<{}, HotelBookingData>({
   }
 });
 
-// 3️⃣ Define a tool that uses the agent-level collected data
-const bookHotel: Tool<unknown, [], string, HotelBookingData> = {
+// 3️⃣ Define a tool using the unified Tool interface
+agent.addTool({
   id: "book_hotel",
+  name: "Hotel Booking System",
   description: "Books a hotel once all information is collected.",
   parameters: { type: "object", properties: {} },
-  handler: ({ data }) => {
-    // Tool receives complete agent data
-    return {
-      data: `Booking confirmed for ${data.guests} guests at ${data.hotelName} on ${data.date}!`,
-    };
+  handler: async ({ context, data, updateContext }) => {
+    // Tool receives complete agent data with simplified context and helper methods
+    const bookingId = await hotelAPI.createBooking({
+      hotel: data.hotelName,
+      date: data.date,
+      guests: data.guests,
+    });
+    
+    // Use helper method to update context
+    await updateContext({
+      lastBookingId: bookingId,
+      lastBookingDate: new Date().toISOString(),
+    });
+    
+    return `Booking confirmed! Confirmation #${bookingId} for ${data.guests} guests at ${data.hotelName} on ${data.date}`;
   },
-};
+});
 
 // 4️⃣ Create a route with required fields specification
 agent.createRoute({
@@ -369,7 +377,7 @@ agent.createRoute({
       id: "confirm_booking",
       description: "Confirm and book the hotel",
       prompt: "Let me confirm your booking details.",
-      tools: [bookHotel], // Tool accesses complete agent data
+      tools: ["book_hotel"], // Reference tool by ID
       requires: ["hotelName", "date", "guests"],
     },
   ],

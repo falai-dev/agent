@@ -22,7 +22,7 @@ import {
 import { Route } from "../core/Route";
 import { Step } from "../core/Step";
 import { RoutingEngine } from "../core/RoutingEngine";
-import { ToolExecutor } from "../core/ToolExecutor";
+import type { ToolManager } from "../core/ToolManager";
 import { END_ROUTE_ID } from "../constants";
 
 export interface ResponsePreparationResult<TContext, TData = unknown> {
@@ -42,8 +42,8 @@ export interface RoutingResult<TContext, TData = unknown> {
 export interface ToolExecutionResult<TData = unknown> {
   session: SessionState<TData>;
   toolCalls:
-    | Array<{ toolName: string; arguments: Record<string, unknown> }>
-    | undefined;
+  | Array<{ toolName: string; arguments: Record<string, unknown> }>
+  | undefined;
 }
 
 export interface DataCollectionResult<TData = unknown> {
@@ -57,8 +57,8 @@ export interface DataCollectionResult<TData = unknown> {
 export class ResponsePipeline<TContext = unknown, TData = unknown> {
   constructor(
     private readonly options: AgentOptions<TContext, TData>,
-    private readonly routes: Route<TContext, TData>[],
-    private readonly tools: Tool<TContext, TData, unknown[], unknown>[],
+    private readonly getRoutes: () => Route<TContext, TData>[],
+    private readonly tools: Tool<TContext, TData>[],
     private readonly routingEngine: RoutingEngine<TContext, TData>,
     private readonly updateContext: (
       updates: Partial<TContext>
@@ -69,8 +69,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     ) => Promise<SessionState<TData>>,
     private readonly updateCollectedData?: (
       updates: Partial<TData>
-    ) => Promise<void>
-  ) {}
+    ) => Promise<void>,
+    private readonly toolManager?: ToolManager<TContext, TData>
+  ) { }
 
   /**
    * Prepare context and session for response generation
@@ -127,7 +128,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
     // Check for pending transition from previous route completion
     if (targetSession.pendingTransition) {
-      const targetRoute = this.routes.find(
+      const targetRoute = routes.find(
         (r) => r.id === targetSession.pendingTransition?.targetRouteId
       );
 
@@ -167,10 +168,12 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       }
     }
 
+    const routes = this.getRoutes();
+    
     // If no pending transition or transition handled, do normal routing
-    if (this.routes.length > 0 && !selectedRoute) {
+    if (routes.length > 0 && !selectedRoute) {
       const orchestration = await this.routingEngine.decideRouteAndStep({
-        routes: this.routes,
+        routes: routes,
         session: targetSession,
         history,
         agentOptions: this.options,
@@ -281,8 +284,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     }
 
     logger.debug(
-      `[ResponseHandler] Executing ${toolCalls.length} ${
-        isStreaming ? "streaming " : ""
+      `[ResponseHandler] Executing ${toolCalls.length} ${isStreaming ? "streaming " : ""
       }tool calls`
     );
 
@@ -299,15 +301,21 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         continue;
       }
 
-      const toolExecutor = new ToolExecutor<TContext, TData>();
-      const result = await toolExecutor.executeTool({
-        tool,
-        context,
-        updateContext: this.updateContext,
-        updateData: this.updateCollectedData || (async () => {}),
-        history,
-        data: updatedSession.data,
-      });
+      // Use ToolManager for unified tool execution
+      let result;
+      if (this.toolManager) {
+        result = await this.toolManager.executeTool({
+          tool,
+          context,
+          updateContext: this.updateContext,
+          updateData: this.updateCollectedData || (async () => { }),
+          history,
+          data: updatedSession.data,
+        });
+      } else {
+        // Fallback: execute tool directly if ToolManager not available
+        throw new Error(`ToolManager not available for tool execution: ${toolCall.toolName}`);
+      }
 
       executedToolCalls.push(toolCall);
 
@@ -323,16 +331,14 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           result.dataUpdate as Partial<TData>
         );
         logger.debug(
-          `[ResponseHandler] ${
-            isStreaming ? "Streaming " : ""
+          `[ResponseHandler] ${isStreaming ? "Streaming " : ""
           }Tool updated collected data:`,
           result.dataUpdate
         );
       }
 
       logger.debug(
-        `[ResponseHandler] Executed ${isStreaming ? "streaming " : ""}tool: ${
-          result.toolName
+        `[ResponseHandler] Executed ${isStreaming ? "streaming " : ""}tool: ${String(tool.id || tool.name || 'unknown')
         } (success: ${result.success})`
       );
     }
@@ -348,8 +354,8 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
    */
   async executeToolLoop(params: {
     initialToolCalls:
-      | Array<{ toolName: string; arguments: Record<string, unknown> }>
-      | undefined;
+    | Array<{ toolName: string; arguments: Record<string, unknown> }>
+    | undefined;
     selectedRoute?: Route<TContext, TData>;
     nextStep: Step<TContext, TData>;
     responsePrompt: string;
@@ -380,8 +386,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
       toolLoopCount++;
       logger.debug(
-        `[ResponseHandler] Starting ${
-          isStreaming ? "streaming " : ""
+        `[ResponseHandler] Starting ${isStreaming ? "streaming " : ""
         }tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS}`
       );
 
@@ -430,8 +435,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
       if (hasToolCalls) {
         logger.debug(
-          `[ResponseHandler] Follow-up call produced ${
-            followUpToolCalls!.length
+          `[ResponseHandler] Follow-up call produced ${followUpToolCalls!.length
           } additional tool calls`
         );
 
@@ -449,8 +453,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         currentToolCalls = followUpToolCalls;
       } else {
         logger.debug(
-          `[ResponseHandler] ${
-            isStreaming ? "Streaming " : ""
+          `[ResponseHandler] ${isStreaming ? "Streaming " : ""
           }Tool loop completed after ${toolLoopCount} iterations`
         );
         // Update final toolCalls from follow-up result if no more tools
@@ -461,8 +464,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
     if (toolLoopCount >= MAX_TOOL_LOOPS) {
       logger.warn(
-        `[ResponseHandler] ${
-          isStreaming ? "Streaming " : ""
+        `[ResponseHandler] ${isStreaming ? "Streaming " : ""
         }Tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`
       );
     }
@@ -505,7 +507,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       if (this.updateCollectedData) {
         await this.updateCollectedData(collectedData);
       }
-      
+
       // Update session with validated data
       updatedSession = await this.updateData(session, collectedData);
       logger.debug(`[ResponseHandler] Collected data:`, collectedData);
@@ -554,7 +556,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
     if (transitionConfig) {
       // Find target route by ID or title
-      const targetRoute = this.routes.find(
+      const targetRoute = this.getRoutes().find(
         (r) =>
           r.id === transitionConfig.nextStep ||
           r.title === transitionConfig.nextStep
@@ -602,12 +604,21 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Find an available tool by name for the given route
+   * Find an available tool by name for the given route using ToolManager
+   * Delegates to ToolManager for unified tool resolution
    */
   private findAvailableTool(
     toolName: string,
     route?: Route<TContext, TData>
-  ): Tool<TContext, TData, unknown[], unknown> | undefined {
+  ): Tool<TContext, TData> | undefined {
+    // Use ToolManager for unified tool resolution if available
+    if (this.toolManager) {
+      return this.toolManager.find(toolName, undefined, undefined, route);
+    }
+
+    // Fallback to legacy resolution if ToolManager not available
+    logger.warn(`[ResponsePipeline] ToolManager not available, using legacy tool resolution for: ${toolName}`);
+
     // Check route-level tools first (if route provided)
     if (route) {
       const routeTool = route
@@ -623,15 +634,29 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Collect all available tools for the given route and step context
+   * Collect all available tools for the given route and step context using ToolManager
+   * Delegates to ToolManager for unified tool resolution and deduplication
    */
   private collectAvailableTools(
     route?: Route<TContext, TData>,
     step?: Step<TContext, TData>
   ): Array<{ id: string; description?: string; parameters?: unknown }> {
+    // Use ToolManager for unified tool collection if available
+    if (this.toolManager) {
+      const availableTools = this.toolManager.getAvailable(undefined, step, route);
+      return availableTools.map((tool) => ({
+        id: tool.id,
+        description: tool.description,
+        parameters: tool.parameters,
+      }));
+    }
+
+    // Fallback to legacy collection logic if ToolManager not available
+    logger.warn(`[ResponsePipeline] ToolManager not available, using legacy tool collection`);
+
     const availableTools = new Map<
       string,
-      Tool<TContext, TData, unknown[], unknown>
+      Tool<TContext, TData>
     >();
 
     // Add agent-level tools
@@ -649,7 +674,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     // Filter by step-level allowed tools if specified
     if (step?.tools) {
       const allowedToolIds = new Set<string>();
-      const stepTools: Tool<TContext, TData, unknown[], unknown>[] = [];
+      const stepTools: Tool<TContext, TData>[] = [];
 
       for (const toolRef of step.tools) {
         if (typeof toolRef === "string") {
@@ -668,7 +693,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       if (allowedToolIds.size > 0) {
         const filteredTools = new Map<
           string,
-          Tool<TContext, TData, unknown[], unknown>
+          Tool<TContext, TData>
         >();
         for (const toolId of Array.from(allowedToolIds)) {
           const tool = availableTools.get(toolId);
@@ -747,35 +772,35 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     }>;
   }> {
     const { routes, session, context } = params;
-    
+
     // Evaluate all routes for completion
     const completedRoutes: Route<TContext, TData>[] = [];
     const pendingTransitions: Array<{
       route: Route<TContext, TData>;
       transitionConfig: RouteTransitionConfig<TContext, TData>;
     }> = [];
-    
+
     for (const route of routes) {
       if (route.isComplete(session.data || {})) {
         completedRoutes.push(route);
-        
+
         // Check for onComplete transitions
         const transitionConfig = await route.evaluateOnComplete(
           { data: session.data },
           context
         );
-        
+
         if (transitionConfig) {
           pendingTransitions.push({ route, transitionConfig });
         }
-        
+
         logger.debug(
           `[ResponsePipeline] Route completed: ${route.title} ` +
           `(${Math.round(route.getCompletionProgress(session.data || {}) * 100)}%)`
         );
       }
     }
-    
+
     // Log completion status for all routes
     if (completedRoutes.length > 0) {
       logger.debug(
@@ -783,7 +808,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         `${completedRoutes.length}/${routes.length} routes complete`
       );
     }
-    
+
     return {
       session,
       completedRoutes,
@@ -801,15 +826,15 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     routes: Route<TContext, TData>[];
   }): Promise<SessionState<TData>> {
     const { session, dataUpdate, routes } = params;
-    
+
     // Update session data
     const updatedSession = await this.updateData(session, dataUpdate);
-    
+
     // Update agent-level data if handler is available
     if (this.updateCollectedData) {
       await this.updateCollectedData(dataUpdate);
     }
-    
+
     // Evaluate route completions after data update
     const completionResults = await this.handleCrossRouteCompletion({
       routes,
@@ -817,14 +842,14 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       context: this.context!,
       history: [],
     });
-    
+
     // Log any newly completed routes
     if (completionResults.completedRoutes.length > 0) {
       logger.debug(
         `[ResponsePipeline] Data update resulted in ${completionResults.completedRoutes.length} completed routes`
       );
     }
-    
+
     return completionResults.session;
   }
 }

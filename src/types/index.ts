@@ -45,8 +45,8 @@ export type {
   RouteRef,
   StepRef,
   StepOptions,
-  StepResult,
   BranchSpec,
+  StepResult,
   BranchResult,
   RouteCompletionHandler,
   RouteTransitionConfig,
@@ -58,7 +58,18 @@ export * from "./route";
 export type { SessionState, PendingTransition } from "./session";
 
 // Tool types
-export type { Tool, ToolContext, ToolResult, ToolHandler } from "./tool";
+export type { 
+  Tool, 
+  ToolContext, 
+  ToolResult, 
+  ToolHandler,
+  ToolExecutionResult,
+  DataEnrichmentConfig,
+  ValidationConfig,
+  ApiCallConfig,
+  ComputationConfig
+} from "./tool";
+export { ToolScope } from "./tool";
 
 // AI provider types
 export type {

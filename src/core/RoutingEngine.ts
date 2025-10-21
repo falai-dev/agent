@@ -71,6 +71,29 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
   constructor(private readonly options?: RoutingEngineOptions) { }
 
   /**
+   * Enter a route if not already in it, merging initial data
+   * @private
+   */
+  private enterRouteIfNeeded(
+    session: SessionState<TData>,
+    route: Route<TContext, TData>
+  ): SessionState<TData> {
+    if (!session.currentRoute || session.currentRoute.id !== route.id) {
+      let updatedSession = enterRoute(session, route.id, route.title);
+      if (route.initialData) {
+        updatedSession = mergeCollected(updatedSession, route.initialData);
+        logger.debug(
+          `[RoutingEngine] Merged initial data for route ${route.title}:`,
+          route.initialData
+        );
+      }
+      logger.debug(`[RoutingEngine] Entered route: ${route.title}`);
+      return updatedSession;
+    }
+    return session;
+  }
+
+  /**
    * Optimized decision for single-route scenarios
    * Skips route scoring and only does step selection
    * @private
@@ -94,26 +117,13 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     const { route, session, history, agentOptions, provider, context, signal } =
       params;
 
-    let updatedSession = session;
     const selectedRoute = route;
 
-    // Check if this single route is complete
-    const completedRoutes = route.isComplete(session.data || {}) ? [route] : [];
+    // Enter route if not already in it (this may merge initial data)
+    let updatedSession = this.enterRouteIfNeeded(session, route);
 
-    // Enter route if not already in it
-    if (!session.currentRoute || session.currentRoute.id !== route.id) {
-      updatedSession = enterRoute(session, route.id, route.title);
-      if (route.initialData) {
-        updatedSession = mergeCollected(updatedSession, route.initialData);
-        logger.debug(
-          `[RoutingEngine] Single-route: Merged initial data:`,
-          route.initialData
-        );
-      }
-      logger.debug(
-        `[RoutingEngine] Single-route: Entered route: ${route.title}`
-      );
-    }
+    // Check if this single route is complete (use updated session data)
+    const completedRoutes = route.isComplete(updatedSession.data || {}) ? [route] : [];
 
     // Get candidate steps
     const currentStep = updatedSession.currentStep
@@ -130,9 +140,11 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       return { selectedRoute, session: updatedSession };
     }
 
-    // If only one candidate, check if route is complete
+    // If only one candidate, no need for AI selection
     if (candidates.length === 1) {
-      const isRouteComplete = candidates[0].isRouteComplete;
+      const candidate = candidates[0];
+      const isRouteComplete = candidate.isRouteComplete;
+      
       if (isRouteComplete) {
         logger.debug(
           `[RoutingEngine] Single-route: Route complete - all data collected, END_ROUTE reached`
@@ -147,16 +159,28 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         };
       } else {
         logger.debug(
-          `[RoutingEngine] Single-route: Only one valid step: ${candidates[0].step.id}`
+          `[RoutingEngine] Single-route: Only one valid step: ${candidate.step.id}`
         );
         return {
           selectedRoute,
-          selectedStep: candidates[0].step,
+          selectedStep: candidate.step,
           session: updatedSession,
           isRouteComplete: false,
           completedRoutes,
         };
       }
+    }
+
+    // No candidates means route is likely complete or has no valid next steps
+    if (candidates.length === 0) {
+      logger.debug(`[RoutingEngine] Single-route: No valid steps found, route may be complete`);
+      return {
+        selectedRoute,
+        selectedStep: undefined,
+        session: updatedSession,
+        isRouteComplete: true, // Assume complete if no valid steps
+        completedRoutes,
+      };
     }
 
     // Multiple candidates - use AI to select best step
@@ -573,27 +597,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
       if (selectedRoute) {
         logger.debug(`[RoutingEngine] Selected route: ${selectedRoute.title}`);
-        if (
-          !session.currentRoute ||
-          session.currentRoute.id !== selectedRoute.id
-        ) {
-          updatedSession = enterRoute(
-            session,
-            selectedRoute.id,
-            selectedRoute.title
-          );
-          if (selectedRoute.initialData) {
-            updatedSession = mergeCollected(
-              updatedSession,
-              selectedRoute.initialData
-            );
-            logger.debug(
-              `[RoutingEngine] Merged initial data:`,
-              selectedRoute.initialData
-            );
-          }
-          logger.debug(`[RoutingEngine] Entered route: ${selectedRoute.title}`);
-        }
+        updatedSession = this.enterRouteIfNeeded(updatedSession, selectedRoute);
       }
     }
 

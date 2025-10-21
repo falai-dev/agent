@@ -228,12 +228,7 @@ function createPersistentOnboardingAgent(sessionId: string) {
   // ============================================================================
 
   // OPTION 1: Using contextUpdate in return value
-  const saveBusinessInfo: Tool<
-    OnboardingContext,
-    OnboardingData,
-    unknown[],
-    unknown
-  > = {
+  const saveBusinessInfo: Tool<OnboardingContext, OnboardingData> = {
     id: "save_business_info",
     name: "Business Info Saver",
     description: "Save business name and description",
@@ -245,12 +240,13 @@ function createPersistentOnboardingAgent(sessionId: string) {
       },
       required: ["name", "description"],
     },
-    handler: (toolContext, ...args) => {
-      const [name, description] = args as [string, string];
+    handler: (toolContext, args) => {
+      const name = args?.name as string;
+      const description = args?.description as string;
       console.log(`📝 Saving business info: ${name}`);
 
       return {
-        data: true,
+        data: "Business information saved successfully",
         // Context update is automatically persisted via onContextUpdate hook
         contextUpdate: {
           collectedData: {
@@ -267,13 +263,8 @@ function createPersistentOnboardingAgent(sessionId: string) {
     },
   };
 
-  // OPTION 2: Using updateContext method directly
-  const saveIndustry: Tool<
-    OnboardingContext,
-    OnboardingData,
-    unknown[],
-    unknown
-  > = {
+  // OPTION 2: Using contextUpdate in return value
+  const saveIndustry: Tool<OnboardingContext, OnboardingData> = {
     id: "save_industry",
     name: "Industry Classifier",
     description: "Save business industry",
@@ -284,29 +275,24 @@ function createPersistentOnboardingAgent(sessionId: string) {
       },
       required: ["industry"],
     },
-    handler: async (toolContext, ...args) => {
-      const [industry] = args as [string];
+    handler: async (toolContext, args) => {
+      const industry = args?.industry as string;
       console.log(`🏭 Saving industry: ${industry}`);
 
-      // Direct context update (triggers onContextUpdate hook)
-      await toolContext.updateContext({
-        collectedData: {
-          ...toolContext.context.collectedData,
-          industry,
+      return {
+        data: "Industry information saved successfully",
+        contextUpdate: {
+          collectedData: {
+            ...toolContext.context.collectedData,
+            industry,
+          },
+          completedSteps: [...toolContext.context.completedSteps, "industry"],
         },
-        completedSteps: [...toolContext.context.completedSteps, "industry"],
-      });
-
-      return { data: true };
+      };
     },
   };
 
-  const saveContactEmail: Tool<
-    OnboardingContext,
-    OnboardingData,
-    unknown[],
-    unknown
-  > = {
+  const saveContactEmail: Tool<OnboardingContext, OnboardingData> = {
     id: "save_contact_email",
     name: "Contact Email Saver",
     description: "Save contact email",
@@ -317,19 +303,20 @@ function createPersistentOnboardingAgent(sessionId: string) {
       },
       required: ["email"],
     },
-    handler: async (toolContext, ...args) => {
-      const [email] = args as [string];
+    handler: async (toolContext, args) => {
+      const email = args?.email as string;
       console.log(`📧 Saving contact email: ${email}`);
 
-      await toolContext.updateContext({
-        collectedData: {
-          ...toolContext.context.collectedData,
-          contactEmail: email,
+      return {
+        data: "Contact email saved successfully",
+        contextUpdate: {
+          collectedData: {
+            ...toolContext.context.collectedData,
+            contactEmail: email,
+          },
+          completedSteps: [...toolContext.context.completedSteps, "contact"],
         },
-        completedSteps: [...toolContext.context.completedSteps, "contact"],
-      });
-
-      return { data: true };
+      };
     },
   };
 

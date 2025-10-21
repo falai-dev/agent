@@ -9,6 +9,7 @@ import type { SessionState } from "../types/session";
 import type { History, HistoryItem } from "../types/history";
 import { PersistenceManager } from "./PersistenceManager";
 import type { PersistenceAdapter } from "../types/persistence";
+import type { Agent } from "./Agent";
 
 /**
  * SessionManager handles session lifecycle and conversation history
@@ -16,11 +17,16 @@ import type { PersistenceAdapter } from "../types/persistence";
 export class SessionManager<TData = unknown> {
   private currentSession?: SessionState<TData>;
   private persistenceManager?: PersistenceManager<TData>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private agent?: Agent<any, TData>;
+  private defaultSessionId?: string;
 
   constructor(
     persistenceManagerOrAdapter?:
       | PersistenceManager<TData>
-      | PersistenceAdapter<TData>
+      | PersistenceAdapter<TData>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    agent?: Agent<any, TData>
   ) {
     if (persistenceManagerOrAdapter) {
       // Check if it's a PersistenceManager or an adapter
@@ -33,6 +39,16 @@ export class SessionManager<TData = unknown> {
         });
       }
     }
+
+    this.agent = agent;
+  }
+
+  /**
+   * Set the default session ID to use when getOrCreate is called without parameters
+   * @internal Used by Agent to set the sessionId from constructor options
+   */
+  setDefaultSessionId(sessionId: string): void {
+    this.defaultSessionId = sessionId;
   }
 
   /**
@@ -40,16 +56,24 @@ export class SessionManager<TData = unknown> {
    * Works for sessionIds that exist, don't exist, or auto-generated IDs
    */
   async getOrCreate(sessionId?: string): Promise<SessionState<TData>> {
+    // Use provided sessionId or fall back to default
+    const effectiveSessionId = sessionId || this.defaultSessionId;
+
     // If we already have a session and no sessionId specified, return it
-    if (this.currentSession && !sessionId) {
+    if (this.currentSession && !effectiveSessionId) {
+      return this.currentSession;
+    }
+
+    // If we have a session with the same ID, return it
+    if (this.currentSession && this.currentSession.id === effectiveSessionId) {
       return this.currentSession;
     }
 
     // If sessionId provided, try to load it first
-    if (sessionId && this.persistenceManager) {
+    if (effectiveSessionId && this.persistenceManager) {
       try {
         const session = await this.persistenceManager.loadSessionState(
-          sessionId
+          effectiveSessionId
         );
         if (session) {
           this.currentSession = session;
@@ -62,7 +86,7 @@ export class SessionManager<TData = unknown> {
     }
 
     // Create new session (with provided ID or auto-generated)
-    return this.create(sessionId);
+    return this.create(effectiveSessionId);
   }
 
   /**
@@ -116,6 +140,9 @@ export class SessionManager<TData = unknown> {
 
     session.history.push(historyItem);
     session.metadata!.lastUpdatedAt = new Date();
+
+    // Ensure currentSession is updated
+    this.currentSession = session;
 
     // Auto-save to persistence
     await this.save();
@@ -205,7 +232,12 @@ export class SessionManager<TData = unknown> {
         ...data,
       };
       this.currentSession.metadata!.lastUpdatedAt = new Date();
-      
+
+      // Synchronize with agent's collected data for bidirectional sync
+      if (this.agent) {
+        await this.agent.updateCollectedData(this.currentSession.data);
+      }
+
       // Auto-save to persistence
       await this.save();
     }
@@ -226,7 +258,7 @@ export class SessionManager<TData = unknown> {
     if (this.currentSession) {
       this.currentSession.data = {} as Partial<TData>;
       this.currentSession.metadata!.lastUpdatedAt = new Date();
-      
+
       // Auto-save to persistence
       await this.save();
     }

@@ -104,7 +104,7 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   /** Initial terms for the route's domain glossary */
   terms?: Term<TContext>[];
   /** Tools available in this route */
-  tools?: Tool<TContext, TData, unknown[], unknown>[];
+  tools?: Tool<TContext, TData>[];
   /** Absolute rules the agent must follow in this route */
   rules?: Template<TContext, TData>[];
   /** Absolute prohibitions the agent must never do in this route */
@@ -197,16 +197,16 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
   /** Transition to a chat state with this description */
   prompt?: Template<TContext, TData>;
   /** Tools available for AI to call in this step (by ID reference or inline definition) */
-  tools?: (string | Tool<TContext, TData, unknown[], unknown>)[];
+  tools?: (string | Tool<TContext, TData>)[];
   /** Programmatic function or tool to run before AI responds */
   prepare?:
     | string
-    | Tool<TContext, TData, unknown[], unknown>
+    | Tool<TContext, TData>
     | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
   /** Programmatic function or tool to run after AI responds */
   finalize?:
     | string
-    | Tool<TContext, TData, unknown[], unknown>
+    | Tool<TContext, TData>
     | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
   /** Transition to a specific step or end marker */
   step?: StepRef | symbol;
@@ -267,4 +267,6 @@ export interface StepResult<TContext = unknown, TData = unknown>
   branch: (
     branches: BranchSpec<TContext, TData>[]
   ) => BranchResult<TContext, TData>;
+  /** Shortcut to end the current route */
+  endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) => StepResult<TContext, TData>;
 }

@@ -18,8 +18,7 @@ export type {
 export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
 export { SessionManager } from "./core/SessionManager";
-export { ToolExecutor } from "./core/ToolExecutor";
-export type { ToolExecutionResult } from "./core/ToolExecutor";
+export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager";
 
 // Providers
 export { GeminiProvider } from "./providers/GeminiProvider";
@@ -102,7 +101,6 @@ export type {
   StepRef,
   RouteOptions,
   StepOptions,
-  StepResult,
   RouteTransitionConfig,
   RouteCompletionHandler,
   SessionState,
@@ -111,6 +109,13 @@ export type {
   ToolResult,
   ToolHandler,
   Tool,
+
+  DataEnrichmentConfig,
+  ValidationConfig,
+  ValidationError,
+  ApiCallConfig,
+  ComputationConfig,
+  ToolScope,
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,

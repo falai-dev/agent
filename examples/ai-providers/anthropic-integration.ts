@@ -25,14 +25,15 @@ interface ResearchData {
 }
 
 // Research tool that Claude can use
-const conductResearch: Tool<unknown, ResearchData, unknown[], unknown> = {
+const conductResearch: Tool<unknown, ResearchData> = {
   id: "conduct_research",
   description: "Conduct comprehensive research on a given topic",
   parameters: {
     type: "object",
     properties: {},
   },
-  handler: async ({ data }) => {
+  handler: async (context, args) => {
+    const data = context.data;
     console.log(
       `Conducting ${data?.depth} research on: ${data?.topic}`
     );
@@ -52,12 +53,12 @@ const conductResearch: Tool<unknown, ResearchData, unknown[], unknown> = {
       sources: ["academic papers", "industry reports", "expert interviews"],
     };
 
-    return Promise.resolve({
+    return {
       data: `Research completed (ID: ${researchId}). ${findings.overview}`,
       dataUpdate: {
         researchId,
       },
-    });
+    };
   },
 };
 
@@ -167,9 +168,12 @@ askFormat.nextStep({
       data?.topic
     }" using ${data?.sources || 5} sources. This may take a moment...`;
   },
-  tools: [conductResearch],
+  tools: ["conduct_research"],
   requires: ["topic"],
 });
+
+// Add the research tool to the agent
+agent.addTool(conductResearch);
 
 // Demonstrate Claude's research capabilities
 async function demonstrateClaudeResearch() {

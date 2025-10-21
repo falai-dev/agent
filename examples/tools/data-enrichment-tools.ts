@@ -1,19 +1,22 @@
 /**
- * Example: Modifying Collected data with Tools and Hooks
+ * Example: Modifying Collected data with Tools and Hooks using ToolManager
  *
  * This demonstrates:
  * 1. Schema-first data extraction with JSON Schema
- * 2. Tools that modify collected data (validation, enrichment)
+ * 2. Simplified tools that modify collected data (validation, enrichment)
  * 3. Lifecycle hooks for data validation and business logic
  * 4. Data-driven step flows with code-based logic (skipIf, requires)
  * 5. Three-phase pipeline: PREPARATION → ROUTING → RESPONSE
+ * 6. NEW: ToolManager pattern helpers for common data operations
  */
 
 import {
   Agent,
   END_ROUTE,
   OpenAIProvider,
-  type Tool,
+  Tool,
+  ToolContext,
+  ValidationError,
 } from "../../src";
 
 // ==============================================================================
@@ -44,60 +47,49 @@ interface FlightData {
 // TOOLS: Data Enrichment (PREPARATION Phase)
 // ==============================================================================
 
-// Tool 1: Convert city names to airport codes
-const enrichDestinationTool: Tool<FlightBookingContext, FlightData, [], void> =
-  {
-    id: "enrich_destination",
-    name: "Destination Code Lookup",
-    description: "Convert city names to IATA airport codes",
-    parameters: {
-      type: "object",
-      properties: {},
-    },
-    handler: ({ data }: { data?: Partial<FlightData> }) => {
-      const destination = (data as Partial<FlightData>)?.destination;
+// Tool 1: Convert city names to airport codes using ToolManager pattern helper
+const enrichDestinationConfig = {
+  id: "enrich_destination",
+  name: "Destination Code Lookup", 
+  description: "Convert city names to IATA airport codes",
+  fields: ["destination"] as const,
+  enricher: async (context: FlightBookingContext, data: Pick<FlightData, "destination">) => {
+    const destination = data.destination;
 
-      if (!destination) {
-        return { data: undefined };
-      }
+    if (!destination) {
+      return {};
+    }
 
-      // Simulate airport code lookup
-      const airportCodes: Record<string, string> = {
-        Paris: "CDG",
-        London: "LHR",
-        "New York": "JFK",
-        Tokyo: "NRT",
-        "Los Angeles": "LAX",
-      };
+    // Simulate airport code lookup
+    const airportCodes: Record<string, string> = {
+      Paris: "CDG",
+      London: "LHR",
+      "New York": "JFK",
+      Tokyo: "NRT",
+      "Los Angeles": "LAX",
+    };
 
-      const destinationCode = airportCodes[destination];
+    const destinationCode = airportCodes[destination];
 
-      console.log(`[Tool] Enriched: ${destination} → ${destinationCode}`);
+    console.log(`[Tool] Enriched: ${destination} → ${destinationCode}`);
 
-      return {
-        data: undefined,
-        dataUpdate: {
-          destinationCode,
-        } as Partial<FlightData>,
-      };
-    },
-  };
+    return {
+      destinationCode,
+    } as Partial<FlightData>;
+  },
+};
 
-// Tool 2: Parse and validate dates
-const validateDateTool: Tool<FlightBookingContext, FlightData, [], void> = {
+// Tool 2: Parse and validate dates using ToolManager pattern helper
+const validateDateConfig = {
   id: "validate_date",
   name: "Date Parser & Validator",
-  description:
-    "Parse relative dates (today, tomorrow) to ISO format and validate",
-  parameters: {
-    type: "object",
-    properties: {},
-  },
-  handler: ({ data }: { data?: Partial<FlightData> }) => {
-    const departureDate = (data as Partial<FlightData>)?.departureDate;
+  description: "Parse relative dates (today, tomorrow) to ISO format and validate",
+  fields: ["departureDate"] as const,
+  enricher: async (context: FlightBookingContext, data: Pick<FlightData, "departureDate">) => {
+    const departureDate = data.departureDate;
 
     if (!departureDate) {
-      return { data: undefined };
+      return {};
     }
 
     let parsedDate: string;
@@ -130,16 +122,13 @@ const validateDateTool: Tool<FlightBookingContext, FlightData, [], void> = {
     console.log(`[Tool] Parsed date: ${departureDate} → ${parsedDate}`);
 
     return {
-      data: undefined,
-      dataUpdate: {
-        departureDateParsed: parsedDate,
-      } as Partial<FlightData>,
-    };
+      departureDateParsed: parsedDate,
+    } as Partial<FlightData>;
   },
 };
 
-// Tool 3: Search for flights (triggered by flag)
-const searchFlightsTool: Tool<FlightBookingContext, FlightData, [], void> = {
+// Tool 3: Search for flights (triggered by flag) using unified Tool interface
+const searchFlightsTool: Tool<FlightBookingContext, FlightData> = {
   id: "search_flights",
   name: "Flight Availability Search",
   description: "Search for available flights based on collected data",
@@ -147,12 +136,12 @@ const searchFlightsTool: Tool<FlightBookingContext, FlightData, [], void> = {
     type: "object",
     properties: {},
   },
-  handler: ({ data }: { data?: Partial<FlightData> }) => {
-    const flightData = data as Partial<FlightData>;
+  handler: async (toolContext, args) => {
+    const flightData = toolContext.data;
 
     if (!flightData?.destinationCode || !flightData?.departureDateParsed) {
       console.log("[Tool] Cannot search flights: missing required data");
-      return { data: undefined };
+      return { data: "Missing required data for flight search" };
     }
 
     // Simulate flight search API call
@@ -176,19 +165,19 @@ const searchFlightsTool: Tool<FlightBookingContext, FlightData, [], void> = {
     );
 
     return {
-      data: undefined,
+      data: `Found ${flights.length} available flights`,
       contextUpdate: {
         availableFlights: flights,
       },
       dataUpdate: {
-        shouldSearchFlights: false, // Clear the flag to prevent re-execution
-      } as Partial<FlightData>,
+        shouldSearchFlights: false,
+      },
     };
   },
 };
 
-// Tool 4: Book the flight
-const bookFlightTool: Tool<FlightBookingContext, FlightData, [], void> = {
+// Tool 4: Book the flight using unified Tool interface
+const bookFlightTool: Tool<FlightBookingContext, FlightData> = {
   id: "book_flight",
   name: "Flight Booking Processor",
   description: "Finalize the flight booking",
@@ -196,11 +185,11 @@ const bookFlightTool: Tool<FlightBookingContext, FlightData, [], void> = {
     type: "object",
     properties: {},
   },
-  handler: ({ data }: { data?: Partial<FlightData> }) => {
-    const flightData = data as Partial<FlightData>;
+  handler: async (toolContext, args) => {
+    const flightData = toolContext.data;
     console.log("[Tool] Booking flight with data:", flightData);
     // Simulate booking API call
-    return { data: undefined };
+    return { data: "Flight booking confirmed!" };
   },
 };
 
@@ -296,13 +285,124 @@ const agent = new Agent<FlightBookingContext, FlightData>({
   description: "I help you find and book flights",
   provider: new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY || "your-api-key-here",
-    model: "gpt-5o-mini",
+    model: "gpt-4o-mini",
   }),
   context: {},
   // NEW: Agent-level schema
   schema: flightBookingSchema,
   hooks: {
     onDataUpdate, // Validation & enrichment hook
+  },
+});
+
+// Pattern 1: Using the enrichDestinationConfig with inline tool creation
+const enrichDestinationTool = {
+  id: "enrich_destination",
+  name: "Destination Code Lookup", 
+  description: "Convert city names to IATA airport codes",
+  parameters: {
+    type: "object",
+    properties: {},
+  },
+  handler: async (context: ToolContext<FlightBookingContext, FlightData>, args?: Record<string, unknown>) => {
+    const destination = context.data.destination;
+
+    if (!destination) {
+      return { data: "No destination to enrich" };
+    }
+
+    // Use the original enricher function from the config
+    const result = await enrichDestinationConfig.enricher(context.context, { destination });
+
+    console.log(`[Tool] Enriched: ${destination} → ${result.destinationCode}`);
+
+    return {
+      data: `Destination code: ${result.destinationCode}`,
+      dataUpdate: result,
+    };
+  },
+};
+
+// Pattern 2: Using the validateDateConfig with typed tool interface
+const validateDateTool: Tool<FlightBookingContext, FlightData> = {
+  id: "validate_date",
+  name: "Date Parser & Validator",
+  description: "Parse relative dates (today, tomorrow) to ISO format and validate",
+  parameters: {
+    type: "object",
+    properties: {},
+  },
+  handler: async (context, args) => {
+    const departureDate = context.data.departureDate;
+
+    if (!departureDate) {
+      return { data: "No departure date to validate" };
+    }
+
+    // Use the original enricher function from the config
+    const result = await validateDateConfig.enricher(context.context, { departureDate });
+
+    console.log(`[Tool] Parsed date: ${departureDate} → ${result.departureDateParsed}`);
+
+    return {
+      data: `Parsed date: ${result.departureDateParsed}`,
+      dataUpdate: result,
+    };
+  },
+};
+
+// Demonstrate different registration methods for data enrichment tools
+
+// Method 1: Register enrichment tools for ID-based reference
+agent.tool.register(enrichDestinationTool);
+agent.tool.register(validateDateTool);
+
+// Method 2: Use registerMany for multiple tools
+agent.tool.registerMany([searchFlightsTool, bookFlightTool]);
+
+// Method 3: Create specialized data enrichment tools using the helper
+const passengerEnrichmentTool = agent.tool.createDataEnrichment({
+  id: "enrich_passenger_info",
+  fields: ["passengers"] as const,
+  enricher: async (context, data) => {
+    // Add passenger type classification - return fields that exist in FlightData
+    const cabinClass = data.passengers === 1 ? "business" : data.passengers <= 4 ? "economy" : "economy";
+    return {
+      cabinClass, // This matches the cabinClass field in FlightData
+    };
+  },
+});
+
+// Method 4: Create validation tool using the helper
+const flightDataValidator = agent.tool.createValidation({
+  id: "validate_flight_data",
+  fields: ["destination", "departureDate", "passengers"] as const,
+  validator: async (context, data) => {
+    const errors: ValidationError[] = [];
+    if (!data.destination) errors.push({ 
+      field: "destination", 
+      value: data.destination,
+      message: "Destination is required",
+      schemaPath: "destination"
+    });
+    if (!data.departureDate) errors.push({ 
+      field: "departureDate", 
+      value: data.departureDate,
+      message: "Departure date is required",
+      schemaPath: "departureDate"
+    });
+    if (!data.passengers || data.passengers < 1) errors.push({ 
+      field: "passengers", 
+      value: data.passengers,
+      message: "At least 1 passenger required",
+      schemaPath: "passengers"
+    });
+    
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings: [],
+    };
   },
 });
 
@@ -320,6 +420,13 @@ const bookingRoute = agent.createRoute({
   optionalFields: ["destinationCode", "departureDateParsed", "cabinClass", "shouldSearchFlights"],
 });
 
+// Method 5: Add route-scoped tools (only available in this route)
+bookingRoute.addTool({
+  id: "route_specific_tool",
+  description: "Tool only available in booking route",
+  handler: () => "This tool is scoped to the booking route only",
+});
+
 // Step 1: Collect destination
 const collectDestination = bookingRoute.initialStep.nextStep({
   prompt: "Ask where they want to fly",
@@ -329,7 +436,7 @@ const collectDestination = bookingRoute.initialStep.nextStep({
 
 // Step 2: Enrich destination (tool execution)
 const enrichDestination = collectDestination.nextStep({
-  tools: [enrichDestinationTool],
+  tools: ["enrich_destination"], // Reference by ID
   requires: ["destination"],
 });
 
@@ -342,7 +449,7 @@ const collectDate = enrichDestination.nextStep({
 
 // Step 4: Validate/parse date (tool execution)
 const validateDate = collectDate.nextStep({
-  tools: [validateDateTool],
+  tools: ["validate_date"], // Reference by ID
   requires: ["departureDate"],
 });
 
@@ -355,7 +462,7 @@ const collectPassengers = validateDate.nextStep({
 
 // Step 6: Search flights (triggered by hook setting shouldSearchFlights)
 const searchFlights = collectPassengers.nextStep({
-  tools: [searchFlightsTool],
+  tools: ["search_flights"], // Reference by ID
   // This step is entered when shouldSearchFlights is true
   // The hook automatically sets this flag when all data is collected
 });
@@ -371,9 +478,12 @@ const confirmBooking = presentResults.nextStep({
   requires: ["destinationCode", "departureDateParsed", "passengers"],
 });
 
+// Method 6: Step-scoped tools can be added via the step's tools array
+// Note: Step-scoped tools are typically defined inline in the step configuration
+
 // Step 9: Finalize booking
 const finalizeBooking = confirmBooking.nextStep({
-  tools: [bookFlightTool],
+  tools: ["book_flight"], // Reference by ID
   when: "User confirms the booking",
 });
 

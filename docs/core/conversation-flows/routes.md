@@ -74,6 +74,8 @@ Routes are selected by the AI routing system based on user intent and conversati
 
 Routes complete when all their required fields are present in the agent's collected data, regardless of which route collected the data. This enables flexible cross-route completion scenarios.
 
+### Basic Route Completion
+
 ```typescript
 // Route completion evaluation
 const isComplete = bookingRoute.isComplete(agent.getCollectedData());
@@ -84,6 +86,134 @@ console.log(`Booking route is ${Math.round(progress * 100)}% complete`);
 if (missingFields.length > 0) {
   console.log(`Still need: ${missingFields.join(', ')}`);
 }
+```
+
+### Route Completion with Error Handling
+
+Proper error handling ensures accurate route completion detection:
+
+```typescript
+const checkRouteCompletion = async (route: Route, agent: Agent) => {
+  try {
+    const collectedData = agent.getCollectedData();
+    
+    // Check data-based completion
+    if (route.isComplete(collectedData)) {
+      return { complete: true, reason: "all_required_data_collected" };
+    }
+    
+    // Check step-based completion (for routes with skipIf conditions)
+    const allStepsProcessed = route.steps.every(step => {
+      if (step.skipIf && step.skipIf(collectedData)) {
+        return true; // Step is skipped, counts as processed
+      }
+      return step.isCompleted;
+    });
+    
+    if (allStepsProcessed) {
+      return { complete: true, reason: "all_steps_processed" };
+    }
+    
+    // Check for explicit route termination
+    if (route.hasExplicitEnd()) {
+      return { complete: true, reason: "explicit_end_route" };
+    }
+    
+    return { 
+      complete: false, 
+      missingFields: route.getMissingRequiredFields(collectedData),
+      progress: route.getCompletionProgress(collectedData)
+    };
+  } catch (error) {
+    console.error("Route completion check failed:", error);
+    return { 
+      complete: false, 
+      error: error.message,
+      fallback: true 
+    };
+  }
+};
+
+// Usage with error handling
+const completionResult = await checkRouteCompletion(bookingRoute, agent);
+
+if (completionResult.error) {
+  console.warn("Completion check failed, assuming incomplete:", completionResult.error);
+} else if (completionResult.complete) {
+  console.log(`Route completed: ${completionResult.reason}`);
+} else {
+  console.log(`Route ${Math.round(completionResult.progress * 100)}% complete`);
+  console.log(`Missing: ${completionResult.missingFields.join(', ')}`);
+}
+```
+
+### Handling Routes with Conditional Steps
+
+Routes with `skipIf` conditions require special completion logic:
+
+```typescript
+const conditionalRoute = agent.createRoute({
+  title: "Conditional Booking",
+  requiredFields: ["destination", "dates", "passengers"]
+});
+
+const askDestination = conditionalRoute.initialStep.nextStep({
+  prompt: "Where would you like to go?",
+  collect: ["destination"],
+  skipIf: (data) => !!data.destination, // Skip if already collected
+});
+
+const askDates = askDestination.nextStep({
+  prompt: "When would you like to travel?",
+  collect: ["dates"],
+  skipIf: (data) => !!data.dates,
+});
+
+const confirmBooking = askDates.nextStep({
+  prompt: "Confirm your booking details",
+  requires: ["destination", "dates", "passengers"],
+  onComplete: () => ({ endRoute: true }) // Explicit route termination
+});
+
+// Completion detection handles skipped steps
+const response = await agent.respond({
+  message: "I want to go to Paris on March 15th for 2 passengers",
+  sessionId: "user-123"
+});
+
+// All steps may be skipped due to complete data extraction
+// Route should still be marked as complete
+console.log("Route complete:", response.isRouteComplete); // Should be true
+```
+
+### Error Recovery in Route Completion
+
+```typescript
+const safeRouteCompletion = async (route: Route, agent: Agent) => {
+  const maxRetries = 3;
+  let attempt = 0;
+  
+  while (attempt < maxRetries) {
+    try {
+      return await checkRouteCompletion(route, agent);
+    } catch (error) {
+      attempt++;
+      console.warn(`Route completion check attempt ${attempt} failed:`, error.message);
+      
+      if (attempt >= maxRetries) {
+        // Final fallback - assume incomplete
+        return {
+          complete: false,
+          error: `Completion check failed after ${maxRetries} attempts: ${error.message}`,
+          fallback: true
+        };
+      }
+      
+      // Brief delay before retry
+      await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+    }
+  }
+};
 ```
 
 ## Route Transitions

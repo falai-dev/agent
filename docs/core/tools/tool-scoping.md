@@ -1,37 +1,123 @@
-# Tool Scoping & Access Control
+# Tool Scoping & Registry System
 
-@falai/agent provides a hierarchical tool scoping system that enables fine-grained control over tool availability and access. Tools can be defined at agent, route, or step levels, with intelligent resolution and security controls.
+The unified Tool interface supports sophisticated hierarchical scoping with a central registry that enables fine-grained control over tool availability and access. Tools can be registered globally for reuse or added to specific scopes (agent, route, step) with intelligent resolution and security controls.
 
 ## Overview
 
-The scoping system provides:
+The unified Tool scoping and registry system provides:
 
-- **Hierarchical Access**: Agent → Route → Step level tool definitions
-- **Security Boundaries**: Control tool access based on context and permissions
-- **Performance Optimization**: Limit tool evaluation to relevant contexts
-- **Conflict Resolution**: Predictable tool selection when IDs conflict
-- **Dynamic Availability**: Tools can be conditionally available
+- **Central Tool Registry**: Global registry for reusable tools referenced by ID across contexts
+- **Hierarchical Scoping**: Agent → Route → Step level tool definitions with clear priority
+- **Intelligent Resolution**: Automatic tool lookup across scopes with fallback to registry
+- **Flexible Returns**: Support for both simple return values and complex ToolResult objects
+- **Security Boundaries**: Fine-grained access control based on context and permissions
+- **Performance Optimization**: Efficient tool evaluation limited to relevant contexts
+- **Conflict Resolution**: Predictable tool selection when IDs conflict across scopes
+- **Dynamic Availability**: Conditional tool access based on runtime context
 
-## Scoping Hierarchy
+## Tool Scoping Hierarchy
+
+### Central Tool Registry
+
+The system maintains a central registry for tools that can be referenced by ID across different contexts:
+
+```typescript
+import { Agent, GeminiProvider } from "@falai/agent";
+
+const agent = new Agent({
+  name: "Multi-Purpose Agent",
+  provider: new GeminiProvider({
+    apiKey: process.env.GEMINI_API_KEY!,
+  }),
+});
+
+// Register tools in the central registry for reuse
+agent.tool.register({
+  id: "global_search",
+  name: "Universal Search",
+  description: "Search across all available data sources",
+  parameters: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Search query" },
+      scope: { type: "string", enum: ["all", "documents", "users"], default: "all" },
+    },
+    required: ["query"],
+  },
+  handler: async ({ context, data }, args) => {
+    const results = await searchService.search(args.query, args.scope);
+    return `Found ${results.length} results for "${args.query}"`; // Simple return value
+  },
+});
+
+agent.tool.register({
+  id: "user_profile_manager",
+  name: "User Profile Manager",
+  description: "Manage user profile operations",
+  parameters: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["get", "update", "delete"] },
+      userId: { type: "string", description: "User ID" },
+      updates: { type: "object", description: "Profile updates for update action" },
+    },
+    required: ["action"],
+  },
+  handler: async ({ context, data }, args) => {
+    const result = await userService.manageProfile(args.action, args.userId, args.updates);
+    return {
+      data: `Profile ${args.action} completed`,
+      success: true,
+      contextUpdate: { lastProfileAction: args.action }
+    }; // Complex ToolResult pattern
+  },
+});
+
+// Register multiple tools at once for efficiency
+agent.tool.registerMany([
+  {
+    id: "system_health_check",
+    description: "Check system health and status",
+    handler: async () => {
+      const health = await systemService.checkHealth();
+      return `System status: ${health.status}`; // Simple return
+    },
+  },
+  {
+    id: "audit_logger",
+    description: "Create audit log entries",
+    handler: async ({ context }, args) => {
+      await auditService.log(context.userId, args.action, args.details);
+      return {
+        data: "Audit entry created",
+        contextUpdate: { lastAuditAction: args.action }
+      }; // ToolResult with context update
+    },
+  },
+]);
+
+// Check registry status
+console.log("Registered tools:", Array.from(agent.tool.getRegistered().keys()));
+console.log("Is search registered?", agent.tool.isRegistered("global_search"));
+```
 
 ### Agent-Level Tools
 
 Available to all routes and steps within the agent:
 
 ```typescript
-const agent = new Agent({
-  name: "Multi-Purpose Agent",
-  provider: openaiProvider,
-
-  // Available to ALL routes and steps
-  tools: [
-    searchTool, // General search functionality
-    userProfileTool, // User management
-    systemStatusTool, // System health checks
-  ],
-
-  routes: [route1, route2, route3], // All can use agent tools
+// Add tools directly to agent scope - simple return value
+agent.addTool({
+  id: "agent_search",
+  description: "Agent-wide search functionality",
+  handler: async ({ context, data }) => {
+    return "Agent search results"; // Simple return
+  },
 });
+
+// All routes can access agent-level tools
+const route1 = agent.createRoute({ title: "Route 1" });
+const route2 = agent.createRoute({ title: "Route 2" });
 ```
 
 **Use Cases:**
@@ -47,14 +133,34 @@ Specific to a single route and its steps:
 ```typescript
 const supportRoute = agent.createRoute({
   title: "Customer Support",
+});
 
-  // Available only within this route
-  tools: [ticketCreationTool, knowledgeBaseTool, escalationTool],
-
-  initialStep: {
-    prompt: "How can I help you?",
-    tools: ["ticketCreationTool"], // Can access route tools
+// Add tools to route scope - mixed return patterns
+supportRoute.addTool({
+  id: "create_ticket",
+  description: "Create support ticket",
+  handler: async ({ context, data }) => {
+    const ticketId = await ticketService.create(data);
+    return {
+      data: "Ticket created successfully",
+      success: true,
+      dataUpdate: { ticketId: ticketId }
+    }; // Complex ToolResult
   },
+});
+
+supportRoute.addTool({
+  id: "search_knowledge",
+  description: "Search knowledge base",
+  handler: async ({ context, data }) => {
+    const results = await knowledgeBase.search(data.query);
+    return `Found ${results.length} knowledge articles`; // Simple return
+  },
+});
+
+const initialStep = supportRoute.initialStep.nextStep({
+  prompt: "How can I help you?",
+  tools: ["create_ticket", "search_knowledge"], // Reference by ID
 });
 ```
 
@@ -69,15 +175,35 @@ const supportRoute = agent.createRoute({
 Limited to a specific conversation step:
 
 ```typescript
-const dataCollectionStep = {
+const dataCollectionStep = supportRoute.initialStep.nextStep({
   prompt: "Please provide your payment information",
   collect: ["paymentDetails"],
-
-  // Available ONLY in this step
-  tools: [paymentValidationTool, fraudCheckTool, secureStorageTool],
-
   requires: ["userConsent", "securityVerified"],
-};
+}).addTool({
+  id: "validate_payment",
+  description: "Validate payment information",
+  handler: async ({ context, data }) => {
+    const isValid = await paymentValidator.validate(data.paymentDetails);
+    return isValid ? "Payment validated successfully" : "Payment validation failed"; // Simple return
+  },
+}).addTool({
+  id: "fraud_check",
+  description: "Perform fraud detection",
+  handler: async ({ context, data }) => {
+    const fraudResult = await fraudDetector.check(data.paymentDetails);
+    return {
+      data: fraudResult.passed ? "Fraud check passed" : "Fraud detected",
+      success: fraudResult.passed,
+      contextUpdate: { fraudScore: fraudResult.score }
+    }; // Complex ToolResult with security data
+  },
+});
+
+// Or reference registered tools by ID
+const secureStep = route.initialStep.nextStep({
+  prompt: "Processing secure operation...",
+  tools: ['registered_security_tool'], // Reference by ID
+});
 ```
 
 **Use Cases:**
@@ -90,40 +216,105 @@ const dataCollectionStep = {
 
 ### Priority Order
 
-When tools have conflicting IDs, resolution follows this hierarchy:
+ToolManager resolves tools with the following priority:
 
 ```typescript
-// 1. Step-level tools (highest priority)
-step.tools.find((tool) => tool.id === toolId || tool.name === toolId) ||
-  // 2. Route-level tools
-  route.tools.find((tool) => tool.id === toolId || tool.name === toolId) ||
-  // 3. Agent-level tools (lowest priority)
-  agent.tools.find((tool) => tool.id === toolId || tool.name === toolId);
+// 1. Step-level inline tools (highest priority)
+// 2. Step-level tool references (by ID) → Registry lookup
+// 3. Route-level tools
+// 4. Agent-level tools
+// 5. Registered tools (fallback for unresolved IDs)
 ```
 
-### Example Resolution
+### Tool Resolution Example
+
+The system resolves tools with clear priority rules and intelligent fallback to the registry:
 
 ```typescript
-const agent = new Agent({
-  tools: [{ id: "search", description: "General search" }],
-  routes: [
+import { Agent, GeminiProvider } from "@falai/agent";
+
+const agent = new Agent({ 
+  name: "Resolution Demo", 
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! })
+});
+
+// 1. Register tool in central registry
+agent.tool.register({
+  id: "search",
+  description: "Registry-based search with fallback capability",
+  handler: async ({ context, data }, args) => "Registry search executed", // Simple return
+});
+
+// 2. Add agent-level tool (overrides registry for this agent)
+agent.addTool({
+  id: "search",
+  description: "Agent-wide search functionality",
+  handler: async ({ context, data }, args) => ({
+    data: "Agent search executed",
+    contextUpdate: { lastSearchLevel: "agent" }
+  }), // ToolResult pattern
+});
+
+const route = agent.createRoute({ title: "Support Route" });
+
+// 3. Add route-level tool (overrides agent-level for this route)
+route.addTool({
+  id: "search",
+  description: "Route-specific search",
+  handler: async ({ context, data }, args) => "Route search executed", // Simple return
+});
+
+// 4. Step with inline tool (highest priority)
+const step = route.initialStep.nextStep({
+  prompt: "What would you like to search for?",
+  tools: [
     {
-      title: "Support",
-      tools: [{ id: "search", description: "Knowledge base search" }],
-      initialStep: {
-        prompt: "Search question?",
-        tools: [{ id: "search", description: "Web search" }],
-      },
+      id: "search",
+      description: "Step-specific search with custom logic",
+      handler: async ({ context, data }, args) => ({
+        data: "Step search executed",
+        success: true,
+        dataUpdate: { lastStepSearch: new Date() }
+      }), // Advanced ToolResult
     },
   ],
 });
 
-// In the support route's initial step:
-// - "search" resolves to: Web search (step-level)
-// In other support route steps:
-// - "search" resolves to: Knowledge base search (route-level)
-// In other routes:
-// - "search" resolves to: General search (agent-level)
+// 5. Step referencing registered tool by ID
+const registryStep = route.initialStep.nextStep({
+  prompt: "Using registry search...",
+  tools: ['global_search'] // References registered tool by ID
+});
+
+// Resolution Priority (highest to lowest):
+// 1. Step-level inline tools → "Step search executed"
+// 2. Step-level tool references (by ID) → Registry lookup
+// 3. Route-level tools → "Route search executed"  
+// 4. Agent-level tools → "Agent search executed"
+// 5. Registry fallback → "Registry search executed"
+
+// Test resolution
+const foundTool = agent.tool.find('search');
+console.log("Resolved tool:", foundTool?.description);
+
+// Get all available tools for current context
+const availableTools = agent.tool.getAvailable();
+console.log("Available tools:", availableTools.map(t => t.id));
+```
+
+### Using Tool Resolution
+
+```typescript
+// Find tool across all scopes
+const tool = agent.tool.find('search');
+
+// Get available tools for current context
+const availableTools = agent.tool.getAvailable();
+
+// Check if tool is registered
+if (agent.tool.isRegistered('search')) {
+  console.log('Tool available in registry');
+}
 ```
 
 ## Dynamic Tool Availability

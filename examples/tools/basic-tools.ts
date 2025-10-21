@@ -2,18 +2,18 @@
  * Basic Tools Example
  *
  * This example demonstrates the fundamentals of creating and using tools
- * in conversational agents. Shows tool definition, execution, error handling,
- * and integration with conversation flows.
+ * with the unified Tool interface. Shows different patterns for tool creation,
+ * execution, error handling, and integration with conversation flows.
  *
  * Key concepts:
- * - Tool definition with Tool<TContext, TData, TArgs, TResult> interface
- * - Tool context and parameters
- * - Tool execution in conversation flows
+ * - Multiple ways to create and use tools with unified interface
+ * - Different tool handler patterns and return types
+ * - Tool registration and scoping approaches
  * - Error handling in tools
  * - Tool results and data flow
  */
 
-import { Agent, GeminiProvider, type Tool } from "../../src/index";
+import { Agent, GeminiProvider, Tool, ToolContext } from "../../src/index";
 
 // Define data types for our examples
 interface CalculatorData {
@@ -35,8 +35,9 @@ interface SearchData {
   source?: string;
 }
 
-// Example 1: Simple Calculator Tool
-const calculatorTool: Tool<unknown, UnifiedToolData, [], string> = {
+// Example 1: Inline Tool Definition (most common pattern)
+// This shows creating a tool object directly without explicit typing
+const calculatorTool = {
   id: "calculator",
   name: "Math Calculator",
   description: "Evaluate mathematical expressions and return results",
@@ -50,40 +51,40 @@ const calculatorTool: Tool<unknown, UnifiedToolData, [], string> = {
     },
     required: ["expression"],
   },
-  handler: ({ data }) => {
-    if (!data?.expression) {
+  handler: async (context: ToolContext<{ preferences?: { theme: string; language: string } }, UnifiedToolData>, args?: Record<string, unknown>) => {
+    const expression = args?.expression as string;
+    if (!expression) {
       throw new Error("No expression provided");
     }
 
     try {
       // Simple expression evaluation (in production, use a safe math library)
       // WARNING: eval is unsafe - use a proper math evaluation library in production
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const result = eval(data.expression);
+      const result = eval(expression);
 
       if (typeof result !== "number" || isNaN(result)) {
         throw new Error("Invalid calculation result");
       }
 
       return {
-        data: `The result of ${data.expression} is ${result}`,
+        data: `The result of ${expression} is ${result}`,
         dataUpdate: {
+          expression,
           result,
-          operation: data.expression,
+          operation: expression,
         },
       };
     } catch (error) {
       throw new Error(
-        `Error calculating ${data.expression}: ${
-          error instanceof Error ? error.message : "Unknown error"
+        `Error calculating ${expression}: ${error instanceof Error ? error.message : "Unknown error"
         }`
       );
     }
   },
 };
 
-// Example 2: Weather Tool with External API Simulation
-const weatherTool: Tool<unknown, UnifiedToolData, [], string> = {
+// Example 2: Explicitly Typed Tool (for better IDE support and type safety)
+const weatherTool: Tool<{ preferences?: { theme: string; language: string } }, UnifiedToolData> = {
   id: "get_weather",
   name: "Weather Lookup",
   description: "Get current weather and forecast for a location",
@@ -94,8 +95,9 @@ const weatherTool: Tool<unknown, UnifiedToolData, [], string> = {
     },
     required: ["location"],
   },
-  handler: async ({ data }) => {
-    if (!data?.location) {
+  handler: async (context, args) => {
+    const location = args?.location as string;
+    if (!location) {
       throw new Error("No location provided");
     }
 
@@ -125,15 +127,16 @@ const weatherTool: Tool<unknown, UnifiedToolData, [], string> = {
       },
     };
 
-    const weather = mockWeather[data.location] || {
+    const weather = mockWeather[location] || {
       temp: 70,
       condition: "Unknown",
       forecast: "Weather data unavailable",
     };
 
     return {
-      data: `Weather in ${data.location}: ${weather.temp}°F and ${weather.condition}. ${weather.forecast}`,
+      data: `Weather in ${location}: ${weather.temp}°F and ${weather.condition}. ${weather.forecast}`,
       dataUpdate: {
+        location,
         temperature: weather.temp,
         condition: weather.condition,
         forecast: weather.forecast,
@@ -142,8 +145,8 @@ const weatherTool: Tool<unknown, UnifiedToolData, [], string> = {
   },
 };
 
-// Example 3: Search Tool with Multiple Results
-const searchTool: Tool<unknown, UnifiedToolData, [], string> = {
+// Example 3: Simple Return Value (just return a string for simple tools)
+const searchTool = {
   id: "web_search",
   name: "Web Search",
   description: "Search the web for information on a given query",
@@ -154,8 +157,9 @@ const searchTool: Tool<unknown, UnifiedToolData, [], string> = {
     },
     required: ["query"],
   },
-  handler: async ({ data }) => {
-    if (!data?.query) {
+  handler: async (context: ToolContext<any, any>, args?: Record<string, unknown>) => {
+    const query = args?.query as string;
+    if (!query) {
       throw new Error("No search query provided");
     }
 
@@ -184,32 +188,22 @@ const searchTool: Tool<unknown, UnifiedToolData, [], string> = {
       ],
     };
 
-    const results = mockResults[data.query.toLowerCase()] || [
-      `Search results for "${data.query}"`,
+    const results = mockResults[query.toLowerCase()] || [
+      `Search results for "${query}"`,
       "This is a simulated search result",
       "In a real implementation, this would connect to a search API",
       "Such as Google Custom Search, Bing Web Search, or Elasticsearch",
     ];
 
-    return {
-      data: `Search results for "${data.query}":\n${results
-        .map((r, i) => `${i + 1}. ${r}`)
-        .join("\n")}`,
-      dataUpdate: {
-        results,
-        source: "Mock Search API",
-      },
-    };
+    // Simple return - just the message (no dataUpdate needed for this example)
+    return `Search results for "${query}":\n${results
+      .map((r, i) => `${i + 1}. ${r}`)
+      .join("\n")}`;
   },
 };
 
-// Example 4: Tool that Modifies Context (Advanced)
-const updatePreferencesTool: Tool<
-  { preferences?: { theme: string; language: string } },
-  UnifiedToolData,
-  [],
-  string
-> = {
+// Example 4: ToolResult Return Type (for complex tools that need context/data updates)
+const updatePreferencesTool = {
   id: "update_preferences",
   name: "Update Preferences",
   description: "Update user preferences and settings",
@@ -220,24 +214,90 @@ const updatePreferencesTool: Tool<
       language: { type: "string", enum: ["en", "es", "fr"] },
     },
   },
-  handler: ({ context, data }) => {
-    if (!context) {
+  handler: async (toolContext: ToolContext<{ preferences?: { theme: string; language: string } }, UnifiedToolData>, args?: Record<string, unknown>) => {
+    if (!toolContext.context) {
       throw new Error("No context available");
     }
 
     const newPreferences = {
-      theme: data?.theme || context.preferences?.theme || "light",
-      language: data?.language || context.preferences?.language || "en",
+      theme: (args?.theme as string) || toolContext.context.preferences?.theme || "light",
+      language: (args?.language as string) || toolContext.context.preferences?.language || "en",
     };
 
+    // Return ToolResult for complex updates
     return {
       data: `Preferences updated: Theme is now ${newPreferences.theme}, Language is ${newPreferences.language}`,
       contextUpdate: {
         preferences: newPreferences,
       },
+      dataUpdate: {
+        theme: newPreferences.theme,
+        language: newPreferences.language,
+      },
     };
   },
 };
+
+// Example 5: Function-style Tool Creation (for dynamic tools)
+function createValidationTool(fieldName: string) {
+  return {
+    id: `validate_${fieldName}`,
+    name: `${fieldName} Validator`,
+    description: `Validate the ${fieldName} field`,
+    parameters: {
+      type: "object",
+      properties: {
+        value: { type: "string", description: `Value to validate for ${fieldName}` },
+      },
+      required: ["value"],
+    },
+    handler: (context: ToolContext<any, any>, args?: Record<string, unknown>) => {
+      const value = args?.value as string;
+      const isValid = value && value.length > 0;
+
+      if (isValid) {
+        return `${fieldName} validation passed: ${value}`;
+      } else {
+        throw new Error(`${fieldName} validation failed: empty or invalid value`);
+      }
+    },
+  };
+}
+
+// Example 6: Class-based Tool (for complex stateful tools)
+class ApiCallTool {
+  constructor(private baseUrl: string, private apiKey: string) { }
+
+  createTool() {
+    return {
+      id: "api_call",
+      name: "API Call Tool",
+      description: "Make API calls to external services",
+      parameters: {
+        type: "object",
+        properties: {
+          endpoint: { type: "string", description: "API endpoint to call" },
+          method: { type: "string", enum: ["GET", "POST", "PUT", "DELETE"], default: "GET" },
+        },
+        required: ["endpoint"],
+      },
+      handler: async (_context: ToolContext<any, any>, args?: Record<string, unknown>) => {
+        const endpoint = args?.endpoint as string;
+        const method = (args?.method as string) || "GET";
+
+        // Simulate API call
+        console.log(`Making ${method} request to ${this.baseUrl}${endpoint}`);
+
+        return {
+          data: `API call successful: ${method} ${this.baseUrl}${endpoint}`,
+          dataUpdate: {
+            source: `API: ${this.baseUrl}${endpoint}`,
+          },
+        };
+      },
+    };
+  }
+}
 
 // Define unified data schema for all tool interactions
 interface UnifiedToolData extends CalculatorData, WeatherData, SearchData {
@@ -267,7 +327,7 @@ const unifiedToolSchema = {
   },
 };
 
-// Create agent with tools
+// Create agent with tools using new ToolManager API
 const agent = new Agent<{ preferences?: { theme: string; language: string } }, UnifiedToolData>({
   name: "ToolBot",
   description: "An agent demonstrating various tool capabilities",
@@ -279,7 +339,74 @@ const agent = new Agent<{ preferences?: { theme: string; language: string } }, U
   schema: unifiedToolSchema,
 });
 
-// Create routes that use different tools
+// Demonstrate ALL the different ways to add tools with the unified interface
+
+// Method 1: Direct addTool() - most common for individual tools
+agent.addTool(calculatorTool);
+agent.addTool(weatherTool);
+
+// Method 2: tool.register() - register for later reference by ID
+agent.tool.register(searchTool);
+agent.tool.register(updatePreferencesTool);
+
+// Method 3: tool.registerMany() - register multiple tools at once
+agent.tool.registerMany([
+  createValidationTool("email"),
+  createValidationTool("phone"),
+]);
+
+// Method 4: tool.create() - create and register in one step
+const greetingTool = agent.tool.create({
+  id: "greeting_tool",
+  description: "Generate personalized greetings",
+  handler: (context) => {
+    const name = context.context?.preferences?.language === "es" ? "Hola" : "Hello";
+    return `${name}! How can I help you today?`;
+  },
+});
+
+// Method 5: tool.createDataEnrichment() - specialized for data enrichment
+const dataEnrichmentTool = agent.tool.createDataEnrichment({
+  id: "enrich_user_data",
+  fields: ["expression", "location"] as const,
+  enricher: async (context, data) => {
+    // Enrich the data with additional information that matches UnifiedToolData
+    return {
+      source: "basic-tools-example", // This matches the 'source' field in UnifiedToolData
+    };
+  },
+});
+
+// Method 6: tool.createValidation() - specialized for validation
+const validationTool = agent.tool.createValidation({
+  id: "validate_input",
+  fields: ["expression"] as const,
+  validator: async (context, data) => {
+    if (!data.expression || data.expression.length < 1) {
+      return {
+        valid: false,
+        errors: [{ 
+          field: "expression", 
+          value: data.expression,
+          message: "Expression cannot be empty",
+          schemaPath: "expression"
+        }],
+        warnings: [],
+      };
+    }
+    return {
+      valid: true,
+      errors: [],
+      warnings: [],
+    };
+  },
+});
+
+// Method 7: Class-based tools with addTool
+const apiTool = new ApiCallTool("https://api.example.com", "your-api-key");
+agent.addTool(apiTool.createTool());
+
+// Create routes that use different tools (now referencing registered tools by ID)
 agent.createRoute({
   title: "Calculator",
   description: "Mathematical calculations",
@@ -299,7 +426,7 @@ agent.createRoute({
       id: "calculate",
       description: "Perform the calculation",
       prompt: "Let me calculate that for you.",
-      tools: [calculatorTool],
+      tools: ["calculator"], // Reference registered tool by ID
       requires: ["expression"],
     },
   ],
@@ -324,7 +451,7 @@ agent.createRoute({
       id: "get_weather",
       description: "Fetch weather data",
       prompt: "Let me check the weather for you.",
-      tools: [weatherTool],
+      tools: ["get_weather"], // Reference registered tool by ID
       requires: ["location"],
     },
   ],
@@ -349,7 +476,7 @@ agent.createRoute({
       id: "perform_search",
       description: "Execute the search",
       prompt: "Let me search for that information.",
-      tools: [searchTool],
+      tools: ["web_search"], // Reference registered tool by ID
       requires: ["query"],
     },
   ],
@@ -364,7 +491,7 @@ agent.createRoute({
       id: "update_prefs",
       description: "Update user preferences",
       prompt: "I can help you update your preferences.",
-      tools: [updatePreferencesTool],
+      tools: ["update_preferences"], // Reference registered tool by ID
     },
   ],
 });
@@ -495,53 +622,130 @@ async function demonstrateToolDataFlow() {
 function demonstrateToolPatterns() {
   console.log("\n=== Tool Definition Patterns ===\n");
 
-  console.log("1. Basic Tool Pattern:");
+  console.log("1. Multiple Tool Creation Patterns:");
   console.log(`
-const myTool: Tool<ContextType, DataType, [], ResultType> = {
-  id: "tool_name",                    // Unique identifier
-  description: "What this tool does", // AI uses this to decide when to call
-  parameters: {                       // JSON Schema for tool parameters
-    type: "object",
-    properties: { /* parameter definitions */ }
-  },
-  handler: ({ data, context, updateContext }) => {
-    // Tool logic here - throw errors for failures
-    return {
-      data: "Result message",          // User-facing result
-      dataUpdate: { /* session data updates */ },
-      contextUpdate: { /* context updates */ },
-    };
-  },
+// Pattern A: Inline tool definition (most common)
+const myTool = {
+  id: "tool_name",
+  description: "What this tool does",
+  handler: (context, args) => "Simple result"
 };
-  `);
 
-  console.log("2. Tool Context Parameters:");
-  console.log(`
-interface ToolContext<TContext, TData> {
-  context: TContext;           // Agent context
-  updateContext: Function;     // Update context function
-  history;            // Conversation history
-  data: Partial<TData>;        // Currently collected data
+// Pattern B: Explicitly typed tool (better IDE support)
+const typedTool: Tool<MyContext, MyData> = {
+  id: "typed_tool",
+  description: "Typed tool with full IntelliSense",
+  handler: (context, args) => ({
+    data: "Result with updates",
+    dataUpdate: { field: "value" },
+    contextUpdate: { setting: "new" }
+  })
+};
+
+// Pattern C: Function factory for dynamic tools
+function createTool(name: string) {
+  return {
+    id: name,
+    handler: () => \`Tool \${name} executed\`
+  };
+}
+
+// Pattern D: Class-based tools for complex logic
+class MyToolClass {
+  createTool() {
+    return {
+      id: "class_tool",
+      handler: (context, args) => this.processData(args)
+    };
+  }
+  
+  private processData(args: any) {
+    return "Processed data from class method";
+  }
 }
   `);
 
-  console.log("3. Tool Result Structure:");
+  console.log("2. Multiple Return Types Supported:");
   console.log(`
-interface ToolResult {
-  data: unknown;               // Primary result (string for AI)
-  dataUpdate?: Record<string, unknown>;    // Update collected data
-  contextUpdate?: Record<string, unknown>; // Update agent context
-  success: boolean;            // Whether tool succeeded
-  error?: string;              // Error message if failed
+// Return Type A: Simple string (for basic tools)
+handler: () => "Simple result message"
+
+// Return Type B: ToolResult object (for complex tools)
+handler: (context, args) => ({
+  data: "User message",
+  dataUpdate: { field: "value" },
+  contextUpdate: { setting: "new" }
+})
+
+// Return Type C: Promise for async operations
+handler: async (context, args) => {
+  const result = await apiCall();
+  return \`Got: \${result}\`;
+}
+
+// Return Type D: Mixed - can return string OR ToolResult
+handler: (context, args) => {
+  if (simple) return "Quick result";
+  return { data: "Complex result", dataUpdate: {...} };
 }
   `);
 
-  console.log("4. Common Tool Patterns:");
-  console.log("   • Data Fetching: API calls to external services");
-  console.log("   • Calculations: Mathematical or logical operations");
-  console.log("   • Data Processing: Transform or analyze collected data");
-  console.log("   • State Updates: Modify conversation state");
-  console.log("   • External Actions: Send emails, create records, etc.");
+  console.log("3. All Available Tool Registration Methods:");
+  console.log(`
+// Method 1: Direct addition (most common)
+agent.addTool(myTool);
+
+// Method 2: Register for ID-based reference
+agent.tool.register(myTool);
+
+// Method 3: Register multiple tools at once
+agent.tool.registerMany([tool1, tool2, tool3]);
+
+// Method 4: Create and register in one step
+const tool = agent.tool.create({
+  id: "my_tool",
+  handler: () => "result"
+});
+
+// Method 5: Specialized data enrichment tools
+const enricher = agent.tool.createDataEnrichment({
+  id: "enrich_data",
+  fields: ["field1", "field2"],
+  enricher: async (context, data) => ({ enriched: true })
+});
+
+// Method 6: Specialized validation tools
+const validator = agent.tool.createValidation({
+  id: "validate_data", 
+  fields: ["field1"],
+  validator: async (context, data) => data.field1 !== undefined
+});
+
+// Method 7: Route-scoped tools
+route.addTool(routeSpecificTool);
+
+// Method 8: Step-level tools
+step.addTool(stepSpecificTool);
+
+// Usage in steps - multiple patterns
+route.step({
+  tools: ["tool_id"],           // By ID (from register)
+  tools: [toolObject],          // Direct object
+  tools: ["id1", obj2, "id3"]   // Mixed approaches
+});
+  `);
+
+  console.log("4. Unified Interface Benefits & Flexibility:");
+  console.log("   • Single Tool interface supports ALL patterns");
+  console.log("   • Choose the right pattern for your use case:");
+  console.log("     - Inline objects for simple tools");
+  console.log("     - Typed interfaces for complex tools");
+  console.log("     - Functions for dynamic tool generation");
+  console.log("     - Classes for stateful/complex logic");
+  console.log("   • Flexible return types (string OR ToolResult)");
+  console.log("   • Optional typing - use as much or as little as needed");
+  console.log("   • Consistent handler signature across all patterns");
+  console.log("   • Tool resolution across scopes (step → route → agent)");
 }
 
 // Run demonstrations

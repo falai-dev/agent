@@ -185,7 +185,7 @@ describe("Streaming with Different Providers", () => {
   });
 
   test("should handle streaming errors", async () => {
-    const errorProvider = MockProviderFactory.withError("Streaming failed");
+    const errorProvider = MockProviderFactory.withError("Mock provider streaming error for testing");
     const agent = createStreamingTestAgent(errorProvider);
     const session = createSession();
 
@@ -197,22 +197,21 @@ describe("Streaming with Different Providers", () => {
       },
     ];
 
-    let errorThrown = false;
-    try {
-      const stream = agent.respondStream({ history, session });
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of stream) {
-        // Should not reach here
-        throw new Error("Expected streaming to throw an error");
+    let errorReceived = false;
+    let errorMessage = "";
+
+    for await (const chunk of agent.respondStream({ history, session })) {
+      if (chunk.error) {
+        errorReceived = true;
+        errorMessage = chunk.error.message;
+        expect(chunk.error).toBeInstanceOf(Error);
+        expect(chunk.done).toBe(true);
+        break;
       }
-    } catch (error) {
-      errorThrown = true;
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain(
-        "Mock provider streaming error for testing"
-      );
     }
-    expect(errorThrown).toBe(true);
+
+    expect(errorReceived).toBe(true);
+    expect(errorMessage).toContain("Mock provider streaming error for testing");
   });
 });
 

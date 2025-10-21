@@ -131,30 +131,19 @@ interface BookingData {
 ### Create an Agent with Centralized Data Schema
 
 ```typescript
-import { Agent, GeminiProvider, type Tool } from "@falai/agent";
+import { Agent, GeminiProvider } from "@falai/agent";
 
-// Booking tool
-const checkAvailability: Tool<{}, [], string, BookingData> = {
-  id: "check_availability",
-  description: "Check availability and pricing",
-  parameters: {
-    type: "object",
-    properties: {},
-  },
-  handler: async (toolContext) => {
-    // Simulate availability check
-    const available = Math.random() > 0.2;
-    const price = Math.floor(Math.random() * 1000) + 500;
+// Define data interface first
+interface BookingData {
+  destination?: string;
+  travelDate?: string;
+  travelers?: number;
+  budget?: number;
+  estimatedPrice?: number;
+  availabilityChecked?: boolean;
+}
 
-    return {
-      data: available
-        ? `✅ Available! Estimated cost: $${price}`
-        : "❌ Not available for those dates",
-    };
-  },
-};
-
-// Create agent with centralized data schema
+// Create agent with centralized data schema first
 const agent = new Agent<{}, BookingData>({
   name: "TravelAgent",
   provider: new GeminiProvider({
@@ -173,9 +162,6 @@ const agent = new Agent<{}, BookingData>({
     required: ["destination", "travelers"],
   },
   
-  // Agent-level tools available to all routes
-  tools: [checkAvailability],
-  
   // Agent-level data validation and enrichment
   hooks: {
     onDataUpdate: async (data, previousData) => {
@@ -187,6 +173,33 @@ const agent = new Agent<{}, BookingData>({
     }
   }
 });
+
+// Create booking tool using unified Tool interface - simple return value
+agent.addTool({
+  id: "check_availability",
+  name: "Availability Checker",
+  description: "Check travel availability and pricing",
+  parameters: {
+    type: "object",
+    properties: {},
+  },
+  handler: async ({ context, data, updateData }) => {
+    // Simulate availability check using collected data
+    const available = Math.random() > 0.2;
+    const price = Math.floor(Math.random() * 1000) + 500;
+    
+    // Update data with pricing information using helper method
+    await updateData({ 
+      estimatedPrice: price,
+      availabilityChecked: true 
+    });
+
+    // Return simple string value - unified interface supports both simple and complex returns
+    return available
+      ? `✅ Available! Estimated cost: $${price} for ${data.travelers} travelers to ${data.destination}`
+      : "❌ Not available for those dates. Please try different dates.";
+  },
+};
 
 // Routes specify required fields instead of schemas
 const bookingRoute = agent.createRoute({
@@ -226,7 +239,7 @@ const askBudget = askTravelers.nextStep({
 
 const checkAndBook = askBudget.nextStep({
   prompt: "Let me check availability for your trip.",
-  tool: checkAvailability, // Tool accesses complete agent data
+  tools: ["check_availability"], // Reference tool by ID
   requires: ["destination", "travelers"], // Minimum data needed
 });
 ```
@@ -245,8 +258,24 @@ async function testBookingAgent() {
     
     // Same agent-level schema and configuration
     schema: agent.schema,
-    tools: agent.tools,
     hooks: agent.hooks
+  });
+
+  // Add the same tool to the session agent
+  sessionAgent.addTool({
+    id: "check_availability",
+    name: "Availability Checker",
+    description: "Check travel availability and pricing",
+    handler: async ({ context, data, updateData }) => {
+      const available = Math.random() > 0.2;
+      const price = Math.floor(Math.random() * 1000) + 500;
+      await updateData({ estimatedPrice: price, availabilityChecked: true });
+      return {
+        data: available
+          ? `✅ Available! Estimated cost: $${price} for ${data.travelers} travelers to ${data.destination}`
+          : "❌ Not available for those dates. Please try different dates.",
+      };
+    },
   });
 
   // Copy the route to the session agent
@@ -270,6 +299,88 @@ async function testBookingAgent() {
 }
 
 testBookingAgent();
+
+// Advanced: Show different tool creation approaches
+function demonstrateToolCreationMethods() {
+  // Method 1: Direct addition (simplest)
+  agent.addTool({
+    id: "simple_search",
+    description: "Basic search functionality",
+    handler: async ({ context, data }, args) => `Found results for: ${args.query}`
+  });
+
+  // Method 2: Registry for reuse
+  agent.tool.register({
+    id: "reusable_validator",
+    description: "Reusable validation tool",
+    handler: async ({ context, data }, args) => ({
+      data: "Validation complete",
+      success: true,
+      contextUpdate: { lastValidated: new Date() }
+    })
+  });
+
+  // Method 3: Pattern helpers
+  const enrichmentTool = agent.tool.createDataEnrichment({
+    id: "enrich_booking",
+    fields: ['destination', 'travelers'],
+    enricher: async (context, data) => ({
+      bookingCode: `${data.destination?.slice(0,3).toUpperCase()}-${data.travelers}`,
+      estimatedDuration: data.destination === 'Paris' ? '8 hours' : '12 hours'
+    })
+  });
+  
+  agent.tool.register(enrichmentTool);
+}
+
+demonstrateToolCreationMethods();
+
+// Advanced: Tools as Step Lifecycle Hooks
+function demonstrateLifecycleHooks() {
+  // Create tools for step lifecycle
+  agent.addTool({
+    id: "prepare_booking",
+    description: "Prepare booking context",
+    handler: async ({ context, data, updateContext }) => {
+      // Enrich context before AI response
+      await updateContext({ 
+        bookingStartTime: new Date().toISOString(),
+        userTier: 'premium' 
+      });
+      return "Booking preparation complete"; // Simple return
+    }
+  });
+
+  agent.addTool({
+    id: "finalize_booking", 
+    description: "Finalize booking process",
+    handler: async ({ context, data }) => {
+      // Process after AI response
+      const confirmationId = await bookingService.reserve(data);
+      return {
+        data: `Booking reserved with ID: ${confirmationId}`,
+        success: true,
+        contextUpdate: { lastBookingId: confirmationId }
+      }; // Complex ToolResult
+    }
+  });
+
+  // Use tools in step lifecycle
+  const bookingStep = agent.createRoute({
+    title: "Hotel Booking with Lifecycle",
+    steps: [{
+      id: "process_booking",
+      prompt: "Let me process your booking...",
+      prepare: "prepare_booking", // Tool executes before AI response
+      finalize: "finalize_booking", // Tool executes after AI response
+      collect: ["hotelName", "checkInDate"]
+    }]
+  });
+
+  console.log("Lifecycle hooks configured with tools");
+}
+
+demonstrateLifecycleHooks();
 ```
 
 **Notice how the agent:**
@@ -277,7 +388,7 @@ testBookingAgent();
 - ✅ Automatically extracted destination from "Paris"
 - ✅ Understood "Next Friday, 2 people, $2000 budget" as structured data
 - ✅ Skipped asking for already-known information
-- ✅ Used the check_availability tool to provide real assistance
+- ✅ Used the ToolManager API to create and execute tools with simplified context
 
 ---
 
