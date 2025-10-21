@@ -39,6 +39,10 @@ export { getLastMessageFromHistory } from "./event";
 // History utilities
 export {
   normalizeHistory,
+  historyItemToEvent,
+  historyToEvents,
+  eventToHistoryItem,
+  eventsToHistory,
   userMessage,
   assistantMessage,
   toolMessage,

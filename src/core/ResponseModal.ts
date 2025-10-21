@@ -9,13 +9,21 @@ import type {
     History,
     SessionState,
     StepRef,
+    HistoryItem,
+    Tool,
+    Event,
+    ToolEventData,
+    AgentStructuredResponse,
+    Term,
 } from "../types";
+import { EventKind, MessageRole } from "../types";
 import type { Agent } from "./Agent";
+import type { Route } from "./Route";
+import  { Step } from "./Step";
 import { ResponseEngine } from "./ResponseEngine";
 import { ResponsePipeline } from "./ResponsePipeline";
-import { normalizeHistory, cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger } from "../utils";
+import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents } from "../utils";
 import { ToolExecutor } from "./ToolExecutor";
-import { Step } from "./Step";
 import { END_ROUTE_ID } from "../constants";
 
 /**
@@ -33,7 +41,7 @@ export interface ResponseModalOptions {
 /**
  * Parameters for respond and respondStream methods
  */
-export interface RespondParams<TContext = unknown, TData = unknown> {
+export interface RespondParams<TContext = unknown, TData = unknown> extends Record<string, unknown> {
     history: History;
     step?: StepRef;
     session?: SessionState<TData>;
@@ -60,17 +68,22 @@ export interface GenerateOptions<TContext = unknown> {
 }
 
 /**
+ * Error details for response generation failures
+ */
+interface ResponseGenerationErrorDetails {
+    originalError?: unknown;
+    params?: Record<string, unknown>;
+    phase?: string;
+    context?: Record<string, unknown>;
+}
+
+/**
  * Error class for response generation failures
  */
 export class ResponseGenerationError extends Error {
     constructor(
         message: string,
-        public readonly details?: {
-            originalError?: unknown;
-            params?: any;
-            phase?: string;
-            context?: any;
-        }
+        public readonly details?: ResponseGenerationErrorDetails
     ) {
         super(message);
         this.name = 'ResponseGenerationError';
@@ -84,7 +97,12 @@ export class ResponseGenerationError extends Error {
     /**
      * Create a ResponseGenerationError from an unknown error
      */
-    static fromError(error: unknown, phase: string, params?: any, context?: any): ResponseGenerationError {
+    static fromError(
+        error: unknown, 
+        phase: string, 
+        params?: Record<string, unknown>, 
+        context?: Record<string, unknown>
+    ): ResponseGenerationError {
         const message = error instanceof Error ? error.message : String(error);
         return new ResponseGenerationError(
             `Response generation failed in ${phase}: ${message}`,
@@ -106,9 +124,9 @@ export class ResponseGenerationError extends Error {
 interface ResponseContext<TContext = unknown, TData = unknown> {
     effectiveContext: TContext;
     session: SessionState<TData>;
-    history: any[];
-    selectedRoute?: any;
-    selectedStep?: any;
+    history: HistoryItem[]; // Keep as HistoryItem[] for external API compatibility
+    selectedRoute?: Route<TContext, TData>;
+    selectedStep?: Step<TContext, TData>;
     responseDirectives?: string[];
     isRouteComplete: boolean;
 }
@@ -329,11 +347,17 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 throw new ResponseGenerationError('History is required for response generation', { params, phase: 'validation' });
             }
 
-            const history = normalizeHistory(simpleHistory);
+            // Convert HistoryItem[] to Event[] for internal processing
+            const historyEvents = historyToEvents(simpleHistory);
+            // Keep original HistoryItem[] format for external APIs
+            const history = simpleHistory;
 
             // Use ResponsePipeline for optimized context and session preparation
             // This leverages existing optimizations and avoids code duplication
-            let responseContext: any;
+            let responseContext: {
+                effectiveContext: TContext;
+                session: SessionState<TData>;
+            };
             try {
                 // Set current context and session in pipeline for consistency
                 this.responsePipeline.setContext(await this.agent.getContext());
@@ -379,11 +403,17 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             }
 
             // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use
-            let routingResult: any;
+            let routingResult: {
+                selectedRoute?: Route<TContext, TData>;
+                selectedStep?: Step<TContext, TData>;
+           responseDirectives?: string[];
+                session: SessionState<TData>;
+                isRouteComplete: boolean;
+            };
             try {
                 routingResult = await this.handleUnifiedRoutingAndStepSelection({
                     session,
-                    history,
+                    history: historyEvents,
                     context: effectiveContext,
                     signal,
                 });
@@ -415,12 +445,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      */
     private async handleUnifiedRoutingAndStepSelection(params: {
         session: SessionState<TData>;
-        history: any[];
+        history: Event[]; // Use Event[] for internal processing
         context: TContext;
         signal?: AbortSignal;
     }): Promise<{
-        selectedRoute?: any;
-        selectedStep?: any;
+        selectedRoute?: Route<TContext, TData>;
+        selectedStep?: Step<TContext, TData>;
         responseDirectives?: string[];
         session: SessionState<TData>;
         isRouteComplete: boolean;
@@ -428,9 +458,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         try {
             // Use the ResponsePipeline for optimized routing and step selection
             // This avoids duplicate logic and leverages existing optimizations
+            // ResponsePipeline expects Event[] for history
             const routingResult = await this.responsePipeline.handleRoutingAndStepSelection({
                 session: params.session,
-                history: params.history,
+                history: params.history, // Already Event[]
                 context: params.context,
                 signal: params.signal,
             });
@@ -466,7 +497,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         let session = initialSession;
 
         // Get last user message (needed for both route and completion handling)
-        const lastUserMessage = getLastMessageFromHistory(history);
+        // Convert HistoryItem[] to Event[] for internal processing
+        const historyEvents = historyToEvents(history);
+        const lastMessageText = getLastMessageFromHistory(historyEvents);
 
         let message: string;
         let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
@@ -480,7 +513,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session,
                 history,
                 context: effectiveContext,
-                lastUserMessage,
+                lastMessageText,
+                historyEvents,
                 signal: responseContext.history ? undefined : undefined, // TODO: Fix signal passing
             });
 
@@ -493,9 +527,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             message = await this.handleRouteCompletion({
                 selectedRoute,
                 session,
-                history,
                 context: effectiveContext,
-                lastUserMessage,
+                lastMessageText,
+                historyEvents,
             });
 
             // Set step to END_ROUTE marker
@@ -505,7 +539,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         } else {
             // Fallback: No routes defined, generate a simple response
             message = await this.generateFallbackResponse({
-                history,
+                history: historyEvents, // Use Event[] for fallback response
                 context: effectiveContext,
                 session,
             });
@@ -527,10 +561,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         responseContext: ResponseContext<TContext, TData>
     ): AsyncGenerator<AgentResponseStreamChunk<TData>> {
         const { effectiveContext, session: initialSession, history, selectedRoute, selectedStep, responseDirectives, isRouteComplete } = responseContext;
-        let session = initialSession;
+        const session = initialSession;
 
         // Get last user message (needed for both route and completion handling)
-        const lastUserMessage = getLastMessageFromHistory(history);
+        // Convert HistoryItem[] to Event[] for internal processing
+        const historyEvents = historyToEvents(history);
+        const lastMessageText = getLastMessageFromHistory(historyEvents);
 
         if (selectedRoute && !isRouteComplete) {
             // Handle normal route processing with streaming
@@ -541,7 +577,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session,
                 history,
                 context: effectiveContext,
-                lastUserMessage,
+                lastMessageText,
+                historyEvents,
             });
 
         } else if (isRouteComplete && selectedRoute) {
@@ -549,15 +586,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             yield* this.streamRouteCompletion({
                 selectedRoute,
                 session,
-                history,
                 context: effectiveContext,
-                lastUserMessage,
+                lastMessageText,
+                historyEvents,
             });
 
         } else {
             // Fallback: No routes defined, stream a simple response
             yield* this.streamFallbackResponse({
-                history,
+                history: historyEvents, // Use Event[] for fallback response
                 context: effectiveContext,
                 session,
             });
@@ -620,23 +657,25 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async processRouteResponse(params: {
-        selectedRoute: any;
-        selectedStep?: any;
+        selectedRoute: Route<TContext, TData>;
+        selectedStep?: Step<TContext, TData>;
         responseDirectives?: string[];
         session: SessionState<TData>;
-        history: any[];
+        history: HistoryItem[]; // Keep as HistoryItem[] for AI provider compatibility
         context: TContext;
-        lastUserMessage: any;
+        lastMessageText: string; // String version for buildResponsePrompt
+        historyEvents: Event[]; // Event[] version for buildResponsePrompt
         signal?: AbortSignal;
     }): Promise<{
         message: string;
         toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         session: SessionState<TData>;
     }> {
-        let { selectedRoute, selectedStep, responseDirectives, session, history, context, lastUserMessage, signal } = params;
+        const { selectedRoute, selectedStep, responseDirectives, history, context, lastMessageText, historyEvents, signal } = params;
+        let session = params.session;
 
         // Determine next step
-        let nextStep: any;
+        let nextStep: Step<TContext, TData>;
         if (selectedStep) {
             nextStep = selectedStep;
         } else {
@@ -667,8 +706,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: responseDirectives,
-            history,
-            lastMessage: lastUserMessage,
+            history: historyEvents, // Use Event[] for buildResponsePrompt
+            lastMessage: lastMessageText, // Use string for buildResponsePrompt
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -684,7 +723,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const result = await agentOptions.provider.generateMessage({
             prompt: responsePrompt,
-            history,
+            history: historyEvents, // Use Event[] for AI provider
             context,
             tools: availableTools,
             signal,
@@ -724,19 +763,21 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async *processRouteStreamingResponse(params: {
-        selectedRoute: any;
-        selectedStep?: any;
+        selectedRoute: Route<TContext, TData>;
+        selectedStep?: Step<TContext, TData>;
         responseDirectives?: string[];
         session: SessionState<TData>;
-        history: any[];
+        history: HistoryItem[];
         context: TContext;
-        lastUserMessage: any;
+        lastMessageText: string; // String version for buildResponsePrompt
+        historyEvents: Event[]; // Event[] version for buildResponsePrompt
         signal?: AbortSignal;
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        let { selectedRoute, selectedStep, responseDirectives, session, history, context, lastUserMessage, signal } = params;
+        const { selectedRoute, selectedStep, responseDirectives, history, context, lastMessageText, historyEvents, signal } = params;
+        let session = params.session;
 
         // Determine next step (same logic as non-streaming)
-        let nextStep: any;
+        let nextStep: Step<TContext, TData>;
         if (selectedStep) {
             nextStep = selectedStep;
         } else {
@@ -763,8 +804,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: responseDirectives,
-            history,
-            lastMessage: lastUserMessage,
+            history: historyEvents, // Use Event[] for buildResponsePrompt
+            lastMessage: lastMessageText, // Use string for buildResponsePrompt
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -780,7 +821,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const stream = agentOptions.provider.generateMessageStream({
             prompt: responsePrompt,
-            history,
+            history: historyEvents, // Use Event[] for AI provider
             context,
             tools: availableTools,
             signal,
@@ -849,8 +890,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         context: TContext;
         session: SessionState<TData>;
-        history: any[];
-        selectedRoute?: any;
+        history: HistoryItem[];
+        selectedRoute?: Route<TContext, TData>;
         responsePrompt: string;
         availableTools: Array<{
             id: string;
@@ -858,7 +899,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             description?: string;
             parameters?: unknown;
         }>;
-        responseSchema?: any;
+        responseSchema?: Record<string, unknown>;
         signal?: AbortSignal;
     }): Promise<{
         session: SessionState<TData>;
@@ -866,7 +907,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         finalMessage?: string;
     }> {
         try {
-            let { toolCalls, context, session, history, selectedRoute, responsePrompt, availableTools, responseSchema, signal } = params;
+            const { context, history, selectedRoute, responsePrompt, availableTools, responseSchema, signal } = params;
+            let { toolCalls, session } = params;
+
+            // Convert HistoryItem[] to Event[] for internal processing
+            const historyEvents = historyToEvents(history);
 
             // Execute initial dynamic tool calls
             if (toolCalls && toolCalls.length > 0) {
@@ -886,7 +931,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             context,
                             updateContext: this.agent.updateContext.bind(this.agent),
                             updateData: this.agent.updateCollectedData.bind(this.agent),
-                            history,
+                            history: historyEvents, // Use Event[] for tool execution
                             data: session.data,
                             toolArguments: toolCall.arguments,
                         });
@@ -939,14 +984,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 toolLoopCount++;
                 logger.debug(`[ResponseModal] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS}`);
 
-                // Add tool execution results to history so AI knows what happened
-                const toolResultsEvents: any[] = [];
+                // Create tool result events with proper Event format structure
+                const toolResultEvents: Event<ToolEventData>[] = [];
                 for (const toolCall of toolCalls || []) {
                     const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
                     if (tool) {
-                        toolResultsEvents.push({
-                            kind: "TOOL",
-                            source: "AGENT",
+                        // Create proper Event format for tool results
+                        const toolResultEvent: Event<ToolEventData> = {
+                            kind: EventKind.TOOL,
+                            source: MessageRole.AGENT,
                             timestamp: new Date().toISOString(),
                             data: {
                                 tool_calls: [
@@ -959,18 +1005,19 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                                     },
                                 ],
                             },
-                        });
+                        };
+                        toolResultEvents.push(toolResultEvent);
                     }
                 }
 
-                // Create updated history with tool results
-                const updatedHistory = [...history, ...toolResultsEvents];
+                // Create updated history with tool results (combine Event arrays)
+                const updatedHistoryEvents = [...historyEvents, ...toolResultEvents];
 
                 // Make follow-up AI call to see if more tools are needed
                 const agentOptions = this.agent.getAgentOptions();
                 const followUpResult = await agentOptions.provider.generateMessage({
                     prompt: responsePrompt,
-                    history: updatedHistory,
+                    history: updatedHistoryEvents, // Use Event[] for AI provider
                     context,
                     tools: availableTools,
                     parameters: responseSchema ? {
@@ -1002,7 +1049,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                                 context,
                                 updateContext: this.agent.updateContext.bind(this.agent),
                                 updateData: this.agent.updateCollectedData.bind(this.agent),
-                                history: updatedHistory,
+                                history: updatedHistoryEvents, // Use Event[] for tool execution
                                 data: session.data,
                                 toolArguments: toolCall.arguments,
                             });
@@ -1065,15 +1112,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 availableToolsCount: params.availableTools.length
             });
         }
-    }  /*
-*
-   * Unified data collection from AI response
-   * @private
-   */
+    }    /**
+     * Unified data collection from AI response
+     * @private
+     */
     private async collectDataFromResponse(params: {
-        result: any;
-        selectedRoute?: any;
-        nextStep?: any;
+        result: { structured?: AgentStructuredResponse };
+        selectedRoute?: Route<TContext, TData>;
+        nextStep?: Step<TContext, TData>;
         session: SessionState<TData>;
     }): Promise<SessionState<TData>> {
         try {
@@ -1084,8 +1130,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             if (selectedRoute && result.structured && nextStep?.collect) {
                 try {
                     const collectedData: Record<string, unknown> = {};
-                    // The structured response includes both base fields and collected extraction fields
-                    const structuredData = result.structured as any & Record<string, unknown>;
+                    // AgentStructuredResponse extends Record<string, unknown>, so we can safely access properties
+                    const structuredData = result.structured;
 
                     for (const field of nextStep.collect) {
                         const fieldKey = String(field);
@@ -1116,11 +1162,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             }
 
             // Extract any additional data from structured response
-            if (result.structured && typeof result.structured === "object" && "contextUpdate" in result.structured) {
+            // Since AgentStructuredResponse extends Record<string, unknown>, we can safely check for additional properties
+            if (result.structured && "contextUpdate" in result.structured) {
                 try {
-                    await this.agent.updateContext(
-                        (result.structured as { contextUpdate?: Partial<TContext> }).contextUpdate as Partial<TContext>
-                    );
+                    const contextUpdate = (result.structured as AgentStructuredResponse & { contextUpdate?: Partial<TContext> }).contextUpdate;
+                    if (contextUpdate) {
+                        await this.agent.updateContext(contextUpdate);
+                    }
                 } catch (error) {
                     logger.error(`[ResponseModal] Failed to update context from structured response:`, error);
                     // Continue without updating context rather than failing completely
@@ -1140,14 +1188,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async handleRouteCompletion(params: {
-        selectedRoute: any;
+        selectedRoute: Route<TContext, TData>;
         session: SessionState<TData>;
-        history: any[];
         context: TContext;
-        lastUserMessage: any;
+        lastMessageText: string; // String version for buildResponsePrompt
+        historyEvents: Event[]; // Event[] version for buildResponsePrompt
         signal?: AbortSignal;
     }): Promise<string> {
-        const { selectedRoute, session, history, context, lastUserMessage, signal } = params;
+        const { selectedRoute, session, context, lastMessageText, historyEvents, signal } = params;
 
         // Get endStep spec from route
         const endStepSpec = selectedRoute.endStepSpec;
@@ -1163,7 +1211,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Build response schema for completion
         const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, completionStep, this.agent.getSchema());
-        const templateContext = { context, session, history };
+        const templateContext = { context, session, history: historyEvents }; // Use Event[] for template context
 
         // Build completion response prompt
         const completionPrompt = await this.responseEngine.buildResponsePrompt({
@@ -1172,8 +1220,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: undefined, // No directives for completion
-            history,
-            lastMessage: lastUserMessage,
+            history: historyEvents, // Use Event[] for buildResponsePrompt
+            lastMessage: lastMessageText, // Use string for buildResponsePrompt
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -1186,7 +1234,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const completionResult = await agentOptions.provider.generateMessage({
             prompt: completionPrompt,
-            history,
+            history: historyEvents, // Use Event[] for AI provider
             context,
             signal,
             parameters: { jsonSchema: responseSchema, schemaName: "completion_message" },
@@ -1226,14 +1274,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async *streamRouteCompletion(params: {
-        selectedRoute: any;
+        selectedRoute: Route<TContext, TData>;
         session: SessionState<TData>;
-        history: any[];
         context: TContext;
-        lastUserMessage: any;
+        lastMessageText: string; // String version for buildResponsePrompt
+        historyEvents: Event[]; // Event[] version for buildResponsePrompt
         signal?: AbortSignal;
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        let { selectedRoute, session, history, context, lastUserMessage, signal } = params;
+        const { selectedRoute, context, lastMessageText, historyEvents, signal } = params;
+        let session = params.session;
 
         // Get endStep spec from route
         const endStepSpec = selectedRoute.endStepSpec;
@@ -1249,7 +1298,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Build response schema for completion
         const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, completionStep, this.agent.getSchema());
-        const templateContext = { context, session, history };
+        const templateContext = { context, session, history: historyEvents }; // Use Event[] for template context
 
         // Build completion response prompt
         const completionPrompt = await this.responseEngine.buildResponsePrompt({
@@ -1258,8 +1307,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: undefined, // No directives for completion
-            history,
-            lastMessage: lastUserMessage,
+            history: historyEvents, // Use Event[] for buildResponsePrompt
+            lastMessage: lastMessageText, // Use string for buildResponsePrompt
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -1272,7 +1321,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const stream = agentOptions.provider.generateMessageStream({
             prompt: completionPrompt,
-            history,
+            history: historyEvents, // Use Event[] for AI provider
             context,
             signal,
             parameters: { jsonSchema: responseSchema, schemaName: "completion_message_stream" },
@@ -1335,7 +1384,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async generateFallbackResponse(params: {
-        history: any[];
+        history: Event[]; // Use Event[] for buildFallbackPrompt
         context: TContext;
         session: SessionState<TData>;
         signal?: AbortSignal;
@@ -1379,7 +1428,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async *streamFallbackResponse(params: {
-        history: any[];
+        history: Event[]; // Use Event[] for buildFallbackPrompt
         context: TContext;
         session: SessionState<TData>;
         signal?: AbortSignal;
@@ -1468,13 +1517,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      */
     private findAvailableTool(
         toolName: string,
-        route?: any
-    ): any | undefined {
+        route?: Route<TContext, TData>
+    ): Tool<TContext, TData, unknown[], unknown> | undefined {
         // Check route-level tools first (if route provided)
         if (route) {
             const routeTool = route
                 .getTools()
-                .find((tool: any) => tool.id === toolName || tool.name === toolName);
+                .find((tool: Tool<TContext, TData, unknown[], unknown>) => tool.id === toolName || tool.name === toolName);
             if (routeTool) return routeTool;
         }
 
@@ -1490,15 +1539,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private collectAvailableTools(
-        route?: any,
-        step?: any
+        route?: Route<TContext, TData>,
+        step?: Step<TContext, TData>
     ): Array<{
         id: string;
         name: string;
         description?: string;
         parameters?: unknown;
     }> {
-        const availableTools = new Map<string, any>();
+        const availableTools = new Map<string, Tool<TContext, TData, unknown[], unknown>>();
 
         // Add agent-level tools
         this.agent.getTools().forEach((tool) => {
@@ -1507,7 +1556,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Add route-level tools (these take precedence)
         if (route) {
-            route.getTools().forEach((tool: any) => {
+            route.getTools().forEach((tool: Tool<TContext, TData, unknown[], unknown>) => {
                 availableTools.set(tool.id, tool);
             });
         }
@@ -1515,7 +1564,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // Filter by step-level allowed tools if specified
         if (step?.tools) {
             const allowedToolIds = new Set<string>();
-            const stepTools: any[] = [];
+            const stepTools: Tool<TContext, TData, unknown[], unknown>[] = [];
 
             for (const toolRef of step.tools) {
                 if (typeof toolRef === "string") {
@@ -1532,8 +1581,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             // If step specifies tools, only include those
             if (allowedToolIds.size > 0) {
-                const filteredTools = new Map<string, any>();
-                for (const toolId of allowedToolIds) {
+                const filteredTools = new Map<string, Tool<TContext, TData, unknown[], unknown>>();
+                for (const toolId of Array.from(allowedToolIds)) {
                     const tool = availableTools.get(toolId);
                     if (tool) {
                         filteredTools.set(toolId, tool);
@@ -1566,13 +1615,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     private async executePrepareFinalize(
         prepareOrFinalize:
             | string
-            | any
+            | Tool<TContext, TData, unknown[], unknown>
             | ((context: TContext, data?: Partial<TData>) => void | Promise<void>)
             | undefined,
         context: TContext,
         data?: Partial<TData>,
-        route?: any,
-        step?: any
+        route?: Route<TContext, TData>,
+        step?: Step<TContext, TData>
     ): Promise<void> {
         if (!prepareOrFinalize) return;
 
@@ -1581,11 +1630,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             await prepareOrFinalize(context, data);
         } else {
             // It's a tool reference - find and execute the tool
-            let tool: any | undefined;
+            let tool: Tool<TContext, TData, unknown[], unknown> | undefined;
 
             if (typeof prepareOrFinalize === "string") {
                 // Tool ID - find it in available tools
-                const availableTools = new Map<string, any>();
+                const availableTools = new Map<string, Tool<TContext, TData, unknown[], unknown>>();
 
                 // Add agent-level tools
                 this.agent.getTools().forEach((t) => {
@@ -1649,10 +1698,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private mergeTerms(
-        agentTerms: any[],
-        routeTerms: any[]
-    ): any[] {
-        const merged = new Map<string, any>();
+        agentTerms: Term<TContext, TData>[],
+        routeTerms: Term<TContext, TData>[]
+    ): Term<TContext, TData>[] {
+        const merged = new Map<string, Term<TContext, TData>>();
 
         // Add agent terms first
         agentTerms.forEach((term) => {

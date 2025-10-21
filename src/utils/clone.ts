@@ -18,10 +18,9 @@ export function cloneDeep<T>(obj: T): T {
   if (Array.isArray(obj)) {
     const arrCopy = [] as any[];
     for (let i = 0; i < obj.length; i++) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       
       arrCopy[i] = cloneDeep(obj[i]);
     }
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return arrCopy as any;
   }
 

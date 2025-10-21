@@ -670,7 +670,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           string,
           Tool<TContext, TData, unknown[], unknown>
         >();
-        for (const toolId of allowedToolIds) {
+        for (const toolId of Array.from(allowedToolIds)) {
           const tool = availableTools.get(toolId);
           if (tool) {
             filteredTools.set(toolId, tool);

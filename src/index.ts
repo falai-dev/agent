@@ -74,6 +74,10 @@ export { generateRouteId, generateStepId, generateToolId } from "./utils/id";
 export { formatKnowledgeBase } from "./utils/template";
 export {
   normalizeHistory,
+  historyItemToEvent,
+  historyToEvents,
+  eventToHistoryItem,
+  eventsToHistory,
   userMessage,
   assistantMessage,
   toolMessage,

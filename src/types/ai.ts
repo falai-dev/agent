@@ -66,7 +66,7 @@ export interface GenerateMessageInput<TContext = unknown> {
 /**
  * Structured response from AI containing message and metadata
  */
-export interface AgentStructuredResponse {
+export interface AgentStructuredResponse extends Record<string, unknown> {
   /** The actual message to send to the user */
   message: string;
   /** Route chosen by the agent (route title or null if no route) */

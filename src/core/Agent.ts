@@ -11,8 +11,6 @@ import type {
   RouteOptions,
   SessionState,
   Template,
-  StepRef,
-  History,
   AgentResponseStreamChunk,
   AgentResponse,
   StructuredSchema,
