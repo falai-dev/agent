@@ -5,7 +5,7 @@
 
 import type { Event, MessageEventData, ToolEventData, StatusEventData } from "../types";
 import { EventKind, MessageRole } from "../types";
-import type { History, HistoryItem, UserHistoryItem, AssistantHistoryItem, ToolHistoryItem, SystemHistoryItem } from "../types/history";
+import type { History, HistoryItem, UserHistoryItem, AssistantHistoryItem, ToolHistoryItem } from "../types/history";
 
 /**
  * Convert a simplified history item to an internal Event
@@ -26,7 +26,7 @@ export function historyItemToEvent(item: HistoryItem): Event<MessageEventData | 
 
   switch (item.role) {
     case "user": {
-      const userItem = item as UserHistoryItem;
+      const userItem = item;
       if (typeof userItem.content !== 'string') {
         throw new Error('Invalid user history item: content must be a string');
       }
@@ -44,7 +44,7 @@ export function historyItemToEvent(item: HistoryItem): Event<MessageEventData | 
       };
     }
     case "assistant": {
-      const assistantItem = item as AssistantHistoryItem;
+      const assistantItem = item;
       if (assistantItem.content !== null && typeof assistantItem.content !== 'string') {
         throw new Error('Invalid assistant history item: content must be a string or null');
       }
@@ -79,7 +79,7 @@ export function historyItemToEvent(item: HistoryItem): Event<MessageEventData | 
       return event;
     }
     case "tool": {
-      const toolItem = item as ToolHistoryItem;
+      const toolItem = item;
       if (!toolItem.tool_call_id || typeof toolItem.tool_call_id !== 'string') {
         throw new Error('Invalid tool history item: tool_call_id is required and must be a string');
       }
@@ -105,7 +105,7 @@ export function historyItemToEvent(item: HistoryItem): Event<MessageEventData | 
       };
     }
     case "system": {
-      const systemItem = item as SystemHistoryItem;
+      const systemItem = item;
       if (typeof systemItem.content !== 'string') {
         throw new Error('Invalid system history item: content must be a string');
       }
@@ -234,7 +234,7 @@ export function eventToHistoryItem(event: Event): HistoryItem {
       };
     }
     default:
-      throw new Error(`Unsupported event kind for conversion: ${event.kind}`);
+      throw new Error(`Unsupported event kind for conversion: ${String(event.kind)}`);
   }
 }
 

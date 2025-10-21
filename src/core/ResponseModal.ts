@@ -1643,7 +1643,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                 // Add route-level tools
                 if (route) {
-                    route.getTools().forEach((t: any) => {
+                    route.getTools().forEach((t: Tool<TContext, TData, unknown[], unknown>) => {
                         availableTools.set(t.id, t);
                     });
                 }
@@ -1653,8 +1653,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     for (const toolRef of step.tools) {
                         if (typeof toolRef === "string") {
                             // Keep as is
-                        } else if (toolRef.id) {
-                            availableTools.set(toolRef.id, toolRef);
+                        } else if (typeof toolRef === 'object' && 'id' in toolRef && toolRef.id) {
+                            availableTools.set(toolRef.id, toolRef as Tool<TContext, TData, unknown[], unknown>);
                         }
                     }
                 }

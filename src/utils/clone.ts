@@ -11,20 +11,19 @@ export function cloneDeep<T>(obj: T): T {
   }
 
   if (obj instanceof Date) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return new Date(obj.getTime()) as any;
+    return new Date(obj.getTime()) as T;
   }
 
   if (Array.isArray(obj)) {
-    const arrCopy = [] as any[];
+    const arrCopy: unknown[] = [];
     for (let i = 0; i < obj.length; i++) {
        
       arrCopy[i] = cloneDeep(obj[i]);
     }
-    return arrCopy as any;
+    return arrCopy as T;
   }
 
-  const objCopy = {} as { [key: string]: any };
+  const objCopy: Record<string, unknown> = {};
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       objCopy[key] = cloneDeep((obj as Record<string, unknown>)[key]);
