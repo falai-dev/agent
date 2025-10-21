@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+
 /**
  * Deep clone utility to avoid adding large dependencies like lodash.
  * Handles objects, arrays, dates, and primitives.

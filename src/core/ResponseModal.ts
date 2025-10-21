@@ -1654,7 +1654,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         if (typeof toolRef === "string") {
                             // Keep as is
                         } else if (typeof toolRef === 'object' && 'id' in toolRef && toolRef.id) {
-                            availableTools.set(toolRef.id, toolRef as Tool<TContext, TData, unknown[], unknown>);
+                            availableTools.set(toolRef.id, toolRef);
                         }
                     }
                 }
