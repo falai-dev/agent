@@ -126,6 +126,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     let completedRoutes: Route<TContext, TData>[] = [];
     let targetSession = session;
 
+    // Get routes early since we need them for pending transitions
+    const routes = this.getRoutes();
+
     // Check for pending transition from previous route completion
     if (targetSession.pendingTransition) {
       const targetRoute = routes.find(
@@ -167,8 +170,6 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         };
       }
     }
-
-    const routes = this.getRoutes();
     
     // If no pending transition or transition handled, do normal routing
     if (routes.length > 0 && !selectedRoute) {

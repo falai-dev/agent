@@ -120,7 +120,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     const selectedRoute = route;
 
     // Enter route if not already in it (this may merge initial data)
-    let updatedSession = this.enterRouteIfNeeded(session, route);
+    const updatedSession = this.enterRouteIfNeeded(session, route);
 
     // Check if this single route is complete (use updated session data)
     const completedRoutes = route.isComplete(updatedSession.data || {}) ? [route] : [];
