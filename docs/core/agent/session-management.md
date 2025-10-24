@@ -589,7 +589,7 @@ For simple question-answering without step:
 ```typescript
 const qnaRoute = agent.createRoute({
   title: "Company Q&A",
-  conditions: ["User asks about company"],
+  when: ["User asks about company"],
   // NO schema - stepless!
 });
 

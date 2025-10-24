@@ -361,7 +361,7 @@ async function modernStreamingWithRoutes() {
   const supportRoute = agent.createRoute({
     title: "Product Support",
     description: "Help users with product questions",
-    conditions: ["User asks about product features or issues"],
+    when: ["User asks about product features or issues"],
   });
 
   supportRoute.initialStep.nextStep({
@@ -372,7 +372,7 @@ async function modernStreamingWithRoutes() {
   agent.createRoute({
     title: "Collect Feedback",
     description: "Collect user feedback on their support experience",
-    conditions: ["User wants to provide feedback"],
+    when: ["User wants to provide feedback"],
     // NEW: Required fields for route completion
     requiredFields: ["rating"],
     // NEW: Optional fields

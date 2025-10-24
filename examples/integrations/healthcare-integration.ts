@@ -248,7 +248,7 @@ function createHealthcareAgent() {
   const schedulingRoute = agent.createRoute({
     title: "Schedule an Appointment",
     description: "Helps the patient find a time for their appointment.",
-    conditions: ["The patient wants to schedule an appointment"],
+    when: ["The patient wants to schedule an appointment"],
     // Route-level identity for healthcare scheduling
     identity:
       "You are a compassionate healthcare scheduling assistant who helps patients book appointments. Be empathetic, prioritize urgent cases, and ensure patients feel supported throughout the process.",
@@ -281,7 +281,7 @@ function createHealthcareAgent() {
   const collectReason = schedulingRoute.initialStep.nextStep({
     prompt: "Ask what the patient needs an appointment for",
     collect: ["appointmentReason"],
-    skipIf: (data) => !!data.appointmentReason,
+    skipIf: (ctx) => !!ctx.data?.appointmentReason,
     when: "Patient hasn't specified reason for appointment yet",
   });
 
@@ -289,7 +289,7 @@ function createHealthcareAgent() {
   const checkUrgency = collectReason.nextStep({
     prompt: "Check if this is urgent and show available slots",
     collect: ["urgency"],
-    skipIf: (data) => !!data.urgency,
+    skipIf: (ctx) => !!ctx.data?.urgency,
     requires: ["appointmentReason"],
     when: "Reason provided, now assess urgency level",
   });
@@ -307,14 +307,14 @@ function createHealthcareAgent() {
   const collectPreferences = presentTimes.nextStep({
     prompt: "Collect preferred time and date",
     collect: ["preferredTime", "preferredDate"],
-    skipIf: (data) => !!data.preferredTime && !!data.preferredDate,
+    skipIf: (ctx) => !!ctx.data?.preferredTime && !!ctx.data?.preferredDate,
   });
 
   // Step 5: Confirm details and schedule
   const confirmDetails = collectPreferences.nextStep({
     prompt: "Confirm the details with the patient before scheduling",
     collect: ["appointmentType"],
-    skipIf: (data) => !!data.appointmentType,
+    skipIf: (ctx) => !!ctx.data?.appointmentType,
     requires: ["appointmentReason", "preferredTime", "preferredDate"],
   });
 
@@ -358,7 +358,7 @@ function createHealthcareAgent() {
   const labResultsRoute = agent.createRoute({
     title: "Lab Results",
     description: "Retrieves the patient's lab results and explains them.",
-    conditions: ["The patient wants to see their lab results"],
+    when: ["The patient wants to see their lab results"],
     // NEW: Required fields for route completion
     requiredFields: ["testType"],
     // NEW: Optional fields
@@ -369,14 +369,14 @@ function createHealthcareAgent() {
   const collectTestInfo = labResultsRoute.initialStep.nextStep({
     prompt: "Ask what type of test results they want to see",
     collect: ["testType"],
-    skipIf: (data) => !!data.testType,
+    skipIf: (ctx) => !!ctx.data?.testType,
   });
 
   // Step 2: Optional: collect test date
   const collectTestDate = collectTestInfo.nextStep({
     prompt: "Ask for the test date if they remember it",
     collect: ["testDate"],
-    skipIf: (data) => !!data.testDate,
+    skipIf: (ctx) => !!ctx.data?.testDate,
     requires: ["testType"],
   });
 
@@ -404,7 +404,7 @@ function createHealthcareAgent() {
   const satisfactionRoute = agent.createRoute({
     title: "Satisfaction Survey",
     description: "Quick satisfaction survey after scheduling",
-    conditions: ["Collect patient satisfaction feedback"],
+    when: ["Collect patient satisfaction feedback"],
 
     // Route-specific knowledge base for patient feedback
     knowledgeBase: {
@@ -442,7 +442,7 @@ function createHealthcareAgent() {
     prompt:
       "Ask for overall satisfaction rating from 1 to 5 with the scheduling experience",
     collect: ["rating"],
-    skipIf: (data) => !!data.rating,
+    skipIf: (ctx) => !!ctx.data?.rating,
   });
 
   const askComments = askRating.nextStep({

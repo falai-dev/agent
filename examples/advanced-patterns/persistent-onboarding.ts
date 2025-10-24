@@ -1,6 +1,13 @@
 /**
  * Persistent multi-turn onboarding agent example
  * Updated for v2 architecture with session step management and schema-first data extraction
+ * 
+ * NEW: Enhanced with flexible ConditionTemplate patterns:
+ * - Mixed route conditions: ["AI context", (ctx) => state_check]
+ * - Route skipIf: Skip if onboarding already complete
+ * - Step skipIf: Enhanced conditional step skipping with AI context
+ * - Programmatic when conditions: (ctx) => data_validation
+ * - Performance patterns for condition evaluation
  */
 
 import {
@@ -327,7 +334,24 @@ function createPersistentOnboardingAgent(sessionId: string) {
   const onboardingRoute = agent.createRoute({
     title: "Business Onboarding",
     description: "Guide user through business information collection",
-    conditions: ["User is onboarding their business"],
+    // Mixed condition: AI context + programmatic validation
+    when: [
+      "User is onboarding their business",
+      (ctx) => {
+        const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+        return message.includes('onboard') || message.includes('register') || 
+               message.includes('business') || message.includes('start');
+      }
+    ],
+    // Skip if user already has complete business info
+    skipIf: [
+      "business information already complete",
+      (ctx) => {
+        const data = ctx.data;
+        return !!(data?.businessName && data?.businessDescription && 
+                 data?.industry && data?.contactEmail);
+      }
+    ],
     // NEW: Required fields for route completion
     requiredFields: ["businessName", "businessDescription"],
     // NEW: Optional fields that enhance the experience
@@ -342,7 +366,12 @@ function createPersistentOnboardingAgent(sessionId: string) {
   const collectBusinessInfo = onboardingRoute.initialStep.nextStep({
     prompt: "Ask for business name and a brief description",
     collect: ["businessName", "businessDescription"],
-    skipIf: (data) => !!data.businessName && !!data.businessDescription,
+    // Mixed skipIf: AI context + programmatic check
+    skipIf: [
+      "business name and description already provided",
+      (ctx) => !!ctx.data?.businessName && !!ctx.data.businessDescription
+    ],
+    // String-only when condition for AI context
     when: "Need to collect basic business information first",
   });
 
@@ -350,14 +379,19 @@ function createPersistentOnboardingAgent(sessionId: string) {
   const saveBusiness = collectBusinessInfo.nextStep({
     tools: [saveBusinessInfo],
     requires: ["businessName", "businessDescription"],
-    when: "Business name and description provided, save to database",
+    // Function-only when condition for programmatic logic
+    when: (ctx) => !!ctx.data?.businessName && !!ctx.data?.businessDescription,
   });
 
   // Step 3: Collect industry
   const collectIndustry = saveBusiness.nextStep({
     prompt: "Ask what industry the business operates in",
     collect: ["industry"],
-    skipIf: (data) => !!data.industry,
+    // Mixed skipIf: AI context + programmatic logic
+    skipIf: [
+      "industry already specified",
+      (ctx) => !!ctx.data?.industry
+    ],
   });
 
   // Step 4: Save industry (tool execution)
@@ -370,7 +404,8 @@ function createPersistentOnboardingAgent(sessionId: string) {
   const collectContact = saveIndustryStep.nextStep({
     prompt: "Ask for their contact email",
     collect: ["contactEmail"],
-    skipIf: (data) => !!data.contactEmail,
+    // Function-only skipIf for programmatic check
+    skipIf: (ctx) => !!ctx.data?.contactEmail,
   });
 
   // Step 6: Save contact (tool execution)

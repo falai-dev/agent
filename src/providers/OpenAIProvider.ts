@@ -13,7 +13,7 @@ import type {
   AgentStructuredResponse,
   StructuredSchema,
 } from "../types";
-import { withTimeoutAndRetry } from "../utils/retry";
+import { withTimeoutAndRetry, logger } from "../utils";
 import { FunctionParameters } from "openai/resources/shared.mjs";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -207,7 +207,7 @@ export class OpenAIProvider implements AiProvider {
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[OPENAI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -215,13 +215,13 @@ export class OpenAIProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[OPENAI] Trying backup models`);
+      logger.debug(`[OPENAI] Trying backup models`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
+        logger.debug(
           `[OPENAI] Trying backup model ${i + 1}/${
             this.backupModels.length
           }: ${backupModel}`
@@ -229,11 +229,11 @@ export class OpenAIProvider implements AiProvider {
 
         try {
           const result = await this.generateWithModel(backupModel, input);
-          console.log(`[OPENAI] Backup model ${backupModel} succeeded`);
+          logger.debug(`[OPENAI] Backup model ${backupModel} succeeded`);
           return result as GenerateMessageOutput<TStructured>;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[OPENAI] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -242,7 +242,7 @@ export class OpenAIProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[OPENAI] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -251,7 +251,7 @@ export class OpenAIProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[OPENAI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -355,7 +355,7 @@ export class OpenAIProvider implements AiProvider {
                 toolCall.function.arguments
               ) as Record<string, unknown>;
             } catch (error) {
-              console.warn(
+              logger.warn(
                 `[OPENAI] Failed to parse tool call arguments: ${getErrorMessage(
                   error
                 )}`
@@ -408,7 +408,7 @@ export class OpenAIProvider implements AiProvider {
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[OPENAI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -416,13 +416,13 @@ export class OpenAIProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[OPENAI] Trying backup models for streaming`);
+      logger.debug(`[OPENAI] Trying backup models for streaming`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
+        logger.debug(
           `[OPENAI] Trying backup model ${i + 1}/${
             this.backupModels.length
           }: ${backupModel}`
@@ -433,11 +433,11 @@ export class OpenAIProvider implements AiProvider {
             backupModel,
             input
           );
-          console.log(`[OPENAI] Backup model ${backupModel} succeeded`);
+          logger.debug(`[OPENAI] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[OPENAI] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -446,7 +446,7 @@ export class OpenAIProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[OPENAI] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -455,7 +455,7 @@ export class OpenAIProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[OPENAI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -535,7 +535,7 @@ export class OpenAIProvider implements AiProvider {
                   >)
                 : {};
             } catch (error) {
-              console.warn(
+              logger.warn(
                 `[OPENAI] Failed to parse tool call arguments in stream: ${getErrorMessage(
                   error
                 )}`
@@ -577,7 +577,7 @@ export class OpenAIProvider implements AiProvider {
       try {
         structured = JSON.parse(accumulated) as TStructured;
       } catch (error) {
-        console.warn(
+        logger.warn(
           "[OPENAI] Failed to parse JSON response in stream:",
           error
         );

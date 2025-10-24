@@ -15,7 +15,7 @@ import type {
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types";
-import { withTimeoutAndRetry } from "../utils/retry";
+import { withTimeoutAndRetry, logger } from "../utils";
 
 const DEFAULT_RETRY_CONFIG = {
   timeout: 60000,
@@ -184,7 +184,7 @@ export class AnthropicProvider implements AiProvider {
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[ANTHROPIC] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -192,13 +192,13 @@ export class AnthropicProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[ANTHROPIC] Trying backup models`);
+      logger.debug(`[ANTHROPIC] Trying backup models`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
+        logger.debug(
           `[ANTHROPIC] Trying backup model ${i + 1}/${
             this.backupModels.length
           }: ${backupModel}`
@@ -209,11 +209,11 @@ export class AnthropicProvider implements AiProvider {
             backupModel,
             input
           );
-          console.log(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
+          logger.debug(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
           return result;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[ANTHROPIC] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -222,7 +222,7 @@ export class AnthropicProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[ANTHROPIC] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -231,7 +231,7 @@ export class AnthropicProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[ANTHROPIC] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -325,7 +325,7 @@ export class AnthropicProvider implements AiProvider {
         try {
           structured = JSON.parse(message) as AgentStructuredResponse;
         } catch (error) {
-          console.warn("[ANTHROPIC] Failed to parse JSON response:", error);
+          logger.warn("[ANTHROPIC] Failed to parse JSON response:", error);
           // Fall back to treating the message as plain text
         }
       }
@@ -375,7 +375,7 @@ export class AnthropicProvider implements AiProvider {
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[ANTHROPIC] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -383,13 +383,13 @@ export class AnthropicProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[ANTHROPIC] Trying backup models for streaming`);
+      logger.debug(`[ANTHROPIC] Trying backup models for streaming`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
+        logger.debug(
           `[ANTHROPIC] Trying backup model ${i + 1}/${
             this.backupModels.length
           }: ${backupModel}`
@@ -400,11 +400,11 @@ export class AnthropicProvider implements AiProvider {
             backupModel,
             input
           );
-          console.log(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
+          logger.debug(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[ANTHROPIC] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -413,7 +413,7 @@ export class AnthropicProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[ANTHROPIC] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -422,7 +422,7 @@ export class AnthropicProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[ANTHROPIC] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -526,7 +526,7 @@ export class AnthropicProvider implements AiProvider {
       try {
         structured = JSON.parse(accumulated) as AgentStructuredResponse;
       } catch (error) {
-        console.warn(
+        logger.warn(
           "[ANTHROPIC] Failed to parse JSON response in stream:",
           error
         );

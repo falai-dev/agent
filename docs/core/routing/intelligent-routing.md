@@ -29,6 +29,124 @@ Within an active route, the routing engine:
 3. **AI Decision**: When multiple candidates exist, uses AI to select the optimal step
 4. **Handles Completion**: Detects route completion and manages transitions
 
+## Enhanced Condition System
+
+### ConditionTemplate for Routes and Steps
+
+The routing system now supports the powerful `ConditionTemplate` type for both route activation and step control:
+
+```typescript
+// Route with mixed condition types
+agent.createRoute({
+  title: "Premium Support",
+  when: [
+    "User needs premium or priority support", // AI context
+    (ctx) => ctx.context?.accountTier === 'premium' // Programmatic check
+  ],
+  skipIf: [
+    "Support system is under maintenance", // AI context
+    (ctx) => ctx.context?.maintenanceMode === true // Programmatic check
+  ],
+  steps: [
+    {
+      id: "priority_greeting",
+      when: "User should receive priority treatment", // AI context only
+      prompt: "Welcome to premium support! How can I assist you today?",
+      collect: ["issueType"]
+    },
+    {
+      id: "technical_help",
+      when: [
+        "User needs technical assistance", // AI context
+        (ctx) => ctx.data?.issueType === 'technical' // Programmatic check
+      ],
+      skipIf: (ctx) => ctx.data?.issueResolved === true, // Function-only skipIf
+      prompt: "Let me help you with your technical issue",
+      collect: ["issueDescription"]
+    }
+  ]
+});
+```
+
+### Condition Evaluation Logic
+
+**Route `when` conditions (AND logic):**
+- All function conditions must return `true`
+- String conditions provide AI context for route scoring
+- Arrays require all functions to pass
+
+**Route `skipIf` conditions (OR logic):**
+- Any function returning `true` excludes the route
+- String conditions provide AI context about exclusion reasons
+- Arrays skip if any function returns `true`
+
+**Step `when` conditions (AND logic):**
+- All function conditions must return `true` for step to be eligible
+- String conditions help AI understand step purpose
+- Arrays require all functions to pass
+
+**Step `skipIf` conditions (OR logic):**
+- Any function returning `true` skips the step
+- String conditions provide AI context about why step is skipped
+- Arrays skip if any function returns `true`
+
+### Hybrid Evaluation Process
+
+The routing engine now performs a two-phase evaluation:
+
+1. **Programmatic Phase**: Execute all function conditions for boolean results
+2. **AI Context Phase**: Include string conditions in AI prompts for intelligent decision-making
+
+```typescript
+// Example evaluation flow:
+const routeCondition = [
+  "User wants to upgrade their account", // → AI context
+  (ctx) => ctx.context?.accountTier !== 'enterprise' // → Must be true
+];
+
+// Programmatic: Check if user can upgrade (not already enterprise)
+// AI Context: "User wants to upgrade their account" helps AI understand intent
+// Result: Route eligible if function passes AND AI scores it highly
+```
+
+### Context-Aware Routing
+
+Conditions can access comprehensive context:
+
+```typescript
+interface RoutingContext {
+  userId: string;
+  accountTier: 'free' | 'premium' | 'enterprise';
+  supportHistory: SupportTicket[];
+  currentTime: Date;
+}
+
+interface AgentData {
+  customerName?: string;
+  issueType?: string;
+  priority?: 'low' | 'medium' | 'high';
+  previousAttempts?: number;
+}
+
+// Route with context-aware conditions
+agent.createRoute({
+  title: "Escalation Support",
+  when: [
+    "User needs escalated support or is frustrated", // AI context
+    (ctx) => ctx.data?.previousAttempts > 2, // Data check
+    (ctx) => ctx.context?.supportHistory.length > 5 // Context check
+  ],
+  skipIf: [
+    "Issue has been resolved recently", // AI context
+    (ctx) => {
+      const lastTicket = ctx.context?.supportHistory[0];
+      return lastTicket?.status === 'resolved' && 
+             (Date.now() - lastTicket.resolvedAt.getTime()) < 24 * 60 * 60 * 1000;
+    }
+  ]
+});
+```
+
 ## Key Features
 
 ### Intelligent Route Scoring

@@ -28,6 +28,7 @@ export {
   renderTemplate,
   renderTemplateObject,
   formatKnowledgeBase,
+  createTemplateContext,
 } from "./template";
 
 // Cloning utilities
@@ -55,3 +56,14 @@ export { LoggerLevel, logger } from "./logger";
 // Retry utilities
 export type { RetryOptions } from "./retry";
 export { retry, withTimeoutAndRetry } from "./retry";
+
+// Condition utilities
+export {
+  ConditionEvaluator,
+  createConditionEvaluator,
+  extractAIContextStrings,
+  hasProgrammaticConditions,
+} from "./condition";
+
+// JSON utilities
+export { parseJSONResponse, tryParseJSONResponse } from "./json";

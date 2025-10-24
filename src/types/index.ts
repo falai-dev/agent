@@ -105,4 +105,15 @@ export type {
 export * from "./persistence";
 
 // Template types
-export type { Template, TemplateContext } from "./template";
+export type { 
+  Template, 
+  TemplateContext, 
+  ConditionTemplate, 
+  ConditionEvaluationResult 
+} from "./template";
+export { 
+  ConditionEvaluator, 
+  createConditionEvaluator, 
+  extractAIContextStrings, 
+  hasProgrammaticConditions 
+} from "../utils/condition";

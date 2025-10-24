@@ -101,7 +101,7 @@ function createSupportAgent(): Agent<TestContext, SupportTicketData> {
   agent.createRoute({
     title: "Support Request",
     description: "Handle customer support requests",
-    conditions: ["User needs help", "Technical issue"],
+    when: ["User needs help", "Technical issue"],
     requiredFields: ["issue", "category"],
     optionalFields: ["priority", "customerName", "email"],
     steps: [
@@ -145,7 +145,7 @@ function createSupportAgent(): Agent<TestContext, SupportTicketData> {
 //   agent.createRoute<SupportTicketData>({
 //     title: "Support Request",
 //     description: "Handle customer support requests",
-//     conditions: ["User needs help", "Technical issue"],
+//     when: ["User needs help", "Technical issue"],
 //     schema: {
 //       type: "object",
 //       properties: {

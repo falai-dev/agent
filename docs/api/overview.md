@@ -774,7 +774,8 @@ interface RouteOptions<TContext = unknown, TData = unknown> {
   description?: string;
   identity?: Template<TContext, TData>;
   personality?: Template<TContext, TData>;
-  conditions?: Template<TContext, TData>[];
+  when?: ConditionTemplate<TContext, TData>;
+  skipIf?: ConditionTemplate<TContext, TData>;
   rules?: Template<TContext, TData>[];
   prohibitions?: Template<TContext, TData>[];
   

@@ -71,6 +71,12 @@ export { END_ROUTE, END_ROUTE_ID } from "./constants";
 // Utils
 export { generateRouteId, generateStepId, generateToolId } from "./utils/id";
 export { formatKnowledgeBase } from "./utils/template";
+export { 
+  ConditionEvaluator, 
+  createConditionEvaluator, 
+  extractAIContextStrings, 
+  hasProgrammaticConditions 
+} from "./utils/condition";
 export {
   normalizeHistory,
   historyItemToEvent,
@@ -138,6 +144,8 @@ export type {
   PersistenceAdapter,
   Template,
   TemplateContext,
+  ConditionTemplate,
+  ConditionEvaluationResult,
   UserHistoryItem,
   AssistantHistoryItem,
   ToolHistoryItem,

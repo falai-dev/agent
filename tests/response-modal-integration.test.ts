@@ -66,7 +66,7 @@ function createComplexAgent(): Agent<TestContext, TestData> {
   agent.createRoute({
     title: "Support Request",
     description: "Handle customer support requests",
-    conditions: ["User needs help", "User has an issue"],
+    when: ["User needs help", "User has an issue"],
     requiredFields: ["issue", "priority"],
     optionalFields: ["category"],
     steps: [
@@ -93,7 +93,7 @@ function createComplexAgent(): Agent<TestContext, TestData> {
   agent.createRoute({
     title: "Information Request",
     description: "Handle information requests",
-    conditions: ["User wants information"],
+    when: ["User wants information"],
     requiredFields: ["name"],
     optionalFields: ["email"],
     steps: [

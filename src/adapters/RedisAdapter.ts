@@ -12,7 +12,7 @@ import type {
   SessionStatus,
   CollectedStateData,
 } from "../types";
-import { createSessionId } from "../utils";
+import { createSessionId, logger } from "../utils";
 
 /**
  * Redis client interface - matches ioredis/redis clients
@@ -164,7 +164,7 @@ class RedisSessionRepository<TData = Record<string, unknown>>
     try {
       return JSON.parse(data) as SessionData<TData>;
     } catch (error) {
-      console.error(`Error parsing session data for id ${id}:`, error);
+      logger.error(`Error parsing session data for id ${id}:`, error);
       return null;
     }
   }
@@ -303,7 +303,7 @@ class RedisMessageRepository implements MessageRepository {
     try {
       return JSON.parse(data) as MessageData;
     } catch (error) {
-      console.error(`Error parsing message data for id ${id}:`, error);
+      logger.error(`Error parsing message data for id ${id}:`, error);
       return null;
     }
   }

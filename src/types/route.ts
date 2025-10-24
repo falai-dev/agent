@@ -4,7 +4,8 @@
 
 import type { Tool } from "./tool";
 import type { StructuredSchema } from "./schema";
-import { Template } from "./template";
+import type { Guideline, Term } from "./agent";
+import { Template, ConditionTemplate } from "./template";
 
 /**
  * Reference to a route
@@ -23,11 +24,6 @@ export interface StepRef {
   /** Route this step belongs to */
   routeId: string;
 }
-
-/**
- * Forward declare Guideline and Term for circular dependency
- */
-import type { Guideline, Term } from "./agent";
 
 /**
  * Route lifecycle hooks for managing route-specific data and behavior
@@ -98,13 +94,15 @@ export interface RouteOptions<TContext = unknown, TData = unknown> {
   /** Optional personality prompt defining the agent's communication style for this route */
   personality?: Template<TContext, TData>;
   /** Conditions that activate this route */
-  conditions?: Template<TContext, TData>[];
+  when?: ConditionTemplate<TContext, TData>;
+  /** Conditions that prevent this route from being considered */
+  skipIf?: ConditionTemplate<TContext, TData>;
   /** Initial guidelines for this route */
-  guidelines?: Guideline<TContext>[];
+  guidelines?: Guideline<TContext, TData>[];
   /** Initial terms for the route's domain glossary */
   terms?: Term<TContext>[];
   /** Tools available in this route */
-  tools?: Tool<TContext, TData>[];
+  tools?: (string | Tool<TContext, TData>)[];
   /** Absolute rules the agent must follow in this route */
   rules?: Template<TContext, TData>[];
   /** Absolute prohibitions the agent must never do in this route */
@@ -216,12 +214,11 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
    */
   collect?: (keyof TData)[];
   /**
-   * Function to determine if this step should be skipped
-   * If returns true, the step will be bypassed
-   * @param data - Currently collected agent-level data
-   * @returns true if step should be skipped, false otherwise
+   * Condition to determine if this step should be skipped
+   * If evaluates to true, the step will be bypassed
+   * Supports strings (AI context), functions (programmatic), and arrays
    */
-  skipIf?: (data: Partial<TData>) => boolean;
+  skipIf?: ConditionTemplate<TContext, TData>;
   /**
    * Required data fields that must be present before entering this step
    * If any required field is missing, step cannot be entered
@@ -231,8 +228,11 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
   /**
    * Optional condition for this transition
    * Description of when this transition should be taken
+   * Supports strings (AI context), functions (programmatic), and arrays
    */
-  when?: Template<TContext, TData>;
+  when?: ConditionTemplate<TContext, TData>;
+  /** Initial guidelines for this step */
+  guidelines?: Guideline<TContext, TData>[];
 }
 
 /**

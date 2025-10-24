@@ -353,7 +353,7 @@ describe("Route Branching - Data Collection", () => {
     expect(advancedStep?.hasRequires({})).toBe(false);
   });
 
-  test("should handle skipIf conditions in branches", () => {
+  test("should handle skipIf conditions in branches", async () => {
     const agent = new Agent<unknown, SupportData>({
       name: "SkipAgent",
       provider: MockProviderFactory.basic(),
@@ -369,15 +369,24 @@ describe("Route Branching - Data Collection", () => {
         id: "conditional_branch",
         step: {
           prompt: "Conditional step",
-          skipIf: (data: Partial<SupportData>) => data.issueType === "general",
+          skipIf: (params) => params.data?.issueType === "general",
         },
       },
     ]);
 
     const conditionalStep = route.getStep("conditional_branch");
     expect(conditionalStep).toBeDefined();
-    expect(conditionalStep?.shouldSkip({ issueType: "general" })).toBe(true);
-    expect(conditionalStep?.shouldSkip({ issueType: "technical" })).toBe(false);
+    
+    // Test skipIf condition evaluation using new system
+    const skipResult1 = await conditionalStep?.evaluateSkipIf({ 
+      data: { issueType: "general" } 
+    });
+    expect(skipResult1?.shouldSkip).toBe(true);
+    
+    const skipResult2 = await conditionalStep?.evaluateSkipIf({ 
+      data: { issueType: "technical" } 
+    });
+    expect(skipResult2?.shouldSkip).toBe(false);
   });
 });
 

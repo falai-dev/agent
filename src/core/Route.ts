@@ -12,14 +12,21 @@ import type {
   RouteLifecycleHooks,
   StructuredSchema,
   Guideline,
+  GuidelineMatch,
   Term,
   Tool,
   Template,
+  ConditionTemplate,
+  TemplateContext,
+  ConditionEvaluationResult,
+  SessionState,
+  Event,
 } from "../types";
+
+import { createConditionEvaluator, generateRouteId, logger } from "../utils";
 
 import { Step } from "./Step";
 import { Agent } from './Agent'
-import { generateRouteId } from "../utils/id";
 import { END_ROUTE } from "../constants";
 
 /**
@@ -31,7 +38,8 @@ export class Route<TContext = unknown, TData = unknown> {
   public readonly description?: string;
   public readonly identity?: Template<TContext, TData>;
   public readonly personality?: Template<TContext, TData>;
-  public readonly conditions: Template<TContext, TData>[];
+  public readonly when?: ConditionTemplate<TContext, TData>;
+  public readonly skipIf?: ConditionTemplate<TContext, TData>;
   public readonly rules: Template<TContext, TData>[];
   public readonly prohibitions: Template<TContext, TData>[];
   public readonly initialStep: Step<TContext, TData>;
@@ -49,7 +57,7 @@ export class Route<TContext = unknown, TData = unknown> {
     | RouteCompletionHandler<TContext, TData>;
   public readonly hooks?: RouteLifecycleHooks<TContext, TData>;
   public routingExtrasSchema?: StructuredSchema;
-  public guidelines: Guideline<TContext>[] = [];
+  public guidelines: Guideline<TContext, TData>[] = [];
   public terms: Term<TContext>[] = [];
   public tools: Tool<TContext, TData>[] = [];
   public knowledgeBase: Record<string, unknown> = {};
@@ -64,7 +72,8 @@ export class Route<TContext = unknown, TData = unknown> {
     this.description = options.description;
     this.identity = options.identity;
     this.personality = options.personality;
-    this.conditions = options.conditions || [];
+    this.when = options.when;
+    this.skipIf = options.skipIf;
     this.rules = options.rules || [];
     this.prohibitions = options.prohibitions || [];
 
@@ -122,8 +131,28 @@ export class Route<TContext = unknown, TData = unknown> {
 
     // Initialize tools from options
     if (options.tools) {
-      options.tools.forEach((tool) => {
-        this.createTool(tool);
+      options.tools.forEach((toolRef) => {
+        if (typeof toolRef === 'string') {
+          // Tool ID - try to resolve from ToolManager
+          if (this.parentAgent?.tool) {
+            const registeredTool = this.parentAgent.tool.find(toolRef);
+            if (registeredTool) {
+              this.createTool(registeredTool);
+            } else {
+              // Tool not found - log warning but don't fail
+              logger.warn(`[Route] Tool ID '${toolRef}' not found in any scope for route ${this.title}`);
+            }
+          } else {
+            logger.warn(`[Route] No agent available to resolve tool ID '${toolRef}' for route ${this.title}`);
+          }
+        } else {
+          // Inline tool object - validate and use directly
+          if (toolRef && toolRef.id && typeof toolRef.handler === 'function') {
+            this.createTool(toolRef);
+          } else {
+            logger.warn(`[Route] Invalid inline tool object in route ${this.title}:`, toolRef);
+          }
+        }
       });
     }
 
@@ -152,9 +181,49 @@ export class Route<TContext = unknown, TData = unknown> {
   }
 
   /**
+   * Evaluate the when condition for this route
+   * @param templateContext - Context for condition evaluation
+   * @returns Evaluation result with programmatic result and AI context strings
+   */
+  async evaluateWhen(
+    templateContext: TemplateContext<TContext, TData>
+  ): Promise<ConditionEvaluationResult> {
+    if (!this.when) {
+      return {
+        programmaticResult: true, // No condition means always eligible
+        aiContextStrings: [],
+        hasProgrammaticConditions: false,
+      };
+    }
+
+    const evaluator = createConditionEvaluator(templateContext);
+    return await evaluator.evaluateCondition(this.when, 'AND');
+  }
+
+  /**
+   * Evaluate the skipIf condition for this route
+   * @param templateContext - Context for condition evaluation
+   * @returns Evaluation result with programmatic result and AI context strings
+   */
+  async evaluateSkipIf(
+    templateContext: TemplateContext<TContext, TData>
+  ): Promise<ConditionEvaluationResult> {
+    if (!this.skipIf) {
+      return {
+        programmaticResult: false, // No skipIf means never skip
+        aiContextStrings: [],
+        hasProgrammaticConditions: false,
+      };
+    }
+
+    const evaluator = createConditionEvaluator(templateContext);
+    return await evaluator.evaluateCondition(this.skipIf, 'OR');
+  }
+
+  /**
    * Create a guideline specific to this route
    */
-  createGuideline(guideline: Guideline<TContext>): this {
+  createGuideline(guideline: Guideline<TContext, TData>): this {
     this.guidelines.push({
       ...guideline,
       id: guideline.id || `guideline_${this.id}_${this.guidelines.length}`,
@@ -212,8 +281,57 @@ export class Route<TContext = unknown, TData = unknown> {
   /**
    * Get all guidelines for this route
    */
-  getGuidelines(): Guideline<TContext>[] {
+  getGuidelines(): Guideline<TContext, TData>[] {
     return [...this.guidelines];
+  }
+
+  /**
+   * Evaluate and match active guidelines based on their conditions
+   * Returns guidelines that should be active given the current context
+   */
+  async evaluateGuidelines(
+    context?: TContext,
+    session?: SessionState<TData>,
+    history?: Event[]
+  ): Promise<GuidelineMatch<TContext, TData>[]> {
+    const templateContext = { context, session, history, data: session?.data };
+    const evaluator = createConditionEvaluator(templateContext);
+    const matches: GuidelineMatch<TContext, TData>[] = [];
+
+    for (const guideline of this.guidelines) {
+      // Skip disabled guidelines
+      if (guideline.enabled === false) {
+        continue;
+      }
+
+      if (guideline.condition) {
+        const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
+        
+        // Include guideline if:
+        // 1. No programmatic conditions (only strings) - always active
+        // 2. Programmatic conditions evaluate to true
+        if (!evaluation.hasProgrammaticConditions || evaluation.programmaticResult) {
+          const rationale = evaluation.aiContextStrings.length > 0
+            ? `Condition met: ${evaluation.aiContextStrings.join(" AND ")}`
+            : evaluation.hasProgrammaticConditions
+              ? "Programmatic condition evaluated to true"
+              : "Always active (no conditions)";
+          
+          matches.push({
+            guideline,
+            rationale
+          });
+        }
+      } else {
+        // No condition means always active
+        matches.push({
+          guideline,
+          rationale: "Always active (no conditions)"
+        });
+      }
+    }
+
+    return matches;
   }
 
   /**
@@ -325,7 +443,8 @@ export class Route<TContext = unknown, TData = unknown> {
       `Route: ${this.title}`,
       `ID: ${this.id}`,
       `Description: ${this.description || "N/A"}`,
-      `Conditions: ${this.conditions.join(", ") || "None"}`,
+      `When: ${this.when ? (typeof this.when === 'string' ? this.when : Array.isArray(this.when) ? '[Array]' : '[Function]') : "None"}`,
+      `SkipIf: ${this.skipIf ? (typeof this.skipIf === 'string' ? this.skipIf : Array.isArray(this.skipIf) ? '[Array]' : '[Function]') : "None"}`,
       "",
       "Steps:",
     ];
@@ -383,13 +502,80 @@ export class Route<TContext = unknown, TData = unknown> {
   }
 
   /**
+   * Export route configuration as RouteOptions for copying/cloning
+   * @returns RouteOptions that can be used to create a new route with identical configuration
+   */
+  toOptions(): RouteOptions<TContext, TData> {
+    // Convert steps to StepOptions
+    const steps = this.getAllSteps()
+      .filter(step => step.id !== this.initialStep.id) // Exclude initial step
+      .map(step => ({
+        id: step.id,
+        description: step.description,
+        prompt: step.prompt,
+        tools: step.tools,
+        prepare: step.prepare,
+        finalize: step.finalize,
+        collect: step.collect,
+        skipIf: step.skipIf,
+        requires: step.requires,
+        when: step.when,
+        guidelines: step.getGuidelines(),
+      }));
+
+    return {
+      id: this.id,
+      title: this.title,
+      description: this.description,
+      identity: this.identity,
+      personality: this.personality,
+      when: this.when,
+      skipIf: this.skipIf,
+      guidelines: this.getGuidelines(),
+      terms: this.getTerms(),
+      tools: this.getTools(),
+      rules: this.rules,
+      prohibitions: this.prohibitions,
+      routingExtrasSchema: this.routingExtrasSchema,
+      responseOutputSchema: this.responseOutputSchema,
+      requiredFields: this.requiredFields,
+      optionalFields: this.optionalFields,
+      initialData: this.initialData,
+      steps: steps.length > 0 ? steps : undefined,
+      initialStep: {
+        id: this.initialStep.id,
+        description: this.initialStep.description,
+        prompt: this.initialStep.prompt,
+        tools: this.initialStep.tools,
+        prepare: this.initialStep.prepare,
+        finalize: this.initialStep.finalize,
+        collect: this.initialStep.collect,
+        skipIf: this.initialStep.skipIf,
+        requires: this.initialStep.requires,
+        when: this.initialStep.when,
+        guidelines: this.initialStep.getGuidelines(),
+      },
+      endStep: this.endStepSpec,
+      onComplete: this.onComplete,
+      hooks: this.hooks,
+      knowledgeBase: this.knowledgeBase,
+    };
+  }
+
+  /**
    * Check if this route is complete based on the provided data
    * @param data - Currently collected agent-level data
    * @returns true if all required fields are present, false otherwise
+   * 
+   * Note: This only checks data completeness. For full route completion including
+   * step flow, use the routing engine's completion detection which considers both
+   * required fields and END_ROUTE markers.
    */
   isComplete(data: Partial<TData>): boolean {
     if (!this.requiredFields || this.requiredFields.length === 0) {
-      return true; // No required fields means route is always complete
+      // No required fields means data collection is complete
+      // But route may still need to reach END_ROUTE in step flow
+      return true;
     }
 
     return this.requiredFields.every(field => {

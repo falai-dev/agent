@@ -13,6 +13,7 @@ import {
   type Tool,
 } from "../src/index";
 import { MockProviderFactory } from "./mock-provider";
+import { createTemplateContext } from "../src/utils";
 
 // Test data types for agent-level data collection
 interface OrderData {
@@ -58,8 +59,8 @@ function createRouteTestAgent<TData = unknown>(): Agent<unknown, TData> {
   });
 }
 
-function createOrderTestAgent(): Agent<unknown, OrderData> {
-  return new Agent<unknown, OrderData>({
+function createOrderTestAgent<TContext = any>(): Agent<TContext, OrderData> {
+  return new Agent<TContext, OrderData>({
     name: "OrderTestAgent",
     description: "Agent for testing order functionality",
     provider: MockProviderFactory.basic(),
@@ -87,7 +88,7 @@ function createOrderFulfillmentRoute(agent: Agent<unknown, OrderData>) {
   return agent.createRoute({
     title: "Order Fulfillment",
     description: "Complete customer order process",
-    conditions: ["Customer wants to place an order", "Shopping inquiry"],
+    when: ["Customer wants to place an order", "Shopping inquiry"],
     requiredFields: ["item", "quantity", "deliveryAddress", "paymentMethod"],
     optionalFields: ["total"],
     steps: [
@@ -174,12 +175,12 @@ describe("Route Creation and Configuration", () => {
     const route = agent.createRoute({
       title: "Simple Route",
       description: "A simple test route",
-      conditions: ["Test condition"],
+      when: ["Test condition"],
     });
 
     expect(route.title).toBe("Simple Route");
     expect(route.description).toBe("A simple test route");
-    expect(route.conditions).toHaveLength(1);
+    expect(route.when).toEqual(["Test condition"]);
     expect(route.requiredFields).toBeUndefined();
     expect(route.optionalFields).toBeUndefined();
   });
@@ -345,7 +346,7 @@ describe("Route Execution and Step Progression", () => {
   });
 
   test("should handle step prerequisites", () => {
-    const agent = new Agent<unknown, SupportTicketData>({
+    const agent = new Agent<any, SupportTicketData>({
       name: "PrerequisiteTestAgent",
       description: "Agent for testing step prerequisites",
       provider: MockProviderFactory.basic(),
@@ -373,7 +374,7 @@ describe("Route Execution and Step Progression", () => {
           prompt: "Second step",
           collect: ["field2"],
           requires: ["field1"],
-          skipIf: (data) => !data.field1,
+          skipIf: (data) => !data.context.field1,
         },
       ],
     });
@@ -403,10 +404,10 @@ describe("Route Execution and Step Progression", () => {
     // Create a simple route that ends
     const route = agent.createRoute({
       title: "Quick Route",
-      conditions: ["Start quick route"],
+      when: ["Start quick route"],
       initialStep: {
         prompt: "This is the only step",
-        skipIf: (data) => !!data.start,
+        skipIf: (params) => !!params.data?.start,
       },
       initialData: {
         start: true,
@@ -426,6 +427,8 @@ describe("Route Execution and Step Progression", () => {
       ],
       session,
     });
+
+
 
     // The route should complete
     expect(response.isRouteComplete).toBe(true);
@@ -494,8 +497,8 @@ describe("Route Branching and Conditional Logic", () => {
     });
   });
 
-  test("should handle conditional step skipping", () => {
-    const agent = new Agent<unknown, SupportTicketData>({
+  test("should handle conditional step skipping", async () => {
+    const agent = new Agent<any, SupportTicketData>({
       name: "ConditionalTestAgent",
       description: "Agent for testing conditional step skipping",
       provider: MockProviderFactory.basic(),
@@ -521,15 +524,15 @@ describe("Route Branching and Conditional Logic", () => {
           id: "ask_category",
           prompt: "What category?",
           collect: ["category"],
-          skipIf: (data: Partial<SupportTicketData>) =>
-            data.category === "general",
+          skipIf: (ctx) =>
+            ctx.context?.category === "general",
         },
         {
           id: "ask_priority",
           prompt: "What's the priority?",
           collect: ["priority"],
-          skipIf: (data: Partial<SupportTicketData>) =>
-            data.category === "general",
+          skipIf: (ctx) =>
+            ctx.context?.category === "general",
         },
       ],
     });
@@ -540,18 +543,24 @@ describe("Route Branching and Conditional Logic", () => {
     expect(typeof steps[1].skipIf).toBe("function");
     expect(typeof steps[2].skipIf).toBe("function");
 
-    // Test skip logic
-    const skipBillingData: Partial<SupportTicketData> = {
-      category: "general" as const,
-    };
-    expect(steps[1].skipIf!(skipBillingData)).toBe(true);
-    expect(steps[2].skipIf!(skipBillingData)).toBe(true);
+    // Test skip logic using new evaluation system
+    const skipContext = createTemplateContext({
+      context: { category: "general" as const },
+      data: { category: "general" as const },
+    });
+    const skipResult1 = await steps[1].evaluateSkipIf(skipContext);
+    const skipResult2 = await steps[2].evaluateSkipIf(skipContext);
+    expect(skipResult1.shouldSkip).toBe(true);
+    expect(skipResult2.shouldSkip).toBe(true);
 
-    const dontSkipData: Partial<SupportTicketData> = {
-      category: "technical" as const,
-    };
-    expect(steps[1].skipIf!(dontSkipData)).toBe(false);
-    expect(steps[2].skipIf!(dontSkipData)).toBe(false);
+    const dontSkipContext = createTemplateContext({
+      context: { category: "technical" as const },
+      data: { category: "technical" as const },
+    });
+    const dontSkipResult1 = await steps[1].evaluateSkipIf(dontSkipContext);
+    const dontSkipResult2 = await steps[2].evaluateSkipIf(dontSkipContext);
+    expect(dontSkipResult1.shouldSkip).toBe(false);
+    expect(dontSkipResult2.shouldSkip).toBe(false);
   });
 });
 
@@ -569,9 +578,8 @@ describe("Route Tools and Finalization", () => {
         },
       },
       handler: ({ data }) => ({
-        data: `Processed: ${
-          (data as Partial<{ input: string }>)?.input || "nothing"
-        }`,
+        data: `Processed: ${(data as Partial<{ input: string }>)?.input || "nothing"
+          }`,
       }),
     };
 
@@ -617,7 +625,7 @@ describe("Route Tools and Finalization", () => {
   });
 
   test("should access ToolManager through route's parent agent", () => {
-    const agent = createOrderTestAgent();
+    const agent = createOrderTestAgent<{ userId: string; }>();
 
     const route = agent.createRoute({
       title: "ToolManager Access Route",
@@ -625,7 +633,7 @@ describe("Route Tools and Finalization", () => {
 
     // Route should be able to access agent's ToolManager
     expect(agent.tool).toBeDefined();
-    
+
     // Register a tool through agent's ToolManager
     agent.tool.register({
       id: "shared_route_tool",
@@ -965,7 +973,7 @@ describe("Complex Route Scenarios", () => {
     const route = agent.createRoute({
       title: "Advanced Support",
       description: "Complex support with branching logic",
-      conditions: ["User needs help", "Support request"],
+      when: ["User needs help", "Support request"],
       requiredFields: ["issue", "category"],
       optionalFields: ["priority", "resolution"],
       guidelines: [

@@ -8,7 +8,7 @@ import type { RouteOptions } from "./route";
 import type { PersistenceConfig } from "./persistence";
 import type { SessionState } from "./session";
 import type { StructuredSchema } from "./schema";
-import { Template } from "./template";
+import { Template, ConditionTemplate } from "./template";
 
 /**
  * Composition mode determines how the agent processes and structures responses
@@ -131,7 +131,7 @@ export interface Guideline<TContext = unknown, TData = unknown> {
   /** Unique identifier */
   id?: string;
   /** Condition that triggers this guideline (optional for always-active guidelines) */
-  condition?: Template<TContext, TData>;
+  condition?: ConditionTemplate<TContext, TData>;
   /** Action the agent should take when the condition is met */
   action: Template<TContext, TData>;
   /** Whether this guideline is currently enabled */

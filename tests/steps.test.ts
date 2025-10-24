@@ -6,6 +6,7 @@
 import { expect, test, describe } from "bun:test";
 import { Agent, createSession, END_ROUTE, type Tool } from "../src/index";
 import { MockProviderFactory } from "./mock-provider";
+import { createTemplateContext } from "../src/utils";
 
 interface TestData {
   field1?: string;
@@ -24,7 +25,7 @@ describe("Route - ID Generation and Configuration", () => {
 
     const route1 = agent.createRoute({ title: "Test Route" });
     const route2 = agent.createRoute({ title: "Test Route" });
-    
+
     // Same title should generate same ID
     expect(route1.id).toBe(route2.id);
   });
@@ -39,7 +40,7 @@ describe("Route - ID Generation and Configuration", () => {
       title: "Test Route",
       id: "custom-route-id",
     });
-    
+
     expect(route.id).toBe("custom-route-id");
   });
 
@@ -51,10 +52,10 @@ describe("Route - ID Generation and Configuration", () => {
 
     const route = agent.createRoute({
       title: "No Conditions Route",
-      conditions: [],
+      when: undefined,
     });
-    
-    expect(route.conditions).toEqual([]);
+
+    expect(route.when).toBeUndefined();
   });
 
   test("should handle undefined conditions", () => {
@@ -66,8 +67,8 @@ describe("Route - ID Generation and Configuration", () => {
     const route = agent.createRoute({
       title: "Undefined Conditions Route",
     });
-    
-    expect(route.conditions).toEqual([]);
+
+    expect(route.when).toBeUndefined();
   });
 
   test("should store identity and personality templates", () => {
@@ -81,7 +82,7 @@ describe("Route - ID Generation and Configuration", () => {
       identity: "You are a helpful assistant",
       personality: "You are friendly and professional",
     });
-    
+
     expect(route.identity).toBe("You are a helpful assistant");
     expect(route.personality).toBe("You are friendly and professional");
   });
@@ -97,7 +98,7 @@ describe("Route - ID Generation and Configuration", () => {
       rules: ["Always verify user identity", "Log all actions"],
       prohibitions: ["Never share passwords", "Never skip validation"],
     });
-    
+
     expect(route.getRules()).toEqual(["Always verify user identity", "Log all actions"]);
     expect(route.getProhibitions()).toEqual(["Never share passwords", "Never skip validation"]);
   });
@@ -118,7 +119,7 @@ describe("Route - Step Building and Chaining", () => {
         { id: "step3", prompt: "Step 3" },
       ],
     });
-    
+
     const steps = route.getAllSteps();
     expect(steps).toHaveLength(3);
     expect(steps[0].id).toBe("step1");
@@ -139,7 +140,7 @@ describe("Route - Step Building and Chaining", () => {
         { id: "second", prompt: "Second step" },
       ],
     });
-    
+
     expect(route.initialStep.id).toBe("auto-initial");
   });
 
@@ -157,7 +158,7 @@ describe("Route - Step Building and Chaining", () => {
         { id: "step2", prompt: "Step 2" },
       ],
     });
-    
+
     const steps = route.getAllSteps();
     expect(steps[0].id).toBe("custom-start");
     expect(steps[1].id).toBe("step1");
@@ -177,7 +178,7 @@ describe("Route - Step Building and Chaining", () => {
         END_ROUTE,
       ],
     });
-    
+
     const steps = route.getAllSteps();
     expect(steps).toHaveLength(2);
     expect(steps[1].id).toBe("END_ROUTE");
@@ -203,16 +204,16 @@ describe("Route - Data Collection and Completion", () => {
       title: "Progress Route",
       requiredFields: ["field1", "field2", "field3"],
     });
-    
+
     // No data
     expect(route.getCompletionProgress({})).toBe(0);
-    
+
     // 1/3 complete
     expect(route.getCompletionProgress({ field1: "value" })).toBeCloseTo(0.333, 2);
-    
+
     // 2/3 complete
     expect(route.getCompletionProgress({ field1: "value", field2: "value" })).toBeCloseTo(0.666, 2);
-    
+
     // 3/3 complete
     expect(route.getCompletionProgress({ field1: "value", field2: "value", field3: "value" })).toBe(1);
   });
@@ -233,7 +234,7 @@ describe("Route - Data Collection and Completion", () => {
       title: "Empty String Route",
       requiredFields: ["field1"],
     });
-    
+
     expect(route.isComplete({ field1: "" })).toBe(false);
     expect(route.getMissingRequiredFields({ field1: "" })).toEqual(["field1"]);
   });
@@ -254,7 +255,7 @@ describe("Route - Data Collection and Completion", () => {
       title: "Null Field Route",
       requiredFields: ["field1"],
     });
-    
+
     expect(route.isComplete({ field1: null as any })).toBe(false);
     expect(route.getMissingRequiredFields({ field1: null as any })).toEqual(["field1"]);
   });
@@ -275,7 +276,7 @@ describe("Route - Data Collection and Completion", () => {
       title: "Undefined Field Route",
       requiredFields: ["field1"],
     });
-    
+
     expect(route.isComplete({ field1: undefined })).toBe(false);
     expect(route.getMissingRequiredFields({ field1: undefined })).toEqual(["field1"]);
   });
@@ -296,7 +297,7 @@ describe("Route - Data Collection and Completion", () => {
       title: "Zero Value Route",
       requiredFields: ["count"],
     });
-    
+
     expect(route.isComplete({ count: 0 })).toBe(true);
     expect(route.getMissingRequiredFields({ count: 0 })).toEqual([]);
   });
@@ -317,7 +318,7 @@ describe("Route - Data Collection and Completion", () => {
       title: "Boolean Route",
       requiredFields: ["flag"],
     });
-    
+
     expect(route.isComplete({ flag: false })).toBe(true);
     expect(route.getMissingRequiredFields({ flag: false })).toEqual([]);
   });
@@ -334,7 +335,7 @@ describe("Route - onComplete Handler", () => {
       title: "String Complete Route",
       onComplete: "next-route-id",
     });
-    
+
     const result = await route.evaluateOnComplete({ data: {} });
     expect(result).toEqual({ nextStep: "next-route-id" });
   });
@@ -352,7 +353,7 @@ describe("Route - onComplete Handler", () => {
         condition: "if user is satisfied",
       },
     });
-    
+
     const result = await route.evaluateOnComplete({ data: {} });
     expect(result).toEqual({
       nextStep: "next-route",
@@ -372,10 +373,10 @@ describe("Route - onComplete Handler", () => {
         return session.data?.field1 ? "route-a" : "route-b";
       },
     });
-    
+
     const result1 = await route.evaluateOnComplete({ data: { field1: "value" } });
     expect(result1).toEqual({ nextStep: "route-a" });
-    
+
     const result2 = await route.evaluateOnComplete({ data: {} });
     expect(result2).toEqual({ nextStep: "route-b" });
   });
@@ -398,13 +399,13 @@ describe("Route - onComplete Handler", () => {
         return undefined;
       },
     });
-    
+
     const result1 = await route.evaluateOnComplete({ data: { field1: "value" } });
     expect(result1).toEqual({
       nextStep: "success-route",
       condition: "if successful",
     });
-    
+
     const result2 = await route.evaluateOnComplete({ data: {} });
     expect(result2).toBeUndefined();
   });
@@ -419,7 +420,7 @@ describe("Route - onComplete Handler", () => {
       title: "Undefined Complete Route",
       onComplete: () => undefined,
     });
-    
+
     const result = await route.evaluateOnComplete({ data: {} });
     expect(result).toBeUndefined();
   });
@@ -437,7 +438,7 @@ describe("Route - onComplete Handler", () => {
         return session.data?.field1 ? "async-route" : undefined;
       },
     });
-    
+
     const result = await route.evaluateOnComplete({ data: { field1: "value" } });
     expect(result).toEqual({ nextStep: "async-route" });
   });
@@ -465,12 +466,12 @@ describe("Route - Lifecycle Hooks", () => {
         },
       },
     });
-    
+
     const newData = { field1: "new" };
     const previousData = { field1: "old" };
-    
+
     await route.handleDataUpdate(newData, previousData);
-    
+
     expect(hookCalled).toBe(true);
     expect(receivedData).toEqual(newData);
     expect(receivedPrevious).toEqual(previousData);
@@ -490,9 +491,9 @@ describe("Route - Lifecycle Hooks", () => {
         },
       },
     });
-    
+
     const result = await route.handleDataUpdate({ field1: "value" }, {});
-    
+
     expect(result).toEqual({ field1: "value", field2: "modified" });
   });
 
@@ -516,12 +517,12 @@ describe("Route - Lifecycle Hooks", () => {
         },
       },
     });
-    
+
     const newContext = { userId: "123" };
     const previousContext = { userId: "456" };
-    
+
     await route.handleContextUpdate(newContext, previousContext);
-    
+
     expect(hookCalled).toBe(true);
     expect(receivedNew).toEqual(newContext);
     expect(receivedPrevious).toEqual(previousContext);
@@ -545,9 +546,9 @@ describe("Route - Lifecycle Hooks", () => {
         },
       },
     });
-    
+
     await route.handleDataUpdate({ field1: "value" }, {});
-    
+
     expect(asyncCompleted).toBe(true);
   });
 });
@@ -568,7 +569,7 @@ describe("Route - Knowledge Base and Metadata", () => {
       title: "Knowledge Route",
       knowledgeBase,
     });
-    
+
     expect(route.getKnowledgeBase()).toEqual(knowledgeBase);
   });
 
@@ -581,7 +582,7 @@ describe("Route - Knowledge Base and Metadata", () => {
     const route = agent.createRoute({
       title: "No Knowledge Route",
     });
-    
+
     expect(route.getKnowledgeBase()).toEqual({});
   });
 
@@ -602,7 +603,7 @@ describe("Route - Knowledge Base and Metadata", () => {
       title: "Extras Schema Route",
       routingExtrasSchema: schema,
     });
-    
+
     expect(route.getRoutingExtrasSchema()).toEqual(schema);
   });
 
@@ -623,7 +624,7 @@ describe("Route - Knowledge Base and Metadata", () => {
       title: "Response Schema Route",
       responseOutputSchema: schema,
     });
-    
+
     expect(route.getResponseOutputSchema()).toEqual(schema);
   });
 });
@@ -642,7 +643,7 @@ describe("Route - Guidelines and Terms", () => {
         { condition: "Condition 2", action: "Action 2" },
       ],
     });
-    
+
     const guidelines = route.getGuidelines();
     expect(guidelines).toHaveLength(2);
     expect(guidelines[0].id).toBeDefined();
@@ -662,7 +663,7 @@ describe("Route - Guidelines and Terms", () => {
         { id: "custom-1", condition: "Condition 1", action: "Action 1" },
       ],
     });
-    
+
     const guidelines = route.getGuidelines();
     expect(guidelines[0].id).toBe("custom-1");
   });
@@ -679,7 +680,7 @@ describe("Route - Guidelines and Terms", () => {
         { condition: "Condition 1", action: "Action 1" },
       ],
     });
-    
+
     const guidelines = route.getGuidelines();
     expect(guidelines[0].enabled).toBe(true);
   });
@@ -696,7 +697,7 @@ describe("Route - Guidelines and Terms", () => {
         { condition: "Condition 1", action: "Action 1", enabled: false },
       ],
     });
-    
+
     const guidelines = route.getGuidelines();
     expect(guidelines[0].enabled).toBe(false);
   });
@@ -710,9 +711,9 @@ describe("Route - Guidelines and Terms", () => {
     const route = agent.createRoute({
       title: "Dynamic Guideline Route",
     });
-    
+
     route.createGuideline({ condition: "New condition", action: "New action" });
-    
+
     const guidelines = route.getGuidelines();
     expect(guidelines).toHaveLength(1);
     expect(guidelines[0].condition).toBe("New condition");
@@ -727,9 +728,9 @@ describe("Route - Guidelines and Terms", () => {
     const route = agent.createRoute({
       title: "Terms Route",
     });
-    
+
     route.createTerm({ name: "API", description: "Application Programming Interface" });
-    
+
     const terms = route.getTerms();
     expect(terms).toHaveLength(1);
     expect(terms[0].name).toBe("API");
@@ -753,7 +754,7 @@ describe("Route - Tools Management", () => {
       title: "Tool Route",
       tools: [tool],
     });
-    
+
     const tools = route.getTools();
     expect(tools).toHaveLength(1);
     expect(tools[0].id).toBe("test-tool");
@@ -768,15 +769,15 @@ describe("Route - Tools Management", () => {
     const route = agent.createRoute({
       title: "Dynamic Tool Route",
     });
-    
+
     const tool: Tool<unknown, TestData> = {
       id: "dynamic-tool",
       description: "Dynamic tool",
       handler: () => ({ data: "result" }),
     };
-    
+
     route.createTool(tool);
-    
+
     const tools = route.getTools();
     expect(tools).toHaveLength(1);
     expect(tools[0].id).toBe("dynamic-tool");
@@ -791,14 +792,14 @@ describe("Route - Tools Management", () => {
     const route = agent.createRoute({
       title: "Multiple Tools Route",
     });
-    
+
     const tools: Tool<unknown, TestData>[] = [
       { id: "tool1", description: "Tool 1", handler: () => ({ data: "1" }) },
       { id: "tool2", description: "Tool 2", handler: () => ({ data: "2" }) },
     ];
-    
+
     route.registerTools(tools);
-    
+
     const registeredTools = route.getTools();
     expect(registeredTools).toHaveLength(2);
   });
@@ -812,11 +813,11 @@ describe("Route - Tools Management", () => {
     const route = agent.createRoute({
       title: "Validation Route",
     });
-    
+
     expect(() => {
       route.createTool(null as any);
     }).toThrow("Invalid tool");
-    
+
     expect(() => {
       route.createTool({ id: "test" } as any);
     }).toThrow("Invalid tool");
@@ -838,7 +839,7 @@ describe("Route - Step Traversal and Lookup", () => {
         { id: "step3", prompt: "Step 3" },
       ],
     });
-    
+
     const steps = route.getAllSteps();
     expect(steps).toHaveLength(3);
   });
@@ -856,7 +857,7 @@ describe("Route - Step Traversal and Lookup", () => {
         { id: "step2", prompt: "Step 2" },
       ],
     });
-    
+
     const step = route.getStep("step2");
     expect(step).toBeDefined();
     expect(step?.id).toBe("step2");
@@ -874,7 +875,7 @@ describe("Route - Step Traversal and Lookup", () => {
         { id: "step1", prompt: "Step 1" },
       ],
     });
-    
+
     const step = route.getStep("non-existent");
     expect(step).toBeUndefined();
   });
@@ -888,12 +889,12 @@ describe("Route - Step Traversal and Lookup", () => {
     const route = agent.createRoute({
       title: "Branch Traversal Route",
     });
-    
+
     route.initialStep.branch([
       { name: "branch1", id: "b1", step: { prompt: "Branch 1" } },
       { name: "branch2", id: "b2", step: { prompt: "Branch 2" } },
     ]);
-    
+
     const steps = route.getAllSteps();
     expect(steps.length).toBeGreaterThanOrEqual(3); // initial + 2 branches
   });
@@ -911,7 +912,7 @@ describe("Route - Step Traversal and Lookup", () => {
         { id: "step2", prompt: "Step 2" },
       ],
     });
-    
+
     // This should not hang
     const steps = route.getAllSteps();
     expect(steps).toHaveLength(2);
@@ -928,18 +929,18 @@ describe("Route - describe() Method", () => {
     const route = agent.createRoute({
       title: "Describe Route",
       description: "A test route",
-      conditions: ["Test condition"],
+      when: ["Test condition"],
       steps: [
         { id: "step1", description: "First step", prompt: "Step 1" },
         { id: "step2", description: "Second step", prompt: "Step 2" },
       ],
     });
-    
+
     const description = route.describe();
-    
+
     expect(description).toContain("Route: Describe Route");
     expect(description).toContain("Description: A test route");
-    expect(description).toContain("Conditions: Test condition");
+    expect(description).toContain("When: [Array]");
     expect(description).toContain("step1: First step");
     expect(description).toContain("step2: Second step");
   });
@@ -953,7 +954,7 @@ describe("Route - describe() Method", () => {
     const route = agent.createRoute({
       title: "No Description Route",
     });
-    
+
     const description = route.describe();
     expect(description).toContain("Description: N/A");
   });
@@ -967,9 +968,9 @@ describe("Route - describe() Method", () => {
     const route = agent.createRoute({
       title: "No Conditions Route",
     });
-    
+
     const description = route.describe();
-    expect(description).toContain("Conditions: None");
+    expect(description).toContain("When: None");
   });
 });
 
@@ -983,10 +984,10 @@ describe("Step - Configuration and Properties", () => {
     const route = agent.createRoute({
       title: "Step ID Route",
     });
-    
+
     const step1 = route.initialStep.nextStep({ description: "Test Step" });
     const step2 = route.initialStep.nextStep({ description: "Test Step" });
-    
+
     // Same description should generate same ID
     expect(step1.id).toBe(step2.id);
   });
@@ -1000,12 +1001,12 @@ describe("Step - Configuration and Properties", () => {
     const route = agent.createRoute({
       title: "Custom Step ID Route",
     });
-    
+
     const step = route.initialStep.nextStep({
       id: "custom-step-id",
       prompt: "Custom step",
     });
-    
+
     expect(step.id).toBe("custom-step-id");
   });
 
@@ -1018,13 +1019,13 @@ describe("Step - Configuration and Properties", () => {
     const route = agent.createRoute({
       title: "Configure Route",
     });
-    
+
     route.initialStep.configure({
       description: "Configured description",
       collect: ["field1"],
       prompt: "Configured prompt",
     });
-    
+
     expect(route.initialStep.description).toBe("Configured description");
     expect(route.initialStep.collect).toEqual(["field1"]);
     expect(route.initialStep.prompt).toBe("Configured prompt");
@@ -1043,11 +1044,11 @@ describe("Step - Configuration and Properties", () => {
         collect: ["field1"],
       },
     });
-    
+
     route.initialStep.configure({
       description: "Updated",
     });
-    
+
     expect(route.initialStep.description).toBe("Updated");
     expect(route.initialStep.collect).toEqual(["field1"]); // Unchanged
   });
@@ -1063,9 +1064,9 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "Transition Route",
     });
-    
+
     const step2 = route.initialStep.nextStep({ prompt: "Step 2" });
-    
+
     expect(step2.id).toBeDefined();
     expect(step2.routeId).toBe(route.id);
   });
@@ -1079,11 +1080,11 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "Chain Route",
     });
-    
+
     const step2 = route.initialStep.nextStep({ id: "step2", prompt: "Step 2" });
     const step3 = step2.nextStep({ id: "step3", prompt: "Step 3" });
     const step4 = step3.nextStep({ id: "step4", prompt: "Step 4" });
-    
+
     expect(step4.id).toBe("step4");
   });
 
@@ -1096,13 +1097,13 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "Branch Route",
     });
-    
+
     const branches = route.initialStep.branch([
       { name: "option1", step: { prompt: "Option 1" } },
       { name: "option2", step: { prompt: "Option 2" } },
       { name: "option3", step: { prompt: "Option 3" } },
     ]);
-    
+
     expect(branches.option1).toBeDefined();
     expect(branches.option2).toBeDefined();
     expect(branches.option3).toBeDefined();
@@ -1117,11 +1118,11 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "Branch Chain Route",
     });
-    
+
     const branches = route.initialStep.branch([
       { name: "branch1", step: { prompt: "Branch 1" } },
     ]);
-    
+
     const nextStep = branches.branch1.nextStep({ prompt: "After branch" });
     expect(nextStep.id).toBeDefined();
   });
@@ -1135,11 +1136,11 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "Custom Branch ID Route",
     });
-    
+
     const branches = route.initialStep.branch([
       { name: "branch1", id: "custom-branch-1", step: { prompt: "Branch 1" } },
     ]);
-    
+
     expect(branches.branch1.id).toBe("custom-branch-1");
   });
 
@@ -1152,9 +1153,9 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "End Route Shortcut",
     });
-    
+
     const endStep = route.initialStep.endRoute();
-    
+
     expect(endStep.id).toBe("END_ROUTE");
   });
 
@@ -1167,11 +1168,11 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "End Route Options",
     });
-    
+
     const endStep = route.initialStep.endRoute({
       prompt: "Completion message",
     });
-    
+
     expect(endStep.id).toBe("END_ROUTE");
   });
 
@@ -1184,9 +1185,9 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "Terminal Route",
     });
-    
+
     const endStep = route.initialStep.endRoute();
-    
+
     expect(() => {
       endStep.nextStep({ prompt: "Invalid" });
     }).toThrow("Cannot transition from END_ROUTE step");
@@ -1201,9 +1202,9 @@ describe("Step - Transitions and Branching", () => {
     const route = agent.createRoute({
       title: "Terminal Branch Route",
     });
-    
+
     const endStep = route.initialStep.endRoute();
-    
+
     expect(() => {
       endStep.branch([{ name: "invalid", step: { prompt: "Invalid" } }]);
     }).toThrow("Cannot branch from END_ROUTE step");
@@ -1211,7 +1212,7 @@ describe("Step - Transitions and Branching", () => {
 });
 
 describe("Step - Data Requirements and Skipping", () => {
-  test("should check if step should be skipped", () => {
+  test("should check if step should be skipped", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
@@ -1223,18 +1224,21 @@ describe("Step - Data Requirements and Skipping", () => {
         {
           id: "conditional-step",
           prompt: "Conditional step",
-          skipIf: (data) => !!data.field1,
+          skipIf: (ctx) => !!ctx.data?.field1,
         },
       ],
     });
-    
+
     const step = route.getStep("conditional-step")!;
-    
-    expect(step.shouldSkip({ field1: "value" })).toBe(true);
-    expect(step.shouldSkip({})).toBe(false);
+
+    const result1 = await step.evaluateSkipIf(createTemplateContext({ data: { field1: "value" } }));
+    expect(result1.shouldSkip).toBe(true);
+
+    const result2 = await step.evaluateSkipIf(createTemplateContext({ data: {} }));
+    expect(result2.shouldSkip).toBe(false);
   });
 
-  test("should return false when no skipIf defined", () => {
+  test("should return false when no skipIf defined", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
@@ -1246,9 +1250,10 @@ describe("Step - Data Requirements and Skipping", () => {
         { id: "step1", prompt: "Step 1" },
       ],
     });
-    
+
     const step = route.getStep("step1")!;
-    expect(step.shouldSkip({})).toBe(false);
+    const result = await step.evaluateSkipIf(createTemplateContext({ data: {} }));
+    expect(result.shouldSkip).toBe(false);
   });
 
   test("should check if step has required data", () => {
@@ -1267,9 +1272,9 @@ describe("Step - Data Requirements and Skipping", () => {
         },
       ],
     });
-    
+
     const step = route.getStep("dependent-step")!;
-    
+
     expect(step.hasRequires({ field1: "a", field2: "b" })).toBe(true);
     expect(step.hasRequires({ field1: "a" })).toBe(false);
     expect(step.hasRequires({})).toBe(false);
@@ -1287,7 +1292,7 @@ describe("Step - Data Requirements and Skipping", () => {
         { id: "step1", prompt: "Step 1" },
       ],
     });
-    
+
     const step = route.getStep("step1")!;
     expect(step.hasRequires({})).toBe(true);
   });
@@ -1308,7 +1313,7 @@ describe("Step - Data Requirements and Skipping", () => {
         },
       ],
     });
-    
+
     const step = route.getStep("step1")!;
     expect(step.hasRequires({})).toBe(true);
   });
@@ -1324,12 +1329,12 @@ describe("Step - Guidelines", () => {
     const route = agent.createRoute({
       title: "Step Guideline Route",
     });
-    
+
     route.initialStep.addGuideline({
       condition: "User is confused",
       action: "Provide clarification",
     });
-    
+
     const guidelines = route.initialStep.getGuidelines();
     expect(guidelines).toHaveLength(1);
     expect(guidelines[0].condition).toBe("User is confused");
@@ -1344,15 +1349,15 @@ describe("Step - Guidelines", () => {
     const route = agent.createRoute({
       title: "Guideline Copy Route",
     });
-    
+
     route.initialStep.addGuideline({
       condition: "Test",
       action: "Test action",
     });
-    
+
     const guidelines1 = route.initialStep.getGuidelines();
     const guidelines2 = route.initialStep.getGuidelines();
-    
+
     expect(guidelines1).not.toBe(guidelines2); // Different array instances
     expect(guidelines1).toEqual(guidelines2); // Same content
   });
@@ -1371,10 +1376,10 @@ describe("Step - References and Results", () => {
         { id: "step1", prompt: "Step 1" },
       ],
     });
-    
+
     const step = route.getStep("step1")!;
     const ref = step.getRef();
-    
+
     expect(ref.id).toBe("step1");
     expect(ref.routeId).toBe(route.id);
   });
@@ -1388,9 +1393,9 @@ describe("Step - References and Results", () => {
     const route = agent.createRoute({
       title: "Result Route",
     });
-    
+
     const result = route.initialStep.asStepResult();
-    
+
     expect(result.id).toBeDefined();
     expect(result.routeId).toBe(route.id);
     expect(typeof result.nextStep).toBe("function");
@@ -1407,10 +1412,10 @@ describe("Step - References and Results", () => {
     const route = agent.createRoute({
       title: "Transitions Route",
     });
-    
+
     route.initialStep.nextStep({ id: "step2", prompt: "Step 2" });
     route.initialStep.nextStep({ id: "step3", prompt: "Step 3" });
-    
+
     const transitions = route.initialStep.getTransitions();
     expect(transitions).toHaveLength(2);
   });

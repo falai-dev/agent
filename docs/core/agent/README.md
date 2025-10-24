@@ -168,16 +168,24 @@ const agent = new Agent<CustomerContext, CustomerData>({
     },
   ],
 
-  // Behavioral guidelines
+  // Enhanced behavioral guidelines with ConditionTemplate
   guidelines: [
     {
-      condition: "Customer seems frustrated",
+      condition: [
+        "Customer seems frustrated or upset", // AI context
+        (ctx) => ctx.data?.priority === 'high' // Programmatic check
+      ],
       action: "Apologize sincerely and offer to escalate to human agent",
       enabled: true,
     },
     {
-      condition: "Premium customer requests",
+      condition: (ctx) => ctx.accountTier === 'premium', // Function-only condition
       action: "Provide expedited service and additional options",
+      enabled: true,
+    },
+    {
+      condition: "User is asking for help with billing", // String-only condition
+      action: "Be extra careful with financial information and offer phone support",
       enabled: true,
     },
   ],
@@ -366,7 +374,7 @@ const agent = new Agent<CustomerContext, CustomerData>({
     {
       title: "Technical Support",
       description: "Help with technical issues",
-      conditions: ["user reports technical problem"],
+      when: ["user reports technical problem"],
       // NEW: Routes specify required fields instead of schemas
       requiredFields: ["customerName", "email", "issueType", "issueDescription"],
       optionalFields: ["phone", "priority"],
@@ -379,7 +387,7 @@ const agent = new Agent<CustomerContext, CustomerData>({
     {
       title: "Billing Inquiry", 
       description: "Handle billing and payment questions",
-      conditions: ["user asks about billing or payment"],
+      when: ["user asks about billing or payment"],
       requiredFields: ["customerName", "email", "issueType"],
       initialStep: {
         prompt:
@@ -414,6 +422,113 @@ const supportRoute = agent
 // Access created routes
 const routes = agent.getRoutes();
 console.log(routes.map((r) => r.title)); // ["Customer Support", ...]
+```
+
+## Enhanced Guideline System
+
+### Flexible Guideline Conditions
+
+Guidelines now support the powerful `ConditionTemplate` system, allowing for more sophisticated behavioral control:
+
+```typescript
+// String-only condition (AI context)
+agent.addGuideline({
+  condition: "User is asking for technical help",
+  action: "Provide detailed technical explanations with examples"
+});
+
+// Function-only condition (programmatic)
+agent.addGuideline({
+  condition: (ctx) => ctx.data?.userType === 'premium',
+  action: "Offer priority support and additional features"
+});
+
+// Mixed array condition (hybrid approach)
+agent.addGuideline({
+  condition: [
+    "User seems confused or needs clarification", // AI context
+    (ctx) => ctx.data?.attemptCount > 2 // Programmatic check
+  ],
+  action: "Slow down, use simpler language, and offer to connect with human support"
+});
+
+// Complex conditional guidelines
+agent.addGuideline({
+  condition: [
+    "User is reporting a critical issue", // AI context
+    (ctx) => ctx.data?.accountTier === 'enterprise', // Account check
+    (ctx) => new Date().getHours() >= 9 && new Date().getHours() <= 17 // Business hours
+  ],
+  action: "Immediately escalate to senior technical support and provide direct contact information"
+});
+```
+
+### Guideline Evaluation Logic
+
+Guidelines use **AND logic** for arrays - all conditions must be met:
+
+- **String conditions**: Provide context to AI for guideline matching
+- **Function conditions**: Must return `true` for guideline to activate
+- **Arrays**: All functions must return `true`, strings provide AI context
+
+### Context-Aware Guidelines
+
+Guidelines can access both agent context and collected data:
+
+```typescript
+interface SupportContext {
+  userTier: 'free' | 'premium' | 'enterprise';
+  supportTicketCount: number;
+  lastContactDate?: Date;
+}
+
+interface SupportData {
+  issueType?: string;
+  severity?: 'low' | 'medium' | 'high' | 'critical';
+  previousAttempts?: number;
+}
+
+agent.addGuideline({
+  condition: [
+    "User has contacted support multiple times recently", // AI context
+    (ctx) => ctx.context?.supportTicketCount > 3, // Context check
+    (ctx) => ctx.data?.severity === 'high' // Data check
+  ],
+  action: "Acknowledge their patience, apologize for the inconvenience, and prioritize their case"
+});
+```
+
+### Dynamic Guideline Activation
+
+Guidelines can be activated based on conversation state:
+
+```typescript
+// Time-based guidelines
+agent.addGuideline({
+  condition: (ctx) => {
+    const hour = new Date().getHours();
+    return hour < 9 || hour > 17; // Outside business hours
+  },
+  action: "Inform user that live support is available during business hours (9 AM - 5 PM)"
+});
+
+// Progress-based guidelines
+agent.addGuideline({
+  condition: [
+    "User is making good progress", // AI context
+    (ctx) => Object.keys(ctx.data || {}).length > 3 // Has collected significant data
+  ],
+  action: "Acknowledge their cooperation and let them know we're almost done"
+});
+
+// Route-specific guidelines
+agent.addGuideline({
+  condition: [
+    "User is in the payment process", // AI context
+    (ctx) => ctx.session?.currentRoute?.id === 'payment_flow' // Route check
+  ],
+  action: "Be extra careful with payment information and confirm all details before processing"
+});
 ```
 
 ## Tool Integration

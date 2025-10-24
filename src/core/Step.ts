@@ -9,13 +9,15 @@ import type {
   BranchSpec,
   BranchResult,
   Guideline,
+  GuidelineMatch,
   Tool,
+  SessionState,
+  Event,
 } from "../types";
-import { ToolScope } from "../types";
-import { Template } from "../types/template";
+import { ToolScope, Template, ConditionTemplate, TemplateContext } from "../types";
+import { createConditionEvaluator, generateStepId, logger } from "../utils";
 import { Agent } from './Agent'
 import { END_ROUTE, END_ROUTE_ID } from "../constants";
-import { generateStepId } from "../utils/id";
 
 /**
  * Represents a step within a route
@@ -23,12 +25,12 @@ import { generateStepId } from "../utils/id";
 export class Step<TContext = unknown, TData = unknown> {
   public readonly id: string;
   private nextSteps: Step<TContext, TData>[] = [];
-  private guidelines: Guideline<TContext>[] = [];
+  private guidelines: Guideline<TContext, TData>[] = [];
   public readonly routeId: string;
   public collect?: (keyof TData)[];
   public description?: string;
-  public when?: Template<TContext, TData>;
-  public skipIf?: (data: Partial<TData>) => boolean;
+  public when?: ConditionTemplate<TContext, TData>;
+  public skipIf?: ConditionTemplate<TContext, TData>;
   public requires?: (keyof TData)[];
   public prompt?: Template<TContext, TData>;
   public prepare?:
@@ -63,6 +65,13 @@ export class Step<TContext = unknown, TData = unknown> {
     this.finalize = options.finalize;
     this.tools = options.tools;
 
+    // Initialize guidelines from options
+    if (options.guidelines) {
+      options.guidelines.forEach((guideline) => {
+        this.addGuideline(guideline);
+      });
+    }
+
     // Store reference to parent agent for ToolManager access
     this.parentAgent = parentAgent;
   }
@@ -74,7 +83,7 @@ export class Step<TContext = unknown, TData = unknown> {
   configure(config: {
     description?: string;
     collect?: (keyof TData)[];
-    skipIf?: (data: Partial<TData>) => boolean;
+    skipIf?: ConditionTemplate<TContext, TData>;
     requires?: (keyof TData)[];
     prompt?: Template<TContext, TData>;
     prepare?:
@@ -199,15 +208,64 @@ export class Step<TContext = unknown, TData = unknown> {
   /**
    * Add a guideline specific to this step
    */
-  addGuideline(guideline: Guideline<TContext>): void {
+  addGuideline(guideline: Guideline<TContext, TData>): void {
     this.guidelines.push(guideline);
   }
 
   /**
    * Get guidelines for this step
    */
-  getGuidelines(): Guideline<TContext>[] {
+  getGuidelines(): Guideline<TContext, TData>[] {
     return [...this.guidelines];
+  }
+
+  /**
+   * Evaluate and match active guidelines based on their conditions
+   * Returns guidelines that should be active given the current context
+   */
+  async evaluateGuidelines(
+    context?: TContext,
+    session?: SessionState<TData>,
+    history?: Event[]
+  ): Promise<GuidelineMatch<TContext, TData>[]> {
+    const templateContext = { context, session, history, data: session?.data || {} };
+    const evaluator = createConditionEvaluator(templateContext);
+    const matches: GuidelineMatch<TContext, TData>[] = [];
+
+    for (const guideline of this.guidelines) {
+      // Skip disabled guidelines
+      if (guideline.enabled === false) {
+        continue;
+      }
+
+      if (guideline.condition) {
+        const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
+        
+        // Include guideline if:
+        // 1. No programmatic conditions (only strings) - always active
+        // 2. Programmatic conditions evaluate to true
+        if (!evaluation.hasProgrammaticConditions || evaluation.programmaticResult) {
+          const rationale = evaluation.aiContextStrings.length > 0
+            ? `Condition met: ${evaluation.aiContextStrings.join(" AND ")}`
+            : evaluation.hasProgrammaticConditions
+              ? "Programmatic condition evaluated to true"
+              : "Always active (no conditions)";
+          
+          matches.push({
+            guideline,
+            rationale
+          });
+        }
+      } else {
+        // No condition means always active
+        matches.push({
+          guideline,
+          rationale: "Always active (no conditions)"
+        });
+      }
+    }
+
+    return matches;
   }
 
   /**
@@ -251,17 +309,17 @@ export class Step<TContext = unknown, TData = unknown> {
             resolvedTools.push(registeredTool);
           } else {
             // Tool not found - log warning but don't fail
-            console.warn(`[Step] Tool ID '${toolRef}' not found in any scope for step ${this.id}`);
+            logger.warn(`[Step] Tool ID '${toolRef}' not found in any scope for step ${this.id}`);
           }
         } else {
-          console.warn(`[Step] No parent agent available to resolve tool ID '${toolRef}' for step ${this.id}`);
+          logger.warn(`[Step] No parent agent available to resolve tool ID '${toolRef}' for step ${this.id}`);
         }
       } else {
         // Inline tool object - validate and use directly
         if (toolRef && toolRef.id && typeof toolRef.handler === 'function') {
           resolvedTools.push(toolRef);
         } else {
-          console.warn(`[Step] Invalid inline tool object in step ${this.id}:`, toolRef);
+          logger.warn(`[Step] Invalid inline tool object in step ${this.id}:`, toolRef);
         }
       }
     }
@@ -382,12 +440,62 @@ export class Step<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Check if this step should be skipped based on collected data
+   * Evaluate when condition using ConditionEvaluator
    */
-  shouldSkip(data: Partial<TData>): boolean {
-    if (!this.skipIf) return false;
-    return this.skipIf(data);
+  async evaluateWhen(
+    templateContext: TemplateContext<TContext, TData>
+  ): Promise<{ 
+    shouldActivate: boolean; 
+    aiContextStrings: string[];
+    hasProgrammaticConditions: boolean;
+  }> {
+    if (!this.when) {
+      return { 
+        shouldActivate: true, 
+        aiContextStrings: [], 
+        hasProgrammaticConditions: false 
+      };
+    }
+
+    const evaluator = createConditionEvaluator(templateContext);
+    const result = await evaluator.evaluateCondition(this.when, 'AND');
+    
+    return {
+      shouldActivate: result.programmaticResult,
+      aiContextStrings: result.aiContextStrings,
+      hasProgrammaticConditions: result.hasProgrammaticConditions
+    };
   }
+
+  /**
+   * Evaluate skipIf condition using ConditionEvaluator
+   */
+  async evaluateSkipIf(
+    templateContext: TemplateContext<TContext, TData>
+  ): Promise<{ 
+    shouldSkip: boolean; 
+    aiContextStrings: string[];
+    hasProgrammaticConditions: boolean;
+  }> {
+    if (!this.skipIf) {
+      return { 
+        shouldSkip: false, 
+        aiContextStrings: [], 
+        hasProgrammaticConditions: false 
+      };
+    }
+
+    const evaluator = createConditionEvaluator(templateContext);
+    const result = await evaluator.evaluateCondition(this.skipIf, 'OR');
+    
+    return {
+      shouldSkip: result.programmaticResult,
+      aiContextStrings: result.aiContextStrings,
+      hasProgrammaticConditions: result.hasProgrammaticConditions
+    };
+  }
+
+
 
   /**
    * Check if this step has all required data to proceed
@@ -460,6 +568,26 @@ export class Step<TContext = unknown, TData = unknown> {
         this.branch(branches),
       endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) =>
         this.endRoute(options),
+    };
+  }
+
+  /**
+   * Export step configuration as StepOptions for copying/cloning
+   * @returns StepOptions that can be used to create a new step with identical configuration
+   */
+  toOptions(): StepOptions<TContext, TData> {
+    return {
+      id: this.id,
+      description: this.description,
+      prompt: this.prompt,
+      tools: this.tools,
+      prepare: this.prepare,
+      finalize: this.finalize,
+      collect: this.collect,
+      skipIf: this.skipIf,
+      requires: this.requires,
+      when: this.when,
+      guidelines: this.getGuidelines(),
     };
   }
 }

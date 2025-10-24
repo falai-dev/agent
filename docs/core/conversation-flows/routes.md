@@ -44,7 +44,7 @@ const agent = new Agent<{}, HotelData>({
 const bookingRoute = agent.createRoute({
   title: "Hotel Booking",
   description: "Help users book hotel accommodations",
-  conditions: ["User wants to book a hotel"],
+  when: ["User wants to book a hotel"],
   requiredFields: ["destination", "checkIn", "checkOut", "guests", "customerName", "email"],
   optionalFields: ["roomType", "phone", "specialRequests"]
 });
@@ -52,7 +52,7 @@ const bookingRoute = agent.createRoute({
 const customerServiceRoute = agent.createRoute({
   title: "Customer Service",
   description: "Help with booking issues",
-  conditions: ["User needs help with existing booking"],
+  when: ["User needs help with existing booking"],
   requiredFields: ["customerName", "email"], // Minimal requirements
   optionalFields: ["phone", "destination"]
 });

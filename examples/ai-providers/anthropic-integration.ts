@@ -135,7 +135,7 @@ For example: "Research the impact of artificial intelligence on healthcare, comp
 const askTopic = researchRoute.initialStep.nextStep({
   prompt: "What topic would you like me to research?",
   collect: ["topic"],
-  skipIf: (data) => !!data.topic,
+  skipIf: (ctx) => !!ctx.data?.topic,
 });
 
 const askDepth = askTopic.nextStep({
@@ -143,14 +143,14 @@ const askDepth = askTopic.nextStep({
     "How deep should I go with this research? (overview, detailed, or comprehensive)",
   collect: ["depth"],
   requires: ["topic"],
-  skipIf: (data) => !!data.depth,
+  skipIf: (ctx) => !!ctx.data?.depth,
 });
 
 const askSources = askDepth.nextStep({
   prompt: "How many sources should I analyze? (1-20, default is 5)",
   collect: ["sources"],
   requires: ["topic"],
-  skipIf: (data) => data.sources !== undefined,
+  skipIf: (ctx) => ctx.data?.sources !== undefined,
 });
 
 const askFormat = askSources.nextStep({
@@ -158,7 +158,7 @@ const askFormat = askSources.nextStep({
     "What format would you prefer for the results? (summary, bullet_points, or structured)",
   collect: ["format"],
   requires: ["topic"],
-  skipIf: (data) => !!data.format,
+  skipIf: (ctx) => !!ctx.data?.format,
 });
 
 askFormat.nextStep({

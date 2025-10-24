@@ -1,4 +1,6 @@
 import type { Template, TemplateContext } from "../types";
+import type { Event, MessageEventData } from "../types/history";
+import { MessageRole, EventKind } from "../types/history";
 
 /**
  * Renders a template, which can be a string or a function, using the provided context.
@@ -202,6 +204,113 @@ export function renderTemplateObject(
   }
 
   return obj;
+}
+
+/**
+ * Creates helper functions for working with history and context in templates.
+ * These helpers make it easier to access message content and perform common operations.
+ *
+ * @param history - The event history array
+ * @returns Object containing helper functions
+ */
+export function createTemplateHelpers(history?: Event[]) {
+  const helpers = {
+    /**
+     * Get the last message from history, optionally filtered by role.
+     * @param role - Optional role to filter by (user, assistant, etc.)
+     * @returns The message content or undefined if not found
+     */
+    getLastMessage(role?: MessageRole): string | undefined {
+      if (!history || history.length === 0) return undefined;
+
+      // Search backwards through history for the most recent message
+      for (let i = history.length - 1; i >= 0; i--) {
+        const event = history[i];
+        if (event.kind === EventKind.MESSAGE) {
+          // If no role specified, return the first message found
+          if (!role || event.source === role) {
+            const messageData = event.data as MessageEventData;
+            return messageData.message;
+          }
+        }
+      }
+      return undefined;
+    },
+
+    /**
+     * Get the last user message from history.
+     * @returns The user message content or undefined if not found
+     */
+    getLastUserMessage(): string | undefined {
+      return helpers.getLastMessage(MessageRole.USER);
+    },
+
+    /**
+     * Get the last assistant message from history.
+     * @returns The assistant message content or undefined if not found
+     */
+    getLastAssistantMessage(): string | undefined {
+      return helpers.getLastMessage(MessageRole.ASSISTANT);
+    },
+
+    /**
+     * Get all messages from history, optionally filtered by role.
+     * @param role - Optional role to filter by
+     * @returns Array of message contents
+     */
+    getMessages(role?: MessageRole): string[] {
+      if (!history || history.length === 0) return [];
+
+      const messages: string[] = [];
+      for (const event of history) {
+        if (event.kind === EventKind.MESSAGE) {
+          if (!role || event.source === role) {
+            const messageData = event.data as MessageEventData;
+            messages.push(messageData.message);
+          }
+        }
+      }
+      return messages;
+    },
+
+    /**
+     * Check if the last message contains any of the given keywords.
+     * @param keywords - Keywords to search for
+     * @param caseSensitive - Whether to perform case-sensitive search (default: false)
+     * @returns True if any keyword is found
+     */
+    lastMessageContains(keywords: string | string[], caseSensitive: boolean = false): boolean {
+      const lastMessage = helpers.getLastMessage();
+      if (!lastMessage) return false;
+
+      const searchText = caseSensitive ? lastMessage : lastMessage.toLowerCase();
+      const keywordArray = Array.isArray(keywords) ? keywords : [keywords];
+      
+      return keywordArray.some(keyword => {
+        const searchKeyword = caseSensitive ? keyword : keyword.toLowerCase();
+        return searchText.includes(searchKeyword);
+      });
+    },
+  };
+
+  return helpers;
+}
+
+/**
+ * Creates a complete TemplateContext with helpers included.
+ * This is a convenience function for creating template contexts with all the helper methods.
+ *
+ * @param params - The base template context parameters
+ * @returns Complete TemplateContext with helpers
+ */
+export function createTemplateContext<TContext = unknown, TData = unknown>(
+  params: Omit<Partial<TemplateContext<TContext, TData>>, 'helpers'>
+): TemplateContext<TContext, TData> {
+  return {
+    ...params,
+    data: params.data || {},
+    helpers: createTemplateHelpers(params.history),
+  };
 }
 
 /**

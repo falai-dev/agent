@@ -78,11 +78,11 @@ const agent = new Agent({
   provider,
 });
 
-// Create a simple route
+// Create a simple route with basic string condition
 const generalRoute = agent.createRoute({
   title: "General Help",
   description: "Answers general questions",
-  conditions: ["User needs help or asks a question"],
+  when: ["User needs help or asks a question"], // Simple string condition
   initialStep: {
     prompt: "How can I help you today?",
   },
@@ -205,7 +205,7 @@ agent.addTool({
 const bookingRoute = agent.createRoute({
   title: "Travel Booking",
   description: "Help users book travel",
-  conditions: ["User wants to book travel"],
+  when: ["User wants to book travel"],
   requiredFields: ["destination", "travelDate", "travelers"], // Required for completion
   optionalFields: ["budget"], // Nice to have but not required
   
@@ -389,6 +389,185 @@ demonstrateLifecycleHooks();
 - ✅ Understood "Next Friday, 2 people, $2000 budget" as structured data
 - ✅ Skipped asking for already-known information
 - ✅ Used the ToolManager API to create and execute tools with simplified context
+
+---
+
+## 🎯 Flexible Routing Conditions (5 minutes)
+
+Learn how to create sophisticated routing logic with the new `ConditionTemplate` system:
+
+### Simple String Conditions (Beginner)
+
+Perfect for AI-driven routing decisions:
+
+```typescript
+// String conditions provide context to AI for routing
+const supportRoute = agent.createRoute({
+  title: "Customer Support",
+  when: "User needs help or has a problem", // AI understands intent
+  initialStep: {
+    prompt: "I'm here to help! What can I assist you with?",
+  },
+});
+
+const feedbackRoute = agent.createRoute({
+  title: "Feedback Collection", 
+  when: "User wants to leave feedback or a review", // AI context
+  initialStep: {
+    prompt: "I'd love to hear your feedback!",
+  },
+});
+```
+
+### Function Conditions (Advanced)
+
+For programmatic logic and precise control:
+
+```typescript
+interface UserContext {
+  userType: 'free' | 'premium' | 'enterprise';
+  loginCount: number;
+  lastActivity: Date;
+}
+
+const agent = new Agent<UserContext>({
+  name: "SmartAgent",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
+  context: {
+    userType: 'free',
+    loginCount: 1,
+    lastActivity: new Date(),
+  },
+});
+
+// Function-only conditions for precise control
+const premiumRoute = agent.createRoute({
+  title: "Premium Features",
+  when: (ctx) => ctx.context?.userType === 'premium', // Programmatic check
+  initialStep: {
+    prompt: "Welcome to premium features! What would you like to explore?",
+  },
+});
+
+const onboardingRoute = agent.createRoute({
+  title: "User Onboarding",
+  when: (ctx) => ctx.context?.loginCount <= 3, // New user logic
+  initialStep: {
+    prompt: "Welcome! Let me show you around.",
+  },
+});
+```
+
+### Mixed Array Conditions (Expert)
+
+Combine AI understanding with programmatic precision:
+
+```typescript
+interface SupportContext {
+  userTier: 'basic' | 'premium' | 'enterprise';
+  supportTickets: number;
+  accountAge: number; // days
+}
+
+interface SupportData {
+  issueType?: 'technical' | 'billing' | 'general';
+  priority?: 'low' | 'medium' | 'high';
+  previousAttempts?: number;
+}
+
+const agent = new Agent<SupportContext, SupportData>({
+  name: "SupportAgent",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
+});
+
+// Mixed conditions: AI context + programmatic logic
+const escalationRoute = agent.createRoute({
+  title: "Escalated Support",
+  when: [
+    "User is frustrated or needs urgent help", // AI context
+    (ctx) => ctx.data?.previousAttempts > 2, // Programmatic check
+    (ctx) => ctx.context?.userTier === 'enterprise' // Context check
+  ],
+  skipIf: [
+    "Support system is under maintenance", // AI context
+    (ctx) => new Date().getHours() < 9 || new Date().getHours() > 17 // Outside hours
+  ],
+  initialStep: {
+    prompt: "I understand this is urgent. Let me connect you with our senior support team.",
+  },
+});
+
+// Advanced step conditions
+const technicalStep = escalationRoute.initialStep.nextStep({
+  when: [
+    "User has a technical issue that needs expert help", // AI context
+    (ctx) => ctx.data?.issueType === 'technical' // Data check
+  ],
+  skipIf: (ctx) => ctx.data?.priority === 'low', // Skip low priority technical issues
+  prompt: "Let me get our technical expert to help you.",
+  collect: ["issueDescription"]
+});
+```
+
+### Route SkipIf (Dynamic Exclusion)
+
+Exclude routes from consideration based on conditions:
+
+```typescript
+const paymentRoute = agent.createRoute({
+  title: "Payment Processing",
+  when: ["User wants to make a payment or purchase"],
+  skipIf: [
+    "Payment system is temporarily unavailable", // AI context
+    (ctx) => ctx.context?.paymentSystemDown === true, // System check
+    (ctx) => ctx.data?.paymentBlocked === true // User-specific block
+  ],
+  initialStep: {
+    prompt: "I'll help you with your payment.",
+  },
+});
+
+const maintenanceRoute = agent.createRoute({
+  title: "Maintenance Notice",
+  when: "User asks about system issues or downtime",
+  skipIf: (ctx) => ctx.context?.maintenanceMode !== true, // Only show during maintenance
+  initialStep: {
+    prompt: "We're currently performing scheduled maintenance. Service will resume shortly.",
+  },
+});
+```
+
+### Testing Your Conditions
+
+```typescript
+async function testConditions() {
+  // Test with different contexts
+  const basicUser = { userTier: 'basic', supportTickets: 1, accountAge: 30 };
+  const premiumUser = { userTier: 'premium', supportTickets: 5, accountAge: 365 };
+
+  // Basic user - should get standard support
+  const response1 = await agent.respond("I need help", {
+    contextOverride: basicUser
+  });
+  console.log("Basic user route:", response1.session?.currentRoute?.title);
+
+  // Premium user with multiple tickets - should get escalated support
+  const response2 = await agent.respond("I'm having issues again", {
+    contextOverride: premiumUser
+  });
+  console.log("Premium user route:", response2.session?.currentRoute?.title);
+}
+
+testConditions();
+```
+
+**Key Benefits:**
+
+- ✅ **Simple strings** for AI-driven routing decisions
+- ✅ **Functions** for precise programmatic control  
+- ✅ **Arrays** to combine both approaches
+- ✅ **Route skipIf** for dynamic exclusion
+- ✅ **Context access** in all condition types
 
 ---
 

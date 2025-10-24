@@ -14,8 +14,6 @@ import {
   GeminiProvider,
   RedisAdapter,
   END_ROUTE,
-  MessageRole,
-  type HistoryItem,
 } from "../../src";
 // @ts-expect-error - Redis is not typed
 import Redis from "ioredis";
@@ -94,7 +92,7 @@ async function example() {
     schema: supportTicketSchema,
     // ✨ Redis adapter with custom options
     persistence: {
-      adapter: new RedisAdapter<ChatContext>({
+      adapter: new RedisAdapter({
         redis,
         keyPrefix: "support:", // Custom prefix
         sessionTTL: 24 * 60 * 60, // 24 hours
@@ -109,7 +107,7 @@ async function example() {
   const ticketRoute = agent.createRoute({
     title: "Create Support Ticket",
     description: "Help user create and track support tickets",
-    conditions: [
+    when: [
       "User needs help with an issue",
       "User wants to report a problem",
       "User mentions support, help, or issue",
@@ -125,18 +123,18 @@ async function example() {
     .nextStep({
       prompt: "Ask what the issue is",
       collect: ["issue", "category"],
-      skipIf: (data) => !!data.issue && !!data.category,
+      skipIf: (ctx) => !!ctx.data?.issue && !!ctx.data.category,
     })
     .nextStep({
       prompt: "Ask for priority",
       collect: ["priority"],
-      skipIf: (data) => !!data.priority,
+      skipIf: (ctx) => !!ctx.data?.priority,
       requires: ["issue", "category"],
     })
     .nextStep({
       prompt: "Ask for detailed description",
       collect: ["description"],
-      skipIf: (data) => !!data.description,
+      skipIf: (ctx) => !!ctx.data?.description,
       requires: ["issue", "category"],
     })
     .nextStep({
@@ -213,7 +211,7 @@ async function example() {
     // NEW: Agent-level schema (same as original agent)
     schema: supportTicketSchema,
     persistence: {
-      adapter: new RedisAdapter<ChatContext>({
+      adapter: new RedisAdapter({
         redis,
         keyPrefix: "support:",
         sessionTTL: 24 * 60 * 60,
@@ -228,7 +226,7 @@ async function example() {
   recoveredAgent.createRoute({
     title: "Create Support Ticket",
     description: "Help user create and track support tickets",
-    conditions: [
+    when: [
       "User needs help with an issue",
       "User wants to report a problem",
       "User mentions support, help, or issue",

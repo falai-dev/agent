@@ -8,6 +8,12 @@
  * 3. Session step management even for stepless conversations
  * 4. Always-on routing with context awareness
  * 5. Three-phase pipeline: PREPARATION → ROUTING → RESPONSE
+ * 6. NEW: Complex ConditionTemplate patterns for intelligent routing:
+ *    - Mixed conditions: ["AI context", (ctx) => programmatic_check]
+ *    - Route skipIf: Dynamic route exclusion based on message content
+ *    - Function-only conditions: (ctx) => sophisticated_logic
+ *    - String-only conditions: "simple AI context"
+ *    - Fallback routing with programmatic logic
  */
 
 import {
@@ -119,7 +125,7 @@ const searchKnowledgeTool: Tool<CompanyContext, UnifiedData> = {
     ).message.toLowerCase();
 
     // Simple keyword matching (in real app, use vector search)
-    const relevantFaqs = context.context.faqs.filter(
+    const relevantFaqs = toolContext.context.faqs.filter(
       (faq) =>
         faq.question.toLowerCase().includes(query) ||
         faq.answer.toLowerCase().includes(query)
@@ -262,12 +268,25 @@ const agent = new Agent<CompanyContext, UnifiedData>({
 agent.createRoute({
   title: "Company Information",
   description: "Answer general questions about Acme Corp",
-  conditions: [
+  // Mixed condition: AI context + programmatic validation
+  when: [
     "User asks about the company",
     "Questions about company history, size, location",
     "When was the company founded",
     "How many employees",
     "Where is the headquarters",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('company') || message.includes('acme') || message.includes('founded');
+    }
+  ],
+  // Skip if user is asking about specific products instead
+  skipIf: [
+    "user is asking about specific products or services",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('widget') || message.includes('gadget') || message.includes('product');
+    }
   ],
   // Route-specific knowledge base for company information
   knowledgeBase: {
@@ -299,12 +318,18 @@ agent.createRoute({
 agent.createRoute({
   title: "Product Information",
   description: "Answer questions about products",
-  conditions: [
-    "User asks about products",
-    "Questions about features, pricing, availability",
-    "What products do you offer",
-    "Tell me about your widgets",
-  ],
+  // Function-only condition for programmatic logic
+  when: (ctx) => {
+    const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+    return message.includes('product') || message.includes('widget') || 
+           message.includes('gadget') || message.includes('price') || 
+           message.includes('feature');
+  },
+  // Skip if user is asking about company policies instead
+  skipIf: (ctx) => {
+    const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+    return message.includes('policy') || message.includes('return') || message.includes('warranty');
+  },
   // NO schema - just answering questions
 });
 
@@ -315,11 +340,25 @@ agent.createRoute({
 agent.createRoute({
   title: "Policy Information",
   description: "Answer questions about company policies",
-  conditions: [
+  // Mixed condition: AI context + programmatic check
+  when: [
     "User asks about policies",
     "Return policy",
-    "Shipping information",
+    "Shipping information", 
     "Warranty questions",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('policy') || message.includes('return') || 
+             message.includes('shipping') || message.includes('warranty');
+    }
+  ],
+  // Skip if user is asking about news or updates
+  skipIf: [
+    "user wants latest news or updates",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('news') || message.includes('update') || message.includes('new');
+    }
   ],
   // NO schema
 });
@@ -330,12 +369,13 @@ agent.createRoute({
 const newsRoute = agent.createRoute({
   title: "Company News",
   description: "Share latest company news and updates",
-  conditions: [
-    "User asks about news",
-    "What's new",
-    "Recent updates",
-    "Latest announcements",
-  ],
+  // String-only condition for AI context
+  when: "User asks about news, updates, or recent announcements",
+  // Skip if user is asking about general FAQ topics
+  skipIf: (ctx) => {
+    const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+    return message.includes('how do i') || message.includes('can i') || message.includes('is there');
+  },
 });
 
 // Add tool to initial step to fetch news
@@ -351,11 +391,25 @@ fetchNews.nextStep({
 const faqRoute = agent.createRoute({
   title: "FAQ Search",
   description: "Search FAQs for relevant answers",
-  conditions: [
+  // Mixed condition: AI context + programmatic pattern matching
+  when: [
     "User has a question that might be in FAQs",
     "How do I...",
     "Can I...",
     "Is there...",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.startsWith('how ') || message.startsWith('can ') || 
+             message.startsWith('is ') || message.includes('?');
+    }
+  ],
+  // Skip if user is clearly asking for news or company info
+  skipIf: [
+    "user wants company news or general company information",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('news') || message.includes('company') || message.includes('founded');
+    }
   ],
 });
 
@@ -372,12 +426,15 @@ searchFaqs.nextStep({
 agent.createRoute({
   title: "General Conversation",
   description: "Handle general conversation or unclear questions",
-  conditions: [
-    "User message doesn't match other routes",
-    "Greetings",
-    "Small talk",
-    "Unclear intent",
-  ],
+  // Function-only condition for fallback logic
+  when: (ctx) => {
+    // This route catches everything that doesn't match other routes
+    const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+    return !message.includes('product') && !message.includes('policy') && 
+           !message.includes('news') && !message.includes('company');
+  },
+  // Never skip the fallback route
+  skipIf: ()=>false,
 });
 
 // Initial step is enough for fallback conversations
@@ -386,7 +443,27 @@ agent.createRoute({
 const feedbackRoute = agent.createRoute({
   title: "Collect Feedback",
   description: "Collect user feedback about their experience",
-  conditions: ["User wants to leave feedback", "User seems satisfied or upset"],
+  // Mixed condition: AI context + sentiment analysis
+  when: [
+    "User wants to leave feedback", 
+    "User seems satisfied or upset",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('feedback') || message.includes('review') || 
+             message.includes('satisfied') || message.includes('disappointed');
+    }
+  ],
+  // Skip if user is in the middle of another task
+  skipIf: [
+    "user is actively getting help with something else",
+    (ctx) => {
+      const recentMessages = ctx.history?.filter((m) => "content" in m).slice(-3) || [];
+      return recentMessages.some(msg => 
+        (msg.content as string)?.toLowerCase().includes('help') || 
+        (msg.content as string)?.toLowerCase().includes('problem')
+      );
+    }
+  ],
   // NEW: Required fields for route completion
   requiredFields: ["rating", "comments"],
   // NEW: Optional fields

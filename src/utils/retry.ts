@@ -1,6 +1,7 @@
 /**
  * Retry utility with exponential backoff
  */
+import {logger} from './logger'
 
 export interface RetryOptions<T> {
   operation: () => Promise<T>;
@@ -78,18 +79,18 @@ export const withTimeoutAndRetry = async <T>(
     delay: (attempt: number) => Math.min(1000 * Math.pow(2, attempt), 5000),
     onRetry: (attempt: number, error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(
+      logger.error(
         `[${operationName}] Failed attempt ${attempt + 1}:`,
         message
       );
       const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-      console.log(`[${operationName}] Retrying in ${delay}ms...`);
-      console.log(
+      logger.debug(`[${operationName}] Retrying in ${delay}ms...`);
+      logger.debug(
         `[${operationName}] Attempt ${attempt + 2}/${maxRetries + 1}`
       );
     },
     onFailure: (_error: unknown) => {
-      console.error(`[${operationName}] All ${maxRetries + 1} attempts failed`);
+      logger.error(`[${operationName}] All ${maxRetries + 1} attempts failed`);
       return true;
     },
   });

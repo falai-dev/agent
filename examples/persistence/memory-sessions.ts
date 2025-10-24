@@ -110,7 +110,7 @@ const supportRoute = agent.createRoute({
       prompt:
         "Hi! I'm here to help with your support request. What's the issue you're experiencing?",
       collect: ["issue"],
-      skipIf: (data: Partial<SupportTicketData>) => !!data.issue,
+      skipIf: (ctx) => !!ctx.data?.issue,
     },
     {
       id: "ask_category",
@@ -119,7 +119,7 @@ const supportRoute = agent.createRoute({
         "What category does this issue fall under? (technical, billing, account, or general)",
       collect: ["category"],
       requires: ["issue"],
-      skipIf: (data: Partial<SupportTicketData>) => !!data.category,
+      skipIf: (ctx) => !!ctx.data?.category,
     },
     {
       id: "ask_priority",
@@ -128,7 +128,7 @@ const supportRoute = agent.createRoute({
         "How would you rate the priority of this issue? (low, medium, or high)",
       collect: ["priority"],
       requires: ["issue", "category"],
-      skipIf: (data: Partial<SupportTicketData>) => !!data.priority,
+      skipIf: (ctx) => !!ctx.data?.priority,
     },
     {
       id: "create_ticket",

@@ -65,7 +65,7 @@ function createTestAgentWithRoute(provider?: MockProvider): Agent<TestContext, T
   agent.createRoute({
     title: "Support Request",
     description: "Handle customer support requests",
-    conditions: ["User needs help"],
+    when: ["User needs help"],
     requiredFields: ["issue"],
     optionalFields: ["priority"],
     steps: [

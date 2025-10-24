@@ -10,6 +10,11 @@
  * - Data persistence across turns
  * - Session restoration
  * - Route transitions with session state
+ * - NEW: Flexible ConditionTemplate patterns for session-aware routing:
+ *   - String-only conditions: "user wants to order" (AI context only)
+ *   - Function-only conditions: (ctx) => !!ctx.data?.orderId (session state checks)
+ *   - Mixed arrays: ["payment needed", (ctx) => !ctx.data?.confirmed] (hybrid)
+ *   - Session-aware skipIf conditions for flow control
  */
 
 import {
@@ -96,7 +101,7 @@ const processPaymentTool: Tool<unknown, UnifiedOrderData> = {
 };
 
 // Define unified data schema for all order-related interactions
-interface UnifiedOrderData extends OrderData, PaymentData {}
+interface UnifiedOrderData extends OrderData, PaymentData { }
 
 const orderSchema = {
   type: "object",
@@ -147,16 +152,16 @@ const orderValidationTool = agent.tool.createValidation({
   validator: async (context, data) => {
     const errors: ValidationError[] = [];
     if (!data.customerName || data.customerName.length < 2) {
-      errors.push({ 
-        field: "customerName", 
+      errors.push({
+        field: "customerName",
         value: data.customerName,
         message: "Customer name must be at least 2 characters",
         schemaPath: "customerName"
       });
     }
     if (!data.budget || data.budget < 100) {
-      errors.push({ 
-        field: "budget", 
+      errors.push({
+        field: "budget",
         value: data.budget,
         message: "Budget must be at least $100",
         schemaPath: "budget"
@@ -178,7 +183,7 @@ const orderEnrichmentTool = agent.tool.createDataEnrichment({
     // Enrich with fields that exist in UnifiedOrderData
     const urgentDelivery = data.budget > 1000; // Premium orders get urgent delivery
     const preferredColor = data.productType === "laptop" ? "silver" : "black";
-    
+
     return {
       urgentDelivery,
       preferredColor,
@@ -190,6 +195,19 @@ const orderEnrichmentTool = agent.tool.createDataEnrichment({
 agent.createRoute({
   title: "Product Order",
   description: "Collect order details and create an order",
+  // Mixed condition: AI context + programmatic validation
+  when: [
+    "user wants to place an order or buy something",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('order') || message.includes('buy') || message.includes('purchase');
+    }
+  ],
+  // Skip if user already has a pending order
+  skipIf: [
+    "user already has an active order",
+    (ctx) => !!ctx.data?.orderId && !ctx.data?.confirmed
+  ],
   // NEW: Required fields for route completion
   requiredFields: ["customerName", "productType", "budget"],
   // NEW: Optional fields that enhance the experience
@@ -201,7 +219,8 @@ agent.createRoute({
       description: "Ask for customer name",
       prompt: "Hi! I'd like to help you place an order. What's your name?",
       collect: ["customerName"],
-      skipIf: (data: Partial<UnifiedOrderData>) => !!data.customerName,
+      // String-only skipIf for AI context
+      skipIf: "customer name already provided",
     },
     {
       id: "ask_product",
@@ -209,7 +228,8 @@ agent.createRoute({
       prompt: "What would you like to order? (laptop, phone, or tablet)",
       collect: ["productType"],
       requires: ["customerName"],
-      skipIf: (data: Partial<UnifiedOrderData>) => !!data.productType,
+      // Function-only skipIf for programmatic check
+      skipIf: (ctx) => !!ctx.data?.productType,
     },
     {
       id: "ask_budget",
@@ -217,7 +237,11 @@ agent.createRoute({
       prompt: "What's your budget for this purchase?",
       collect: ["budget"],
       requires: ["customerName", "productType"],
-      skipIf: (data: Partial<UnifiedOrderData>) => data.budget !== undefined,
+      // Mixed skipIf: AI context + programmatic logic
+      skipIf: [
+        "budget already specified",
+        (ctx) => ctx.data?.budget !== undefined
+      ],
     },
     {
       id: "ask_color",
@@ -225,7 +249,8 @@ agent.createRoute({
       prompt: "Do you have a preferred color?",
       collect: ["preferredColor"],
       requires: ["customerName", "productType", "budget"],
-      skipIf: (data: Partial<UnifiedOrderData>) => !!data.preferredColor,
+      // Function-only skipIf
+      skipIf: (ctx) => !!ctx.data?.preferredColor,
     },
     {
       id: "ask_urgent",
@@ -233,7 +258,8 @@ agent.createRoute({
       prompt: "Do you need urgent delivery?",
       collect: ["urgentDelivery"],
       requires: ["customerName", "productType", "budget"],
-      skipIf: (data: Partial<UnifiedOrderData>) => data.urgentDelivery !== undefined,
+      // String-only skipIf for simple cases
+      skipIf: "delivery preference already collected",
     },
     {
       id: "create_order",
@@ -253,6 +279,10 @@ agent.createRoute({
 agent.createRoute({
   title: "Payment Processing",
   description: "Process payment for an order",
+  // Function-only condition for programmatic logic
+  when: (ctx) => !!ctx.data?.orderId && !ctx.data?.confirmed,
+  // Skip if payment already processed
+  skipIf: (ctx) => !!ctx.data?.confirmed,
   // NEW: Required fields for route completion
   requiredFields: ["orderId", "paymentMethod", "amount"],
   // NEW: Optional fields
@@ -265,7 +295,11 @@ agent.createRoute({
       prompt:
         "Now let's process payment for your order. What payment method would you prefer?",
       collect: ["paymentMethod"],
-      skipIf: (data: Partial<UnifiedOrderData>) => !!data.paymentMethod,
+      // Mixed skipIf: AI context + programmatic check
+      skipIf: [
+        "payment method already selected",
+        (ctx) => !!ctx.data?.paymentMethod
+      ],
     },
     {
       id: "ask_amount",
@@ -273,7 +307,8 @@ agent.createRoute({
       prompt: "What's the payment amount?",
       collect: ["amount"],
       requires: ["paymentMethod"],
-      skipIf: (data: Partial<UnifiedOrderData>) => data.amount !== undefined,
+      // Function-only skipIf
+      skipIf: (ctx) => ctx.data?.amount !== undefined,
     },
     {
       id: "process_payment",
@@ -308,7 +343,7 @@ async function demonstrateSessionManagement() {
 
   // Copy routes to the session agent
   agent.getRoutes().forEach(route => {
-    sessionAgent.createRoute(route);
+    sessionAgent.createRoute(route.toOptions());
   });
 
   // Turn 1: Start order process - simple message API
@@ -387,7 +422,7 @@ async function demonstrateSessionPersistence() {
 
   // Copy routes to the persistent agent
   agent.getRoutes().forEach(route => {
-    persistentAgent.createRoute(route);
+    persistentAgent.createRoute(route.toOptions());
   });
 
   console.log("Session ready:", persistentAgent.session.id);
@@ -426,7 +461,7 @@ async function demonstrateSessionPersistence() {
 
   // Copy routes to the restored agent
   agent.getRoutes().forEach(route => {
-    restoredAgent.createRoute(route);
+    restoredAgent.createRoute(route.toOptions());
   });
 
   console.log("Session automatically restored:");

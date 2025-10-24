@@ -155,7 +155,7 @@ async function example() {
   const onboardingRoute = agent.createRoute({
     title: "Customer Onboarding",
     description: "Collect customer information",
-    conditions: [
+    when: [
       "User is a new customer",
       "User needs to set up their account",
     ],
@@ -171,19 +171,19 @@ async function example() {
       id: "ask_name",
       prompt: "Ask for full name",
       collect: ["fullName"],
-      skipIf: (data: Partial<OnboardingData>) => !!data.fullName,
+      skipIf: (ctx) => !!ctx.data?.fullName,
     })
     .nextStep({
       id: "ask_email",
       prompt: "Ask for email address",
       collect: ["email"],
-      skipIf: (data: Partial<OnboardingData>) => !!data.email,
+      skipIf: (ctx) => !!ctx.data?.email,
     })
     .nextStep({
       id: "ask_company",
       prompt: "Ask for company name",
       collect: ["companyName"],
-      skipIf: (data: Partial<OnboardingData>) => !!data.companyName,
+      skipIf: (ctx) => !!ctx.data?.companyName,
     })
     .nextStep({
       id: "ask_phone",
@@ -414,7 +414,7 @@ async function syncSessionToDatabase(
 /**
  * Mock function to simulate processing the completed onboarding data.
  */
-async function processOnboarding(data: Partial<OnboardingData> | undefined) {
+async function processOnboarding(data) {
   console.log("\n🚀 Processing onboarding data...");
   console.log(
     `   - Creating account for ${data?.fullName} at ${data?.companyName}`
@@ -453,7 +453,7 @@ async function advancedExample() {
     schema: smartOnboardingSchema,
     hooks: {
       // Validate and enrich collected data
-      onDataUpdate: (data: Partial<OnboardingData>, _previous: Partial<OnboardingData>) => {
+      onDataUpdate: (data, _previous: Partial<OnboardingData>) => {
         console.log("🔄 Data collected, validating...");
 
         // Normalize email

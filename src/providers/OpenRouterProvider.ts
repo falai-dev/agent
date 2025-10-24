@@ -15,7 +15,7 @@ import type {
   GenerateMessageStreamChunk,
   StructuredSchema,
 } from "../types";
-import { withTimeoutAndRetry } from "../utils/retry";
+import { withTimeoutAndRetry, logger } from "../utils";
 
 const DEFAULT_RETRY_CONFIG = {
   timeout: 60000,
@@ -214,7 +214,7 @@ export class OpenRouterProvider implements AiProvider {
       return await this.generateWithModel(this.primaryModel, input);
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[OPENROUTER] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -222,13 +222,13 @@ export class OpenRouterProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[OPENROUTER] Trying backup models`);
+      logger.debug(`[OPENROUTER] Trying backup models`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
+        logger.debug(
           `[OPENROUTER] Trying backup model ${i + 1}/${
             this.backupModels.length
           }: ${backupModel}`
@@ -236,11 +236,11 @@ export class OpenRouterProvider implements AiProvider {
 
         try {
           const result = await this.generateWithModel(backupModel, input);
-          console.log(`[OPENROUTER] Backup model ${backupModel} succeeded`);
+          logger.debug(`[OPENROUTER] Backup model ${backupModel} succeeded`);
           return result as GenerateMessageOutput<TStructured>;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[OPENROUTER] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -249,7 +249,7 @@ export class OpenRouterProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[OPENROUTER] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -258,7 +258,7 @@ export class OpenRouterProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[OPENROUTER] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -364,7 +364,7 @@ export class OpenRouterProvider implements AiProvider {
                 toolCall.function.arguments
               ) as Record<string, unknown>;
             } catch (error) {
-              console.warn(
+              logger.warn(
                 `[OPENROUTER] Failed to parse tool call arguments: ${getErrorMessage(
                   error
                 )}`
@@ -413,7 +413,7 @@ export class OpenRouterProvider implements AiProvider {
       yield* this.generateStreamWithModel(this.primaryModel, input);
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[OPENROUTER] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -421,13 +421,13 @@ export class OpenRouterProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[OPENROUTER] Trying backup models for streaming`);
+      logger.debug(`[OPENROUTER] Trying backup models for streaming`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
+        logger.debug(
           `[OPENROUTER] Trying backup model ${i + 1}/${
             this.backupModels.length
           }: ${backupModel}`
@@ -435,11 +435,11 @@ export class OpenRouterProvider implements AiProvider {
 
         try {
           yield* this.generateStreamWithModel(backupModel, input);
-          console.log(`[OPENROUTER] Backup model ${backupModel} succeeded`);
+          logger.debug(`[OPENROUTER] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[OPENROUTER] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -448,7 +448,7 @@ export class OpenRouterProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[OPENROUTER] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -457,7 +457,7 @@ export class OpenRouterProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[OPENROUTER] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -537,7 +537,7 @@ export class OpenRouterProvider implements AiProvider {
                   >)
                 : {};
             } catch (error) {
-              console.warn(
+              logger.warn(
                 `[OPENROUTER] Failed to parse tool call arguments in stream: ${getErrorMessage(
                   error
                 )}`
@@ -579,7 +579,7 @@ export class OpenRouterProvider implements AiProvider {
       try {
         structured = JSON.parse(accumulated) as TStructured;
       } catch (error) {
-        console.warn(
+        logger.warn(
           "[OPENROUTER] Failed to parse JSON response in stream:",
           error
         );

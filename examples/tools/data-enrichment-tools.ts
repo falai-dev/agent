@@ -410,7 +410,7 @@ const flightDataValidator = agent.tool.createValidation({
 const bookingRoute = agent.createRoute({
   title: "Book Flight",
   description: "Help user book a flight",
-  conditions: [
+  when: [
     "User wants to book a flight",
     "User mentions flying, traveling, or booking",
   ],
@@ -431,7 +431,7 @@ bookingRoute.addTool({
 const collectDestination = bookingRoute.initialStep.nextStep({
   prompt: "Ask where they want to fly",
   collect: ["destination"],
-  skipIf: (data) => !!data.destination,
+  skipIf: (ctx) => !!ctx.data?.destination,
 });
 
 // Step 2: Enrich destination (tool execution)
@@ -444,7 +444,7 @@ const enrichDestination = collectDestination.nextStep({
 const collectDate = enrichDestination.nextStep({
   prompt: "Ask when they want to depart",
   collect: ["departureDate"],
-  skipIf: (data) => !!data.departureDate,
+  skipIf: (ctx) => !!ctx.data?.departureDate,
 });
 
 // Step 4: Validate/parse date (tool execution)
@@ -457,7 +457,7 @@ const validateDate = collectDate.nextStep({
 const collectPassengers = validateDate.nextStep({
   prompt: "Ask how many passengers",
   collect: ["passengers"],
-  skipIf: (data) => !!data.passengers,
+  skipIf: (ctx) => !!ctx.data?.passengers,
 });
 
 // Step 6: Search flights (triggered by hook setting shouldSearchFlights)

@@ -73,7 +73,7 @@ function createStreamingAgentWithRoute(provider?: MockProvider): Agent<TestConte
   agent.createRoute({
     title: "Streaming Support",
     description: "Handle support requests with streaming",
-    conditions: ["User needs streaming help"],
+    when: ["User needs streaming help"],
     requiredFields: ["issue", "category"],
     optionalFields: ["priority"],
     steps: [

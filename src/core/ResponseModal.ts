@@ -23,6 +23,7 @@ import { Step } from "./Step";
 import { ResponseEngine } from "./ResponseEngine";
 import { ResponsePipeline } from "./ResponsePipeline";
 import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents } from "../utils";
+import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
 import { END_ROUTE_ID } from "../constants";
 
@@ -480,12 +481,57 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 context: params.context,
                 signal: params.signal,
             });
+
+            let updatedSession = routingResult.session;
+            let isRouteComplete = routingResult.isRouteComplete;
+
+            // PRE-EXTRACTION: If entering a new route that collects data, extract data from user message first
+            // This allows us to skip steps whose data is already provided
+            if (routingResult.selectedRoute && !isRouteComplete) {
+                const isEnteringNewRoute = !params.session.currentRoute || 
+                    params.session.currentRoute.id !== routingResult.selectedRoute.id;
+
+                if (isEnteringNewRoute && this.shouldPreExtractData(routingResult.selectedRoute)) {
+                    logger.debug(
+                        `[ResponseModal] Pre-extracting data for route: ${routingResult.selectedRoute.title}`
+                    );
+
+                    const extractedData = await this.preExtractRouteData({
+                        route: routingResult.selectedRoute,
+                        history: params.history,
+                        context: params.context,
+                        session: updatedSession,
+                        signal: params.signal,
+                    });
+
+                    if (extractedData && Object.keys(extractedData).length > 0) {
+                        logger.debug(
+                            `[ResponseModal] Pre-extracted data:`,
+                            extractedData
+                        );
+                        // Update session with pre-extracted data
+                        updatedSession = mergeCollected(updatedSession, extractedData);
+                        // Also update agent's collected data
+                        await this.agent.updateCollectedData(extractedData);
+
+                        // Re-check route completion after pre-extraction
+                        const allRequiredFieldsCollected = routingResult.selectedRoute.isComplete(updatedSession.data || {});
+                        if (allRequiredFieldsCollected) {
+                            logger.debug(
+                                `[ResponseModal] Route ${routingResult.selectedRoute.title} completed after pre-extraction`
+                            );
+                            isRouteComplete = true;
+                        }
+                    }
+                }
+            }
+
             // Determine next step using pipeline method for consistency
-            const stepResult = this.responsePipeline.determineNextStep({
+            const stepResult = await this.responsePipeline.determineNextStep({
                 selectedRoute: routingResult.selectedRoute,
                 selectedStep: routingResult.selectedStep,
-                session: routingResult.session,
-                isRouteComplete: routingResult.isRouteComplete,
+                session: updatedSession, // Use updated session with pre-extracted data
+                isRouteComplete, // Use updated completion status
             });
 
             return {
@@ -493,10 +539,100 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 selectedStep: stepResult.nextStep, // Use the determined next step
                 responseDirectives: routingResult.responseDirectives,
                 session: stepResult.session,
-                isRouteComplete: routingResult.isRouteComplete,
+                isRouteComplete, // Use updated completion status
             };
         } catch (error) {
             throw ResponseGenerationError.fromError(error, 'routing_optimization', params);
+        }
+    }
+
+    /**
+     * Check if a route should pre-extract data before determining the initial step
+     * @private
+     */
+    private shouldPreExtractData(route: Route<TContext, TData>): boolean {
+        // Pre-extract if route has declared required or optional fields
+        if (route.requiredFields && route.requiredFields.length > 0) {
+            return true;
+        }
+        if (route.optionalFields && route.optionalFields.length > 0) {
+            return true;
+        }
+
+        // Pre-extract if any step in the route collects data
+        const steps = route.getAllSteps();
+        const hasDataCollectionSteps = steps.some(
+            step => step.collect && step.collect.length > 0
+        );
+
+        return hasDataCollectionSteps;
+    }
+
+    /**
+     * Pre-extract data from user message when entering a route
+     * This allows skipping steps whose data is already provided
+     * @private
+     */
+    private async preExtractRouteData(params: {
+        route: Route<TContext, TData>;
+        history: Event[];
+        context: TContext;
+        session: SessionState<TData>;
+        signal?: AbortSignal;
+    }): Promise<Partial<TData>> {
+        const { route, history, context, signal } = params;
+
+        // Build a schema for data extraction based on route's fields
+        const extractionSchema = this.agent.getSchema();
+        if (!extractionSchema) {
+            logger.warn(`[ResponseModal] No schema available for pre-extraction`);
+            return {};
+        }
+
+        // Get last user message
+        const lastMessage = getLastMessageFromHistory(history);
+
+        // Build extraction prompt
+        const extractionPrompt = [
+            `Extract any relevant information from the user's message that matches the following data fields.`,
+            `Only extract information that is explicitly stated or clearly implied.`,
+            ``,
+            `User's message: "${lastMessage}"`,
+            ``,
+            `Extract data for these fields if present:`,
+        ];
+
+        // Add field descriptions
+        if (route.requiredFields) {
+            extractionPrompt.push(`Required fields: ${route.requiredFields.join(', ')}`);
+        }
+        if (route.optionalFields) {
+            extractionPrompt.push(`Optional fields: ${route.optionalFields.join(', ')}`);
+        }
+
+        extractionPrompt.push(
+            ``,
+            `Return ONLY the extracted data as JSON. If no data can be extracted, return an empty object {}.`
+        );
+
+        // Call AI to extract data
+        const agentOptions = this.agent.getAgentOptions();
+        try {
+            const result = await agentOptions.provider.generateMessage<TContext, Partial<TData>>({
+                prompt: extractionPrompt.join('\n'),
+                history,
+                context,
+                signal,
+                parameters: {
+                    jsonSchema: extractionSchema,
+                    schemaName: 'data_extraction',
+                },
+            });
+
+            return result.structured || {};
+        } catch (error) {
+            logger.error(`[ResponseModal] Pre-extraction failed:`, error);
+            return {};
         }
     }
 
@@ -541,18 +677,27 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         } else if (isRouteComplete && selectedRoute) {
             // Handle route completion
+            logger.debug(`[ResponseModal] Generating completion message for route: ${selectedRoute.title}`);
 
-            message = await this.handleRouteCompletion({
-                selectedRoute,
-                session,
-                context: effectiveContext,
-                lastMessageText,
-                historyEvents,
-            });
+            try {
+                message = await this.handleRouteCompletion({
+                    selectedRoute,
+                    session,
+                    context: effectiveContext,
+                    lastMessageText,
+                    historyEvents,
+                    signal: undefined, // TODO: Pass signal from responseContext
+                });
 
-            // Set step to END_ROUTE marker
-            session = enterStep(session, END_ROUTE_ID, "Route completed");
-            logger.debug(`[ResponseModal] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`);
+                // Set step to END_ROUTE marker
+                session = enterStep(session, END_ROUTE_ID, "Route completed");
+                logger.debug(`[ResponseModal] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`);
+            } catch (error) {
+                logger.error(`[ResponseModal] Error generating completion message:`, error);
+                // Fallback to simple completion message
+                message = `Thank you! I've recorded all the information for your ${selectedRoute.title.toLowerCase()}.`;
+                session = enterStep(session, END_ROUTE_ID, "Route completed");
+            }
 
         } else {
             // Fallback: No routes defined, generate a simple response
@@ -698,12 +843,27 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (selectedStep) {
             nextStep = selectedStep;
         } else {
-            // New route or no step selected - get initial step or first valid step
+            // Determine current step from session if we're already in this route
+            const isInSameRoute = session.currentRoute?.id === selectedRoute.id;
+            const currentStep = isInSameRoute && session.currentStep
+                ? selectedRoute.getStep(session.currentStep.id)
+                : undefined;
+
+            logger.debug(`[ResponseModal] Step determination: route match=${isInSameRoute}, currentRoute=${session.currentRoute?.id}, selectedRoute=${selectedRoute.id}, currentStep=${currentStep?.id || 'none'}`);
+
+            // Get candidate steps based on current position in the route
             const routingEngine = this.agent.getRoutingEngine();
-            const candidates = routingEngine.getCandidateSteps(selectedRoute, undefined, session.data || {});
+            const candidates = await routingEngine.getCandidateStepsWithConditions(
+                selectedRoute, 
+                currentStep, // Pass current step instead of undefined to maintain progression
+                createTemplateContext({ data: session.data, session, context })
+            );
+            
+            logger.debug(`[ResponseModal] Found ${candidates.length} candidate steps${currentStep ? ' from current step ' + currentStep.id : ' (new route entry)'}`);
+            
             if (candidates.length > 0) {
                 nextStep = candidates[0].step;
-                logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id} for new route`);
+                logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`);
             } else {
                 // Fallback to initial step even if it should be skipped
                 nextStep = selectedRoute.initialStep;
@@ -751,6 +911,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         let message = result.structured?.message || result.message;
         let toolCalls = result.structured?.toolCalls;
+
+        // Debug: Log initial AI response
+        logger.debug(`[ResponseModal] Initial AI response:`, {
+            hasMessage: !!message,
+            messageLength: message?.length || 0,
+            hasToolCalls: !!toolCalls,
+            toolCallsCount: toolCalls?.length || 0,
+            toolNames: toolCalls?.map(tc => tc.toolName) || [],
+        });
 
         // Execute tools with unified loop handling
         const toolResult = await this.executeUnifiedToolLoop({
@@ -800,11 +969,22 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (selectedStep) {
             nextStep = selectedStep;
         } else {
+            // Determine current step from session if we're already in this route
+            const currentStep = session.currentRoute?.id === selectedRoute.id && session.currentStep
+                ? selectedRoute.getStep(session.currentStep.id)
+                : undefined;
+
+            // Get candidate steps based on current position in the route
             const routingEngine = this.agent.getRoutingEngine();
-            const candidates = routingEngine.getCandidateSteps(selectedRoute, undefined, session.data || {});
+            const candidates = await routingEngine.getCandidateStepsWithConditions(
+                selectedRoute, 
+                currentStep, // Pass current step instead of undefined to maintain progression
+                createTemplateContext({ data: session.data, session, context })
+            );
+            
             if (candidates.length > 0) {
                 nextStep = candidates[0].step;
-                logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id} for new route`);
+                logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`);
             } else {
                 nextStep = selectedRoute.initialStep;
                 logger.warn(`[ResponseModal] No valid steps found, using initial step: ${nextStep.id}`);
@@ -934,7 +1114,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             // Execute initial dynamic tool calls
             if (toolCalls && toolCalls.length > 0) {
-                logger.debug(`[ResponseModal] Executing ${toolCalls.length} dynamic tool calls`);
+                logger.debug(`[ResponseModal] Executing ${toolCalls.length} dynamic tool calls:`, toolCalls.map(tc => tc.toolName));
 
                 for (const toolCall of toolCalls) {
                     const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
@@ -1009,7 +1189,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
                 toolLoopCount++;
-                logger.debug(`[ResponseModal] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS}`);
+                logger.debug(`[ResponseModal] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS} with ${toolCalls?.length || 0} tool calls`);
 
                 // Create tool result events with proper Event format structure
                 const toolResultEvents: Event<ToolEventData>[] = [];
@@ -1041,12 +1221,21 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 const updatedHistoryEvents = [...historyEvents, ...toolResultEvents];
 
                 // Make follow-up AI call to see if more tools are needed
+                // After first iteration, don't provide tools to force a text response
                 const agentOptions = this.agent.getAgentOptions();
+                const shouldProvideTools = toolLoopCount === 1;
+                
+                logger.debug(`[ResponseModal] Making follow-up AI call (loop ${toolLoopCount}):`, {
+                    providingTools: shouldProvideTools,
+                    toolsCount: shouldProvideTools ? availableTools.length : 0,
+                    addingTextInstruction: toolLoopCount > 1,
+                });
+
                 const followUpResult = await agentOptions.provider.generateMessage({
-                    prompt: responsePrompt,
+                    prompt: responsePrompt + (toolLoopCount > 1 ? "\n\nProvide a text response to the user based on the tool results." : ""),
                     history: updatedHistoryEvents, // Use Event[] for AI provider
                     context,
-                    tools: availableTools,
+                    tools: shouldProvideTools ? availableTools : [], // Only provide tools on first iteration
                     parameters: responseSchema ? {
                         jsonSchema: responseSchema,
                         schemaName: "tool_followup",
@@ -1057,6 +1246,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // Check if follow-up call has more tool calls
                 const followUpToolCalls = followUpResult.structured?.toolCalls;
                 hasToolCalls = followUpToolCalls && followUpToolCalls.length > 0;
+
+                logger.debug(`[ResponseModal] Follow-up AI response (loop ${toolLoopCount}):`, {
+                    hasMessage: !!followUpResult.message,
+                    messageLength: followUpResult.message?.length || 0,
+                    hasToolCalls,
+                    toolCallsCount: followUpToolCalls?.length || 0,
+                    toolNames: followUpToolCalls?.map(tc => tc.toolName) || [],
+                });
 
                 if (hasToolCalls) {
                     logger.debug(`[ResponseModal] Follow-up call produced ${followUpToolCalls!.length} additional tool calls`);
@@ -1136,6 +1333,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 logger.warn(`[ResponseModal] Tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`);
             }
 
+            logger.debug(`[ResponseModal] Tool loop completed:`, {
+                totalIterations: toolLoopCount,
+                hasFinalMessage: !!finalMessage,
+                finalMessageLength: finalMessage?.length || 0,
+                finalToolCallsCount: toolCalls?.length || 0,
+            });
+
             return {
                 session,
                 finalToolCalls: toolCalls,
@@ -1162,15 +1366,34 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             let updatedSession = session;
 
             // Extract collected data from final response (only for route-based interactions)
-            if (selectedRoute && result.structured && nextStep?.collect) {
+            if (selectedRoute && result.structured) {
                 try {
                     const collectedData: Record<string, unknown> = {};
                     // AgentStructuredResponse extends Record<string, unknown>, so we can safely access properties
                     const structuredData = result.structured;
 
-                    for (const field of nextStep.collect) {
+                    // Collect ALL route fields (required + optional) from structured response
+                    const allRouteFields = new Set<string>();
+                    
+                    // Add route required fields
+                    if (selectedRoute.requiredFields) {
+                        selectedRoute.requiredFields.forEach(field => allRouteFields.add(String(field)));
+                    }
+                    
+                    // Add route optional fields
+                    if (selectedRoute.optionalFields) {
+                        selectedRoute.optionalFields.forEach(field => allRouteFields.add(String(field)));
+                    }
+                    
+                    // Also include current step's collect fields (in case they're not in route fields)
+                    if (nextStep?.collect) {
+                        nextStep.collect.forEach(field => allRouteFields.add(String(field)));
+                    }
+
+                    // Extract all available fields from structured response
+                    for (const field of allRouteFields) {
                         const fieldKey = String(field);
-                        if (fieldKey in structuredData) {
+                        if (fieldKey in structuredData && structuredData[fieldKey] !== undefined && structuredData[fieldKey] !== null) {
                             collectedData[fieldKey] = structuredData[fieldKey];
                         }
                     }
@@ -1244,37 +1467,66 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             prompt: endStepSpec.prompt || "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
         });
 
-        // Build response schema for completion
-        const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, completionStep, this.agent.getSchema());
-        const templateContext = { context, session, history: historyEvents }; // Use Event[] for template context
+        // Build response schema for completion (message only, no data collection)
+        const completionSchema = {
+            type: "object",
+            properties: {
+                message: {
+                    type: "string",
+                    description: "Completion message confirming what was accomplished",
+                },
+            },
+            required: ["message"],
+            additionalProperties: false,
+        };
+        
+        const templateContext = createTemplateContext({ context, session, history: historyEvents });
 
-        // Build completion response prompt
+        // Build completion response prompt using ResponseEngine
+        // Filter out conditional guidelines - only include always-active ones
+        const alwaysActiveGuidelines = [
+            ...this.agent.getGuidelines().filter(g => !g.condition),
+            ...selectedRoute.getGuidelines().filter(g => !g.condition),
+        ];
+        let completitionPrompt =  "Summarize what was accomplished and confirm completion"
+        if(endStepSpec.prompt){
+            completitionPrompt = await render(endStepSpec.prompt, templateContext)
+        }
+
         const completionPrompt = await this.responseEngine.buildResponsePrompt({
             route: selectedRoute,
             currentStep: completionStep,
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
-            directives: undefined, // No directives for completion
-            history: historyEvents, // Use Event[] for buildResponsePrompt
-            lastMessage: lastMessageText, // Use string for buildResponsePrompt
+            directives: [
+                `Task completed: ${selectedRoute.title}`,
+                `Collected data: ${JSON.stringify(session.data, null, 2)}`,
+                "Do NOT ask for more information - the task is complete",
+                completitionPrompt,
+            ],
+            history: historyEvents,
+            lastMessage: lastMessageText,
             agentOptions: this.agent.getAgentOptions(),
-            combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
+            combinedGuidelines: alwaysActiveGuidelines, // Only non-conditional guidelines
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
             context,
             session,
-            agentSchema: this.agent.getSchema(),
+            agentSchema: undefined, // No data collection schema for completion
         });
 
         // Generate completion message using AI provider
         const agentOptions = this.agent.getAgentOptions();
+        logger.debug(`[ResponseModal] Calling AI provider for completion message...`);
+
         const completionResult = await agentOptions.provider.generateMessage({
             prompt: completionPrompt,
-            history: historyEvents, // Use Event[] for AI provider
+            history: historyEvents,
             context,
             signal,
-            parameters: { jsonSchema: responseSchema, schemaName: "completion_message" },
+            parameters: { jsonSchema: completionSchema, schemaName: "completion_message" },
         });
 
+        logger.debug(`[ResponseModal] AI provider returned completion result`);
         const message = completionResult.structured?.message || completionResult.message;
         logger.debug(`[ResponseModal] Generated completion message for route: ${selectedRoute.title}`);
 
@@ -1333,7 +1585,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Build response schema for completion
         const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, completionStep, this.agent.getSchema());
-        const templateContext = { context, session, history: historyEvents }; // Use Event[] for template context
+        const templateContext = createTemplateContext({ context, session, history: historyEvents }); // Use Event[] for template context
 
         // Build completion response prompt
         const completionPrompt = await this.responseEngine.buildResponsePrompt({

@@ -8,7 +8,11 @@
  * - Schema-first data definition
  * - Type-safe data extraction
  * - Automatic validation
- * - SkipIf conditions for smart flow control
+ * - NEW: Flexible ConditionTemplate patterns for routing and step control:
+ *   - String-only conditions: "user wants to register" (AI context only)
+ *   - Function-only conditions: (ctx) => ctx.data?.complete (programmatic only)
+ *   - Mixed arrays: ["user provided info", (ctx) => !!ctx.data?.name] (hybrid)
+ *   - Enhanced skipIf conditions for smart flow control
  */
 
 import { Agent, GeminiProvider, type Tool } from "../../src/index";
@@ -106,6 +110,16 @@ agent.addTool(saveUserProfileTool);
 agent.createRoute({
   title: "User Profile Collection",
   description: "Collect comprehensive user profile information",
+  // Mixed condition: AI context + programmatic validation
+  when: [
+    "user wants to create a profile or register",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('profile') || message.includes('register') || message.includes('sign up');
+    }
+  ],
+  // Skip if user already has a complete profile
+  skipIf: (ctx) => Boolean(ctx.data?.name && ctx.data?.email && ctx.data?.age),
   // NEW: Required fields for route completion (instead of schema)
   requiredFields: ["name", "email"],
   // NEW: Optional fields that enhance the experience
@@ -117,7 +131,8 @@ agent.createRoute({
       description: "Ask for user's name",
       prompt: "Hi! I'd like to create a profile for you. What's your name?",
       collect: ["name"],
-      skipIf: (data: Partial<UserProfileData>) => !!data.name,
+      // String-only skipIf for AI context
+      skipIf: "user already provided their name",
     },
     {
       id: "ask_email",
@@ -125,7 +140,8 @@ agent.createRoute({
       prompt: "What's your email address?",
       collect: ["email"],
       requires: ["name"],
-      skipIf: (data: Partial<UserProfileData>) => !!data.email,
+      // Function-only skipIf for programmatic logic
+      skipIf: (ctx) => !!ctx.data?.email,
     },
     {
       id: "ask_age",
@@ -133,7 +149,11 @@ agent.createRoute({
       prompt: "How old are you? (optional)",
       collect: ["age"],
       requires: ["name", "email"],
-      skipIf: (data: Partial<UserProfileData>) => data.age !== undefined,
+      // Mixed skipIf: AI context + programmatic check
+      skipIf: [
+        "age already collected",
+        (ctx) => ctx.data?.age !== undefined
+      ],
     },
     {
       id: "ask_interests",
@@ -141,8 +161,11 @@ agent.createRoute({
       prompt: "What are your interests or hobbies? (optional)",
       collect: ["interests"],
       requires: ["name", "email"],
-      skipIf: (data: Partial<UserProfileData>) =>
-        !!(data.interests && data.interests.length > 0),
+      // Mixed skipIf with complex logic
+      skipIf: [
+        "interests already provided",
+        (ctx) => !!(ctx.data?.interests && ctx.data.interests.length > 0)
+      ],
     },
     {
       id: "ask_contact_preference",
@@ -150,7 +173,8 @@ agent.createRoute({
       prompt: "What's your preferred contact method?",
       collect: ["preferredContact"],
       requires: ["name", "email"],
-      skipIf: (data: Partial<UserProfileData>) => !!data.preferredContact,
+      // Function-only skipIf
+      skipIf: (ctx) => !!ctx.data?.preferredContact,
     },
     {
       id: "ask_newsletter",
@@ -158,8 +182,8 @@ agent.createRoute({
       prompt: "Would you like to subscribe to our newsletter?",
       collect: ["newsletterOptIn"],
       requires: ["name", "email"],
-      skipIf: (data: Partial<UserProfileData>) =>
-        data.newsletterOptIn !== undefined,
+      // String-only skipIf for simple cases
+      skipIf: "newsletter preference already collected",
     },
     {
       id: "save_profile",

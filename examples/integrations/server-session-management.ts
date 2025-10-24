@@ -92,7 +92,7 @@ function createBookingAgent(sessionId?: string) {
             {
                 title: "Hotel Booking",
                 description: "Collect booking details and confirm reservation",
-                conditions: ["User wants to book a hotel room"],
+                when: ["User wants to book a hotel room"],
                 // NEW: Required fields for route completion
                 requiredFields: ["customerName", "hotelName", "checkInDate", "checkOutDate", "guests"],
                 // NEW: Optional fields that enhance the experience
@@ -103,7 +103,7 @@ function createBookingAgent(sessionId?: string) {
                         description: "Ask for customer name",
                         prompt: "Hi! I'd be happy to help you book a hotel room. What's your name?",
                         collect: ["customerName"],
-                        skipIf: (data: Partial<BookingData>) => !!data.customerName,
+                        skipIf: (ctx) => !!ctx.data?.customerName,
                     },
                     {
                         id: "ask_hotel",
@@ -111,7 +111,7 @@ function createBookingAgent(sessionId?: string) {
                         prompt: "Which hotel would you like to book?",
                         collect: ["hotelName"],
                         requires: ["customerName"],
-                        skipIf: (data: Partial<BookingData>) => !!data.hotelName,
+                        skipIf: (ctx) => !!ctx.data?.hotelName,
                     },
                     {
                         id: "ask_dates",
@@ -119,7 +119,7 @@ function createBookingAgent(sessionId?: string) {
                         prompt: "What are your check-in and check-out dates?",
                         collect: ["checkInDate", "checkOutDate"],
                         requires: ["customerName", "hotelName"],
-                        skipIf: (data: Partial<BookingData>) => !!data.checkInDate && !!data.checkOutDate,
+                        skipIf: (ctx) => !!ctx.data?.checkInDate && !!ctx.data.checkOutDate,
                     },
                     {
                         id: "ask_guests",
@@ -127,7 +127,7 @@ function createBookingAgent(sessionId?: string) {
                         prompt: "How many guests will be staying?",
                         collect: ["guests"],
                         requires: ["customerName", "hotelName", "checkInDate", "checkOutDate"],
-                        skipIf: (data: Partial<BookingData>) => data.guests !== undefined,
+                        skipIf: (ctx) => ctx.data?.guests !== undefined,
                     },
                     {
                         id: "ask_room_type",
@@ -135,7 +135,7 @@ function createBookingAgent(sessionId?: string) {
                         prompt: "What type of room would you prefer? (standard, deluxe, or suite)",
                         collect: ["roomType"],
                         requires: ["customerName", "hotelName", "checkInDate", "checkOutDate", "guests"],
-                        skipIf: (data: Partial<BookingData>) => !!data.roomType,
+                        skipIf: (ctx) => !!ctx.data?.roomType,
                     },
                     {
                         id: "ask_special_requests",
@@ -143,7 +143,7 @@ function createBookingAgent(sessionId?: string) {
                         prompt: "Do you have any special requests for your stay?",
                         collect: ["specialRequests"],
                         requires: ["customerName", "hotelName", "checkInDate", "checkOutDate", "guests"],
-                        skipIf: (data: Partial<BookingData>) => data.specialRequests !== undefined,
+                        skipIf: (ctx) => ctx.data?.specialRequests !== undefined,
                     },
                     {
                         id: "confirm_booking",
@@ -168,7 +168,7 @@ interface ChatResponse {
     message: string;
     sessionId: string;
     isComplete: boolean;
-    data?: Partial<BookingData>;
+    data?;
 }
 
 // Simulate POST /chat endpoint

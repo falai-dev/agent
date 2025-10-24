@@ -4,10 +4,16 @@
  * This example demonstrates how to configure an entire agent
  * using declarative syntax in the constructor, including:
  * - Terms (domain glossary)
- * - Guidelines (behavior rules)
+ * - Guidelines (behavior rules) with flexible ConditionTemplate patterns
  * - Tools (capabilities)
  * - Routes with data extraction schemas and sequential steps
  * - Session management for multi-turn conversations
+ * - NEW: Flexible routing conditions with ConditionTemplate patterns:
+ *   - String-only conditions: "user wants to book" (AI context only)
+ *   - Function-only conditions: (ctx) => ctx.data?.hasPayment (programmatic only)
+ *   - Mixed arrays: ["user wants to book", (ctx) => !ctx.data?.complete] (hybrid)
+ *   - Route skipIf: Dynamic route exclusion based on conditions
+ *   - Step skipIf: Enhanced conditional step skipping
  */
 
 import {
@@ -17,7 +23,6 @@ import {
   ValidationError,
   type Term,
   type Guideline,
-  type RouteOptions,
 } from "../../src/index";
 
 // Context type
@@ -130,19 +135,32 @@ const terms: Term<HealthcareContext>[] = [
 
 const guidelines: Guideline<HealthcareContext>[] = [
   {
+    // String-only condition for AI context
     condition: "The patient asks about insurance",
     action:
       "List the insurance providers we accept and tell them to call the office for more details",
     tags: ["insurance", "billing"],
   },
   {
-    condition: "The patient asks to talk to a human agent",
+    // Mixed condition: AI context + programmatic check
+    condition: [
+      "The patient asks to talk to a human agent",
+      (ctx) => ctx.context?.patientName !== undefined // Only if we have patient info
+    ],
     action: ({ context }: { context?: HealthcareContext }) =>
       `Of course. You can reach our office at +1-234-567-8900 during office hours (Monday to Friday, 9 AM to 5 PM). I've noted that you'd like to speak with someone, and I can have a representative call you back if you'd like, ${context?.patientName}.`,
     tags: ["escalation"],
   },
   {
-    condition: "The patient inquires about something unrelated to healthcare",
+    // Function-only condition for programmatic logic
+    condition: (ctx) => {
+      const event = ctx.history?.[ctx.history.length - 1]
+      if(event && "content" in event){
+        const message = (event.content as string).toLocaleLowerCase() || '';
+        return !message.includes('health') && !message.includes('medical') && !message.includes('appointment');
+      }
+      return false
+    },
     action:
       "Kindly tell them you cannot assist with off-topic inquiries - do not engage",
     tags: ["off-topic"],
@@ -154,7 +172,16 @@ const routes = [
     id: "route_schedule_appointment",
     title: "Schedule Appointment",
     description: "Helps the patient schedule an appointment",
-    conditions: ["The patient wants to schedule an appointment"],
+    // Mixed condition: AI context + programmatic check
+    when: [
+      "The patient wants to schedule an appointment",
+      (ctx) => !ctx.data?.orderId // Only if no existing order
+    ],
+    // Skip if patient already has urgent medical needs
+    skipIf: [
+      "patient has urgent medical emergency",
+      (ctx) => ctx.data?.urgency === "high"
+    ],
     // NEW: Required fields for route completion (instead of schema)
     requiredFields: ["appointmentType", "preferredDate", "preferredTime"],
     // NEW: Optional fields that enhance the experience
@@ -188,14 +215,17 @@ const routes = [
         description: "Ask about symptoms",
         prompt: "Are you experiencing any symptoms?",
         collect: ["symptoms"],
-        skipIf: (data: Partial<HealthcareData>) =>
-          data.appointmentType === "checkup", // Skip for checkups
+        // Mixed skipIf: AI context + programmatic logic
+        skipIf: [
+          "routine checkup doesn't need symptom details",
+          (data: Partial<HealthcareData>) => data.appointmentType === "checkup"
+        ],
       },
       {
         id: "schedule_appointment",
         description: "Schedule the appointment",
         prompt: "I'll schedule your appointment now.",
-        tools: ["healthcare_schedule_appointment"], // Reference by ID
+        tools: [scheduleAppointmentTool], // Inline tool - only available on this step
         requires: ["preferredDate", "preferredTime"],
         prepare: "healthcare_insurance_providers", // Reference by ID
         finalize: "finalize_appointment", // Reference by ID - will be registered later
@@ -207,7 +237,13 @@ const routes = [
     id: "route_check_lab_results",
     title: "Check Lab Results",
     description: "Retrieves and explains patient lab results",
-    conditions: ["The patient wants to see their lab results"],
+    // Function-only condition for programmatic logic
+    when: (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('lab') || message.includes('test') || message.includes('results');
+    },
+    // Skip if no patient ID available
+    skipIf: (ctx) => !ctx.context?.patientId,
     // NEW: Required fields for route completion
     requiredFields: ["testType"],
     // NEW: Optional fields
@@ -225,7 +261,8 @@ const routes = [
   {
     title: "General Healthcare Questions",
     description: "Answer general healthcare questions",
-    conditions: ["Patient asks general healthcare questions"],
+    // String-only condition for AI context
+    when: "Patient asks general healthcare questions",
     // No required fields - conversational Q&A
   },
 ];
@@ -294,16 +331,19 @@ const agent = new Agent<HealthcareContext, HealthcareData>({
   // Declarative initialization
   terms,
   guidelines,
+  // Enable debug logging
+  debug: true,
 });
 
 // Demonstrate different tool registration approaches
 
 // Method 1: Register tools for ID-based reference in routes
+// Note: scheduleAppointmentTool is NOT registered globally - it's only available on the specific step
 agent.tool.registerMany([
   getInsuranceProvidersTool,
   getAvailableSlotsTool,
   getLabResultsTool,
-  scheduleAppointmentTool,
+  // scheduleAppointmentTool, // Commented out - will be added to specific step only
 ]);
 
 // Method 2: Create and register specialized tools
@@ -398,45 +438,26 @@ async function main() {
 
   // Turn 1 - Agent responds and routes to appropriate flow
   console.log("🔄 Turn 1: Initial inquiry");
-  await agent.session.addMessage("user", "Hi, I need to follow up on my recent visit", "Alice");
-  
-  const response1 = await agent.respond({ 
-    history: agent.session.getHistory() 
-  });
+  const response1 = await agent.chat("Hi, I need to follow up on my recent visit");
   
   console.log("🤖 Agent:", response1.message);
   console.log("🛤️  Route chosen:", response1.session?.currentRoute?.title);
 
-  await agent.session.addMessage("assistant", response1.message);
-
   // Turn 2 - User provides more details
   console.log("\n🔄 Turn 2: Providing appointment details");
-  await agent.session.addMessage("user", "I need a checkup next Tuesday at 2 PM", "Alice");
-
-  const response2 = await agent.respond({ 
-    history: agent.session.getHistory() 
-  });
+  const response2 = await agent.chat("I need a checkup next Tuesday at 2 PM");
   
   console.log("🤖 Agent:", response2.message);
   console.log("📊 Collected data:", agent.session.getData());
   console.log("📍 Current step:", response2.session?.currentStep?.id);
 
-  await agent.session.addMessage("assistant", response2.message);
-
   // Turn 3 - Continue the conversation flow
   console.log("\n🔄 Turn 3: Continuing appointment booking");
-  
-  await agent.session.addMessage("user", "I'm feeling a bit anxious about the visit", "Alice");
-
-  const response3 = await agent.respond({ 
-    history: agent.session.getHistory() 
-  });
+  const response3 = await agent.chat("I'm feeling a bit anxious about the visit");
   
   console.log("🤖 Agent:", response3.message);
   console.log("📊 Updated data:", agent.session.getData());
   console.log("📍 Current step:", response3.session?.currentStep?.id);
-  
-  await agent.session.addMessage("assistant", response3.message);
 
   // Check for route completion
   if (response3.isRouteComplete && response3.session) {

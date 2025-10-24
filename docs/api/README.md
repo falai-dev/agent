@@ -15,6 +15,106 @@ Complete API documentation for `@falai/agent`. This framework provides a strongl
 
 ---
 
+## ConditionTemplate System
+
+### `ConditionTemplate<TContext, TData>`
+
+**NEW:** Enhanced condition type that supports flexible routing logic with both AI context and programmatic evaluation.
+
+```typescript
+type ConditionTemplate<TContext = unknown, TData = unknown> =
+  | string  // AI context only - provides context to AI for routing decisions
+  | ((params: TemplateContext<TContext, TData>) => boolean | Promise<boolean>) // Programmatic evaluation
+  | ConditionTemplate<TContext, TData>[]; // Array of either type
+```
+
+**Key Features:**
+
+- **String conditions**: Provide AI context for routing decisions (e.g., `"user wants to book a flight"`)
+- **Function conditions**: Execute programmatic logic returning boolean (e.g., `(ctx) => ctx.data?.isLoggedIn === true`)
+- **Array conditions**: Combine multiple conditions with logical operators
+- **Hybrid approach**: Mix strings and functions for optimal flexibility
+
+#### Evaluation Logic
+
+**For `when` conditions (AND logic):**
+- **Functions**: All must return `true` for condition to pass
+- **Strings**: Ignored in programmatic evaluation, used for AI context
+- **Arrays**: All functions must return `true`
+
+**For `skipIf` conditions (OR logic):**
+- **Functions**: Any returning `true` causes skip
+- **Strings**: Ignored in programmatic evaluation, used for AI context  
+- **Arrays**: Any function returning `true` causes skip
+
+#### Usage Examples
+
+```typescript
+// String-only condition (AI context)
+when: "User wants to make a reservation"
+
+// Function-only condition (programmatic)
+when: (ctx) => ctx.data?.userType === 'premium'
+
+// Mixed array condition (hybrid approach)
+when: [
+  "User is asking for help", // AI context
+  (ctx) => ctx.data?.isLoggedIn === true // Programmatic check
+]
+
+// Route skipIf with OR logic
+skipIf: [
+  "System is under maintenance", // AI context
+  (ctx) => ctx.data?.maintenanceMode === true // Programmatic check
+]
+```
+
+### `ConditionEvaluator<TContext, TData>`
+
+**NEW:** Utility class for evaluating ConditionTemplate instances with consistent logic across the framework.
+
+#### Constructor
+
+```typescript
+new ConditionEvaluator<TContext, TData>(templateContext: TemplateContext<TContext, TData>)
+```
+
+#### Methods
+
+##### `evaluateCondition(condition, logic?): Promise<ConditionEvaluationResult>`
+
+Evaluates a ConditionTemplate and returns detailed results.
+
+**Parameters:**
+- `condition`: ConditionTemplate to evaluate
+- `logic`: 'AND' | 'OR' - logical operator for arrays (default: 'AND')
+
+**Returns:**
+```typescript
+interface ConditionEvaluationResult {
+  programmaticResult: boolean; // Result of function evaluations only
+  aiContextStrings: string[]; // String values for AI context
+  hasProgrammaticConditions: boolean; // Whether any functions were evaluated
+}
+```
+
+**Example:**
+
+```typescript
+const evaluator = new ConditionEvaluator(templateContext);
+
+const result = await evaluator.evaluateCondition([
+  "User needs premium support", // AI context
+  (ctx) => ctx.data?.userType === 'premium' // Programmatic
+]);
+
+console.log(result.programmaticResult); // true/false from function
+console.log(result.aiContextStrings); // ["User needs premium support"]
+console.log(result.hasProgrammaticConditions); // true
+```
+
+---
+
 ## Core Classes
 
 ### `Agent<TContext, TData>`
@@ -823,7 +923,8 @@ interface RouteOptions<TData = unknown> {
   description?: string;     // Route description
   identity?: string;        // Optional identity prompt defining the agent's role and persona for this route
   personality?: Template;   // Optional personality prompt defining the agent's communication style for this route
-  conditions?: string[];    // Conditions that activate this route
+  when?: ConditionTemplate; // NEW: Conditions that activate this route (replaces conditions)
+  skipIf?: ConditionTemplate; // NEW: Conditions that exclude this route from consideration
   guidelines?: Guideline[]; // Initial guidelines for this route
   terms?: Term[];          // Initial terms for the route's domain glossary
   rules?: string[];         // Absolute rules the agent MUST follow in this route
@@ -935,7 +1036,7 @@ console.log(description);
 // Route: Book Flight
 // ID: route_book_flight
 // Description: N/A
-// Conditions: None
+// When: None
 //
 // Steps:
 //   - step_ask_destination: Ask where to fly
@@ -1003,9 +1104,13 @@ Route title (readonly).
 
 Route description (readonly).
 
-##### `conditions: string[]`
+##### `when?: ConditionTemplate`
 
-Conditions that trigger this route (readonly).
+**NEW:** Conditions that trigger this route (readonly). Can be a string, function, or array of either.
+
+##### `skipIf?: ConditionTemplate`
+
+**NEW:** Conditions that exclude this route from consideration (readonly). Can be a string, function, or array of either.
 
 ##### `initialStep: Step`
 
@@ -1038,14 +1143,14 @@ interface StepOptions<TData = unknown> {
   // NEW: Data extraction fields for this step
   collect?: string[];
 
-  // NEW: Code-based condition to skip this step
-  skipIf?: (data: Partial<TData>) => boolean;
+  // ENHANCED: Flexible condition to determine when this step should be active
+  when?: ConditionTemplate<TContext, TData>;
+
+  // ENHANCED: Flexible condition to skip this step
+  skipIf?: ConditionTemplate<TContext, TData>;
 
   // NEW: Prerequisites that must be met to enter this step
   requires?: string[];
-
-  // Optional: AI-evaluated text condition for this transition
-  condition?: string;
 }
 
 interface Step<TContext = unknown, TData = unknown> {
@@ -1054,7 +1159,8 @@ interface Step<TContext = unknown, TData = unknown> {
   nextStep: (spec: StepOptions<TContext, TData>) => Step<TContext, TData>;
   description?: string; // Step description
   collect?: (keyof TData)[]; // Fields to collect in this step
-  skipIf?: (data: Partial<TData>) => boolean; // Skip condition function
+  when?: ConditionTemplate<TContext, TData>; // ENHANCED: Flexible condition for step activation
+  skipIf?: ConditionTemplate<TContext, TData>; // ENHANCED: Flexible condition to skip step
   requires?: (keyof TData)[]; // Required data prerequisites
 }
 ```
@@ -2497,9 +2603,9 @@ interface Term<TContext = unknown> {
 ### `Guideline`
 
 ```typescript
-interface Guideline<TContext = unknown> {
+interface Guideline<TContext = unknown, TData = unknown> {
   id?: string;
-  condition?: Template<TContext>;
+  condition?: ConditionTemplate<TContext, TData>; // ENHANCED: Flexible condition for guideline activation
   action: Template<TContext>;
   enabled?: boolean; // Default: true
   tags?: string[];

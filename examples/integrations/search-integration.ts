@@ -76,7 +76,7 @@ async function example() {
   const userId = "user_123";
 
   // Create adapter
-  const adapter = new OpenSearchAdapter<ConversationContext>(client, {
+  const adapter = new OpenSearchAdapter(client, {
     indices: {
       sessions: "agent_sessions",
       messages: "agent_messages",
@@ -145,7 +145,7 @@ async function example() {
   const complaintRoute = agent.createRoute({
     title: "Handle Customer Complaint",
     description: "Process and resolve customer complaints",
-    conditions: [
+    when: [
       "User has a complaint",
       "User reports an issue or problem",
       "User is dissatisfied",
@@ -161,18 +161,18 @@ async function example() {
     .nextStep({
       prompt: "Understand the complaint",
       collect: ["category", "severity", "description"],
-      skipIf: (data: Partial<ComplaintData>) => !!data.description,
+      skipIf: (ctx) => !!ctx.data?.description,
     })
     .nextStep({
       prompt: "Identify affected service",
       collect: ["affectedService"],
-      skipIf: (data: Partial<ComplaintData>) => !!data.affectedService,
+      skipIf: (ctx) => !!ctx.data?.affectedService,
       requires: ["description"],
     })
     .nextStep({
       prompt: "Ask for desired resolution",
       collect: ["requestedResolution"],
-      skipIf: (data: Partial<ComplaintData>) => !!data.requestedResolution,
+      skipIf: (ctx) => !!ctx.data?.requestedResolution,
       requires: ["category", "description"],
     })
     .nextStep({
@@ -254,7 +254,7 @@ async function example() {
   recoveredAgent.createRoute({
     title: "Handle Customer Complaint",
     description: "Process and resolve customer complaints",
-    conditions: [
+    when: [
       "User has a complaint",
       "User reports an issue or problem",
       "User is dissatisfied",
@@ -324,7 +324,7 @@ async function analyticsExample() {
     auth: { username: "admin", password: "admin" },
   });
 
-  const adapter = new OpenSearchAdapter<ConversationContext>(client, {
+  const adapter = new OpenSearchAdapter(client, {
     indices: {
       sessions: "support_sessions",
       messages: "support_messages",
@@ -396,7 +396,7 @@ async function analyticsExample() {
       // NEW: Agent-level schema
       schema: ticketSchema,
       persistence: {
-        adapter: new OpenSearchAdapter<AnalyticsContext>(client),
+        adapter: new OpenSearchAdapter(client),
         autoSave: true,
       },
     });

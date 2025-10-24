@@ -19,6 +19,7 @@ import {
   logger,
   render,
 } from "../utils";
+import { createTemplateContext } from "../utils/template";
 import { Route } from "../core/Route";
 import { Step } from "../core/Step";
 import { RoutingEngine } from "../core/RoutingEngine";
@@ -211,12 +212,12 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   /**
    * Determine next step and update session
    */
-  determineNextStep(params: {
+  async determineNextStep(params: {
     selectedRoute: Route<TContext, TData> | undefined;
     selectedStep: Step<TContext, TData> | undefined;
     session: SessionState<TData>;
     isRouteComplete: boolean;
-  }): { nextStep: Step<TContext, TData> | undefined; session: SessionState<TData> } {
+  }): Promise<{ nextStep: Step<TContext, TData> | undefined; session: SessionState<TData> }> {
     const { selectedRoute, selectedStep, session, isRouteComplete } = params;
 
     if (!selectedRoute || isRouteComplete) {
@@ -229,16 +230,23 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     if (selectedStep) {
       nextStep = selectedStep;
     } else {
-      // New route or no step selected - get initial step or first valid step
-      const candidates = this.routingEngine.getCandidateSteps(
+      // Determine current step from session if we're already in this route
+      const currentStep = session.currentRoute?.id === selectedRoute.id && session.currentStep
+        ? selectedRoute.getStep(session.currentStep.id)
+        : undefined;
+
+      const contextToUse = this.getStoredContext();
+      // Get candidate steps based on current position in the route
+      const candidates = await this.routingEngine.getCandidateStepsWithConditions(
         selectedRoute,
-        undefined,
-        session.data || {}
+        currentStep, // Pass current step instead of undefined to maintain progression
+        createTemplateContext({ data: session.data, session, context: contextToUse })
       );
+      
       if (candidates.length > 0) {
         nextStep = candidates[0].step;
         logger.debug(
-          `[ResponseHandler] Using first valid step: ${nextStep.id} for new route`
+          `[ResponseHandler] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`
         );
       } else {
         // Fallback to initial step even if it should be skipped
@@ -564,11 +572,11 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       );
 
       if (targetRoute) {
-        const templateContext = {
+        const templateContext = createTemplateContext({
           context,
           session,
           history,
-        };
+        });
         const renderedCondition: string =
           (await render(transitionConfig.condition, templateContext)) ||
           (typeof transitionConfig.condition === "string"

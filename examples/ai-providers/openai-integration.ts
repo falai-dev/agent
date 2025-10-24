@@ -131,7 +131,7 @@ async function main() {
   const weatherRoute = agent.createRoute({
     title: "Check Weather",
     description: "Help user check weather for a location",
-    conditions: ["User wants to know the weather"],
+    when: ["User wants to know the weather"],
   });
 
   // Step 1: Collect location

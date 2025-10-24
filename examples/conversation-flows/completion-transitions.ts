@@ -6,6 +6,12 @@
  * - Post-booking feedback collection
  * - Upsell after purchase
  * - Satisfaction surveys after support
+ * 
+ * NEW: Enhanced with flexible ConditionTemplate patterns:
+ * - Mixed route conditions: ["AI context", (ctx) => programmatic_check]
+ * - Route skipIf examples: Dynamic route exclusion based on state
+ * - Step skipIf examples: Enhanced conditional step skipping
+ * - AI context strings in action for better routing decisions
  */
 
 import {
@@ -43,7 +49,7 @@ async function main() {
   };
 
   // Create agent with unified schema
-  const agent = new Agent<unknown, UnifiedBookingData>({
+  const agent = new Agent<any, UnifiedBookingData>({
     name: "HotelBot",
     description: "A hotel booking assistant with feedback collection",
     provider: new GeminiProvider({
@@ -58,7 +64,23 @@ async function main() {
   agent.createRoute({
     title: "Book Hotel",
     description: "Collects hotel booking information",
-    conditions: ["User wants to book a hotel"],
+    // Mixed condition: AI context + programmatic validation
+    when: [
+      "User wants to book a hotel",
+      (ctx) => {
+        const event = ctx.history?.[ctx.history.length - 1]
+        if(event && "content" in event){
+          const message = (event.content as string).toLocaleLowerCase() || '';
+          return message.includes('book') || message.includes('hotel') || message.includes('reservation');
+        }
+        return false;
+      }
+    ],
+    // Skip if user already has a booking
+    skipIf: [
+      "user already has an active booking",
+      (ctx) => !!ctx.data?.hotelName && !!ctx.data?.date
+    ],
     // NEW: Required fields for route completion
     requiredFields: ["hotelName", "date", "guests"],
     // Sequential steps for booking flow
@@ -68,7 +90,8 @@ async function main() {
         description: "Ask for hotel preference",
         prompt: "Which hotel would you like to book?",
         collect: ["hotelName"],
-        skipIf: (data: Partial<UnifiedBookingData>) => !!data.hotelName,
+        // String-only skipIf for AI context
+        skipIf: "hotel already selected",
       },
       {
         id: "ask_date",
@@ -76,7 +99,8 @@ async function main() {
         prompt: "What date would you like to book for?",
         collect: ["date"],
         requires: ["hotelName"],
-        skipIf: (data: Partial<UnifiedBookingData>) => !!data.date,
+        // Function-only skipIf for programmatic check
+        skipIf: (data) => !!data.context.date,
       },
       {
         id: "ask_guests",
@@ -84,7 +108,11 @@ async function main() {
         prompt: "How many guests will be staying?",
         collect: ["guests"],
         requires: ["hotelName", "date"],
-        skipIf: (data: Partial<UnifiedBookingData>) => data.guests !== undefined,
+        // Mixed skipIf: AI context + programmatic logic
+        skipIf: [
+          "guest count already provided",
+          (data) => data.context.guests !== undefined
+        ],
       },
       {
         id: "confirm_booking",
@@ -102,7 +130,16 @@ async function main() {
   agent.createRoute({
     title: "Collect Feedback",
     description: "Collects user feedback after booking",
-    conditions: ["User wants to provide feedback"],
+    // Function-only condition for programmatic logic
+    when: (ctx) => {
+      // Only activate if we have booking data but no feedback yet
+      return !!ctx.data?.hotelName && ctx.data?.rating === undefined;
+    },
+    // Skip if feedback already collected
+    skipIf: [
+      "feedback already provided",
+      (ctx) => ctx.data?.rating !== undefined
+    ],
     // NEW: Required fields for route completion
     requiredFields: ["rating"],
     // NEW: Optional fields that enhance the experience
@@ -114,7 +151,11 @@ async function main() {
         description: "Ask for rating",
         prompt: "How would you rate your booking experience from 1 to 5?",
         collect: ["rating"],
-        skipIf: (data: Partial<UnifiedBookingData>) => data.rating !== undefined,
+        // Mixed skipIf: AI context + programmatic check
+        skipIf: [
+          "rating already provided",
+          (data) => data.context.rating !== undefined
+        ],
       },
       {
         id: "ask_comments",

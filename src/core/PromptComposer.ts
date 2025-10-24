@@ -1,13 +1,14 @@
 import type { Event, Term, Guideline, AgentOptions } from "../types";
 import type { Route } from "./Route";
-import { render, renderMany, formatKnowledgeBase } from "../utils/template";
+import { render, renderMany, formatKnowledgeBase, createTemplateContext } from "../utils/template";
 import { TemplateContext } from "../types/template";
+import { extractAIContextStrings, ConditionEvaluator } from "../utils/condition";
 
 export class PromptComposer<TContext = unknown, TData = unknown> {
   private parts: string[] = [];
   private renderContext: TemplateContext<TContext, TData>;
 
-  constructor(context: TemplateContext<TContext, TData> = {}) {
+  constructor(context: TemplateContext<TContext, TData> = createTemplateContext({})) {
     this.renderContext = context;
   }
 
@@ -100,22 +101,60 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     return this;
   }
 
-  async addGuidelines(guidelines: Guideline<TContext>[]): Promise<this> {
+  async addGuidelines(guidelines: Guideline<TContext, TData>[]): Promise<this> {
     const enabled = guidelines.filter((g) => g.enabled !== false);
     if (!enabled.length) return this;
 
+    const evaluator = new ConditionEvaluator(this.renderContext);
+    const activeGuidelines: Guideline<TContext, TData>[] = [];
+    const allAIContextStrings: string[] = [];
+
+    // Evaluate guideline conditions to determine which are active
+    for (const guideline of enabled) {
+      if (guideline.condition) {
+        const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
+        
+        // Collect AI context strings for prompt
+        allAIContextStrings.push(...evaluation.aiContextStrings);
+        
+        // Include guideline if:
+        // 1. No programmatic conditions (only strings) - always active
+        // 2. Programmatic conditions evaluate to true
+        if (!evaluation.hasProgrammaticConditions || evaluation.programmaticResult) {
+          activeGuidelines.push(guideline);
+        }
+      } else {
+        // No condition means always active
+        activeGuidelines.push(guideline);
+      }
+    }
+
+    if (!activeGuidelines.length && !allAIContextStrings.length) return this;
+
     const renderedGuidelines = await Promise.all(
-      enabled.map(async (g, i) => {
+      activeGuidelines.map(async (g, i) => {
         const action = await render(g.action, this.renderContext);
         if (g.condition) {
-          const condition = await render(g.condition, this.renderContext);
-          return `- Guideline #${i + 1}: When ${condition}, then ${action}`;
+          // Use AI context strings if available, otherwise render the condition
+          const conditionStrings = extractAIContextStrings(g.condition);
+          if (conditionStrings.length > 0) {
+            const conditionText = conditionStrings.join(" AND ");
+            return `- Guideline #${i + 1}: When ${conditionText}, then ${action}`;
+          }
         }
         return `- Guideline #${i + 1}: ${action}`;
       })
     );
 
-    this.parts.push(`## Guidelines\n\n${renderedGuidelines.join("\n")}`);
+    // Add any additional AI context from inactive guidelines
+    if (allAIContextStrings.length > 0) {
+      const uniqueContextStrings = Array.from(new Set(allAIContextStrings));
+      const contextSection = `\n\n**Additional Context:** ${uniqueContextStrings.join(", ")}`;
+      this.parts.push(`## Guidelines\n\n${renderedGuidelines.join("\n")}${contextSection}`);
+    } else {
+      this.parts.push(`## Guidelines\n\n${renderedGuidelines.join("\n")}`);
+    }
+    
     return this;
   }
 
@@ -143,11 +182,10 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
 
     const renderedRoutes = await Promise.all(
       routes.map(async (r, i) => {
+        const whenContextStrings = r.when ? extractAIContextStrings(r.when) : [];
         const conditions =
-          r.conditions.length > 0
-            ? `\n\n  **Triggered when:** ${(
-                await renderMany(r.conditions, this.renderContext)
-              ).join(" OR ")}`
+          whenContextStrings.length > 0
+            ? `\n\n  **Triggered when:** ${whenContextStrings.join(" OR ")}`
             : "";
         const desc = r.description
           ? `\n\n  **Description:** ${r.description}`
@@ -164,12 +202,11 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
         const prohibitionsInfo =
           prohibitions.length > 0
             ? `\n\n  **Prohibitions:**\n  ${prohibitions
-                .map((x) => `  - ${x}`)
-                .join("\n  ")}`
+              .map((x) => `  - ${x}`)
+              .join("\n  ")}`
             : "";
-        return `### Route ${i + 1}: ${
-          r.title
-        }${desc}${conditions}${rulesInfo}${prohibitionsInfo}`;
+        return `### Route ${i + 1}: ${r.title
+          }${desc}${conditions}${rulesInfo}${prohibitionsInfo}`;
       })
     );
 

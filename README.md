@@ -22,26 +22,27 @@
 ### Traditional AI Chat:
 
 ```typescript
-// User: "I want to book the Grand Hotel for 2 people"
+// User: "I want to book the Grand Hotel for 2 people next Friday"
 // AI: "Sure! Which hotel would you like?" // 😠 Asked already!
 // User: "Grand Hotel"
 // AI: "How many guests?"                 // 😠 You just told me!
 // User: "2 people"
-// AI: "What date?"                        // Finally...
+// AI: "What date?"                        // 😠 I said Friday!
 ```
 
 ### With @falai/agent:
 
 ```typescript
-// User: "I want to book the Grand Hotel for 2 people"
-// AI: "Sure! For what date would you like to book?"  // ✅ Skips known info
-// User: "Next Friday"
-// AI: "Booking confirmed for 2 guests at Grand Hotel on Friday!" // ✅ All data collected
+// User: "I want to book the Grand Hotel for 2 people next Friday"
+// AI: "Perfect! Booking confirmed for 2 guests at Grand Hotel on Friday!" 
+// ✅ Extracted all data from one message
+// ✅ Skipped unnecessary steps
+// ✅ Completed immediately
 ```
 
 **No more repetitive questions. No more guessing what the AI will ask next.**
 
-Schema-first extraction means the AI automatically captures what you've already said, and only asks for what's missing.
+**Intelligent Pre-Extraction** - AI automatically captures ALL relevant data from user messages, then determines which step to start at based on what's missing.
 
 ---
 
@@ -87,9 +88,10 @@ After building production AI applications, we found existing solutions either:
 
 ### 🛤️ **Data-Driven Conversations**
 
+- **Intelligent Pre-Extraction** - Automatically extract data BEFORE entering steps
 - **Schema-First Extraction** - Define data contracts with JSON Schema
-- **Session Step Management** - Track progress across conversation turns
-- **Flexible Step Transitions** - Use AI, text, or code (`skipIf`) for flow control
+- **Automatic Route Completion** - Routes complete when required fields are collected
+- **Smart Step Skipping** - Skip steps whose data is already present
 - **Always-On Routing** - Context-aware routing between different flows
 
 </td>
@@ -194,7 +196,7 @@ const agent = new Agent({
 agent.createRoute({
   title: "General Help",
   description: "Answers user questions",
-  conditions: ["User needs help or asks a question"],
+  when: ["User needs help or asks a question"],
   steps: [
     {
       id: "answer_question",
@@ -211,6 +213,125 @@ console.log(response.message);
 ```
 
 **That's it!** You now have a working conversational AI agent.
+
+---
+
+## 🎯 Advanced Routing with ConditionTemplate
+
+### Flexible Route Conditions
+
+Routes now support powerful condition patterns that combine AI context with programmatic logic:
+
+```typescript
+// String-only conditions (AI context for routing decisions)
+agent.createRoute({
+  title: "Customer Support",
+  when: "User needs help with their account",
+  steps: [/* ... */]
+});
+
+// Function-only conditions (programmatic evaluation)
+agent.createRoute({
+  title: "Premium Features",
+  when: (ctx) => ctx.data?.userType === 'premium',
+  steps: [/* ... */]
+});
+
+// Mixed array conditions (AI context + programmatic logic)
+agent.createRoute({
+  title: "Booking Assistance",
+  when: [
+    "User wants to make a reservation", // AI context
+    (ctx) => ctx.data?.isLoggedIn === true // Programmatic check
+  ],
+  steps: [/* ... */]
+});
+
+// Route skipIf - exclude routes dynamically
+agent.createRoute({
+  title: "Payment Processing",
+  when: ["User wants to make a payment"],
+  skipIf: [
+    "Payment system is under maintenance", // AI context
+    (ctx) => ctx.data?.paymentBlocked === true // Programmatic check
+  ],
+  steps: [/* ... */]
+});
+```
+
+### Enhanced Step Conditions
+
+Steps support the same flexible condition patterns:
+
+```typescript
+agent.createRoute({
+  title: "Order Process",
+  steps: [
+    {
+      id: "collect_items",
+      when: "User wants to add items to cart",
+      prompt: "What would you like to order?",
+      collect: ["items"]
+    },
+    {
+      id: "payment_step",
+      when: [
+        "Ready to process payment", // AI context
+        (ctx) => ctx.data?.items?.length > 0 // Programmatic check
+      ],
+      skipIf: (ctx) => ctx.data?.paymentComplete === true,
+      prompt: "Let's process your payment",
+      tools: ["process_payment"]
+    },
+    {
+      id: "confirmation",
+      when: "Order is ready for confirmation",
+      skipIf: [
+        "Order already confirmed", // AI context
+        (ctx) => ctx.data?.orderConfirmed === true // Programmatic check
+      ],
+      prompt: "Your order is confirmed!",
+      finalize: "send_confirmation_email"
+    }
+  ]
+});
+```
+
+### Dynamic Guidelines
+
+Guidelines now support flexible conditions for context-aware behavior:
+
+```typescript
+// Add guidelines with mixed condition types
+agent.addGuideline({
+  title: "Premium User Support",
+  condition: [
+    "User is asking for help", // AI context
+    (ctx) => ctx.data?.userType === 'premium' // Programmatic check
+  ],
+  content: "Provide priority support with detailed explanations and offer direct phone support."
+});
+
+agent.addGuideline({
+  title: "Maintenance Mode",
+  condition: "System maintenance is active",
+  content: "Inform users about scheduled maintenance and provide estimated completion time."
+});
+
+// Function-only guideline for specific conditions
+agent.addGuideline({
+  title: "High Value Customer",
+  condition: (ctx) => ctx.data?.totalSpent > 10000,
+  content: "Offer VIP treatment and exclusive deals."
+});
+```
+
+**Key Benefits:**
+
+- ✅ **Hybrid Logic** - Combine AI understanding with programmatic precision
+- ✅ **Context Awareness** - AI sees string conditions for better routing decisions
+- ✅ **Performance** - Functions execute first, strings only used when needed
+- ✅ **Flexibility** - Use simple strings, functions, or arrays as needed
 
 ---
 
@@ -345,7 +466,7 @@ agent.addTool({
 agent.createRoute({
   title: "Book Hotel",
   description: "Guides the user through the hotel booking process.",
-  conditions: ["User wants to book a hotel"],
+  when: ["User wants to book a hotel"],
   requiredFields: ["hotelName", "date", "guests"], // Required for route completion
   
   // 5️⃣ Define the flow to collect data step-by-step
@@ -579,39 +700,37 @@ External service integrations:
 
 ## 🏗️ How It Works
 
-`@falai/agent` uses a **schema-first, pipeline-driven architecture** with sophisticated data extraction and lifecycle management:
+`@falai/agent` uses a **schema-first, pipeline-driven architecture** with intelligent pre-extraction:
 
 ```
 User Message + Session State
     ↓
 ┌─────────────────────────────────────────┐
-│ 1. RESPONSE PIPELINE                    │
-│    • Prepare context & session          │
-│    • Handle pending transitions         │
-│    • Execute step prepare() functions   │
+│ 1. ROUTING + PRE-EXTRACTION             │
+│    • Evaluate routes (AI scoring)       │
+│    • Pre-extract data from message      │
+│    • Check route completion             │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 2. ROUTING + STEP SELECTION             │
-│    • Evaluate routes (AI scoring)       │
+│ 2. SMART STEP SELECTION                 │
 │    • Filter steps (skipIf, requires)    │
-│    • Select best route & step           │
+│    • Skip steps with existing data      │
+│    • Select optimal next step           │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
 │ 3. RESPONSE GENERATION                  │
-│    • Build prompt with context/schema   │
-│    • Stream or generate AI response     │
-│    • Extract data via JSON Schema       │
-│    • Execute dynamic tools (streaming)  │
+│    • Build prompt with context          │
+│    • Generate AI response               │
+│    • Execute tools if needed            │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ 4. POST-PROCESSING                      │
-│    • Run finalize() functions           │
-│    • Update context/data (lifecycle)    │
-│    • Auto-save session                  │
-│    • Handle route completion/transitions│
+│ 4. COMPLETION HANDLING                  │
+│    • Auto-complete when data collected  │
+│    • Exclude completed routes           │
+│    • Generate completion message        │
 └─────────────────────────────────────────┘
     ↓
 Response + Updated Session State
@@ -619,19 +738,18 @@ Response + Updated Session State
 
 ### Key Principles:
 
-✅ **AI decides:** Route selection, message generation, data extraction, tool calling
-✅ **Code decides:** Step flow control (`skipIf`/`requires`), tool execution, lifecycle hooks, data validation
-✅ **Result:** Predictable, testable agents with natural conversations
+✅ **AI decides:** Route selection, data extraction, message generation, tool calling
+✅ **Code decides:** Step flow control, route completion, lifecycle hooks, data validation
+✅ **Result:** Efficient conversations that don't waste user time
 
-### New Features:
+### What Makes It Smart:
 
-🚀 **Streaming Support**: Real-time response generation with tool execution
-🔄 **Lifecycle Hooks**: `prepare`/`finalize` functions or tools, context/data update hooks
-📊 **Data-Driven Flows**: Smart step skipping, prerequisite checking, schema validation
-🛠️ **Advanced Tools**: Context-aware tools with data access and lifecycle integration
-💾 **Session Management**: Automatic persistence, state restoration, route transitions
+🎯 **Pre-Extraction** - Data extracted BEFORE entering steps (no repeated questions)
+🚀 **Auto-Completion** - Routes complete automatically when required fields are collected
+🔒 **Completion Protection** - Completed routes excluded from future selection
+⚡ **Smart Skipping** - Steps bypassed if their data is already present
 
-📖 **[Read the architecture docs →](./docs/core/agent/README.md)**
+📖 **[Read the detailed architecture →](./docs/architecture/data-extraction-flow.md)**
 
 ---
 

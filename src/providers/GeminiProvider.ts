@@ -20,6 +20,8 @@ import type {
   StructuredSchema,
 } from "../types";
 import { withTimeoutAndRetry } from "../utils/retry";
+import { tryParseJSONResponse } from "../utils/json";
+import { logger } from "../utils/logger";
 
 const DEFAULT_RETRY_CONFIG = {
   timeout: 60000,
@@ -194,7 +196,7 @@ export class GeminiProvider implements AiProvider {
       (Array.isArray(schema.type) && schema.type.includes("object"))
     ) {
       if (!schema.properties || Object.keys(schema.properties).length === 0) {
-        console.warn(
+        logger.warn(
           "[GeminiProvider] Gemini requires OBJECT types to have non-empty properties. Converting empty object to STRING."
         );
         geminiSchema.type = Type.STRING;
@@ -246,7 +248,7 @@ export class GeminiProvider implements AiProvider {
       case "object":
         return Type.OBJECT;
       default:
-        console.warn(
+        logger.warn(
           `[GeminiProvider] Unknown type "${type}", defaulting to STRING`
         );
         return Type.STRING;
@@ -282,7 +284,7 @@ export class GeminiProvider implements AiProvider {
       return await this.generateWithModel(this.primaryModel, input);
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[GEMINI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -290,25 +292,24 @@ export class GeminiProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[GEMINI] Trying backup models`);
+      logger.debug(`[GEMINI] Trying backup models`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
-          `[GEMINI] Trying backup model ${i + 1}/${
-            this.backupModels.length
+        logger.debug(
+          `[GEMINI] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
         try {
           const result = await this.generateWithModel(backupModel, input);
-          console.log(`[GEMINI] Backup model ${backupModel} succeeded`);
+          logger.debug(`[GEMINI] Backup model ${backupModel} succeeded`);
           return result as GenerateMessageOutput<TStructured>;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[GEMINI] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -317,7 +318,7 @@ export class GeminiProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[GEMINI] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -326,7 +327,7 @@ export class GeminiProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -344,40 +345,49 @@ export class GeminiProvider implements AiProvider {
       // Schema-required: configure response schema
       const configOverride: Partial<GenerateContentConfig> = { ...this.config };
 
-      // Add tools if provided
-      if (input.tools && input.tools.length > 0) {
+      // Handle tools and JSON schema - Gemini doesn't support both simultaneously
+      const hasTools = input.tools && input.tools.length > 0;
+      const hasJsonSchema = input.parameters?.jsonSchema;
+
+      if (hasTools && hasJsonSchema) {
+        logger.debug(`[GeminiProvider] Both tools and JSON schema provided. Prioritizing function calling - JSON schema will be ignored.`);
+      }
+
+      if (hasTools) {
+        const toolNames = input.tools?.map((tool) => tool.name || tool.id) || [];
+        logger.debug(`[GeminiProvider] Configuring ${toolNames.length} tools for model ${model}:`, toolNames);
         configOverride.tools = [
           {
-            functionDeclarations: input.tools.map((tool) => ({
+            functionDeclarations: input.tools?.map((tool) => ({
               name: tool.name || tool.id,
               description: tool.description || "",
               parameters: tool.parameters as FunctionDeclaration["parameters"], // JSON schema
             })),
           },
         ];
-      }
 
-      if (input.parameters?.jsonSchema) {
+      } else if (hasJsonSchema) {
+        // Only set JSON schema if no tools are present
         configOverride.responseMimeType = "application/json";
         // Adapt common schema format to Gemini's specific requirements
-        configOverride.responseSchema = this.adaptSchemaForGemini(
+        configOverride.responseSchema = input.parameters ? this.adaptSchemaForGemini(
           input.parameters.jsonSchema
-        );
+        ) : {};
       }
 
-      const response: GenerateContentResponse =
-        await this.genAI.models.generateContent({
+      let response: GenerateContentResponse;
+      try {
+        response = await this.genAI.models.generateContent({
           model,
           contents: input.prompt,
           config: configOverride,
         });
-
-      const message = response.text;
-      if (!message) {
-        throw new Error("No response from Gemini");
+      } catch (error: unknown) {
+        logger.error(`[GeminiProvider] API call failed:`, error);
+        throw error;
       }
 
-      // Extract tool calls from response
+      // Extract tool calls from response first
       const toolCalls: Array<{
         toolName: string;
         arguments: Record<string, unknown>;
@@ -395,21 +405,68 @@ export class GeminiProvider implements AiProvider {
         }
       }
 
+      // Debug logging for response structure
+      if (!response.text && toolCalls.length === 0) {
+        logger.debug(`[GeminiProvider] Debug - Response structure:`, {
+          hasText: !!response.text,
+          candidatesCount: response.candidates?.length || 0,
+          firstCandidateContent: response.candidates?.[0]?.content,
+          firstCandidateParts: response.candidates?.[0]?.content?.parts?.length || 0,
+        });
+      }
+      // Try to get text from response, handling function calls properly
+      let message = "";
+      try {
+        message = response.text || "";
+      } catch (textError) {
+        // Sometimes response.text throws when there are function calls
+        logger.debug(`[GeminiProvider] Could not get response.text (likely due to function calls):`, textError);
+
+        // Try to extract text parts manually
+        if (response.candidates && response.candidates[0]?.content?.parts) {
+          const textParts = response.candidates[0].content.parts
+            .filter(part => part.text)
+            .map(part => part.text)
+            .join('');
+          message = textParts;
+          logger.debug(`[GeminiProvider] Extracted text from parts:`, message);
+        }
+      }
+
+      // Only throw error if we have no text AND no function calls
+      if (!message && toolCalls.length === 0) {
+        logger.error(`[GeminiProvider] Empty response - no text or function calls`);
+        logger.error(`[GeminiProvider] Response candidates:`, response.candidates);
+        throw new Error("No response from Gemini");
+      }
+
+      // Log when we have function calls but no text (this is normal)
+      if (toolCalls.length > 0 && !message) {
+        logger.debug(`[GeminiProvider] Function calls detected without text message:`, toolCalls.map(tc => tc.toolName));
+      } else if (toolCalls.length > 0 && message) {
+        logger.debug(`[GeminiProvider] Response has both text and function calls:`, {
+          messageLength: message.length,
+          toolCalls: toolCalls.map(tc => tc.toolName),
+        });
+      }
+
+
+
       // Parse JSON response if schema was provided
       let structured: AgentStructuredResponse | undefined;
       if (input.parameters?.jsonSchema) {
-        try {
-          structured = JSON.parse(message) as AgentStructuredResponse;
-        } catch (error) {
-          console.warn("[GEMINI] Failed to parse JSON response:", error);
-          // Fall back to treating the message as plain text
+        const parsed = tryParseJSONResponse(message);
+        if (parsed) {
+          structured = parsed as AgentStructuredResponse;
+        } else {
+          logger.warn("[GeminiProvider] Failed to parse JSON response, treating as plain text");
         }
       }
 
       // If tools were used, include them in structured response
       if (toolCalls.length > 0) {
         structured = {
-          message,
+          message: structured?.message || message,
           toolCalls,
           ...structured,
         } as AgentStructuredResponse;
@@ -446,7 +503,7 @@ export class GeminiProvider implements AiProvider {
       yield* this.generateStreamWithModel(this.primaryModel, input);
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
-      console.warn(
+      logger.warn(
         `[GEMINI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
       );
 
@@ -454,25 +511,24 @@ export class GeminiProvider implements AiProvider {
         throw primaryError;
       }
 
-      console.log(`[GEMINI] Trying backup models for streaming`);
+      logger.debug(`[GEMINI] Trying backup models for streaming`);
 
       let lastBackupError: unknown = primaryError;
 
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
-        console.log(
-          `[GEMINI] Trying backup model ${i + 1}/${
-            this.backupModels.length
+        logger.debug(
+          `[GEMINI] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
         try {
           yield* this.generateStreamWithModel(backupModel, input);
-          console.log(`[GEMINI] Backup model ${backupModel} succeeded`);
+          logger.debug(`[GEMINI] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
           const backupErrMsg = getErrorMessage(backupError);
-          console.warn(
+          logger.warn(
             `[GEMINI] Backup model ${backupModel} failed: ${backupErrMsg}`
           );
           lastBackupError = backupError;
@@ -481,7 +537,7 @@ export class GeminiProvider implements AiProvider {
             !shouldUseBackupModel(backupError) &&
             i < this.backupModels.length - 1
           ) {
-            console.log(
+            logger.debug(
               `[GEMINI] Backup model error doesn't qualify for further attempts`
             );
             break;
@@ -490,7 +546,7 @@ export class GeminiProvider implements AiProvider {
       }
 
       const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      console.error(
+      logger.error(
         `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
       throw lastBackupError;
@@ -507,32 +563,47 @@ export class GeminiProvider implements AiProvider {
     // Streaming: request JSON if schema provided
     const configOverride: Partial<GenerateContentConfig> = { ...this.config };
 
-    // Add tools if provided
-    if (input.tools && input.tools.length > 0) {
+    // Handle tools and JSON schema - Gemini doesn't support both simultaneously
+    const hasTools = input.tools && input.tools.length > 0;
+    const hasJsonSchema = input.parameters?.jsonSchema;
+
+    if (hasTools && hasJsonSchema) {
+      logger.debug(`[GeminiProvider] Both tools and JSON schema provided. Prioritizing function calling - JSON schema will be ignored.`);
+    }
+
+    if (hasTools) {
+      const toolNames = input.tools?.map((tool) => tool.name || tool.id) || [];
+      logger.debug(`[GeminiProvider] Configuring ${toolNames.length} tools for streaming:`, toolNames);
       configOverride.tools = [
         {
-          functionDeclarations: input.tools.map((tool) => ({
+          functionDeclarations: input.tools?.map((tool) => ({
             name: tool.name || tool.id,
             description: tool.description || "",
             parameters: tool.parameters as FunctionDeclaration["parameters"],
           })),
         },
       ];
-    }
 
-    if (input.parameters?.jsonSchema) {
+    } else if (hasJsonSchema) {
+      // Only set JSON schema if no tools are present
       configOverride.responseMimeType = "application/json";
       // Adapt common schema format to Gemini's specific requirements
-      configOverride.responseSchema = this.adaptSchemaForGemini(
+      configOverride.responseSchema = input.parameters ? this.adaptSchemaForGemini(
         input.parameters.jsonSchema
-      );
+      ) : {};
     }
 
-    const stream = await this.genAI.models.generateContentStream({
-      model,
-      contents: input.prompt,
-      config: configOverride,
-    });
+    let stream;
+    try {
+      stream = await this.genAI.models.generateContentStream({
+        model,
+        contents: input.prompt,
+        config: configOverride,
+      });
+    } catch (error: unknown) {
+      logger.error(`[GeminiProvider] Streaming API call failed:`, error);
+      throw error;
+    }
 
     let accumulated = "";
     let promptTokenCount = 0;
@@ -578,20 +649,18 @@ export class GeminiProvider implements AiProvider {
     // Parse JSON response if schema was provided
     let structured: AgentStructuredResponse | undefined;
     if (input.parameters?.jsonSchema && accumulated) {
-      try {
-        structured = JSON.parse(accumulated) as AgentStructuredResponse;
-      } catch (error) {
-        console.warn(
-          "[GEMINI] Failed to parse JSON response in stream:",
-          error
-        );
+      const parsed = tryParseJSONResponse(accumulated);
+      if (parsed) {
+        structured = parsed as AgentStructuredResponse;
+      } else {
+        logger.warn("[GeminiProvider] Failed to parse JSON response in stream, treating as plain text");
       }
     }
 
     // If tools were used, include them in structured response
     if (toolCalls.length > 0) {
       structured = {
-        message: accumulated,
+        message: structured?.message || accumulated,
         toolCalls,
         ...structured,
       } as AgentStructuredResponse;

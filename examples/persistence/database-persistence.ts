@@ -97,7 +97,7 @@ async function example() {
       userName: "Alice",
     },
     persistence: {
-      adapter: new PrismaAdapter<ConversationContext>({ prisma }),
+      adapter: new PrismaAdapter({ prisma }),
       autoSave: true, // Auto-saves session after each response
     },
     schema: {
@@ -139,7 +139,7 @@ async function example() {
   const flightRoute = agent.createRoute({
     title: "Book a Flight",
     description: "Help user book a flight ticket",
-    conditions: [
+    when: [
       "User wants to book a flight",
       "User mentions travel, flying, or booking tickets",
     ],
@@ -150,14 +150,14 @@ async function example() {
     id: "ask_destination", // Custom step ID for easier tracking
     prompt: "Ask where they want to fly",
     collect: ["destination"],
-    skipIf: (data: Partial<FlightBookingData>) => !!data.destination,
+    skipIf: (ctx) => !!ctx.data?.destination,
   });
 
   const askDates = askDestination.nextStep({
     id: "ask_dates", // Custom step ID
     prompt: "Ask about travel dates",
     collect: ["departureDate", "returnDate"],
-    skipIf: (data: Partial<FlightBookingData>) => !!data.departureDate,
+    skipIf: (ctx) => !!ctx.data?.departureDate,
     requires: ["destination"],
   });
 
@@ -165,7 +165,7 @@ async function example() {
     id: "ask_passengers", // Custom step ID
     prompt: "Ask how many passengers",
     collect: ["passengers"],
-    skipIf: (data: Partial<FlightBookingData>) => !!data.passengers,
+    skipIf: (ctx) => !!ctx.data?.passengers,
     requires: ["destination", "departureDate"],
   });
 
@@ -173,7 +173,7 @@ async function example() {
     id: "ask_cabin_class", // Custom step ID
     prompt: "Ask about cabin class preference",
     collect: ["cabinClass"],
-    skipIf: (data: Partial<FlightBookingData>) => !!data.cabinClass,
+    skipIf: (ctx) => !!ctx.data?.cabinClass,
     requires: ["destination", "departureDate", "passengers"],
   });
 
@@ -275,7 +275,7 @@ async function example() {
       required: ["destination", "departureDate", "passengers", "cabinClass"],
     },
     persistence: {
-      adapter: new PrismaAdapter<ConversationContext>({ prisma }),
+      adapter: new PrismaAdapter({ prisma }),
     },
     sessionId, // Same sessionId - will load existing session
   });
@@ -338,8 +338,8 @@ async function advancedExample() {
     // Lifecycle hooks for data enrichment
     hooks: {
       onDataUpdate: async (
-        data: Partial<OnboardingData>,
-        previous: Partial<OnboardingData>
+        data,
+        previous
       ) => {
         console.log("🔄 Data updated:", { data, previous });
 
@@ -365,7 +365,7 @@ async function advancedExample() {
       },
     },
     persistence: {
-      adapter: new PrismaAdapter<UserContext>({ prisma }),
+      adapter: new PrismaAdapter({ prisma }),
       autoSave: true,
     },
     sessionId,
@@ -391,12 +391,12 @@ async function advancedExample() {
     .nextStep({
       prompt: "Welcome and ask for name",
       collect: ["fullName"],
-      skipIf: (data: Partial<OnboardingData>) => !!data.fullName,
+      skipIf: (ctx) => !!ctx.data?.fullName,
     })
     .nextStep({
       prompt: "Ask for email",
       collect: ["email"],
-      skipIf: (data: Partial<OnboardingData>) => !!data.email,
+      skipIf: (ctx) => !!ctx.data?.email,
     })
     .nextStep({
       prompt: "Ask for phone number (optional)",
@@ -405,7 +405,7 @@ async function advancedExample() {
     .nextStep({
       prompt: "Ask for country",
       collect: ["country"],
-      skipIf: (data: Partial<OnboardingData>) => !!data.country,
+      skipIf: (ctx) => !!ctx.data?.country,
     })
     .nextStep({
       prompt: "Confirm and complete onboarding",
@@ -536,7 +536,7 @@ async function serverEndpointExample() {
  * Mock function to send a flight confirmation email.
  */
 async function sendFlightConfirmation(
-  data: Partial<FlightBookingData> | undefined
+  data
 ) {
   console.log("\n" + "=".repeat(60));
   console.log("🚀 Sending Flight Confirmation...");
@@ -552,7 +552,7 @@ async function sendFlightConfirmation(
 /**
  * Mock function to send an onboarding email.
  */
-async function sendOnboardingEmail(data: Partial<OnboardingData> | undefined) {
+async function sendOnboardingEmail(data) {
   console.log("\n" + "=".repeat(60));
   console.log("🚀 Sending Onboarding Email...");
   console.log("=".repeat(60));

@@ -4,6 +4,14 @@
  *
  * Demonstrates how to use rules and prohibitions to control agent behavior
  * in different conversation routes (e.g., WhatsApp bot with different styles)
+ * 
+ * NEW: Enhanced with complex ConditionTemplate patterns:
+ * - Mixed conditions: ["AI context", (ctx) => keyword_detection]
+ * - Route skipIf: Dynamic route exclusion based on message analysis
+ * - Function-only conditions: (ctx) => sophisticated_routing_logic
+ * - String-only conditions: "simple AI context for general chat"
+ * - Emergency routing with never-skip logic (skipIf: false)
+ * - Performance patterns for real-time condition evaluation
  */
 
 import { Agent, type History, END_ROUTE, OpenAIProvider } from "../../src";
@@ -112,7 +120,23 @@ const agent = new Agent<unknown, ServiceData>({
 agent.createRoute({
   title: "Quick Support",
   description: "Fast answers for common questions",
-  conditions: ["User has a simple question", "User wants quick help"],
+  // Mixed condition: AI context + programmatic validation
+  when: [
+    "User has a simple question", 
+    "User wants quick help",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('quick') || message.includes('simple') || message.length < 50;
+    }
+  ],
+  // Skip if user seems to need detailed help
+  skipIf: [
+    "user needs detailed or complex assistance",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('detailed') || message.includes('complex') || message.length > 100;
+    }
+  ],
   rules: [
     "Keep messages extremely short (1-2 lines maximum)",
     "Use bullet points for lists",
@@ -130,9 +154,21 @@ agent.createRoute({
 agent.createRoute({
   title: "Sales Consultation",
   description: "Help customer discover needs and present solutions",
-  conditions: [
-    "User is interested in buying",
-    "User wants product information",
+  // Function-only condition for programmatic sales detection
+  when: (ctx) => {
+    const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+    return message.includes('buy') || message.includes('purchase') || 
+           message.includes('price') || message.includes('cost') ||
+           message.includes('product') || message.includes('interested');
+  },
+  // Skip if user is having technical issues
+  skipIf: [
+    "user has technical problems that need solving first",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('broken') || message.includes('error') || 
+             message.includes('not working') || message.includes('problem');
+    }
   ],
   rules: [
     "Ask open-ended questions to discover needs",
@@ -169,7 +205,22 @@ agent.createRoute({
 agent.createRoute({
   title: "Technical Support",
   description: "Help with technical issues and troubleshooting",
-  conditions: ["User has technical problem", "User needs step-by-step help"],
+  // Mixed condition: AI context + technical keyword detection
+  when: [
+    "User has technical problem", 
+    "User needs step-by-step help",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      return message.includes('help') || message.includes('problem') || 
+             message.includes('error') || message.includes('not working') ||
+             message.includes('broken') || message.includes('fix');
+    }
+  ],
+  // Skip if user is just browsing or asking about sales
+  skipIf: (ctx) => {
+    const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+    return message.includes('price') || message.includes('buy') || message.includes('cost');
+  },
   rules: [
     "Provide clear, numbered steps",
     "Use simple language for technical concepts",
@@ -209,7 +260,19 @@ techSupportRoute.initialStep
 agent.createRoute({
   title: "Emergency Support",
   description: "Handle urgent customer issues",
-  conditions: ["Customer is frustrated", "Urgent issue", "Service down"],
+  // Mixed condition: AI context + urgency detection
+  when: [
+    "Customer is frustrated", 
+    "Urgent issue", 
+    "Service down",
+    (ctx) => {
+      const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+      const urgentWords = ['urgent', 'emergency', 'critical', 'down', 'broken', 'frustrated', 'angry'];
+      return urgentWords.some(word => message.includes(word)) || message.includes('!!!');
+    }
+  ],
+  // Never skip emergency support
+  skipIf: ()=>false,
   rules: [
     "Acknowledge the urgency immediately",
     "Express empathy and understanding",
@@ -229,7 +292,14 @@ agent.createRoute({
 agent.createRoute({
   title: "General Chat",
   description: "Casual conversation and general questions",
-  conditions: ["User is just chatting", "Greeting", "General question"],
+  // String-only condition for AI context
+  when: "User is just chatting, greeting, or asking general questions",
+  // Skip if user has specific needs that other routes can handle
+  skipIf: (ctx) => {
+    const message = ctx.helpers.getLastUserMessage()?.toLowerCase() || '';
+    return message.includes('help') || message.includes('buy') || 
+           message.includes('problem') || message.includes('urgent');
+  },
   rules: [
     "Be friendly and conversational",
     "Use emojis naturally 😊",
@@ -262,7 +332,7 @@ async function demonstrateRulesAndProhibitions() {
   agent.createRoute({
     title: "Quick Support",
     description: "Fast answers for common questions",
-    conditions: ["User has a simple question", "User wants quick help"],
+    when: ["User has a simple question", "User wants quick help"],
     rules: [
       "Keep messages extremely short (1-2 lines maximum)",
       "Use bullet points for lists",
@@ -280,7 +350,7 @@ async function demonstrateRulesAndProhibitions() {
   agent.createRoute({
     title: "Sales Consultation",
     description: "Help customer discover needs and present solutions",
-    conditions: [
+    when: [
       "User is interested in buying",
       "User wants product information",
     ],
@@ -303,7 +373,7 @@ async function demonstrateRulesAndProhibitions() {
   agent.createRoute({
     title: "Technical Support",
     description: "Help with technical issues and troubleshooting",
-    conditions: ["User has technical problem", "User needs step-by-step help"],
+    when: ["User has technical problem", "User needs step-by-step help"],
     rules: [
       "Provide clear, numbered steps",
       "Use simple language for technical concepts",
@@ -343,7 +413,7 @@ async function demonstrateRulesAndProhibitions() {
   agent.createRoute({
     title: "Emergency Support",
     description: "Handle urgent customer issues",
-    conditions: ["Customer is frustrated", "Urgent issue", "Service down"],
+    when: ["Customer is frustrated", "Urgent issue", "Service down"],
     rules: [
       "Acknowledge the urgency immediately",
       "Express empathy and understanding",
@@ -363,7 +433,7 @@ async function demonstrateRulesAndProhibitions() {
   agent.createRoute({
     title: "General Chat",
     description: "Casual conversation and general questions",
-    conditions: ["User is just chatting", "Greeting", "General question"],
+    when: ["User is just chatting", "Greeting", "General question"],
     rules: [
       "Be friendly and conversational",
       "Use emojis naturally 😊",

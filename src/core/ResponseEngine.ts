@@ -10,7 +10,7 @@ import type {
 import type { Route } from "./Route";
 import type { Step } from "./Step";
 import { PromptComposer } from "./PromptComposer";
-import { render } from "../utils/template";
+import { createTemplateContext, render } from "../utils/template";
 
 export interface BuildResponsePromptParams<
   TContext = unknown,
@@ -91,8 +91,9 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
       combinedTerms,
       context,
       session,
+      agentSchema,
     } = params;
-    const templateContext = { context, session, history };
+    const templateContext = createTemplateContext({ context, session, history });
     const pc = new PromptComposer(templateContext);
 
     // Create combined agent options with route overrides
@@ -143,9 +144,147 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
 
     await pc.addInteractionHistory(history);
     await pc.addLastMessage(lastMessage);
+    
+    // Add data collection instructions - include ALL route fields, not just current step
+    if (agentSchema?.properties) {
+      // Collect all fields from route's required and optional fields
+      const allRouteFields = new Set<string>();
+      
+      // Add route required fields
+      if (route.requiredFields) {
+        route.requiredFields.forEach(field => allRouteFields.add(String(field)));
+      }
+      
+      // Add route optional fields
+      if (route.optionalFields) {
+        route.optionalFields.forEach(field => allRouteFields.add(String(field)));
+      }
+      
+      // Add current step's collect fields (in case they're not in route fields)
+      if (currentStep?.collect) {
+        currentStep.collect.forEach(field => allRouteFields.add(String(field)));
+      }
+      
+      if (allRouteFields.size > 0) {
+        const stepCollectFields = new Set(currentStep?.collect?.map(f => String(f)) || []);
+        const fieldDescriptions: string[] = [];
+        
+        for (const field of allRouteFields) {
+          const fieldSchema = agentSchema.properties[field];
+          if (fieldSchema) {
+            const fieldName = field;
+            const fieldDesc = fieldSchema.description || fieldName;
+            const fieldType = Array.isArray(fieldSchema.type) ? fieldSchema.type[0] : fieldSchema.type;
+            
+            let fieldInfo = `  • ${fieldName} (${fieldType})`;
+            
+            // Add enum values if present
+            if (fieldSchema.enum && Array.isArray(fieldSchema.enum)) {
+              fieldInfo += ` [${fieldSchema.enum.join(' | ')}]`;
+            }
+            
+            // Add description
+            fieldInfo += `: ${fieldDesc}`;
+            
+            // Mark if this is the current step's focus
+            if (stepCollectFields.has(field)) {
+              fieldInfo += ` ← FOCUS FOR THIS STEP`;
+            }
+            
+            fieldDescriptions.push(fieldInfo);
+          }
+        }
+        
+        if (fieldDescriptions.length > 0) {
+          const instruction = [
+            `## Data Collection Rules`,
+            ``,
+            `CRITICAL: You MUST extract ALL relevant information from the user's message, not just what this step asks for.`,
+            ``,
+            `Available fields to extract:`,
+            ...fieldDescriptions,
+            ``,
+            `**How to collect data:**`,
+            `1. Read the user's message carefully`,
+            `2. Extract EVERY piece of information that matches ANY field above`,
+            `3. Users often provide multiple details at once (e.g., "I need a checkup next Tuesday at 2 PM")`,
+            `4. Include ALL extracted fields in your JSON response as top-level properties`,
+            `5. Field names must match EXACTLY as shown above`,
+            `6. Only include fields that the user actually mentioned`,
+            ``,
+            `**Example:** If user says "I need a checkup next Tuesday at 2 PM", extract:`,
+            `- appointmentType: "checkup"`,
+            `- preferredDate: "next Tuesday"`,
+            `- preferredTime: "2 PM"`,
+          ].join('\n');
+          
+          await pc.addInstruction(instruction);
+        }
+      }
+    }
+    
+    // Add response format instructions with explicit JSON structure
+    // Generate example JSON based on actual schema fields
+    const exampleFields: string[] = ['  "message": "your response to the user"'];
+    
+    if (agentSchema?.properties) {
+      // Collect all fields from route's required and optional fields
+      const allRouteFields = new Set<string>();
+      
+      if (route.requiredFields) {
+        route.requiredFields.forEach(field => allRouteFields.add(String(field)));
+      }
+      
+      if (route.optionalFields) {
+        route.optionalFields.forEach(field => allRouteFields.add(String(field)));
+      }
+      
+      if (currentStep?.collect) {
+        currentStep.collect.forEach(field => allRouteFields.add(String(field)));
+      }
+      
+      // Generate example values for each field
+      for (const field of allRouteFields) {
+        const fieldSchema = agentSchema.properties[field];
+        if (fieldSchema) {
+          const fieldType = Array.isArray(fieldSchema.type) ? fieldSchema.type[0] : fieldSchema.type;
+          let exampleValue = '"value if extracted"';
+          
+          // Generate type-appropriate example
+          if (fieldSchema.enum && Array.isArray(fieldSchema.enum) && fieldSchema.enum.length > 0) {
+            exampleValue = `"${fieldSchema.enum[0]}"`;
+          } else if (fieldType === 'string') {
+            exampleValue = '"extracted value"';
+          } else if (fieldType === 'number' || fieldType === 'integer') {
+            exampleValue = '0';
+          } else if (fieldType === 'boolean') {
+            exampleValue = 'true';
+          }
+          
+          exampleFields.push(`  "${field}": ${exampleValue}`);
+        }
+      }
+    }
+    
     await pc.addInstruction(
-      "Return ONLY JSON matching the schema. The 'message' field is required."
+      [
+        `## Response Format`,
+        ``,
+        `You MUST return ONLY valid JSON in this exact format:`,
+        `{`,
+        ...exampleFields.map((f, i) => i < exampleFields.length - 1 ? `${f},` : f),
+        `}`,
+        ``,
+        `CRITICAL RULES:`,
+        `- Return ONLY the JSON object, no other text`,
+        `- The "message" field is REQUIRED and must contain your response to the user`,
+        `- Include ALL extracted data fields as top-level properties`,
+        `- Only include data fields that were actually mentioned by the user`,
+        `- Do not wrap the JSON in markdown code blocks`,
+        `- Do not add any explanatory text before or after the JSON`,
+      ].join('\n')
     );
+    
     return pc.build();
   }
 
@@ -154,7 +293,7 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
   ): Promise<string> {
     const { history, agentOptions, terms, guidelines, context, session } =
       params;
-    const templateContext = { context, session, history };
+    const templateContext = createTemplateContext({ context, session, history });
     const pc = new PromptComposer(templateContext);
 
     await pc.addAgentMeta(agentOptions);

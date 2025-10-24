@@ -6,6 +6,7 @@ import type {
   AgentOptions,
   Term,
   Guideline,
+  GuidelineMatch,
   Tool,
   Event,
   RouteOptions,
@@ -24,6 +25,8 @@ import {
   logger,
   LoggerLevel,
   render,
+  createTemplateContext,
+  createConditionEvaluator,
 } from "../utils";
 
 import { Route } from "./Route";
@@ -675,6 +678,55 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
+   * Evaluate and match active guidelines based on their conditions
+   * Returns guidelines that should be active given the current context
+   */
+  async evaluateGuidelines(
+    context?: TContext,
+    session?: SessionState<TData>,
+    history?: Event[]
+  ): Promise<GuidelineMatch<TContext, TData>[]> {
+    const templateContext = { context, session, history, data: session?.data };
+    const evaluator = createConditionEvaluator(templateContext);
+    const matches: GuidelineMatch<TContext, TData>[] = [];
+
+    for (const guideline of this.guidelines) {
+      // Skip disabled guidelines
+      if (guideline.enabled === false) {
+        continue;
+      }
+
+      if (guideline.condition) {
+        const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
+        
+        // Include guideline if:
+        // 1. No programmatic conditions (only strings) - always active
+        // 2. Programmatic conditions evaluate to true
+        if (!evaluation.hasProgrammaticConditions || evaluation.programmaticResult) {
+          const rationale = evaluation.aiContextStrings.length > 0
+            ? `Condition met: ${evaluation.aiContextStrings.join(" AND ")}`
+            : evaluation.hasProgrammaticConditions
+              ? "Programmatic condition evaluated to true"
+              : "Always active (no conditions)";
+          
+          matches.push({
+            guideline,
+            rationale
+          });
+        }
+      } else {
+        // No condition means always active
+        matches.push({
+          guideline,
+          rationale: "Always active (no conditions)"
+        });
+      }
+    }
+
+    return matches;
+  }
+
+  /**
    * Get the agent's knowledge base
    */
   getKnowledgeBase(): Record<string, unknown> {
@@ -859,12 +911,12 @@ export class Agent<TContext = any, TData = any> {
           .join(", ")}`
       );
     }
-    const templateContext = {
+    const templateContext = createTemplateContext({
       context: this.context,
       session,
       history,
       data: this.currentSession?.data,
-    };
+    });
     const renderedCondition = await render(condition, templateContext);
 
     const updatedSession: SessionState<TData> = {

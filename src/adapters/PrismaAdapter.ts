@@ -15,6 +15,7 @@ import type {
   Event,
   CreateSessionData,
 } from "../types";
+import { logger } from '../utils'
 
 /**
  * Prisma model operations
@@ -158,7 +159,7 @@ export class PrismaAdapter<TData = Record<string, unknown>>
     // Auto-initialize if configured
     if (this.options.autoMigrate) {
       this.initialize().catch((error) => {
-        console.error("[PrismaAdapter] Auto-migration failed:", error);
+        logger.error("[PrismaAdapter] Auto-migration failed:", error);
       });
     }
   }
@@ -172,7 +173,7 @@ export class PrismaAdapter<TData = Record<string, unknown>>
 
     if (this.options.autoMigrate && this.prisma.$executeRaw) {
       // Note: This is a simplified example. In production, use Prisma Migrate.
-      console.warn(
+      logger.warn(
         "[PrismaAdapter] autoMigrate is experimental. Use Prisma Migrate for production."
       );
       // Table creation would go here, but it's database-specific
