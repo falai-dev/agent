@@ -567,21 +567,27 @@ export class Route<TContext = unknown, TData = unknown> {
    * @param data - Currently collected agent-level data
    * @returns true if all required fields are present, false otherwise
    * 
-   * Note: This only checks data completeness. For full route completion including
-   * step flow, use the routing engine's completion detection which considers both
-   * required fields and END_ROUTE markers.
+   * Note: Routes with no requiredFields AND no optionalFields are never complete
+   * based on data (they complete via END_ROUTE). Routes with only optionalFields
+   * are always complete (optional data doesn't block completion).
    */
   isComplete(data: Partial<TData>): boolean {
-    if (!this.requiredFields || this.requiredFields.length === 0) {
-      // No required fields means data collection is complete
-      // But route may still need to reach END_ROUTE in step flow
+    // If route has required fields, check if they're all collected
+    if (this.requiredFields && this.requiredFields.length > 0) {
+      return this.requiredFields.every(field => {
+        const value = data[field];
+        return value !== undefined && value !== null && value !== '';
+      });
+    }
+
+    // If route has optional fields but no required fields, it's always complete
+    if (this.optionalFields && this.optionalFields.length > 0) {
       return true;
     }
 
-    return this.requiredFields.every(field => {
-      const value = data[field];
-      return value !== undefined && value !== null && value !== '';
-    });
+    // No required or optional fields - route doesn't complete based on data
+    // It can only complete by reaching END_ROUTE in step flow
+    return false;
   }
 
   /**
@@ -604,18 +610,27 @@ export class Route<TContext = unknown, TData = unknown> {
    * Get the completion progress for this route as a percentage
    * @param data - Currently collected agent-level data
    * @returns Completion progress as a number between 0 and 1
+   * 
+   * Note: Must be consistent with isComplete() logic
    */
   getCompletionProgress(data: Partial<TData>): number {
-    if (!this.requiredFields || this.requiredFields.length === 0) {
-      return 1; // No required fields means 100% complete
+    // If route has required fields, calculate progress
+    if (this.requiredFields && this.requiredFields.length > 0) {
+      const completedFields = this.requiredFields.filter(field => {
+        const value = data[field];
+        return value !== undefined && value !== null && value !== '';
+      });
+      return completedFields.length / this.requiredFields.length;
     }
 
-    const completedFields = this.requiredFields.filter(field => {
-      const value = data[field];
-      return value !== undefined && value !== null && value !== '';
-    });
+    // If route has optional fields but no required fields, it's always complete
+    if (this.optionalFields && this.optionalFields.length > 0) {
+      return 1;
+    }
 
-    return completedFields.length / this.requiredFields.length;
+    // No required or optional fields - route doesn't complete based on data
+    // Progress is 0 (must reach END_ROUTE in step flow)
+    return 0;
   }
 
   /**

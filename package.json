@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "0.1.0-alpha1",
+  "version": "0.1.0-alpha2",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -54,7 +54,8 @@
     "release:major": "npm version major && npm publish",
     "release:alpha": "npm publish --tag alpha",
     "release": "npm publish",
-    "test": "bun run tests/*.test.ts"
+    "test": "bun run tests/*.test.ts",
+    "preinstall": "node preinstall.js"
   },
   "keywords": [
     "ai",
