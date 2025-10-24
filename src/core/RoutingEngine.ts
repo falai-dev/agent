@@ -127,11 +127,11 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     const completedRoutes = route.isComplete(updatedSession.data || {}) ? [route] : [];
 
     // Get candidate steps using new condition evaluation
-    const templateContext = createTemplateContext({ 
-      context, 
-      session: updatedSession, 
+    const templateContext = createTemplateContext({
+      context,
+      session: updatedSession,
       history,
-      data: updatedSession.data 
+      data: updatedSession.data
     });
     const currentStep = updatedSession.currentStep
       ? route.getStep(updatedSession.currentStep.id)
@@ -150,7 +150,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     // If only one candidate, check if it's a completion marker
     if (candidates.length === 1) {
       const candidate = candidates[0];
-      
+
       if (candidate.isRouteComplete) {
         logger.debug(
           `[RoutingEngine] Single-route: Route complete - all required fields collected or END_ROUTE reached`
@@ -195,17 +195,17 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
     // Multiple candidates - use AI to select best step
     const lastUserMessage = getLastMessageFromHistory(history);
-    
+
     // Collect AI context strings from step conditions
     const stepConditionContext: string[] = [];
     for (const candidate of candidates) {
       const whenResult = await candidate.step.evaluateWhen(templateContext);
       stepConditionContext.push(...whenResult.aiContextStrings);
     }
-    
+
     // Check if any candidate is a completion marker (isRouteComplete = true)
     const hasCompletionOption = candidates.some(c => c.isRouteComplete);
-    
+
     const stepPrompt = await this.buildStepSelectionPrompt({
       route,
       currentStep,
@@ -244,7 +244,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     });
 
     const selectedStepId = stepResult.structured?.selectedStepId;
-    
+
     // Check if AI selected END_ROUTE
     if (selectedStepId === END_ROUTE_ID) {
       logger.debug(
@@ -384,7 +384,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
     if (!currentStep) {
       // Entering route for the first time
-      
+
       // If all required fields already collected, route is immediately complete
       if (allRequiredFieldsCollected) {
         logger.debug(
@@ -400,7 +400,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
       const initialStep = route.initialStep;
       const skipResult = await initialStep.evaluateSkipIf(templateContext);
-      
+
       if (skipResult.shouldSkip) {
         // Initial step should be skipped - recursively traverse to find first non-skipped step or END_ROUTE
         const result = await this.findFirstValidStepRecursiveWithConditions(
@@ -453,7 +453,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
         // Check if this step collects only optional fields
         const collectsOnlyOptional = target.collect && target.collect.length > 0 &&
-          target.collect.every(field => 
+          target.collect.every(field =>
             route.optionalFields?.includes(field)
           );
 
@@ -512,7 +512,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       if (!target) continue;
 
       const skipResult = await target.evaluateSkipIf(templateContext);
-      
+
       if (skipResult.shouldSkip) {
         logger.debug(
           `[RoutingEngine] Skipping step ${target.id} (skipIf condition met)`
@@ -637,23 +637,23 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     }
 
     const lastUserMessage = getLastMessageFromHistory(history);
-    const templateContext = createTemplateContext({ 
-      context, 
-      session, 
+    const templateContext = createTemplateContext({
+      context,
+      session,
       history,
-      data: session.data 
+      data: session.data
     });
 
     // Apply route filtering with new condition evaluation system
     const skipIfResult = await this.filterRoutesBySkipIf(routes, templateContext);
     const whenResult = await this.filterRoutesByWhen(skipIfResult.eligibleRoutes, templateContext);
-    
+
     // Collect all AI context strings from route conditions
     const routeConditionContext = [...skipIfResult.aiContextStrings, ...whenResult.aiContextStrings];
-    
+
     // Use filtered routes for further processing
     const eligibleRoutes = whenResult.eligibleRoutes;
-    
+
     logger.debug(`[RoutingEngine] Route filtering: ${routes.length} total → ${skipIfResult.eligibleRoutes.length} after skipIf → ${eligibleRoutes.length} after when`);
 
     let activeRouteSteps: Step<TContext, TData>[] | undefined;
@@ -749,12 +749,22 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         routingResult.structured.routes
       );
 
-      // If no optimal route found (all routes completed), don't select any route
+      // If no optimal route found, check why
       if (!optimalRoute) {
-        logger.debug(
-          `[RoutingEngine] No eligible routes available - all routes are complete or filtered out`
-        );
-        selectedRoute = undefined;
+        if (eligibleRoutes.length === 0) {
+          // No routes passed filtering
+          logger.debug(
+            `[RoutingEngine] No eligible routes available - all routes filtered out`
+          );
+          selectedRoute = undefined;
+        } else {
+          // Routes exist but selectOptimalRoute returned undefined
+          // This means all routes are 100% complete
+          logger.debug(
+            `[RoutingEngine] No optimal route found - all ${eligibleRoutes.length} eligible routes are complete`
+          );
+          selectedRoute = undefined;
+        }
       } else {
         selectedRoute = optimalRoute;
       }
@@ -813,10 +823,10 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
     for (const route of routes) {
       const skipResult = await route.evaluateSkipIf(templateContext);
-      
+
       // Collect AI context strings from skipIf conditions
       aiContextStrings.push(...skipResult.aiContextStrings);
-      
+
       // If route should not be skipped, it's eligible
       if (!skipResult.programmaticResult) {
         eligibleRoutes.push(route);
@@ -846,10 +856,10 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
     for (const route of routes) {
       const whenResult = await route.evaluateWhen(templateContext);
-      
+
       // Collect AI context strings from when conditions
       aiContextStrings.push(...whenResult.aiContextStrings);
-      
+
       // If route has no programmatic conditions or they evaluate to true, it's eligible
       if (!whenResult.hasProgrammaticConditions || whenResult.programmaticResult) {
         eligibleRoutes.push(route);
@@ -1094,7 +1104,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     includeEndRoute: boolean = false
   ): StructuredSchema {
     const stepIds = validSteps.map((s) => s.id);
-    
+
     // Add END_ROUTE as an option if requested (when required fields are complete)
     if (includeEndRoute) {
       stepIds.push(END_ROUTE_ID);
@@ -1113,7 +1123,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         selectedStepId: {
           type: "string",
           nullable: false,
-          description: includeEndRoute 
+          description: includeEndRoute
             ? `The ID of the selected step to transition to, or '${END_ROUTE_ID}' to complete the route`
             : "The ID of the selected step to transition to",
           enum: stepIds,
@@ -1289,14 +1299,14 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
           "Available steps in active route (choose one to transition to):",
         ];
         const activeStepConditionContext: string[] = [];
-        
+
         for (const step of activeRouteSteps) {
           const idx = activeRouteSteps.indexOf(step);
           stepInfo.push(`${idx + 1}. Step: ${step.id}`);
           if (step.description) {
             stepInfo.push(`   Description: ${step.description}`);
           }
-          
+
           // Collect AI context from step conditions
           if (step.when) {
             const whenResult = await step.evaluateWhen(templateContext);
@@ -1307,7 +1317,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
               stepInfo.push(`   When this step should be completed: ${step.when}`);
             }
           }
-          
+
           if (step.requires && step.requires.length > 0) {
             stepInfo.push(`   Required data: ${step.requires.join(", ")}`);
           }
@@ -1324,7 +1334,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         stepInfo.push("- The logical next step in the conversation");
         stepInfo.push("- Whether conditions for steps are met");
         await pc.addInstruction(stepInfo.join("\n"));
-        
+
         // Add active step condition context if available
         if (activeStepConditionContext.length > 0) {
           await pc.addInstruction(
@@ -1343,7 +1353,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     await pc.addInteractionHistory(history);
     await pc.addLastMessage(lastMessage);
     await pc.addRoutingOverview(routes);
-    
+
     // Add route condition context if available
     if (routeConditionContext && routeConditionContext.length > 0) {
       await pc.addInstruction(

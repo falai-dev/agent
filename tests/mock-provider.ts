@@ -79,7 +79,7 @@ export class MockProvider implements AiProvider {
     TContext = unknown,
     TStructured = AgentStructuredResponse
   >(
-    _input: GenerateMessageInput<TContext>
+    input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
     // Simulate API delay
     if (this.config.delayMs > 0) {
@@ -91,6 +91,68 @@ export class MockProvider implements AiProvider {
       throw new Error(this.config.errorMessage);
     }
 
+    // Smart structured response generation based on schema
+    let structuredResponse: any = undefined;
+
+    // If the schema requests specific structured data, generate it
+    if (input.parameters?.jsonSchema && typeof input.parameters.jsonSchema === 'object') {
+      const schema = input.parameters.jsonSchema as any;
+      const schemaName = input.parameters.schemaName || '';
+      
+      // Check if this is a routing schema (has routes property with route IDs)
+      if (schema.properties?.routes?.properties) {
+        const routeIds = Object.keys(schema.properties.routes.properties);
+        
+        // Generate mock routing scores (distribute scores to make tests work)
+        const routes: Record<string, number> = {};
+        routeIds.forEach((routeId, index) => {
+          // Give higher scores to earlier routes to make selection deterministic
+          routes[routeId] = 80 - (index * 10);
+        });
+
+        structuredResponse = {
+          context: "User message context",
+          routes,
+          responseDirectives: [],
+        };
+      }
+      // Check if this is a step selection schema
+      else if (schema.properties?.selectedStepId) {
+        const stepIds = schema.properties.selectedStepId.enum || [];
+        if (stepIds.length > 0) {
+          structuredResponse = {
+            reasoning: "Selecting first available step",
+            selectedStepId: stepIds[0],
+          };
+        }
+      }
+      // Check if this is a response schema (has message field)
+      else if (schema.properties?.message) {
+        // Build response with only the message field
+        structuredResponse = {
+          message: this.config.responseMessage,
+        };
+      }
+      // Check if this is a data extraction schema (schemaName contains 'extraction' or 'data')
+      else if (schemaName.includes('extraction') || schemaName.includes('data')) {
+        // Return empty object for data extraction - let the agent handle it
+        structuredResponse = {};
+      }
+      // Check if this is a completion message schema
+      else if (schemaName.includes('completion')) {
+        structuredResponse = {
+          message: this.config.responseMessage,
+        };
+      }
+      else {
+        // Unknown schema type - return empty object to avoid validation errors
+        structuredResponse = {};
+      }
+    } else {
+      // No schema provided, use configured structured response
+      structuredResponse = this.config.structuredResponse;
+    }
+
     return {
       message: this.config.responseMessage,
       metadata: {
@@ -98,7 +160,7 @@ export class MockProvider implements AiProvider {
         tokensUsed: 150,
         finishReason: "stop",
       },
-      structured: this.config.structuredResponse as TStructured,
+      structured: structuredResponse,
     };
   }
 
