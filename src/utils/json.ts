@@ -37,7 +37,7 @@ export function parseJSONResponse(text: string): unknown {
 /**
  * Safely parse JSON response, returning undefined on failure
  */
-export function tryParseJSONResponse(text: string): unknown | undefined {
+export function tryParseJSONResponse(text: string): unknown {
   try {
     return parseJSONResponse(text);
   } catch {

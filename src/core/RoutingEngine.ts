@@ -454,7 +454,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         // Check if this step collects only optional fields
         const collectsOnlyOptional = target.collect && target.collect.length > 0 &&
           target.collect.every(field => 
-            route.optionalFields?.includes(field as keyof TData)
+            route.optionalFields?.includes(field)
           );
 
         if (collectsOnlyOptional) {
