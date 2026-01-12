@@ -4,6 +4,8 @@
 
 ### Type-Safe AI Conversational Agents That Actually Work in Production
 
+**@falai/agent is a conversational state engine where the AI understands, but the code is in control.**
+
 **Schema-driven data extraction • Predictable conversations • Enterprise-ready**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
@@ -750,6 +752,105 @@ Response + Updated Session State
 ⚡ **Smart Skipping** - Steps bypassed if their data is already present
 
 📖 **[Read the detailed architecture →](./docs/architecture/data-extraction-flow.md)**
+
+---
+
+### 1️⃣ General flowchart of @falai/agent
+
+This is the **actual internal execution flow** when `agent.respond()` is called.
+
+```mermaid
+flowchart TD
+    A[User sends a message] --> B[Load session and state]
+    B --> C[Routing + Pre-Extraction]
+
+    C --> C1[AI evaluates available routes]
+    C --> C2[AI extracts schema data]
+    C --> C3[Updates data/context]
+
+    C --> D{Route found?}
+    D -- No --> D1[Generic response / fallback]
+    D -- Yes --> E{Is the route already complete?}
+
+    E -- Yes --> F[Execute finalize / tools]
+    F --> G[Completion message]
+
+    E -- No --> H[Smart Step Selection]
+
+    H --> H1[Filter steps: when]
+    H --> H2[Remove steps via skipIf]
+    H --> H3[Validate requires]
+    H --> H4[Select next step]
+
+    H4 --> I[Prepare hooks / tools]
+    I --> J[AI generates response]
+    J --> K{Tool called?}
+
+    K -- Yes --> K1[Execute tool]
+    K1 --> K2[Update data/context]
+    K2 --> L[Re-evaluate route]
+
+    K -- No --> L[Re-evaluate route]
+
+    L --> M{Required fields completed?}
+    M -- Yes --> F
+    M -- No --> N[Save session]
+    N --> O[Return response to user]
+```
+
+### 🧠 Mental model of the flow
+
+* **AI decides**
+  → intent, route, data extraction, tools
+* **Code decides**
+  → step order, skipping steps, completing routes
+* **Nothing is random**
+  → there is always a deterministic next step
+
+---
+
+## 2️⃣ Data-Driven conversation flowchart (e.g. Booking)
+
+This shows **why the framework does not ask repeated questions**.
+
+```mermaid
+flowchart TD
+    A[User: I want to book the Grand Hotel for 2 people] --> B[Pre-Extraction]
+    B --> C[Extracts: hotelName, guests]
+    C --> D{All required fields?}
+
+    D -- No --> E[Select next step]
+    E --> F{hotelName present?}
+    F -- Yes --> G[Skip step ask_hotel]
+    F -- No --> H[Ask hotel]
+
+    G --> I{date present?}
+    I -- No --> J[Ask date]
+    I -- Yes --> K[Skip step ask_date]
+
+    J --> L[User answers date]
+    L --> M[Extract date]
+
+    M --> N{All fields completed?}
+    N -- Yes --> O[Execute tool book_hotel]
+    O --> P[Confirmation message]
+
+    N -- No --> E
+```
+
+---
+
+## 🔑 Key concepts mapped in the flowchart
+
+| README Concept    | Where it appears                     |
+| ----------------- | ------------------------------------ |
+| Pre-Extraction    | Before any step                      |
+| skipIf            | Smart Step Selection                 |
+| requires          | Validation before the step           |
+| requiredFields    | Route completion check               |
+| Tools             | During generation or finalize        |
+| Session-aware     | State loaded at the beginning        |
+| Always-on routing | Route re-evaluated after each action |
 
 ---
 
