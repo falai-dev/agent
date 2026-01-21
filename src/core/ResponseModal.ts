@@ -1117,7 +1117,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             batchSteps,
             batchStoppedReason,
         } = responseContext;
-        let session = initialSession;
+        const session = initialSession;
 
         // Get last user message (needed for both route and completion handling)
         // Convert HistoryItem[] to Event[] for internal processing

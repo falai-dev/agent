@@ -228,8 +228,12 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
       // Try to get field type/description from schema
       if (schema?.properties && schema.properties[field]) {
         const fieldSchema = schema.properties[field] as Record<string, unknown>;
-        const type = fieldSchema.type || 'string';
-        const description = fieldSchema.description || '';
+        const rawType = fieldSchema.type;
+        const rawDescription = fieldSchema.description;
+        
+        // Safely convert to string, handling objects and primitives
+        const type = typeof rawType === 'string' ? rawType : 'string';
+        const description = typeof rawDescription === 'string' ? rawDescription : '';
         
         if (description) {
           fieldDescription = `${field} (${type}): ${description}`;
