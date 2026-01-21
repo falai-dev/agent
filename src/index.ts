@@ -19,6 +19,8 @@ export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
 export { SessionManager } from "./core/SessionManager";
 export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager";
+export { BatchExecutor, needsInput, type NeedsInputStep, type DetermineBatchParams } from "./core/BatchExecutor";
+export { BatchPromptBuilder, type BuildBatchPromptParams, type BatchPromptResult } from "./core/BatchPromptBuilder";
 
 // Providers
 export { GeminiProvider } from "./providers/GeminiProvider";

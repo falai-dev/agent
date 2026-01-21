@@ -4,7 +4,7 @@
 
 import type { AgentStructuredResponse, AiProvider } from "./ai";
 import type { Tool } from "./tool";
-import type { RouteOptions } from "./route";
+import type { RouteOptions, StepRef, StoppedReason } from "./route";
 import type { PersistenceConfig } from "./persistence";
 import type { SessionState } from "./session";
 import type { StructuredSchema } from "./schema";
@@ -157,6 +157,10 @@ export interface AgentResponse<TData = Record<string, unknown>> {
   session?: SessionState<TData>;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   isRouteComplete?: boolean;
+  /** Steps executed in this response (for multi-step execution) */
+  executedSteps?: StepRef[];
+  /** Why execution stopped (for multi-step execution) */
+  stoppedReason?: StoppedReason;
 }
 
 export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
@@ -166,6 +170,10 @@ export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
   session?: SessionState<TData>;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   isRouteComplete?: boolean;
+  /** Steps executed in this response (for multi-step execution) */
+  executedSteps?: StepRef[];
+  /** Why execution stopped (for multi-step execution) */
+  stoppedReason?: StoppedReason;
   metadata?: {
     model?: string;
     tokensUsed?: number;

@@ -13,6 +13,7 @@ By the end of this guide, you'll have a working AI agent that can:
 - ✅ Maintain context across multiple turns
 - ✅ Use tools to perform actions
 - ✅ Handle complex conversation flows
+- ✅ Execute multiple steps in a single LLM call (multi-step execution)
 
 **Time estimate:** 15-30 minutes
 
@@ -389,6 +390,107 @@ demonstrateLifecycleHooks();
 - ✅ Understood "Next Friday, 2 people, $2000 budget" as structured data
 - ✅ Skipped asking for already-known information
 - ✅ Used the ToolManager API to create and execute tools with simplified context
+- ✅ Batched multiple steps together when data was available
+
+---
+
+## ⚡ Multi-Step Execution Benefits
+
+@falai/agent automatically batches multiple steps together when their data requirements are satisfied, reducing LLM calls and improving conversation flow.
+
+### How It Works
+
+When a user provides information that satisfies multiple steps, they execute together:
+
+```typescript
+// Traditional approach: 3 separate turns
+// Turn 1: "Which hotel?" → "Grand Hotel"
+// Turn 2: "What date?" → "Friday"
+// Turn 3: "How many guests?" → "2"
+
+// With multi-step execution: 1 turn
+const response = await agent.respond("Book Grand Hotel for 2 on Friday");
+
+// All 3 steps execute in a single LLM call!
+console.log(response.executedSteps);
+// [
+//   { id: "ask-hotel", routeId: "booking" },
+//   { id: "ask-date", routeId: "booking" },
+//   { id: "ask-guests", routeId: "booking" }
+// ]
+
+console.log(response.stoppedReason);
+// "route_complete"
+```
+
+### Benefits
+
+1. **Fewer LLM Calls** - Multiple steps in one call reduces costs
+2. **Better UX** - Users don't repeat information they've already provided
+3. **Faster Responses** - Less back-and-forth means quicker completion
+4. **Automatic** - No code changes needed, works with existing routes
+
+### Seeing It In Action
+
+```typescript
+// Create a booking route with multiple steps
+const bookingRoute = agent.createRoute({
+  title: "Hotel Booking",
+  requiredFields: ["hotel", "date", "guests"],
+  initialStep: {
+    prompt: "Which hotel?",
+    collect: ["hotel"],
+    skipIf: (data) => !!data.hotel,
+  },
+});
+
+const askDate = bookingRoute.initialStep.nextStep({
+  prompt: "What date?",
+  collect: ["date"],
+  skipIf: (data) => !!data.date,
+});
+
+const askGuests = askDate.nextStep({
+  prompt: "How many guests?",
+  collect: ["guests"],
+  skipIf: (data) => data.guests !== undefined,
+});
+
+// User provides all info at once
+const response = await agent.respond(
+  "I want to book the Grand Hotel for 2 people next Friday"
+);
+
+// Pre-extraction captures all data
+// All steps execute in one batch
+// Route completes immediately!
+
+console.log(response.message);
+// "Perfect! I've booked the Grand Hotel for 2 guests on Friday."
+
+console.log(response.isRouteComplete);
+// true
+```
+
+### Understanding the Response
+
+The response includes information about what executed:
+
+```typescript
+const response = await agent.respond("Book for 2 guests");
+
+// Which steps ran
+console.log(response.executedSteps);
+// [{ id: "ask-guests", routeId: "booking" }]
+
+// Why execution stopped
+console.log(response.stoppedReason);
+// "needs_input" - waiting for hotel and date
+
+// Or if complete:
+// "route_complete" - all steps finished
+// "end_route" - reached END_ROUTE marker
+```
 
 ---
 

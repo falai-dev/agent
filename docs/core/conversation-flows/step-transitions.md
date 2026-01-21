@@ -12,6 +12,138 @@ Step transitions handle:
 - **Route Completion**: Detect when routes reach their end
 - **Loop Prevention**: Avoid infinite traversal in complex flows
 
+## Stopping Conditions in Batch Execution
+
+When executing multiple steps in a batch, the engine stops for specific reasons indicated by the `stoppedReason` field in the response.
+
+### StoppedReason Values
+
+| Reason | Description | Behavior |
+|--------|-------------|----------|
+| `needs_input` | Step requires data not yet available | Batch stops, LLM generates response to collect data |
+| `end_route` | Reached END_ROUTE marker | Route is complete, no more steps to execute |
+| `route_complete` | All steps in route processed | Route finished successfully |
+| `prepare_error` | Error in prepare hook | Batch stops, error returned with last successful state |
+| `llm_error` | Error during LLM call | Batch stops, session state preserved |
+| `validation_error` | Data validation failed | Batch continues, errors included in response |
+| `finalize_error` | Error in finalize hook | Non-fatal, logged and execution continues |
+
+### Needs-Input Stopping
+
+The most common stopping condition. A step needs input when:
+
+```typescript
+// Step needs input if requires fields are missing
+const step1 = {
+  prompt: "Confirm your booking",
+  requires: ["hotel", "date"], // Both must be present
+};
+
+// Step needs input if collecting and no collect fields have data
+const step2 = {
+  prompt: "What's your preference?",
+  collect: ["preference", "notes"], // Needs input if BOTH are missing
+};
+```
+
+### End-Route Stopping
+
+Batch stops when reaching the END_ROUTE marker:
+
+```typescript
+const finalStep = confirmStep.nextStep({
+  prompt: "Booking confirmed! Anything else?",
+}).endRoute(); // Creates END_ROUTE transition
+
+// Response will have:
+// stoppedReason: "end_route"
+// isRouteComplete: true
+```
+
+### Route-Complete Stopping
+
+When all steps have been processed without hitting END_ROUTE:
+
+```typescript
+// If the last step has no transitions and doesn't need input
+const response = await agent.respond("Complete my booking");
+
+// Response will have:
+// stoppedReason: "route_complete"
+// isRouteComplete: true
+```
+
+### Transitions Within Batched Execution
+
+During batch execution, transitions work as follows:
+
+1. **Linear transitions** - Steps connected via `nextStep()` are evaluated sequentially
+2. **SkipIf evaluation** - Each step's `skipIf` is checked before inclusion
+3. **Needs-input check** - If a step needs input, batch stops there
+4. **END_ROUTE detection** - Batch stops when reaching route end
+
+```typescript
+// Example: Steps A → B → C → END_ROUTE
+// If user provides data for A and B but not C:
+
+const response = await agent.respond("Data for A and B");
+
+// Batch includes: [A, B]
+// Stops at: C (needs_input)
+// Next call will continue from C
+```
+
+### Error Stopping Conditions
+
+Errors during batch execution have different behaviors:
+
+```typescript
+// Prepare hook error - stops immediately
+const stepWithPrepare = {
+  prompt: "Processing...",
+  prepare: async (context, data) => {
+    if (!data.valid) throw new Error("Invalid data");
+  },
+};
+// stoppedReason: "prepare_error"
+// Session state: last successful state preserved
+
+// LLM error - stops with preserved state
+// stoppedReason: "llm_error"
+// Session state: preserved from before LLM call
+
+// Validation error - continues but reports error
+// stoppedReason: "validation_error"
+// Collected data: partial data preserved
+
+// Finalize hook error - logged, continues
+// stoppedReason: original reason (not changed)
+// Error: included in response for logging
+```
+
+### Checking Stop Reason in Response
+
+```typescript
+const response = await agent.respond("Book a hotel");
+
+switch (response.stoppedReason) {
+  case 'needs_input':
+    console.log("Waiting for user input");
+    break;
+  case 'end_route':
+  case 'route_complete':
+    console.log("Route finished:", response.isRouteComplete);
+    break;
+  case 'prepare_error':
+  case 'llm_error':
+    console.error("Error occurred:", response.error);
+    break;
+  case 'validation_error':
+    console.warn("Validation issues:", response.error);
+    break;
+}
+```
+
 ## Conditional Skipping
 
 ### SkipIf Logic

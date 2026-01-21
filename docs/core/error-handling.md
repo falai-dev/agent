@@ -11,6 +11,199 @@ The framework handles errors across multiple layers:
 - **Session Data Synchronization** - Consistent error handling for agent-session data operations
 - **Tool Execution Errors** - Graceful handling of tool failures
 - **Validation Errors** - Schema and data validation error recovery
+- **Batch Execution Errors** - Error handling during multi-step batch execution
+
+## Batch Execution Error Handling
+
+When executing multiple steps in a batch, errors are handled according to their category and severity.
+
+### Error Categories
+
+| Error Type | Severity | Behavior |
+|------------|----------|----------|
+| `pre_extraction` | Warning | Log warning, continue with empty extraction |
+| `skipif_evaluation` | Warning | Treat step as non-skippable, include in batch |
+| `prepare_hook` | Fatal | Stop batch execution, return error response |
+| `llm_call` | Fatal | Stop batch, preserve last successful session state |
+| `data_validation` | Non-fatal | Include errors in response, preserve partial data |
+| `finalize_hook` | Non-fatal | Log error, continue with remaining hooks |
+
+### Pre-Extraction Errors
+
+Failures during data extraction from user message:
+
+```typescript
+// Pre-extraction is an optimization; failure shouldn't block execution
+try {
+  const preExtracted = await preExtractData(message, route);
+  session = mergeCollected(session, preExtracted);
+} catch (error) {
+  // Log warning but continue
+  console.warn("Pre-extraction failed:", error.message);
+  // Continue with empty extraction result
+}
+```
+
+### SkipIf Evaluation Errors
+
+Exceptions thrown by skipIf conditions:
+
+```typescript
+// Safer to execute than skip when condition is indeterminate
+let shouldSkip = false;
+try {
+  shouldSkip = await step.evaluateSkipIf(context);
+} catch (error) {
+  console.warn(`skipIf error for step ${step.id}, treating as non-skippable`);
+  shouldSkip = false; // Include step in batch
+}
+```
+
+### Prepare Hook Errors
+
+Failures in step prepare hooks stop batch execution:
+
+```typescript
+const response = await agent.respond("Process my request");
+
+if (response.stoppedReason === 'prepare_error') {
+  console.error("Prepare hook failed:", response.error);
+  // {
+  //   type: 'prepare_hook',
+  //   message: 'Validation failed in prepare hook',
+  //   stepId: 'validate-step',
+  //   details: { ... }
+  // }
+  
+  // Session state is preserved from before the failed hook
+  console.log(response.session); // Last successful state
+}
+```
+
+### LLM Call Errors
+
+Provider failures, timeouts, and rate limits:
+
+```typescript
+const response = await agent.respond("Generate response");
+
+if (response.stoppedReason === 'llm_error') {
+  console.error("LLM call failed:", response.error);
+  // {
+  //   type: 'llm_call',
+  //   message: 'Rate limit exceeded',
+  //   details: { ... }
+  // }
+  
+  // Session preserved from before LLM call
+  // Can retry with same session
+}
+```
+
+### Data Validation Errors
+
+Schema validation failures for collected data:
+
+```typescript
+const response = await agent.respond("Book for 100 guests");
+
+if (response.stoppedReason === 'validation_error') {
+  console.warn("Validation failed:", response.error);
+  // {
+  //   type: 'data_validation',
+  //   message: 'Validation failed for 1 field(s): guests',
+  //   details: [
+  //     { field: 'guests', value: 100, message: 'Exceeds maximum of 10' }
+  //   ]
+  // }
+  
+  // Valid partial data is still preserved
+  console.log(response.session.data); // Contains valid fields
+}
+```
+
+### Finalize Hook Errors
+
+Failures in finalize hooks are logged but don't stop execution:
+
+```typescript
+// Finalize hooks are for cleanup; one failure shouldn't block others
+const response = await agent.respond("Complete booking");
+
+// Even if finalize hooks fail, response is returned
+// Errors are logged and included in response.error if present
+if (response.error?.type === 'finalize_hook') {
+  console.warn("Some finalize hooks failed:", response.error.details);
+}
+```
+
+### Partial Progress Preservation
+
+Errors preserve partial progress:
+
+```typescript
+// Batch: [step1, step2, step3]
+// step2's prepare hook fails
+
+const response = await agent.respond("Process all steps");
+
+// step1 completed successfully
+// step2 failed during prepare
+// step3 never executed
+
+console.log(response.executedSteps);
+// [{ id: "step1", routeId: "route" }]
+
+console.log(response.stoppedReason);
+// "prepare_error"
+
+// Session contains data from step1
+console.log(response.session.data);
+```
+
+### Error Response Structure
+
+```typescript
+interface BatchExecutionError {
+  /** Type of error that occurred */
+  type: 'pre_extraction' | 'skipif_evaluation' | 'prepare_hook' | 
+        'llm_call' | 'data_validation' | 'finalize_hook';
+  /** Error message */
+  message: string;
+  /** Step where error occurred (if applicable) */
+  stepId?: string;
+  /** Additional error details */
+  details?: unknown;
+}
+```
+
+### Handling Batch Errors
+
+```typescript
+const response = await agent.respond(message);
+
+// Check for errors
+if (response.error) {
+  switch (response.error.type) {
+    case 'prepare_hook':
+      // Fatal - batch stopped
+      await handlePrepareError(response.error);
+      break;
+    case 'llm_call':
+      // Fatal - can retry
+      await retryWithBackoff(() => agent.respond(message));
+      break;
+    case 'data_validation':
+      // Non-fatal - ask user to correct
+      await promptForCorrection(response.error.details);
+      break;
+    case 'finalize_hook':
+      // Non-fatal - log and continue
+      console.warn("Finalize error:", response.error);
+      break;
+  }
+}
+```
 
 ## Streaming Error Propagation
 

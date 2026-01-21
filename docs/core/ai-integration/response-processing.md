@@ -277,6 +277,150 @@ Built-in monitoring capabilities:
 - **Debug logging** - Detailed processing traces
 - **Performance profiling** - Identify bottlenecks
 
+## Batch Execution Response Fields
+
+When using multi-step execution, the `AgentResponse` includes additional fields for batch execution information.
+
+### New AgentResponse Fields
+
+```typescript
+interface AgentResponse<TData = unknown> {
+  /** The generated message */
+  message: string;
+  /** Updated session state */
+  session?: SessionState<TData>;
+  /** Tool calls made during response */
+  toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+  /** Whether the route is complete */
+  isRouteComplete?: boolean;
+  
+  // Multi-step execution fields
+  /** Steps executed in this response */
+  executedSteps?: StepRef[];
+  /** Why execution stopped */
+  stoppedReason?: StoppedReason;
+}
+```
+
+### executedSteps Array
+
+Lists all steps that were executed in the batch:
+
+```typescript
+const response = await agent.respond("Book Grand Hotel for 2 on Friday");
+
+console.log(response.executedSteps);
+// [
+//   { id: "ask-hotel", routeId: "booking" },
+//   { id: "ask-guests", routeId: "booking" },
+//   { id: "ask-date", routeId: "booking" }
+// ]
+```
+
+Each `StepRef` contains:
+- `id` - The step identifier
+- `routeId` - The route this step belongs to
+
+### stoppedReason Field
+
+Indicates why batch execution stopped:
+
+```typescript
+type StoppedReason =
+  | 'needs_input'      // Step requires uncollected data
+  | 'end_route'        // Reached END_ROUTE
+  | 'route_complete'   // All Steps processed
+  | 'prepare_error'    // Error in prepare hook
+  | 'llm_error'        // Error during LLM call
+  | 'validation_error' // Error validating collected data
+  | 'finalize_error';  // Error in finalize hook (non-fatal)
+```
+
+### BatchExecutionResult Structure
+
+The internal batch execution result provides detailed information:
+
+```typescript
+interface BatchExecutionResult<TData = unknown> {
+  /** The generated message */
+  message: string;
+  /** Updated session state */
+  session: SessionState<TData>;
+  /** Steps that were executed */
+  executedSteps: StepRef[];
+  /** Why execution stopped */
+  stoppedReason: StoppedReason;
+  /** Collected data from the batch */
+  collectedData?: Partial<TData>;
+  /** Any errors that occurred */
+  error?: BatchExecutionError;
+}
+```
+
+### Error Information
+
+When errors occur, detailed information is available:
+
+```typescript
+interface BatchExecutionError {
+  /** Type of error that occurred */
+  type: 'pre_extraction' | 'skipif_evaluation' | 'prepare_hook' | 
+        'llm_call' | 'data_validation' | 'finalize_hook';
+  /** Error message */
+  message: string;
+  /** Step where error occurred (if applicable) */
+  stepId?: string;
+  /** Additional error details */
+  details?: unknown;
+}
+```
+
+### Using Response Fields
+
+```typescript
+const response = await agent.respond("Complete my booking");
+
+// Check what was executed
+console.log(`Executed ${response.executedSteps?.length || 0} steps`);
+
+// Check why execution stopped
+switch (response.stoppedReason) {
+  case 'needs_input':
+    console.log("Waiting for more information from user");
+    break;
+  case 'route_complete':
+  case 'end_route':
+    console.log("Route finished successfully");
+    break;
+  case 'validation_error':
+    console.log("Data validation issues:", response.error);
+    break;
+  default:
+    console.log("Stopped due to:", response.stoppedReason);
+}
+
+// Check route completion
+if (response.isRouteComplete) {
+  console.log("All required data collected");
+}
+```
+
+### Session State After Batch
+
+The session state reflects the final step position:
+
+```typescript
+const response = await agent.respond("Book for 2 guests");
+
+// Session shows current position
+console.log(response.session?.currentStep);
+// { id: "ask-date", routeId: "booking" }
+
+// Session data includes all collected values
+console.log(response.session?.data);
+// { hotel: "Grand Hotel", guests: 2 }
+```
+
 ## Best Practices
 
 - Design schemas for reliable AI extraction
@@ -285,3 +429,5 @@ Built-in monitoring capabilities:
 - Use streaming for better user experience
 - Leverage tool results for context enrichment
 - Validate data at multiple levels (schema + business rules)
+- Check `executedSteps` to understand batch behavior
+- Handle different `stoppedReason` values appropriately

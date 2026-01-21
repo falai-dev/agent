@@ -4,6 +4,29 @@ This directory contains migration guides for major changes and updates to the `@
 
 ## Available Migration Guides
 
+### [Multi-Step Execution Migration Guide](./multi-step-execution.md)
+
+**Latest Update** - Guide for understanding and migrating to multi-step batch execution.
+
+**What's New:**
+- 🚀 **Multi-Step Batching**: Multiple steps execute in a single LLM call
+- ⚡ **Reduced LLM Costs**: Fewer calls for the same outcome
+- 🎯 **Better UX**: Less back-and-forth in conversations
+- 📊 **New Response Fields**: `executedSteps`, `stoppedReason`, `error`
+
+**Key Changes:**
+- Steps batch together when data requirements are satisfied
+- Pre-extraction happens before batch determination
+- Hook execution order: all prepare → LLM → all finalize
+- SkipIf conditions affect batch determination
+
+**Migration Status:**
+- ✅ **API Compatible**: Public API shape unchanged
+- ⚠️ **Behavioral Change**: Execution semantics differ
+- ✅ **Gradual Migration**: Review hooks and tests
+
+---
+
 ### [ResponseModal Refactor Migration Guide](./response-modal-refactor.md)
 
 **Latest Update** - Comprehensive guide for migrating to the new ResponseModal architecture.

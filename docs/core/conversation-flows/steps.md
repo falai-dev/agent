@@ -145,6 +145,115 @@ const dataStep = previousStep.nextStep({
 });
 ```
 
+## Multi-Step Batch Execution
+
+Steps can execute together in a single LLM call when their data requirements are already satisfied. This reduces unnecessary back-and-forth and minimizes LLM costs.
+
+### How Steps Are Batched
+
+The execution engine walks through Steps sequentially and includes them in a batch until encountering a Step that needs user input:
+
+```typescript
+// Route with 3 steps
+const route = agent.createRoute({
+  title: "Booking",
+  requiredFields: ["hotel", "date", "guests"],
+  initialStep: {
+    prompt: "Which hotel?",
+    collect: ["hotel"],
+    skipIf: (data) => !!data.hotel,
+  },
+});
+
+const askDate = route.initialStep.nextStep({
+  prompt: "What date?",
+  collect: ["date"],
+  skipIf: (data) => !!data.date,
+});
+
+const askGuests = askDate.nextStep({
+  prompt: "How many guests?",
+  collect: ["guests"],
+  skipIf: (data) => data.guests !== undefined,
+});
+```
+
+When a user says "Book Grand Hotel for 2 people on Friday":
+1. Pre-extraction captures: `{ hotel: "Grand Hotel", date: "Friday", guests: 2 }`
+2. All steps have their data satisfied (skipIf evaluates to true)
+3. Route completes in a single LLM call
+
+### The `requires` Field in Batch Context
+
+The `requires` field specifies data prerequisites that must be present before a Step can execute:
+
+```typescript
+const confirmStep = askGuests.nextStep({
+  prompt: "Confirm booking for {{guests}} guests at {{hotel}} on {{date}}?",
+  requires: ["hotel", "date", "guests"], // All must be present
+  collect: ["confirmed"],
+});
+```
+
+**Batch behavior:**
+- If any `requires` field is missing from session data (after pre-extraction), the Step **needs input**
+- The batch stops at this Step, and the LLM generates a response to collect the missing data
+
+### The `collect` Field in Batch Context
+
+The `collect` field specifies which data fields the Step should extract from the conversation:
+
+```typescript
+const contactStep = {
+  prompt: "What's your email and phone?",
+  collect: ["email", "phone"], // Extract both from response
+};
+```
+
+**Batch behavior:**
+- If a Step has `collect` fields and **none** of those fields have data in the session, the Step **needs input**
+- If **any** collect field already has data, the Step doesn't need input and can be included in the batch
+
+### SkipIf Evaluation During Batch Determination
+
+The `skipIf` condition is evaluated for each Step during batch determination:
+
+```typescript
+const premiumStep = {
+  prompt: "Would you like premium features?",
+  collect: ["wantsPremium"],
+  skipIf: (data) => data.userTier === "free", // Skip for free users
+};
+```
+
+**Evaluation rules:**
+1. If `skipIf` evaluates to `true` → Step is skipped, continue to next Step
+2. If `skipIf` evaluates to `false` → Step is evaluated for needs-input
+3. If `skipIf` throws an error → Step is treated as non-skippable (safer to execute than skip)
+
+### Batch Execution Example
+
+```typescript
+// User provides partial info
+const response1 = await agent.respond("I want to book the Grand Hotel");
+
+// Response shows which steps executed
+console.log(response1.executedSteps);
+// [{ id: "ask-hotel", routeId: "booking" }]
+
+console.log(response1.stoppedReason);
+// "needs_input" - stopped at ask-date step
+
+// User provides remaining info
+const response2 = await agent.respond("2 people on Friday");
+
+console.log(response2.executedSteps);
+// [{ id: "ask-date", routeId: "booking" }, { id: "ask-guests", routeId: "booking" }]
+
+console.log(response2.stoppedReason);
+// "route_complete"
+```
+
 ## Best Practices
 
 - Keep step prompts clear and focused
@@ -152,3 +261,6 @@ const dataStep = previousStep.nextStep({
 - Leverage schema validation for data integrity
 - Implement error handling in lifecycle hooks
 - Consider user experience in step sequencing
+- Design steps to maximize batching by using `skipIf` conditions
+- Use `requires` to enforce data dependencies between steps
+- Keep `collect` fields focused on what each step actually needs

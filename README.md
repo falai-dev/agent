@@ -606,6 +606,10 @@ app.post('/chat', async (req, res) => {
 - **[Routes](./docs/core/conversation-flows/routes.md)** - Route definition & lifecycle
 - **[Steps](./docs/core/conversation-flows/steps.md)** - Step transitions & logic
 
+### 🏗️ Architecture
+
+- **[Multi-Step Execution](./docs/architecture/multi-step-execution.md)** - Batch execution architecture & flow
+
 ### 🤖 AI Integration
 
 - **[AI Providers](./docs/core/ai-integration/providers.md)** - Gemini, OpenAI, Anthropic, OpenRouter
@@ -627,6 +631,7 @@ app.post('/chat', async (req, res) => {
 
 - **[Building Agents](./docs/guides/building-agents/)** - Complete agent construction patterns
 - **[Advanced Patterns](./docs/guides/advanced-patterns/)** - Complex use cases & integrations
+- **[Multi-Step Execution Migration](./docs/guides/migration/multi-step-execution.md)** - Migrating to batch execution
 - **[API Reference](./docs/api/overview.md)** - Complete API documentation
 
 ---

@@ -15,6 +15,7 @@ import type {
     ToolEventData,
     AgentStructuredResponse,
     Term,
+    StoppedReason,
 } from "../types";
 import { EventKind, MessageRole } from "../types";
 import type { Agent } from "./Agent";
@@ -22,10 +23,13 @@ import type { Route } from "./Route";
 import { Step } from "./Step";
 import { ResponseEngine } from "./ResponseEngine";
 import { ResponsePipeline } from "./ResponsePipeline";
+import { BatchExecutor, type HookFunction } from "./BatchExecutor";
+import { BatchPromptBuilder } from "./BatchPromptBuilder";
 import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
 import { END_ROUTE_ID } from "../constants";
+import type { StepOptions } from "../types/route";
 
 /**
  * Configuration options for ResponseModal
@@ -130,6 +134,12 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
     selectedStep?: Step<TContext, TData>;
     responseDirectives?: string[];
     isRouteComplete: boolean;
+    /** Batch of steps to execute (for multi-step execution) */
+    batchSteps?: StepOptions<TContext, TData>[];
+    /** Reason why batch determination stopped */
+    batchStoppedReason?: StoppedReason;
+    /** Step that caused batch to stop (if applicable) */
+    batchStoppedAtStep?: StepOptions<TContext, TData>;
 }
 
 /**
@@ -139,6 +149,8 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
 export class ResponseModal<TContext = unknown, TData = unknown> {
     private readonly responseEngine: ResponseEngine<TContext, TData>;
     private readonly responsePipeline: ResponsePipeline<TContext, TData>;
+    private readonly batchExecutor: BatchExecutor<TContext, TData>;
+    private readonly batchPromptBuilder: BatchPromptBuilder<TContext, TData>;
 
     constructor(
         private readonly agent: Agent<TContext, TData>,
@@ -158,6 +170,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             this.agent.updateCollectedData.bind(this.agent),
             this.getToolManager()
         );
+
+        // Initialize batch executor for multi-step execution
+        this.batchExecutor = new BatchExecutor<TContext, TData>();
+
+        // Initialize batch prompt builder for combined prompts
+        this.batchPromptBuilder = new BatchPromptBuilder<TContext, TData>();
     }
 
     /**
@@ -419,12 +437,16 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             }
 
             // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use
+            // Also performs pre-extraction and batch determination
             let routingResult: {
                 selectedRoute?: Route<TContext, TData>;
                 selectedStep?: Step<TContext, TData>;
                 responseDirectives?: string[];
                 session: SessionState<TData>;
                 isRouteComplete: boolean;
+                batchSteps?: StepOptions<TContext, TData>[];
+                batchStoppedReason?: StoppedReason;
+                batchStoppedAtStep?: StepOptions<TContext, TData>;
             };
             try {
                 routingResult = await this.handleUnifiedRoutingAndStepSelection({
@@ -445,6 +467,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 selectedStep: routingResult.selectedStep,
                 responseDirectives: routingResult.responseDirectives,
                 isRouteComplete: routingResult.isRouteComplete,
+                batchSteps: routingResult.batchSteps,
+                batchStoppedReason: routingResult.batchStoppedReason,
+                batchStoppedAtStep: routingResult.batchStoppedAtStep,
             };
         } catch (error) {
             // Re-throw ResponseGenerationError as-is, wrap others
@@ -470,6 +495,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         responseDirectives?: string[];
         session: SessionState<TData>;
         isRouteComplete: boolean;
+        /** Batch of steps to execute (for multi-step execution) */
+        batchSteps?: StepOptions<TContext, TData>[];
+        /** Reason why batch determination stopped */
+        batchStoppedReason?: StoppedReason;
+        /** Step that caused batch to stop (if applicable) */
+        batchStoppedAtStep?: StepOptions<TContext, TData>;
     }> {
         try {
             // Use the ResponsePipeline for optimized routing and step selection
@@ -485,13 +516,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             let updatedSession = routingResult.session;
             let isRouteComplete = routingResult.isRouteComplete;
 
-            // PRE-EXTRACTION: If entering a new route that collects data, extract data from user message first
+            // PRE-EXTRACTION: If entering a route that collects data, extract data from user message first
             // This allows us to skip steps whose data is already provided
+            // Requirement 3.1: Perform Pre_Extraction before determining the Batch
             if (routingResult.selectedRoute && !isRouteComplete) {
-                const isEnteringNewRoute = !params.session.currentRoute || 
-                    params.session.currentRoute.id !== routingResult.selectedRoute.id;
-
-                if (isEnteringNewRoute && this.shouldPreExtractData(routingResult.selectedRoute)) {
+                // Always pre-extract when route collects data (not just on new route entry)
+                // This ensures batch determination has the most up-to-date data
+                if (this.shouldPreExtractData(routingResult.selectedRoute)) {
                     logger.debug(
                         `[ResponseModal] Pre-extracting data for route: ${routingResult.selectedRoute.title}`
                     );
@@ -509,7 +540,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             `[ResponseModal] Pre-extracted data:`,
                             extractedData
                         );
-                        // Update session with pre-extracted data
+                        // Requirement 3.3: Merge pre-extracted data into session before batch determination
                         updatedSession = mergeCollected(updatedSession, extractedData);
                         // Also update agent's collected data
                         await this.agent.updateCollectedData(extractedData);
@@ -526,6 +557,33 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 }
             }
 
+            // BATCH DETERMINATION: Use BatchExecutor to determine which steps can execute together
+            // Requirement 3.4: Pre-extraction results affect batch determination
+            let batchSteps: StepOptions<TContext, TData>[] | undefined;
+            let batchStoppedReason: StoppedReason | undefined;
+            let batchStoppedAtStep: StepOptions<TContext, TData> | undefined;
+
+            if (routingResult.selectedRoute && !isRouteComplete) {
+                // Determine current step position for batch determination
+                const currentStep = routingResult.selectedStep || 
+                    (updatedSession.currentStep ? routingResult.selectedRoute.getStep(updatedSession.currentStep.id) : undefined);
+
+                logger.debug(`[ResponseModal] Determining batch starting from step: ${currentStep?.id || 'initial'}`);
+
+                const batchResult = await this.batchExecutor.determineBatch({
+                    route: routingResult.selectedRoute,
+                    currentStep,
+                    sessionData: updatedSession.data || {},
+                    context: params.context,
+                });
+
+                batchSteps = batchResult.steps;
+                batchStoppedReason = batchResult.stoppedReason;
+                batchStoppedAtStep = batchResult.stoppedAtStep;
+
+                logger.debug(`[ResponseModal] Batch determined: ${batchSteps.length} steps, stopped reason: ${batchStoppedReason}`);
+            }
+
             // Determine next step using pipeline method for consistency
             const stepResult = await this.responsePipeline.determineNextStep({
                 selectedRoute: routingResult.selectedRoute,
@@ -540,6 +598,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 responseDirectives: routingResult.responseDirectives,
                 session: stepResult.session,
                 isRouteComplete, // Use updated completion status
+                batchSteps,
+                batchStoppedReason,
+                batchStoppedAtStep,
             };
         } catch (error) {
             throw ResponseGenerationError.fromError(error, 'routing_optimization', params);
@@ -643,7 +704,17 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     private async generateUnifiedResponse(
         responseContext: ResponseContext<TContext, TData>
     ): Promise<AgentResponse<TData>> {
-        const { effectiveContext, session: initialSession, history, selectedRoute, selectedStep, responseDirectives, isRouteComplete } = responseContext;
+        const { 
+            effectiveContext, 
+            session: initialSession, 
+            history, 
+            selectedRoute, 
+            selectedStep, 
+            responseDirectives, 
+            isRouteComplete,
+            batchSteps,
+            batchStoppedReason,
+        } = responseContext;
         let session = initialSession;
 
         // Get last user message (needed for both route and completion handling)
@@ -653,27 +724,61 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         let message: string;
         let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
+        let executedSteps: StepRef[] | undefined;
+        let stoppedReason: StoppedReason | undefined;
 
 
         
         if (selectedRoute && !isRouteComplete) {
-            // Handle normal route processing
+            // Check if we have batch steps to execute
+            if (batchSteps && batchSteps.length > 0) {
+                // BATCH EXECUTION: Execute multiple steps in a single LLM call
+                logger.debug(`[ResponseModal] Executing batch of ${batchSteps.length} steps`);
 
-            const result = await this.processRouteResponse({
-                selectedRoute,
-                selectedStep,
-                responseDirectives,
-                session,
-                history,
-                context: effectiveContext,
-                lastMessageText,
-                historyEvents,
-                signal: responseContext.history ? undefined : undefined, // TODO: Fix signal passing
-            });
+                const batchResult = await this.executeBatchResponse({
+                    selectedRoute,
+                    batchSteps,
+                    responseDirectives,
+                    session,
+                    history,
+                    context: effectiveContext,
+                    historyEvents,
+                });
 
-            message = result.message;
-            toolCalls = result.toolCalls;
-            session = result.session;
+                message = batchResult.message;
+                toolCalls = batchResult.toolCalls;
+                session = batchResult.session;
+                executedSteps = batchResult.executedSteps;
+                stoppedReason = batchStoppedReason;
+
+            } else {
+                // SINGLE STEP EXECUTION: Fall back to single-step processing
+                // This happens when batch determination returns empty (first step needs input)
+                const result = await this.processRouteResponse({
+                    selectedRoute,
+                    selectedStep,
+                    responseDirectives,
+                    session,
+                    history,
+                    context: effectiveContext,
+                    lastMessageText,
+                    historyEvents,
+                    signal: undefined,
+                });
+
+                message = result.message;
+                toolCalls = result.toolCalls;
+                session = result.session;
+                
+                // Track executed step for single-step execution
+                if (selectedStep) {
+                    executedSteps = [{
+                        id: selectedStep.id,
+                        routeId: selectedRoute.id,
+                    }];
+                }
+                stoppedReason = batchStoppedReason || 'needs_input';
+            }
 
         } else if (isRouteComplete && selectedRoute) {
             // Handle route completion
@@ -686,17 +791,19 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     context: effectiveContext,
                     lastMessageText,
                     historyEvents,
-                    signal: undefined, // TODO: Pass signal from responseContext
+                    signal: undefined,
                 });
 
                 // Set step to END_ROUTE marker
                 session = enterStep(session, END_ROUTE_ID, "Route completed");
+                stoppedReason = 'route_complete';
                 logger.debug(`[ResponseModal] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`);
             } catch (error) {
                 logger.error(`[ResponseModal] Error generating completion message:`, error);
                 // Fallback to simple completion message
                 message = `Thank you! I've recorded all the information for your ${selectedRoute.title.toLowerCase()}.`;
                 session = enterStep(session, END_ROUTE_ID, "Route completed");
+                stoppedReason = 'route_complete';
             }
 
         } else {
@@ -707,14 +814,289 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 context: effectiveContext,
                 session,
             });
+            
+            // For fallback responses, set empty executedSteps and no stoppedReason
+            // since there's no route/step execution happening
+            executedSteps = [];
+            stoppedReason = undefined;
         }
 
+        // Ensure response structure completeness (Requirement 8.1, 8.2, 8.3)
+        // - executedSteps: array of steps executed (empty array if none)
+        // - stoppedReason: why execution stopped (undefined for fallback)
+        // - session.currentStep: reflects final step position
         return {
             message,
             session,
             toolCalls,
             isRouteComplete,
+            executedSteps: executedSteps || [],
+            stoppedReason,
         };
+    }
+
+    /**
+     * Execute a batch of steps with a single LLM call
+     * 
+     * This method:
+     * 1. Executes all prepare hooks for steps in the batch (in order)
+     * 2. Builds a combined prompt using BatchPromptBuilder
+     * 3. Makes a single LLM call
+     * 4. Collects data from the response for all steps
+     * 5. Executes all finalize hooks for steps in the batch (in order)
+     * 
+     * @private
+     * **Validates: Requirements 1.1, 4.4, 5.1, 5.2**
+     */
+    private async executeBatchResponse(params: {
+        selectedRoute: Route<TContext, TData>;
+        batchSteps: StepOptions<TContext, TData>[];
+        responseDirectives?: string[];
+        session: SessionState<TData>;
+        history: HistoryItem[];
+        context: TContext;
+        historyEvents: Event[];
+        signal?: AbortSignal;
+    }): Promise<{
+        message: string;
+        toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+        session: SessionState<TData>;
+        executedSteps: StepRef[];
+    }> {
+        const { selectedRoute, batchSteps, history, context, historyEvents, signal } = params;
+        let session = params.session;
+
+        logger.debug(`[ResponseModal] Starting batch execution for ${batchSteps.length} steps`);
+
+        // Create hook executor function
+        const executeHook = async (
+            hook: HookFunction<TContext, TData>,
+            hookContext: TContext,
+            data?: Partial<TData>,
+            step?: StepOptions<TContext, TData>
+        ): Promise<void> => {
+            // Find the route for this step
+            const route = selectedRoute;
+            // Convert StepOptions to Step if needed for executePrepareFinalize
+            const stepInstance = step?.id ? route.getStep(step.id) : undefined;
+            await this.executePrepareFinalize(hook, hookContext, data, route, stepInstance);
+        };
+
+        // PHASE 1: Execute all prepare hooks (Requirement 5.1)
+        logger.debug(`[ResponseModal] Executing prepare hooks for batch`);
+        const prepareResult = await this.batchExecutor.executePrepareHooks({
+            steps: batchSteps,
+            context,
+            data: session.data,
+            executeHook,
+        });
+
+        if (!prepareResult.success) {
+            // Prepare hook failed - return error response
+            logger.error(`[ResponseModal] Prepare hook failed:`, prepareResult.error);
+            throw new ResponseGenerationError(
+                `Prepare hook failed: ${prepareResult.error?.message}`,
+                { 
+                    phase: 'prepare_hooks', 
+                    context: { 
+                        stepId: prepareResult.error?.stepId,
+                        executedSteps: prepareResult.executedSteps,
+                    } 
+                }
+            );
+        }
+
+        // PHASE 2: Build combined prompt using BatchPromptBuilder (Requirement 4.4)
+        logger.debug(`[ResponseModal] Building batch prompt`);
+        const batchPromptResult = await this.batchPromptBuilder.buildBatchPrompt({
+            steps: batchSteps,
+            route: selectedRoute,
+            history: historyEvents,
+            context,
+            session,
+            agentOptions: this.agent.getAgentOptions(),
+        });
+
+        logger.debug(`[ResponseModal] Batch prompt built with ${batchPromptResult.stepCount} steps, collecting: ${batchPromptResult.collectFields.join(', ')}`);
+
+        // Build response schema for batch (includes all collect fields)
+        const responseSchema = this.buildBatchResponseSchema(batchPromptResult.collectFields);
+
+        // Collect available tools for AI (from all steps in batch)
+        const availableTools = this.collectBatchAvailableTools(selectedRoute, batchSteps);
+
+        // PHASE 3: Make single LLM call (Requirement 4.4)
+        logger.debug(`[ResponseModal] Making LLM call for batch`);
+        const agentOptions = this.agent.getAgentOptions();
+        const result = await agentOptions.provider.generateMessage({
+            prompt: batchPromptResult.prompt,
+            history: historyEvents,
+            context,
+            tools: availableTools,
+            signal,
+            parameters: responseSchema ? { jsonSchema: responseSchema, schemaName: "batch_response" } : undefined,
+        });
+
+        let message = result.structured?.message || result.message;
+        let toolCalls = result.structured?.toolCalls;
+
+        logger.debug(`[ResponseModal] LLM response received for batch`);
+
+        // Execute tools if any
+        if (toolCalls && toolCalls.length > 0) {
+            const toolResult = await this.executeUnifiedToolLoop({
+                toolCalls,
+                context,
+                session,
+                history,
+                selectedRoute,
+                responsePrompt: batchPromptResult.prompt,
+                availableTools,
+                responseSchema,
+                signal,
+            });
+
+            session = toolResult.session;
+            toolCalls = toolResult.finalToolCalls;
+            if (toolResult.finalMessage) {
+                message = toolResult.finalMessage;
+            }
+        }
+
+        // PHASE 4: Collect data from response for all steps (Requirement 6.1, 6.2, 6.3)
+        logger.debug(`[ResponseModal] Collecting batch data`);
+        const collectResult = this.batchExecutor.collectBatchData({
+            steps: batchSteps,
+            llmResponse: result.structured || {},
+            session,
+            schema: this.agent.getSchema(),
+        });
+
+        session = collectResult.session;
+
+        if (collectResult.collectedData && Object.keys(collectResult.collectedData).length > 0) {
+            // Update agent's collected data
+            await this.agent.updateCollectedData(collectResult.collectedData);
+            logger.debug(`[ResponseModal] Batch collected data:`, collectResult.collectedData);
+        }
+
+        if (collectResult.validationErrors && collectResult.validationErrors.length > 0) {
+            logger.warn(`[ResponseModal] Batch data validation errors:`, collectResult.validationErrors);
+        }
+
+        // Update session to final step position
+        const lastStep = batchSteps[batchSteps.length - 1];
+        if (lastStep?.id) {
+            session = enterStep(session, lastStep.id, lastStep.description);
+            logger.debug(`[ResponseModal] Updated session to final batch step: ${lastStep.id}`);
+        }
+
+        // PHASE 5: Execute all finalize hooks (Requirement 5.2)
+        logger.debug(`[ResponseModal] Executing finalize hooks for batch`);
+        const finalizeResult = await this.batchExecutor.executeFinalizeHooks({
+            steps: batchSteps,
+            context,
+            data: session.data,
+            executeHook,
+        });
+
+        if (finalizeResult.errors && finalizeResult.errors.length > 0) {
+            // Log finalize errors but don't fail (Requirement 5.5)
+            logger.warn(`[ResponseModal] Some finalize hooks failed:`, finalizeResult.errors);
+        }
+
+        // Build executed steps list
+        const executedSteps: StepRef[] = batchSteps
+            .filter(step => step.id)
+            .map(step => ({
+                id: step.id!,
+                routeId: selectedRoute.id,
+            }));
+
+        logger.debug(`[ResponseModal] Batch execution complete. Executed ${executedSteps.length} steps`);
+
+        return {
+            message,
+            toolCalls,
+            session,
+            executedSteps,
+        };
+    }
+
+    /**
+     * Build response schema for batch execution
+     * @private
+     */
+    private buildBatchResponseSchema(collectFields: string[]): Record<string, unknown> {
+        const properties: Record<string, unknown> = {
+            message: {
+                type: "string",
+                description: "Your response to the user",
+            },
+        };
+
+        // Add collect fields to schema
+        for (const field of collectFields) {
+            properties[field] = {
+                type: "string",
+                description: `Collected value for ${field}`,
+            };
+        }
+
+        return {
+            type: "object",
+            properties,
+            required: ["message"],
+            additionalProperties: true,
+        };
+    }
+
+    /**
+     * Collect available tools from all steps in the batch
+     * @private
+     */
+    private collectBatchAvailableTools(
+        route: Route<TContext, TData>,
+        batchSteps: StepOptions<TContext, TData>[]
+    ): Array<{
+        id: string;
+        name: string;
+        description?: string;
+        parameters?: unknown;
+    }> {
+        const availableTools = new Map<string, Tool<TContext, TData>>();
+
+        // Add agent-level tools
+        this.agent.getTools().forEach((tool) => {
+            availableTools.set(tool.id, tool);
+        });
+
+        // Add route-level tools
+        route.getTools().forEach((tool: Tool<TContext, TData>) => {
+            availableTools.set(tool.id, tool);
+        });
+
+        // Add step-level tools from all batch steps
+        for (const step of batchSteps) {
+            if (step.tools) {
+                for (const toolRef of step.tools) {
+                    if (typeof toolRef === "string") {
+                        // Reference to registered tool - already in availableTools
+                    } else if (typeof toolRef === 'object' && 'id' in toolRef && toolRef.id) {
+                        // Inline tool definition
+                        availableTools.set(toolRef.id, toolRef);
+                    }
+                }
+            }
+        }
+
+        // Convert to the format expected by AI providers
+        return Array.from(availableTools.values()).map((tool) => ({
+            id: tool.id,
+            name: tool.name || tool.id,
+            description: tool.description,
+            parameters: tool.parameters,
+        }));
     }
 
     /**
@@ -724,8 +1106,18 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     private async *generateUnifiedStreamingResponse(
         responseContext: ResponseContext<TContext, TData>
     ): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { effectiveContext, session: initialSession, history, selectedRoute, selectedStep, responseDirectives, isRouteComplete } = responseContext;
-        const session = initialSession;
+        const { 
+            effectiveContext, 
+            session: initialSession, 
+            history, 
+            selectedRoute, 
+            selectedStep, 
+            responseDirectives, 
+            isRouteComplete,
+            batchSteps,
+            batchStoppedReason,
+        } = responseContext;
+        let session = initialSession;
 
         // Get last user message (needed for both route and completion handling)
         // Convert HistoryItem[] to Event[] for internal processing
@@ -733,17 +1125,35 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const lastMessageText = getLastMessageFromHistory(historyEvents);
 
         if (selectedRoute && !isRouteComplete) {
-            // Handle normal route processing with streaming
-            yield* this.processRouteStreamingResponse({
-                selectedRoute,
-                selectedStep,
-                responseDirectives,
-                session,
-                history,
-                context: effectiveContext,
-                lastMessageText,
-                historyEvents,
-            });
+            // Check if we have batch steps to execute
+            if (batchSteps && batchSteps.length > 0) {
+                // BATCH EXECUTION: Execute multiple steps with streaming
+                // Note: For streaming, we still use batch execution but stream the response
+                logger.debug(`[ResponseModal] Streaming batch execution for ${batchSteps.length} steps`);
+
+                yield* this.streamBatchResponse({
+                    selectedRoute,
+                    batchSteps,
+                    responseDirectives,
+                    session,
+                    history,
+                    context: effectiveContext,
+                    historyEvents,
+                    batchStoppedReason,
+                });
+            } else {
+                // SINGLE STEP EXECUTION: Fall back to single-step streaming
+                yield* this.processRouteStreamingResponse({
+                    selectedRoute,
+                    selectedStep,
+                    responseDirectives,
+                    session,
+                    history,
+                    context: effectiveContext,
+                    lastMessageText,
+                    historyEvents,
+                });
+            }
 
         } else if (isRouteComplete && selectedRoute) {
             // Handle route completion streaming
@@ -764,6 +1174,148 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             });
         }
     }
+
+    /**
+     * Stream a batch response with multiple steps
+     * 
+     * Similar to executeBatchResponse but streams the LLM response.
+     * 
+     * @private
+     */
+    private async *streamBatchResponse(params: {
+        selectedRoute: Route<TContext, TData>;
+        batchSteps: StepOptions<TContext, TData>[];
+        responseDirectives?: string[];
+        session: SessionState<TData>;
+        history: HistoryItem[];
+        context: TContext;
+        historyEvents: Event[];
+        batchStoppedReason?: StoppedReason;
+        signal?: AbortSignal;
+    }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+        const { selectedRoute, batchSteps, context, historyEvents, batchStoppedReason, signal } = params;
+        let session = params.session;
+
+        // Create hook executor function
+        const executeHook = async (
+            hook: HookFunction<TContext, TData>,
+            hookContext: TContext,
+            data?: Partial<TData>,
+            step?: StepOptions<TContext, TData>
+        ): Promise<void> => {
+            const route = selectedRoute;
+            const stepInstance = step?.id ? route.getStep(step.id) : undefined;
+            await this.executePrepareFinalize(hook, hookContext, data, route, stepInstance);
+        };
+
+        // PHASE 1: Execute all prepare hooks
+        const prepareResult = await this.batchExecutor.executePrepareHooks({
+            steps: batchSteps,
+            context,
+            data: session.data,
+            executeHook,
+        });
+
+        if (!prepareResult.success) {
+            // Yield error chunk
+            yield {
+                delta: "",
+                accumulated: "",
+                done: true,
+                session,
+                error: new ResponseGenerationError(
+                    `Prepare hook failed: ${prepareResult.error?.message}`,
+                    { phase: 'prepare_hooks' }
+                ),
+            };
+            return;
+        }
+
+        // PHASE 2: Build combined prompt
+        const batchPromptResult = await this.batchPromptBuilder.buildBatchPrompt({
+            steps: batchSteps,
+            route: selectedRoute,
+            history: historyEvents,
+            context,
+            session,
+            agentOptions: this.agent.getAgentOptions(),
+        });
+
+        const responseSchema = this.buildBatchResponseSchema(batchPromptResult.collectFields);
+        const availableTools = this.collectBatchAvailableTools(selectedRoute, batchSteps);
+
+        // PHASE 3: Stream LLM response
+        const agentOptions = this.agent.getAgentOptions();
+        const stream = agentOptions.provider.generateMessageStream({
+            prompt: batchPromptResult.prompt,
+            history: historyEvents,
+            context,
+            tools: availableTools,
+            signal,
+            parameters: responseSchema ? { jsonSchema: responseSchema, schemaName: "batch_stream_response" } : undefined,
+        });
+
+        // Build executed steps list
+        const executedSteps: StepRef[] = batchSteps
+            .filter(step => step.id)
+            .map(step => ({
+                id: step.id!,
+                routeId: selectedRoute.id,
+            }));
+
+        // Stream chunks
+        for await (const chunk of stream) {
+            // On final chunk, collect data and execute finalize hooks
+            if (chunk.done) {
+                // Collect data from response
+                if (chunk.structured) {
+                    const collectResult = this.batchExecutor.collectBatchData({
+                        steps: batchSteps,
+                        llmResponse: chunk.structured,
+                        session,
+                        schema: this.agent.getSchema(),
+                    });
+
+                    session = collectResult.session;
+
+                    if (collectResult.collectedData && Object.keys(collectResult.collectedData).length > 0) {
+                        await this.agent.updateCollectedData(collectResult.collectedData);
+                    }
+                }
+
+                // Update session to final step position
+                const lastStep = batchSteps[batchSteps.length - 1];
+                if (lastStep?.id) {
+                    session = enterStep(session, lastStep.id, lastStep.description);
+                }
+
+                // Execute finalize hooks
+                await this.batchExecutor.executeFinalizeHooks({
+                    steps: batchSteps,
+                    context,
+                    data: session.data,
+                    executeHook,
+                });
+
+                // Finalize session
+                await this.finalizeSession(session, context);
+            }
+
+            yield {
+                delta: chunk.delta,
+                accumulated: chunk.accumulated,
+                done: chunk.done,
+                session,
+                toolCalls: chunk.structured?.toolCalls,
+                isRouteComplete: false,
+                executedSteps: chunk.done ? executedSteps : undefined,
+                stoppedReason: chunk.done ? batchStoppedReason : undefined,
+                metadata: chunk.metadata,
+                structured: chunk.structured,
+            };
+        }
+    }
+
     /**
        * Execute prepare function for current step if available
        * @private
@@ -1067,6 +1619,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 await this.finalizeSession(session, context);
             }
 
+            // Response structure completeness (Requirement 8.1, 8.2, 8.3)
+            // - executedSteps: single step executed in this response
+            // - stoppedReason: 'needs_input' for single-step execution (waiting for user input)
+            // - session.currentStep: reflects the executed step
             yield {
                 delta: chunk.delta,
                 accumulated: chunk.accumulated,
@@ -1074,6 +1630,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session,
                 toolCalls,
                 isRouteComplete: false,
+                executedSteps: chunk.done ? [{ id: nextStep.id, routeId: selectedRoute.id }] : undefined,
+                stoppedReason: chunk.done ? 'needs_input' : undefined,
                 metadata: chunk.metadata,
                 structured: chunk.structured,
             };
@@ -1653,6 +2211,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 await this.finalizeSession(session, context);
             }
 
+            // Response structure completeness (Requirement 8.1, 8.2, 8.3)
+            // - executedSteps: empty for route completion (no new steps executed)
+            // - stoppedReason: 'route_complete' for completed routes
+            // - session.currentStep: set to END_ROUTE
             yield {
                 delta: chunk.delta,
                 accumulated: chunk.accumulated,
@@ -1660,6 +2222,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session,
                 toolCalls: undefined,
                 isRouteComplete: true,
+                executedSteps: chunk.done ? [] : undefined,
+                stoppedReason: chunk.done ? 'route_complete' : undefined,
                 metadata: chunk.metadata,
                 structured: chunk.structured,
             };
@@ -1754,6 +2318,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 await this.finalizeSession(session, context);
             }
 
+            // Response structure completeness (Requirement 8.1, 8.2, 8.3)
+            // - executedSteps: empty for fallback (no route/step execution)
+            // - stoppedReason: undefined for fallback (no route context)
+            // - session.currentStep: unchanged (no step progression)
             yield {
                 delta: chunk.delta,
                 accumulated: chunk.accumulated,
@@ -1761,6 +2329,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session,
                 toolCalls: undefined,
                 isRouteComplete: false,
+                executedSteps: chunk.done ? [] : undefined,
+                stoppedReason: undefined,
                 metadata: chunk.metadata,
                 structured: chunk.structured,
             };

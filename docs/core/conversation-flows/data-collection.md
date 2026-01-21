@@ -13,6 +13,149 @@ The agent-level data collection system provides:
 - **Natural Conversations**: AI handles information gathering conversationally
 - **Validation & Enrichment**: Agent-level lifecycle hooks for data processing
 - **Session Persistence**: Data survives across conversation turns and route transitions
+- **Batch Data Collection**: Multiple steps can collect data in a single LLM call
+
+## Data Collection Across Batched Steps
+
+When multiple steps execute in a single batch, data collection works across all steps simultaneously.
+
+### How Batch Data Collection Works
+
+1. **Gather collect fields** - All `collect` fields from all steps in the batch are combined
+2. **Single LLM call** - The combined prompt instructs the LLM to extract all fields
+3. **Extract from response** - All specified fields are extracted from the LLM response
+4. **Validate against schema** - Collected data is validated against the agent schema
+5. **Update session** - All collected values are merged into session data
+
+```typescript
+// Batch with 3 steps, each collecting different fields
+const batch = [
+  { collect: ["name"] },
+  { collect: ["email", "phone"] },
+  { collect: ["preferences"] }
+];
+
+// Combined collection: ["name", "email", "phone", "preferences"]
+// Single LLM response extracts all fields at once
+```
+
+### Pre-Extraction and Batch Determination
+
+Pre-extraction happens **before** batch determination and directly impacts which steps can be batched:
+
+```typescript
+// User message: "I'm John, email john@example.com, I prefer dark mode"
+
+// Phase 1: Pre-extraction
+const preExtracted = {
+  name: "John",
+  email: "john@example.com",
+  preferences: { theme: "dark" }
+};
+
+// Phase 2: Batch determination (with pre-extracted data merged)
+// Step 1: collect: ["name"] → name exists → doesn't need input
+// Step 2: collect: ["email"] → email exists → doesn't need input
+// Step 3: collect: ["preferences"] → preferences exists → doesn't need input
+// Result: All 3 steps batched together
+```
+
+### Pre-Extraction Configuration
+
+Pre-extraction is automatic when routes define data fields:
+
+```typescript
+// Option 1: Route-level required fields
+agent.createRoute({
+  title: "Booking",
+  requiredFields: ["hotel", "date", "guests"],
+  // Pre-extraction enabled automatically
+});
+
+// Option 2: Route-level optional fields
+agent.createRoute({
+  title: "Booking",
+  optionalFields: ["specialRequests"],
+  // Pre-extraction enabled automatically
+});
+
+// Option 3: Steps with collect arrays
+agent.createRoute({
+  title: "Booking",
+  steps: [
+    { collect: ["hotel"] },  // Pre-extraction enabled automatically
+  ]
+});
+```
+
+### Batch Collection Example
+
+```typescript
+const response = await agent.respond(
+  "I'm Alice, alice@example.com, and I want to book for 2 guests"
+);
+
+// Response includes all collected data
+console.log(response.session.data);
+// {
+//   name: "Alice",
+//   email: "alice@example.com",
+//   guests: 2
+// }
+
+// Shows which steps executed
+console.log(response.executedSteps);
+// [
+//   { id: "ask-name", routeId: "booking" },
+//   { id: "ask-email", routeId: "booking" },
+//   { id: "ask-guests", routeId: "booking" }
+// ]
+```
+
+### Validation Across Batch
+
+Data validation happens after collection for all fields:
+
+```typescript
+// Agent schema defines validation rules
+const agent = new Agent({
+  schema: {
+    type: "object",
+    properties: {
+      email: { type: "string", format: "email" },
+      guests: { type: "number", minimum: 1, maximum: 10 }
+    }
+  }
+});
+
+// If validation fails for any field:
+const response = await agent.respond("Book for 100 guests");
+
+// Response includes validation errors
+if (response.stoppedReason === 'validation_error') {
+  console.log(response.error);
+  // {
+  //   type: 'data_validation',
+  //   message: 'Validation failed for 1 field(s): guests',
+  //   details: [{ field: 'guests', message: 'Value exceeds maximum of 10' }]
+  // }
+}
+```
+
+### Partial Data Preservation
+
+Even when validation fails, valid partial data is preserved:
+
+```typescript
+// User provides valid name but invalid email
+const response = await agent.respond("I'm John, email: not-an-email");
+
+// Valid data is still collected
+console.log(response.session.data.name); // "John"
+
+// Invalid data triggers validation error
+console.log(response.stoppedReason); // "validation_error"
+```
 
 ## Agent-Level Schema Definition
 

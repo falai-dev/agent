@@ -269,8 +269,9 @@ describe("RoutingEngine Integration with Flexible Conditions", () => {
             });
 
             expect(premiumResponse.session?.currentRoute?.id).toBe("complex-workflow");
-            // Should start with initial step
-            expect(premiumResponse.session?.currentStep?.id).toBe("initial-step");
+            // With multi-step batch execution, steps without requires/collect fields
+            // are executed together in a single batch, ending at the final step
+            expect(premiumResponse.session?.currentStep?.id).toBe("completion-step");
 
             // Test basic user without payment
             session = createSession<TestData>();
@@ -283,7 +284,9 @@ describe("RoutingEngine Integration with Flexible Conditions", () => {
             });
 
             expect(basicResponse.session?.currentRoute?.id).toBe("complex-workflow");
-            expect(basicResponse.session?.currentStep?.id).toBe("initial-step");
+            // With multi-step batch execution, steps without requires/collect fields
+            // are executed together in a single batch
+            expect(basicResponse.session?.currentStep?.id).toBe("completion-step");
         });
 
         test("should handle step progression with conditions", async () => {
@@ -408,7 +411,9 @@ describe("RoutingEngine Integration with Flexible Conditions", () => {
             });
 
             expect(response.session?.currentRoute?.id).toBe("skip-steps-route");
-            expect(response.session?.currentStep?.id).toBe("always-step");
+            // With multi-step batch execution, steps without requires/collect fields
+            // are executed together in a single batch, ending at the final step
+            expect(response.session?.currentStep?.id).toBe("final-step");
         });
     });
 

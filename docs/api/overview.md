@@ -922,6 +922,130 @@ interface SessionData {
 }
 ```
 
+### Batch Execution Types
+
+Types for multi-step batch execution:
+
+```typescript
+/**
+ * Reason why batch execution stopped
+ */
+type StoppedReason =
+  | 'needs_input'      // Step requires uncollected data
+  | 'end_route'        // Reached END_ROUTE
+  | 'route_complete'   // All Steps processed
+  | 'prepare_error'    // Error in prepare hook
+  | 'llm_error'        // Error during LLM call
+  | 'validation_error' // Error validating collected data
+  | 'finalize_error';  // Error in finalize hook (non-fatal)
+
+/**
+ * Result of batch determination - which steps can execute together
+ */
+interface BatchResult<TContext = unknown, TData = unknown> {
+  /** Steps included in this batch */
+  steps: StepOptions<TContext, TData>[];
+  /** Why the batch stopped */
+  stoppedReason: StoppedReason;
+  /** The Step that caused the stop (if applicable) */
+  stoppedAtStep?: StepOptions<TContext, TData>;
+}
+
+/**
+ * Result of executing a batch of steps
+ */
+interface BatchExecutionResult<TData = unknown> {
+  /** The generated message */
+  message: string;
+  /** Updated session state */
+  session: SessionState<TData>;
+  /** Steps that were executed */
+  executedSteps: StepRef[];
+  /** Why execution stopped */
+  stoppedReason: StoppedReason;
+  /** Collected data from the batch */
+  collectedData?: Partial<TData>;
+  /** Any errors that occurred */
+  error?: BatchExecutionError;
+}
+
+/**
+ * Error details for batch execution failures
+ */
+interface BatchExecutionError {
+  /** Type of error that occurred */
+  type: 'pre_extraction' | 'skipif_evaluation' | 'prepare_hook' | 
+        'llm_call' | 'data_validation' | 'finalize_hook';
+  /** Error message */
+  message: string;
+  /** Step where error occurred (if applicable) */
+  stepId?: string;
+  /** Additional error details */
+  details?: unknown;
+}
+
+/**
+ * Event emitted during batch execution for debugging
+ */
+interface BatchExecutionEvent {
+  /** Type of batch execution event */
+  type: 'batch_start' | 'step_included' | 'step_skipped' | 'batch_stop' | 'batch_complete';
+  /** Timestamp when the event occurred */
+  timestamp: Date;
+  /** Event-specific details */
+  details: {
+    stepId?: string;
+    reason?: string;
+    batchSize?: number;
+    stoppedReason?: StoppedReason;
+    timing?: BatchExecutionTiming;
+  };
+}
+
+/**
+ * Timing information for batch execution phases
+ */
+interface BatchExecutionTiming {
+  /** Total batch execution time in milliseconds */
+  totalMs: number;
+  /** Time spent in batch determination phase */
+  determinationMs?: number;
+  /** Time spent executing prepare hooks */
+  prepareHooksMs?: number;
+  /** Time spent in LLM call */
+  llmCallMs?: number;
+  /** Time spent collecting data */
+  dataCollectionMs?: number;
+  /** Time spent executing finalize hooks */
+  finalizeHooksMs?: number;
+}
+```
+
+### Enhanced AgentResponse
+
+The AgentResponse interface includes batch execution fields:
+
+```typescript
+interface AgentResponse<TData = unknown> {
+  /** The generated message */
+  message: string;
+  /** Updated session state */
+  session?: SessionState<TData>;
+  /** Tool calls made during response */
+  toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+  /** Whether the route is complete */
+  isRouteComplete?: boolean;
+  
+  // Multi-step execution fields
+  /** Steps executed in this response */
+  executedSteps?: StepRef[];
+  /** Why execution stopped */
+  stoppedReason?: StoppedReason;
+  /** Error information if execution failed */
+  error?: BatchExecutionError;
+}
+```
+
 ### Tool Types
 
 ```typescript

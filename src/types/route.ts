@@ -8,6 +8,77 @@ import type { Guideline, Term } from "./agent";
 import { Template, ConditionTemplate } from "./template";
 
 /**
+ * Reason why batch execution stopped
+ * Used to indicate the stopping condition for multi-step execution
+ */
+export type StoppedReason =
+  | 'needs_input'      // Step requires uncollected data
+  | 'end_route'        // Reached END_ROUTE
+  | 'route_complete'   // All Steps processed
+  | 'prepare_error'    // Error in prepare hook
+  | 'llm_error'        // Error during LLM call
+  | 'validation_error' // Error validating collected data
+  | 'finalize_error';  // Error in finalize hook (non-fatal, logged)
+
+/**
+ * Event types for batch execution observability
+ */
+export type BatchExecutionEventType = 
+  | 'batch_start' 
+  | 'step_included' 
+  | 'step_skipped' 
+  | 'batch_stop' 
+  | 'batch_complete';
+
+/**
+ * Event emitted during batch execution for debugging and observability
+ * 
+ * **Validates: Requirements 11.3**
+ */
+export interface BatchExecutionEvent {
+  /** Type of batch execution event */
+  type: BatchExecutionEventType;
+  /** Timestamp when the event occurred */
+  timestamp: Date;
+  /** Event-specific details */
+  details: {
+    /** Step ID related to this event (for step_included, step_skipped) */
+    stepId?: string;
+    /** Reason for the event (e.g., why step was skipped or batch stopped) */
+    reason?: string;
+    /** Current batch size (for batch_start, batch_complete) */
+    batchSize?: number;
+    /** Stopped reason (for batch_stop, batch_complete) */
+    stoppedReason?: StoppedReason;
+    /** Phase timing information (for batch_complete) */
+    timing?: BatchExecutionTiming;
+  };
+}
+
+/**
+ * Timing information for batch execution phases
+ */
+export interface BatchExecutionTiming {
+  /** Total batch execution time in milliseconds */
+  totalMs: number;
+  /** Time spent in batch determination phase */
+  determinationMs?: number;
+  /** Time spent executing prepare hooks */
+  prepareHooksMs?: number;
+  /** Time spent in LLM call */
+  llmCallMs?: number;
+  /** Time spent collecting data */
+  dataCollectionMs?: number;
+  /** Time spent executing finalize hooks */
+  finalizeHooksMs?: number;
+}
+
+/**
+ * Callback type for batch execution event listeners
+ */
+export type BatchExecutionEventListener = (event: BatchExecutionEvent) => void;
+
+/**
  * Reference to a route
  */
 export interface RouteRef {
@@ -23,6 +94,54 @@ export interface StepRef {
   id: string;
   /** Route this step belongs to */
   routeId: string;
+}
+
+/**
+ * Result of batch determination - which steps can execute together
+ * @template TContext - Type of context data
+ * @template TData - Type of collected data
+ */
+export interface BatchResult<TContext = unknown, TData = unknown> {
+  /** Steps included in this batch */
+  steps: StepOptions<TContext, TData>[];
+  /** Why the batch stopped */
+  stoppedReason: StoppedReason;
+  /** The Step that caused the stop (if applicable) */
+  stoppedAtStep?: StepOptions<TContext, TData>;
+}
+
+/**
+ * Error details for batch execution failures
+ */
+export interface BatchExecutionError {
+  /** Type of error that occurred */
+  type: 'pre_extraction' | 'skipif_evaluation' | 'prepare_hook' | 
+        'llm_call' | 'data_validation' | 'finalize_hook';
+  /** Error message */
+  message: string;
+  /** Step where error occurred (if applicable) */
+  stepId?: string;
+  /** Additional error details */
+  details?: unknown;
+}
+
+/**
+ * Result of executing a batch of steps
+ * @template TData - Type of collected data
+ */
+export interface BatchExecutionResult<TData = unknown> {
+  /** The generated message */
+  message: string;
+  /** Updated session state */
+  session: import('./session').SessionState<TData>;
+  /** Steps that were executed */
+  executedSteps: StepRef[];
+  /** Why execution stopped */
+  stoppedReason: StoppedReason;
+  /** Collected data from the batch */
+  collectedData?: Partial<TData>;
+  /** Any errors that occurred */
+  error?: BatchExecutionError;
 }
 
 /**

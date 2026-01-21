@@ -218,3 +218,138 @@ Prompts are optimized for token efficiency:
 - Leverage route-specific overrides for specialized behavior
 - Monitor token usage and optimize prompt length
 - Test prompts with different AI providers for consistency
+
+## BatchPromptBuilder for Multi-Step Execution
+
+When multiple steps execute in a single batch, the `BatchPromptBuilder` combines their prompts into a single coherent prompt.
+
+### Combined Prompt Structure
+
+```
+[Agent Identity & Personality]
+[Route Context]
+
+## Current Conversation Flow
+
+You are handling multiple aspects of this conversation in a single response.
+
+### Step 1: [Step Description]
+[Step Prompt]
+
+### Step 2: [Step Description]  
+[Step Prompt]
+
+[... additional steps ...]
+
+## Data Collection
+
+Extract the following information from your response:
+- field1 (type): description
+- field2 (type): description
+
+## Response Format
+
+Return JSON with:
+- message: Your response to the user
+- [collected fields as top-level properties]
+```
+
+### How Prompts Are Merged
+
+The `BatchPromptBuilder` preserves each step's intent while creating a unified prompt:
+
+```typescript
+// Individual step prompts
+const step1 = { prompt: "What's your name?", collect: ["name"] };
+const step2 = { prompt: "What's your email?", collect: ["email"] };
+const step3 = { prompt: "How can I help?", collect: ["request"] };
+
+// Combined prompt includes all three
+const result = await batchPromptBuilder.buildBatchPrompt({
+  steps: [step1, step2, step3],
+  route,
+  history,
+  context,
+  session,
+  agentOptions,
+});
+
+// result.prompt contains unified prompt
+// result.collectFields = ["name", "email", "request"]
+// result.stepCount = 3
+```
+
+### Collect Fields Aggregation
+
+All `collect` fields from all steps are combined and deduplicated:
+
+```typescript
+// Steps with overlapping collect fields
+const steps = [
+  { collect: ["name", "email"] },
+  { collect: ["email", "phone"] },  // email appears twice
+  { collect: ["preferences"] }
+];
+
+// Combined collect fields (deduplicated)
+// ["name", "email", "phone", "preferences"]
+```
+
+### Schema-Aware Field Descriptions
+
+When the agent has a schema, field descriptions are included in the prompt:
+
+```typescript
+// Agent schema
+const schema = {
+  properties: {
+    email: { type: "string", format: "email", description: "User's email address" },
+    guests: { type: "number", minimum: 1, description: "Number of guests" }
+  }
+};
+
+// Generated data collection section:
+// ## Data Collection
+// Extract the following information from your response:
+// - email (string): User's email address
+// - guests (number): Number of guests
+```
+
+### Single vs Multi-Step Prompts
+
+The prompt structure adapts based on batch size:
+
+```typescript
+// Single step batch
+// ## Current Step
+// [Step prompt]
+
+// Multi-step batch
+// ## Current Conversation Flow
+// You are handling multiple aspects of this conversation in a single response.
+// ### Step 1: ...
+// ### Step 2: ...
+```
+
+### Using BatchPromptBuilder
+
+```typescript
+import { BatchPromptBuilder } from "@falai/agent";
+
+const builder = new BatchPromptBuilder<MyContext, MyData>();
+
+const result = await builder.buildBatchPrompt({
+  steps: batchResult.steps,
+  route: currentRoute,
+  history: conversationHistory,
+  context: agentContext,
+  session: currentSession,
+  agentOptions: agent.getAgentOptions(),
+});
+
+// Use result.prompt for LLM call
+const llmResponse = await provider.generateMessage({
+  prompt: result.prompt,
+  // ...
+});
+```
