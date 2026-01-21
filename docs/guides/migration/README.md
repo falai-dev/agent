@@ -6,7 +6,11 @@ This directory contains migration guides for major changes and updates to the `@
 
 ### [Multi-Step Execution Migration Guide](./multi-step-execution.md)
 
-**Latest Update** - Guide for understanding and migrating to multi-step batch execution.
+**v1.0.0 - Major Release** - Guide for understanding and migrating to multi-step batch execution.
+
+**Breaking Changes:**
+- � **History API Simplified**: `createMessageEvent`/`EventSource` replaced with `userMessage`/`assistantMessage`
+- 📝 **StepOptions**: `instructions` property renamed to `prompt`
 
 **What's New:**
 - 🚀 **Multi-Step Batching**: Multiple steps execute in a single LLM call
@@ -21,7 +25,7 @@ This directory contains migration guides for major changes and updates to the `@
 - SkipIf conditions affect batch determination
 
 **Migration Status:**
-- ✅ **API Compatible**: Public API shape unchanged
+- ⚠️ **Breaking Changes**: History API and StepOptions.instructions
 - ⚠️ **Behavioral Change**: Execution semantics differ
 - ✅ **Gradual Migration**: Review hooks and tests
 

@@ -180,8 +180,6 @@ Create a minimal conversational agent:
 import {
   Agent,
   GeminiProvider,
-  createMessageEvent,
-  EventSource,
 } from "@falai/agent";
 
 // Create your agent
@@ -397,8 +395,6 @@ Now let's build an agent that intelligently collects structured data:
 import {
   Agent,
   OpenAIProvider,
-  createMessageEvent,
-  EventSource,
 } from "@falai/agent";
 
 // 1️⃣ Define the data you want to collect
@@ -538,6 +534,25 @@ for await (const chunk of agent.respondStream("Hello")) {
     console.log("\nTool calls:", chunk.toolCalls);
   }
 }
+```
+
+**Working with conversation history:**
+
+```typescript
+import { userMessage, assistantMessage, historyToEvents } from "@falai/agent";
+
+// Create history using helper functions
+const history = [
+  userMessage("Hello, I need help booking a hotel"),
+  assistantMessage("I'd be happy to help! Which hotel would you like to book?"),
+  userMessage("The Grand Hotel please"),
+];
+
+// Pass history to agent
+const response = await agent.respond("For 2 guests", { history });
+
+// Or access session history
+console.log(agent.session.history);
 ```
 
 **Automatic session management** for multi-turn conversations:

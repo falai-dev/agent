@@ -2,6 +2,76 @@
 
 This guide covers the behavioral changes from single-step to multi-step execution and provides migration guidance for existing routes.
 
+## Breaking Changes in v1.0.0
+
+### History API Simplified
+
+The `createMessageEvent` and `EventSource` exports have been replaced with simpler helper functions:
+
+**Before (v0.x):**
+```typescript
+import { createMessageEvent, EventSource } from "@falai/agent";
+
+const history = [
+  createMessageEvent(EventSource.CUSTOMER, "Hello"),
+  createMessageEvent(EventSource.AI_AGENT, "Hi there!"),
+];
+```
+
+**After (v1.0.0):**
+```typescript
+import { userMessage, assistantMessage } from "@falai/agent";
+
+const history = [
+  userMessage("Hello"),
+  assistantMessage("Hi there!"),
+];
+```
+
+The history is now a simple array of objects with `role` and `content` properties:
+
+```typescript
+// Available helper functions
+import { 
+  userMessage,      // (content, name?) => { role: "user", content, name? }
+  assistantMessage, // (content, toolCalls?) => { role: "assistant", content, tool_calls? }
+  toolMessage,      // (toolCallId, name, content) => { role: "tool", ... }
+  systemMessage,    // (content) => { role: "system", content }
+} from "@falai/agent";
+
+// Or create history items directly
+const history = [
+  { role: "user", content: "Hello" },
+  { role: "assistant", content: "Hi there!" },
+];
+```
+
+### StepOptions: `instructions` → `prompt`
+
+The `instructions` property in `StepOptions` has been renamed to `prompt`:
+
+**Before:**
+```typescript
+steps: [
+  {
+    id: "greeting",
+    instructions: "Greet the user warmly",
+  }
+]
+```
+
+**After:**
+```typescript
+steps: [
+  {
+    id: "greeting",
+    prompt: "Greet the user warmly",
+  }
+]
+```
+
+---
+
 ## Overview
 
 Multi-step execution is a **major behavioral change** that allows multiple consecutive steps to execute in a single LLM call. While the public API shape remains compatible, the execution semantics differ from the previous single-step model.
