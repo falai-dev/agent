@@ -94,6 +94,7 @@ export {
 // Types
 export type {
   AgentOptions,
+  AgentResponse,
   Term,
   Guideline,
   GuidelineMatch,
@@ -152,6 +153,14 @@ export type {
   AssistantHistoryItem,
   ToolHistoryItem,
   SystemHistoryItem,
+  // Multi-step execution types
+  StoppedReason,
+  BatchResult,
+  BatchExecutionResult,
+  BatchExecutionEvent,
+  BatchExecutionEventType,
+  BatchExecutionTiming,
+  BatchExecutionError,
 } from "./types";
 export { CompositionMode, EventKind, MessageRole } from "./types";
 export { createSession, enterRoute, enterStep, mergeCollected } from "./utils";
