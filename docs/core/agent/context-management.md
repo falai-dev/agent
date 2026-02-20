@@ -773,10 +773,10 @@ hooks: {
 
 ## 📚 Related Resources
 
-- [Complete Example: Persistent Onboarding](../examples/persistent-onboarding.ts)
-- [API Reference: AgentOptions](../api/overview.md#agentoptions)
-- [API Reference: ContextLifecycleHooks](../api/overview.md#contextlifecyclehooks)
-- [Getting Started](../guides/getting-started/README.md)
+- [Complete Example: Persistent Onboarding](../../../examples/advanced-patterns/persistent-onboarding.ts)
+- [API Reference: AgentOptions](../../api/overview.md#agentoptions)
+- [API Reference: ContextLifecycleHooks](../../api/overview.md#contextlifecyclehooks)
+- [Getting Started](../../guides/getting-started/README.md)
 
 ---
 
@@ -784,8 +784,8 @@ hooks: {
 
 If you're still having issues:
 
-1. Check the [examples](../examples/) for working implementations
-2. Review the [API Reference](../api/README.md) for detailed type information
+1. Check the [examples](../../../examples/) for working implementations
+2. Review the [API Reference](../../api/README.md) for detailed type information
 3. Open an issue on GitHub with your use case
 
 **Remember:** The key to persistent conversations is:

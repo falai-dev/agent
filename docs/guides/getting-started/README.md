@@ -717,27 +717,24 @@ console.log(response2.message); // Agent remembers: "Your name is Alice"
 
 ### Level 2: Core Concepts
 
-- **[Schema-Driven Extraction](../core-concepts/schema-driven-extraction.ts)** - Advanced data collection patterns
-- **[Session Management](../core-concepts/session-management.ts)** - Multi-turn conversations
-- **[Context Providers](../core-concepts/context-providers.ts)** - Dynamic context fetching
+- **[Schema-Driven Extraction](../../../examples/core-concepts/schema-driven-extraction.ts)** - Advanced data collection patterns
+- **[Session Management](../../../examples/core-concepts/session-management.ts)** - Multi-turn conversations
+- **[Modern Streaming API](../../../examples/core-concepts/modern-streaming-api.ts)** - Streaming with the modern API
 
 ### Level 3: Conversation Flows
 
-- **[Simple Routes](../conversation-flows/simple-route.ts)** - Basic route patterns
-- **[Data-Driven Flows](../conversation-flows/data-driven-flows.ts)** - Conditional logic and requirements
-- **[Branching](../conversation-flows/branching/README.md)** - Non-linear conversations
+- **[Completion Transitions](../../../examples/conversation-flows/completion-transitions.ts)** - Route completion and transitions
 
 ### Level 4: Advanced Features
 
-- **[Custom Providers](../ai-providers/custom-provider.ts)** - Integrate any AI service
-- **[Context Tools](../tools/context-updating-tools.ts)** - Modify agent state
-- **[Multi-Turn Conversations](../advanced-patterns/multi-turn-conversations.ts)** - Complex dialogues
+- **[Knowledge-Based Agent](../../../examples/advanced-patterns/knowledge-based-agent.ts)** - Domain-specific knowledge bases
+- **[Route Lifecycle Hooks](../../../examples/advanced-patterns/route-lifecycle-hooks.ts)** - Custom route behavior
 
 ### Level 5: Production
 
-- **[Server Deployment](../integrations/server-deployment.ts)** - HTTP API with WebSockets
-- **[Database Persistence](../persistence/custom-adapter.ts)** - Custom storage adapters
-- **[Streaming Responses](../advanced-patterns/streaming-responses.ts)** - Real-time UX
+- **[Server Session Management](../../../examples/integrations/server-session-management.ts)** - Server-side sessions
+- **[Database Persistence](../../../examples/persistence/custom-adapter.ts)** - Custom storage adapters
+- **[Streaming Responses](../../../examples/advanced-patterns/streaming-responses.ts)** - Real-time UX
 
 ---
 
@@ -783,7 +780,7 @@ console.log("Provider:", agent.options.provider.name);
 ### Getting Help
 
 - 📖 **[Full Documentation](../../README.md)** - Complete API reference
-- 💬 **[Examples Directory](../../examples/)** - Working code samples
+- 💬 **[Examples Directory](../../../examples/)** - Working code samples
 - 🐛 **[GitHub Issues](https://github.com/falai-dev/agent/issues)** - Report bugs
 - 💡 **[Discussions](https://github.com/falai-dev/agent/discussions)** - Ask questions
 

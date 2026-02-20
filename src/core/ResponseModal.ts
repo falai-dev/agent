@@ -1028,28 +1028,35 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private buildBatchResponseSchema(collectFields: string[]): Record<string, unknown> {
-        const properties: Record<string, unknown> = {
-            message: {
-                type: "string",
-                description: "Your response to the user",
-            },
-        };
+            const properties: Record<string, unknown> = {
+                message: {
+                    type: "string",
+                    description: "Your response to the user",
+                },
+            };
 
-        // Add collect fields to schema
-        for (const field of collectFields) {
-            properties[field] = {
-                type: "string",
-                description: `Collected value for ${field}`,
+            const agentSchema = this.agent.getSchema();
+
+            // Add collect fields to schema, using agent schema definitions when available
+            for (const field of collectFields) {
+                if (agentSchema?.properties && agentSchema.properties[field]) {
+                    properties[field] = agentSchema.properties[field];
+                } else {
+                    // Dynamic fallback when no agent schema is defined
+                    properties[field] = {
+                        type: "string",
+                        description: `Collected value for ${field}`,
+                    };
+                }
+            }
+
+            return {
+                type: "object",
+                properties,
+                required: ["message"],
+                additionalProperties: true,
             };
         }
-
-        return {
-            type: "object",
-            properties,
-            required: ["message"],
-            additionalProperties: true,
-        };
-    }
 
     /**
      * Collect available tools from all steps in the batch
@@ -1424,8 +1431,34 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         }
 
         // Update session with next step
-        session = enterStep(session, nextStep.id, nextStep.description);
-        logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+        // If the next step has requires fields that are missing, stay at the previous step
+        if (nextStep.requires && nextStep.requires.length > 0) {
+            const sessionData = session.data || {};
+            const missingRequires = nextStep.requires.filter(
+                field => (sessionData as Record<string, unknown>)[String(field)] === undefined
+            );
+            if (missingRequires.length > 0) {
+                const warning = `[Agent] Cannot advance to step "${nextStep.description || nextStep.id}": ` +
+                    `missing required fields [${missingRequires.join(', ')}]. Staying at current step.`;
+                logger.warn(warning);
+                console.warn(warning);
+                // Stay at the current step - don't enter the next one
+                const currentStepId = session.currentStep?.id;
+                if (currentStepId) {
+                    const currentStepInstance = selectedRoute.getStep(currentStepId);
+                    if (currentStepInstance) {
+                        nextStep = currentStepInstance;
+                        logger.debug(`[ResponseModal] Staying at current step: ${nextStep.id} due to missing requires`);
+                    }
+                }
+            } else {
+                session = enterStep(session, nextStep.id, nextStep.description);
+                logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+            }
+        } else {
+            session = enterStep(session, nextStep.id, nextStep.description);
+            logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+        }
 
         // Build response schema for this route (with collect fields from step)
         const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, nextStep, this.agent.getSchema());
@@ -1434,8 +1467,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const responsePrompt = await this.responseEngine.buildResponsePrompt({
             route: selectedRoute,
             currentStep: nextStep,
-            rules: selectedRoute.getRules(),
-            prohibitions: selectedRoute.getProhibitions(),
+            rules: [...this.agent.getRules(), ...selectedRoute.getRules()],
+            prohibitions: [...this.agent.getProhibitions(), ...selectedRoute.getProhibitions()],
             directives: responseDirectives,
             history: historyEvents, // Use Event[] for buildResponsePrompt
             lastMessage: lastMessageText, // Use string for buildResponsePrompt
@@ -1544,16 +1577,41 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         }
 
         // Update session with next step
-        session = enterStep(session, nextStep.id, nextStep.description);
-        logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+        // If the next step has requires fields that are missing, stay at the previous step
+        if (nextStep.requires && nextStep.requires.length > 0) {
+            const sessionData = session.data || {};
+            const missingRequires = nextStep.requires.filter(
+                field => (sessionData as Record<string, unknown>)[String(field)] === undefined
+            );
+            if (missingRequires.length > 0) {
+                const warning = `[Agent] Cannot advance to step "${nextStep.description || nextStep.id}": ` +
+                    `missing required fields [${missingRequires.join(', ')}]. Staying at current step.`;
+                logger.warn(warning);
+                console.warn(warning);
+                const currentStepId = session.currentStep?.id;
+                if (currentStepId) {
+                    const currentStepInstance = selectedRoute.getStep(currentStepId);
+                    if (currentStepInstance) {
+                        nextStep = currentStepInstance;
+                        logger.debug(`[ResponseModal] Staying at current step: ${nextStep.id} due to missing requires`);
+                    }
+                }
+            } else {
+                session = enterStep(session, nextStep.id, nextStep.description);
+                logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+            }
+        } else {
+            session = enterStep(session, nextStep.id, nextStep.description);
+            logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+        }
 
         // Build response schema and prompt (same as non-streaming)
         const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, nextStep, this.agent.getSchema());
         const responsePrompt = await this.responseEngine.buildResponsePrompt({
             route: selectedRoute,
             currentStep: nextStep,
-            rules: selectedRoute.getRules(),
-            prohibitions: selectedRoute.getProhibitions(),
+            rules: [...this.agent.getRules(), ...selectedRoute.getRules()],
+            prohibitions: [...this.agent.getProhibitions(), ...selectedRoute.getProhibitions()],
             directives: responseDirectives,
             history: historyEvents, // Use Event[] for buildResponsePrompt
             lastMessage: lastMessageText, // Use string for buildResponsePrompt

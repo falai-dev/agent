@@ -631,10 +631,9 @@ This framework draws inspiration from:
 
 ## Further Reading
 
-- [Getting Started Guide](../guides/getting-started/README.md) - Build your first agent
-- [Session Step Guide](./CONTEXT_MANAGEMENT.md) - Session management patterns
-- [API Reference](../api/README.md) - Complete API documentation
-- [Examples](../examples/) - Real-world implementations
+- [Getting Started Guide](../../guides/getting-started/README.md) - Build your first agent
+- [Context Management](./context-management.md) - Context providers and updates
+- [API Reference](../../api/README.md) - Complete API documentation
 
 ---
 

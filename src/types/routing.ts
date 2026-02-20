@@ -8,11 +8,6 @@ export interface RoutingDecision {
   contextUpdate?: Record<string, unknown>;
 }
 
-export interface RoutingDecisionWithRoute extends RoutingDecision {
-  selectedRouteId: string;
-  maxScore: number;
-}
-
 export interface RoutingSchemaOptions {
   extrasSchema?: StructuredSchema;
 }

@@ -513,6 +513,6 @@ The modern `stream()` API is the recommended approach for new streaming implemen
 ---
 
 **Need Help?** 
-- Check the [examples](../../examples/) directory for complete working examples
+- Check the [examples](../../../examples/) directory for complete working examples
 - Review the [API documentation](../../api/) for detailed method signatures
-- Look at the [streaming examples](../../examples/advanced-patterns/streaming-responses.ts) for side-by-side comparisons
+- Look at the [streaming examples](../../../examples/advanced-patterns/streaming-responses.ts) for side-by-side comparisons

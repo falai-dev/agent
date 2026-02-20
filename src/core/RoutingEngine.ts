@@ -2,7 +2,6 @@ import type {
   Event,
   AgentOptions,
   StructuredSchema,
-  RoutingDecision,
   SessionState,
   AiProvider,
   TemplateContext,
@@ -36,9 +35,12 @@ export interface RoutingDecisionOutput {
 }
 
 export interface RoutingEngineOptions {
-  allowRouteSwitch?: boolean;
-  switchThreshold?: number; // 0-100
-  maxCandidates?: number;
+  /**
+   * Score margin the best alternative route must exceed the current route's score
+   * by before the agent switches routes. Prevents flip-flopping on marginal differences.
+   * @default 15
+   */
+  routeSwitchMargin?: number;
 }
 
 export interface BuildStepSelectionPromptParams<
@@ -746,7 +748,8 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       const optimalRoute = this.selectOptimalRoute(
         eligibleRoutes,
         updatedSession.data || {},
-        routingResult.structured.routes
+        routingResult.structured.routes,
+        updatedSession.currentRoute?.id
       );
 
       // If no optimal route found, check why
@@ -908,42 +911,68 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
    * @returns Route that should be prioritized for continuation
    */
   selectOptimalRoute(
-    routes: Route<TContext, TData>[],
-    data: Partial<TData>,
-    routeScores: Record<string, number>
-  ): Route<TContext, TData> | undefined {
-    const completionStatus = this.getRouteCompletionStatus(routes, data);
+      routes: Route<TContext, TData>[],
+      data: Partial<TData>,
+      routeScores: Record<string, number>,
+      currentRouteId?: string
+    ): Route<TContext, TData> | undefined {
+      const completionStatus = this.getRouteCompletionStatus(routes, data);
+      const switchMargin = this.options?.routeSwitchMargin ?? 15;
 
-    // Create weighted scores combining AI intent scores with completion progress
-    const weightedScores: Array<{ route: Route<TContext, TData>; score: number }> = [];
+      // Create weighted scores combining AI intent scores with completion progress
+      const weightedScores: Array<{ route: Route<TContext, TData>; score: number }> = [];
 
-    for (const route of routes) {
-      const aiScore = routeScores[route.id] || 0;
-      const completionProgress = completionStatus.get(route.id) || 0;
+      for (const route of routes) {
+        const aiScore = routeScores[route.id] || 0;
+        const completionProgress = completionStatus.get(route.id) || 0;
 
-      // ALWAYS skip fully completed routes to prevent re-entering finished tasks
-      // Users should not be forced back into completed routes
-      if (completionProgress >= 1.0) {
-        logger.debug(
-          `[RoutingEngine] Excluding completed route: ${route.title} (100% complete)`
-        );
-        continue;
+        // ALWAYS skip fully completed routes to prevent re-entering finished tasks
+        if (completionProgress >= 1.0) {
+          logger.debug(
+            `[RoutingEngine] Excluding completed route: ${route.title} (100% complete)`
+          );
+          continue;
+        }
+
+        // Boost partially complete routes that match user intent
+        let weightedScore = aiScore;
+        if (completionProgress > 0 && completionProgress < 1.0) {
+          weightedScore += (completionProgress * 20); // Up to 20 point boost
+        }
+
+        weightedScores.push({ route, score: weightedScore });
       }
 
-      // Boost partially complete routes that match user intent
-      let weightedScore = aiScore;
-      if (completionProgress > 0 && completionProgress < 1.0) {
-        // Boost score for partially complete routes
-        weightedScore += (completionProgress * 20); // Up to 20 point boost
+      // Sort by weighted score descending
+      weightedScores.sort((a, b) => b.score - a.score);
+
+      if (weightedScores.length === 0) {
+        return undefined;
       }
 
-      weightedScores.push({ route, score: weightedScore });
-    }
+      // Apply sticky routing: if there's a current route, only switch if the
+      // best alternative exceeds the current route's score by the configured margin
+      if (currentRouteId) {
+        const currentEntry = weightedScores.find(e => e.route.id === currentRouteId);
+        const bestEntry = weightedScores[0];
 
-    // Sort by weighted score and return the best option
-    weightedScores.sort((a, b) => b.score - a.score);
+        if (currentEntry && bestEntry.route.id !== currentRouteId) {
+          if (bestEntry.score < currentEntry.score + switchMargin) {
+            logger.debug(
+              `[RoutingEngine] Staying on current route: ${currentEntry.route.title} ` +
+              `(current: ${currentEntry.score}, best alternative: ${bestEntry.score}, ` +
+              `margin required: ${switchMargin})`
+            );
+            return currentEntry.route;
+          }
+          logger.debug(
+            `[RoutingEngine] Switching route: ${currentEntry.route.title} → ${bestEntry.route.title} ` +
+            `(current: ${currentEntry.score}, alternative: ${bestEntry.score}, ` +
+            `margin: ${switchMargin})`
+          );
+        }
+      }
 
-    if (weightedScores.length > 0) {
       logger.debug(
         `[RoutingEngine] Selected optimal route: ${weightedScores[0].route.title} ` +
         `(AI: ${routeScores[weightedScores[0].route.id]}, ` +
@@ -952,9 +981,6 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       );
       return weightedScores[0].route;
     }
-
-    return undefined;
-  }
 
   /**
    * Build prompt for step selection within a single route
@@ -1380,17 +1406,4 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     return pc.build();
   }
 
-  decideRouteFromScores(output: RoutingDecision): {
-    routeId: string;
-    maxScore: number;
-  } {
-    // Optionally limit candidates and apply switching threshold
-    const entries = Object.entries(output.routes).sort((a, b) => b[1] - a[1]);
-    const limited = this.options?.maxCandidates
-      ? entries.slice(0, this.options.maxCandidates)
-      : entries;
-    const [topId, topScore] = limited[0] || ["", 0];
-    // switchThreshold is enforced by caller when a current route exists
-    return { routeId: topId, maxScore: topScore };
-  }
 }

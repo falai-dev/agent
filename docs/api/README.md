@@ -9,7 +9,7 @@ Complete API documentation for `@falai/agent`. This framework provides a strongl
 - **[AI Routing System](../core/routing/intelligent-routing.md)** - Intelligent route and step selection
 - **[Route DSL](../core/conversation-flows/route-dsl.md)** - Declarative conversation flow design
 - **[Data Collection](../core/conversation-flows/data-collection.md)** - Schema-driven data extraction
-- **[Tool Execution](../core/tools/tool-execution.md)** - Dynamic tool calling and context updates
+- **[Tool Definition](../core/tools/tool-definition.md)** - Tool creation and configuration
 - **[Session Storage](../core/persistence/session-storage.md)** - Persistence and session management
 - **[AI Providers](../core/ai-integration/providers.md)** - Provider integrations and configuration
 
@@ -127,7 +127,7 @@ Main agent class for managing conversational AI with agent-level data collection
 new Agent<TContext, TData>(options: AgentOptions<TContext, TData>)
 ```
 
-See [Agent](./AGENT.md) for full details.
+See `AgentOptions` type definition for full details.
 
 #### Methods
 
@@ -298,6 +298,22 @@ Gets all guidelines configured in the agent.
 ```typescript
 const guidelines = agent.getGuidelines();
 // Returns array of all configured guidelines
+```
+
+##### `getRules(): Template<TContext, TData>[]`
+
+Gets agent-level rules. These are merged with route-level rules in every prompt.
+
+```typescript
+const rules = agent.getRules();
+```
+
+##### `getProhibitions(): Template<TContext, TData>[]`
+
+Gets agent-level prohibitions. These are merged with route-level prohibitions in every prompt.
+
+```typescript
+const prohibitions = agent.getProhibitions();
 ```
 
 ````typescript
@@ -616,7 +632,7 @@ return response.message;
 - If all steps are skipped (due to `skipIf` conditions), the route can complete immediately on entry
 - Use `agent.getData(session)` to retrieve all collected data
 
-See also: [Custom Database Integration Example](../examples/custom-database-persistence.ts)
+See also: [Database Integration Example](../../examples/integrations/database-integration.ts)
 
 ##### `respondStream(input: RespondInput<TContext>): AsyncGenerator<StreamChunk>`
 
@@ -792,7 +808,7 @@ await db.agentMessages.create({
 });
 ```
 
-**See Also:** [streaming-agent.ts](../examples/streaming-agent.ts) for comprehensive examples.
+**See Also:** [streaming-responses.ts](../../examples/advanced-patterns/streaming-responses.ts) for comprehensive examples.
 
 #### Properties
 
@@ -1445,7 +1461,7 @@ Route this step belongs to (readonly).
 
 Tools provide a powerful way to execute custom logic, access external APIs, and enrich conversation context before AI response generation.
 
-**See Also:** [TOOLS.md](./TOOLS.md) - Complete guide to tool execution, lifecycle, and best practices
+**See Also:** [Tool Definition](../core/tools/tool-definition.md) - Complete guide to tool creation and configuration
 
 ---
 
@@ -1626,7 +1642,7 @@ const provider = new OpenRouterProvider({
 });
 ```
 
-**See Also:** [Providers Guide](./PROVIDERS.md) for detailed provider comparison and configuration examples.
+**See Also:** [AI Providers](../core/ai-integration/providers.md) for detailed provider comparison and configuration examples.
 
 ---
 
@@ -1773,9 +1789,7 @@ Handles route and step selection logic for conversation orchestration.
 new RoutingEngine<TContext, TData>(options?: RoutingEngineOptions)
 
 interface RoutingEngineOptions {
-  allowRouteSwitch?: boolean;  // Default: true
-  switchThreshold?: number;    // Default: 70 (0-100)
-  maxCandidates?: number;      // Default: 5
+  routeSwitchMargin?: number;  // Default: 15 (0-100)
 }
 ```
 
@@ -1911,9 +1925,9 @@ const agent = new Agent({
 });
 ```
 
-**Schema Example:** See [examples/prisma-schema.example.prisma](../examples/prisma-schema.example.prisma)
+**Schema Example:** See [examples/prisma-schema.example.prisma](../../examples/persistence/prisma-schema.example.prisma)
 
-**Full Example:** See [examples/prisma-persistence.ts](../examples/prisma-persistence.ts)
+**Full Example:** See [examples/database-persistence.ts](../../examples/persistence/database-persistence.ts)
 
 ---
 
@@ -1956,7 +1970,7 @@ const agent = new Agent({
 
 **Install:** `npm install ioredis` or `npm install redis`
 
-**Full Example:** See [examples/redis-persistence.ts](../examples/redis-persistence.ts)
+**Full Example:** See [examples/redis-persistence.ts](../../examples/persistence/redis-persistence.ts)
 
 ---
 
@@ -2169,8 +2183,6 @@ const agent = new Agent({
 
 **Perfect for:** Full-text search, analytics, time-series analysis, AWS OpenSearch Service, Elasticsearch 7.x users
 
-**Full Example:** See [examples/opensearch-persistence.ts](../examples/opensearch-persistence.ts)
-
 ---
 
 ### `MemoryAdapter`
@@ -2294,8 +2306,8 @@ interface PersistenceAdapter {
 
 **See Also:**
 
-- [docs/PERSISTENCE.md](./PERSISTENCE.md) - Complete persistence guide
-- [docs/ADAPTERS.md](./ADAPTERS.md) - Adapter comparison and details
+- [Session Storage](../core/persistence/session-storage.md) - Session persistence patterns
+- [Database Adapters](../core/persistence/adapters.md) - Adapter comparison and details
 
 ---
 

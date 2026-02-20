@@ -12,7 +12,7 @@ import type { AgentOptions } from '../types/agent';
 import type { SessionState } from '../types/session';
 import type { Event } from '../types/history';
 import type { Route } from './Route';
-import { render, createTemplateContext } from '../utils/template';
+import { render, renderMany, createTemplateContext } from '../utils/template';
 import { PromptComposer } from './PromptComposer';
 
 /**
@@ -119,6 +119,24 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
     // Add guidelines
     const allGuidelines = [...(agentOptions.guidelines || []), ...route.getGuidelines()];
     await composer.addGuidelines(allGuidelines);
+    
+    // Add combined rules (agent + route)
+    const allRules = [...(agentOptions.rules || []), ...route.getRules()];
+    if (allRules.length > 0) {
+      const renderedRules = await renderMany(allRules, templateContext);
+      if (renderedRules.length > 0) {
+        await composer.addInstruction(`Rules:\n- ${renderedRules.join('\n- ')}`);
+      }
+    }
+    
+    // Add combined prohibitions (agent + route)
+    const allProhibitions = [...(agentOptions.prohibitions || []), ...route.getProhibitions()];
+    if (allProhibitions.length > 0) {
+      const renderedProhibitions = await renderMany(allProhibitions, templateContext);
+      if (renderedProhibitions.length > 0) {
+        await composer.addInstruction(`Prohibitions:\n- ${renderedProhibitions.join('\n- ')}`);
+      }
+    }
     
     // Add interaction history
     await composer.addInteractionHistory(history, 'Recent conversation context:');

@@ -106,10 +106,21 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
   persistence?: PersistenceConfig<TData>;
   /** Knowledge base containing any JSON structure the AI should know */
   knowledgeBase?: Record<string, unknown>;
+  /** Absolute rules the agent must follow across all routes */
+  rules?: Template<TContext, TData>[];
+  /** Absolute prohibitions the agent must never do across all routes */
+  prohibitions?: Template<TContext, TData>[];
   /** Agent-level data schema defining the complete data structure for collection */
   schema?: StructuredSchema;
   /** Initial data to pre-populate when creating the agent */
   initialData?: Partial<TData>;
+  /**
+   * Margin (0-100) the best alternative route must exceed the current route's score
+   * by before the agent switches. Higher values make the agent "stickier" to the
+   * current route. Set to 0 to switch whenever any route scores higher.
+   * @default 15
+   */
+  routeSwitchMargin?: number;
 }
 
 /**

@@ -67,6 +67,8 @@ export class Agent<TContext = any, TData = any> {
   private guidelines: Guideline<TContext, TData>[] = [];
   private tools: Tool<TContext, TData>[] = [];
   private routes: Route<TContext, TData>[] = [];
+  private agentRules: Template<TContext, TData>[] = [];
+  private agentProhibitions: Template<TContext, TData>[] = [];
   private context: TContext | undefined;
   private persistenceManager: PersistenceManager<TData> | undefined;
   private routingEngine: RoutingEngine<TContext, TData>;
@@ -124,9 +126,7 @@ export class Agent<TContext = any, TData = any> {
 
     // Initialize routing engine
     this.routingEngine = new RoutingEngine<TContext, TData>({
-      maxCandidates: 5,
-      allowRouteSwitch: true,
-      switchThreshold: 70,
+      routeSwitchMargin: options.routeSwitchMargin,
     });
 
     // Initialize ResponseModal for handling all response generation
@@ -183,6 +183,14 @@ export class Agent<TContext = any, TData = any> {
       options.tools.forEach((tool) => {
         this.createTool(tool);
       });
+    }
+
+    // Initialize agent-level rules and prohibitions
+    if (options.rules) {
+      this.agentRules = [...options.rules];
+    }
+    if (options.prohibitions) {
+      this.agentProhibitions = [...options.prohibitions];
     }
 
     if (options.routes) {
@@ -675,6 +683,20 @@ export class Agent<TContext = any, TData = any> {
    */
   getGuidelines(): Guideline<TContext, TData>[] {
     return [...this.guidelines];
+  }
+
+  /**
+   * Get agent-level rules
+   */
+  getRules(): Template<TContext, TData>[] {
+    return [...this.agentRules];
+  }
+
+  /**
+   * Get agent-level prohibitions
+   */
+  getProhibitions(): Template<TContext, TData>[] {
+    return [...this.agentProhibitions];
   }
 
   /**

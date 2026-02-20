@@ -25,6 +25,7 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 - **[Agent Overview](./core/agent/README.md)** - Agent lifecycle, configuration & hooks
 - **[Context Management](./core/agent/context-management.md)** - Dynamic context providers & updates
 - **[Session Management](./core/agent/session-management.md)** - Session persistence & state
+- **[Rules & Prohibitions](./core/agent/rules-and-prohibitions.md)** - Agent-wide behavioral boundaries
 
 #### AI Routing System
 
@@ -47,7 +48,6 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 #### Tools & Execution
 
 - **[Tool Definition](./core/tools/tool-definition.md)** - Creating and configuring tools
-- **[Tool Execution](./core/tools/tool-execution.md)** - Dynamic tool calling and context updates
 - **[Tool Scoping](./core/tools/tool-scoping.md)** - Agent, route, and step-level tool management
 
 #### Persistence
@@ -62,7 +62,6 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 
 ### 🚀 Advanced Guides
 
-- **[Building Agents](./guides/building-agents/)** - Complete agent construction patterns
 - **[Advanced Patterns](./guides/advanced-patterns/)** - Complex use cases & integrations
 - **[Migration Guides](./guides/migration/)** - Upgrade guides for major changes
 - **[API Reference](./api/README.md)** - Complete API documentation
@@ -84,13 +83,13 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 → Learn [Agent-Level Data Collection](./core/conversation-flows/data-collection.md) and [Schema-Driven Extraction](../examples/core-concepts/schema-driven-extraction.ts)
 
 **🔧 Working with tools?**
-→ See [Tool Definition](./core/tools/tool-definition.md), [Tool Execution](./core/tools/tool-execution.md), and [Tool Scoping](./core/tools/tool-scoping.md)
+→ See [Tool Definition](./core/tools/tool-definition.md) and [Tool Scoping](./core/tools/tool-scoping.md)
 
 **💾 Need persistence?**
 → See [Session Storage](./core/persistence/session-storage.md) and [Database Adapters](./core/persistence/adapters.md)
 
 **🚀 Going to production?**
-→ Check [Server Deployment](../examples/integrations/server-deployment.ts) and [Advanced Patterns](./guides/advanced-patterns/)
+→ Check [Advanced Patterns](./guides/advanced-patterns/) and [Server Session Management](../examples/integrations/server-session-management.ts)
 
 ### By Topic
 
@@ -98,10 +97,10 @@ Welcome to the `@falai/agent` documentation! This comprehensive framework enable
 - **AI Routing System**: [Intelligent Routing](./core/routing/intelligent-routing.md) | [Route DSL](./core/conversation-flows/route-dsl.md) | [Step Transitions](./core/conversation-flows/step-transitions.md)
 - **Conversation Flows**: [Routes](./core/conversation-flows/routes.md) | [Steps](./core/conversation-flows/steps.md) | [Agent-Level Data Collection](./core/conversation-flows/data-collection.md)
 - **AI Integration**: [Providers](./core/ai-integration/providers.md) | [Prompts](./core/ai-integration/prompt-composition.md) | [Responses](./core/ai-integration/response-processing.md)
-- **Tools & Execution**: [Tool Definition](./core/tools/tool-definition.md) | [Tool Execution](./core/tools/tool-execution.md) | [Tool Scoping](./core/tools/tool-scoping.md)
+- **Tools & Execution**: [Tool Definition](./core/tools/tool-definition.md) | [Tool Scoping](./core/tools/tool-scoping.md)
 - **Persistence**: [Session Storage](./core/persistence/session-storage.md) | [Adapters](./core/persistence/adapters.md)
 - **Error Handling**: [Core Error Handling](./core/error-handling.md) | [Error Patterns](./guides/error-handling-patterns.md)
-- **Advanced**: [Building Agents](./guides/building-agents/) | [Patterns](./guides/advanced-patterns/) | [Migration](./guides/migration/) | [API Reference](./api/)
+- **Advanced**: [Patterns](./guides/advanced-patterns/) | [Migration](./guides/migration/) | [API Reference](./api/)
 
 ## 💡 Examples by Domain
 
@@ -112,34 +111,26 @@ Check out the [`examples/`](../examples/) directory for complete, runnable examp
 - **[Basic Agent](../examples/core-concepts/basic-agent.ts)** - Minimal agent setup and configuration
 - **[Schema-Driven Extraction](../examples/core-concepts/schema-driven-extraction.ts)** - Type-safe data collection with JSON Schema
 - **[Session Management](../examples/core-concepts/session-management.ts)** - Multi-turn conversations with persistence
-- **[Context Providers](../examples/core-concepts/context-providers.ts)** - Dynamic context fetching and updates
+- **[Modern Streaming API](../examples/core-concepts/modern-streaming-api.ts)** - Streaming responses with the modern API
 
 ### 🤖 AI Routing System
 
-- **[Simple Route](../examples/conversation-flows/simple-route.ts)** - Basic route with linear step progression
-- **[Multi-Route Agent](../examples/conversation-flows/multi-route-agent.ts)** - AI-powered route selection from multiple options
-- **[Data-Driven Flows](../examples/conversation-flows/data-driven-flows.ts)** - Conditional logic with skipIf and requires
-- **[Conditional Branching](../examples/conversation-flows/conditional-branching.ts)** - AI-powered branching decisions
 - **[Completion Transitions](../examples/conversation-flows/completion-transitions.ts)** - Automatic route transitions when flows complete
 
 ### 💬 Conversation Flows
 
 - **[Knowledge-Based Agent](../examples/advanced-patterns/knowledge-based-agent.ts)** - Agents with domain-specific knowledge bases
 - **[Persistent Onboarding](../examples/advanced-patterns/persistent-onboarding.ts)** - Multi-step onboarding with data persistence
-- **[Behavioral Control](../examples/advanced-patterns/behavioral-control.ts)** - Guidelines and prohibitions for agent behavior
 
 ### 🤖 AI Providers
 
 - **[OpenAI Integration](../examples/ai-providers/openai-integration.ts)** - GPT-4 and GPT-3.5 Turbo with backup models
 - **[Anthropic Integration](../examples/ai-providers/anthropic-integration.ts)** - Claude with streaming and tool calling
-- **[Custom Provider](../examples/ai-providers/custom-provider.ts)** - Build your own AI provider integration
 
 ### 🔧 Tools & Execution
 
 - **[Basic Tools](../examples/tools/basic-tools.ts)** - Unified Tool interface with simple return values
 - **[Data Enrichment Tools](../examples/tools/data-enrichment-tools.ts)** - Pattern helpers for data modification
-- **[Context Updating Tools](../examples/tools/context-updating-tools.ts)** - Advanced ToolResult patterns with context updates
-- **[Domain Scoped Tools](../examples/tools/domain-scoped-tools.ts)** - Tool registry and scoping with agent.tool.register()
 
 ### 💾 Persistence
 
@@ -150,16 +141,15 @@ Check out the [`examples/`](../examples/) directory for complete, runnable examp
 
 ### 🚀 Advanced Patterns
 
-- **[Multi-Turn Conversations](../examples/advanced-patterns/multi-turn-conversations.ts)** - Complex dialogue flows with backtracking
 - **[Streaming Responses](../examples/advanced-patterns/streaming-responses.ts)** - Real-time response streaming
 - **[Route Lifecycle Hooks](../examples/advanced-patterns/route-lifecycle-hooks.ts)** - Custom route behavior and data transformation
 
 ### 🔗 Integrations
 
-- **[Server Deployment](../examples/integrations/server-deployment.ts)** - HTTP API with WebSocket streaming
 - **[Database Integration](../examples/integrations/database-integration.ts)** - Direct database access patterns
 - **[Healthcare Integration](../examples/integrations/healthcare-integration.ts)** - Domain-specific healthcare workflows
 - **[Search Integration](../examples/integrations/search-integration.ts)** - Integration with search engines
+- **[Server Session Management](../examples/integrations/server-session-management.ts)** - Server-side session handling
 
 ## 🤝 Contributing
 

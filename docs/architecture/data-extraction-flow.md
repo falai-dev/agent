@@ -360,4 +360,3 @@ This results in natural, efficient conversations that respect user time.
 **Next Steps:**
 - [Route Configuration](../core/conversation-flows/routes.md)
 - [Step Configuration](../core/conversation-flows/steps.md)
-- [Schema Design](../guides/building-agents/schema-design.md)

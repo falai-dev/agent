@@ -44,36 +44,47 @@ export interface BuildFallbackPromptParams<TContext = unknown, TData = unknown> 
 
 export class ResponseEngine<TContext = unknown, TData = unknown> {
   responseSchemaForRoute(
-    route: Route<TContext, TData>,
-    currentStep?: Step<TContext, TData>,
-    agentSchema?: StructuredSchema
-  ): StructuredSchema {
-    const base: StructuredSchema = {
-      type: "object",
-      properties: {
-        message: { type: "string", description: "Final user-facing message" },
-      },
-      required: ["message"],
-      additionalProperties: false,
-    };
+      route: Route<TContext, TData>,
+      currentStep?: Step<TContext, TData>,
+      agentSchema?: StructuredSchema
+    ): StructuredSchema {
+      const base: StructuredSchema = {
+        type: "object",
+        properties: {
+          message: { type: "string", description: "Final user-facing message" },
+        },
+        required: ["message"],
+        additionalProperties: false,
+      };
 
-    // Add data field only if route has responseOutputSchema
-    if (route.responseOutputSchema) {
-      base.properties!.data = route.responseOutputSchema;
-    }
+      // Add data field only if route has responseOutputSchema
+      if (route.responseOutputSchema) {
+        base.properties!.data = route.responseOutputSchema;
+      }
 
-    // Add collect fields from current step using agent-level schema
-    if (currentStep?.collect && agentSchema?.properties) {
-      for (const field of currentStep.collect) {
-        const fieldSchema = agentSchema.properties[field as string];
-        if (fieldSchema) {
-          base.properties![field as string] = fieldSchema;
+      // Add collect fields from current step
+      if (currentStep?.collect) {
+        if (agentSchema?.properties) {
+          // Use agent schema definitions for collect fields
+          for (const field of currentStep.collect) {
+            const fieldSchema = agentSchema.properties[field as string];
+            if (fieldSchema) {
+              base.properties![field as string] = fieldSchema;
+            }
+          }
+        } else {
+          // No agent schema - generate dynamic schema from collect fields
+          for (const field of currentStep.collect) {
+            base.properties![field as string] = {
+              type: "string",
+              description: `Collected value for ${String(field)}`,
+            };
+          }
         }
       }
-    }
 
-    return base;
-  }
+      return base;
+    }
 
   async buildResponsePrompt(
     params: BuildResponsePromptParams<TContext, TData>
@@ -146,30 +157,25 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
     await pc.addLastMessage(lastMessage);
     
     // Add data collection instructions - include ALL route fields, not just current step
-    if (agentSchema?.properties) {
-      // Collect all fields from route's required and optional fields
-      const allRouteFields = new Set<string>();
+    // Collect all fields from route's required and optional fields
+    const allRouteFields = new Set<string>();
+    
+    if (route.requiredFields) {
+      route.requiredFields.forEach(field => allRouteFields.add(String(field)));
+    }
+    if (route.optionalFields) {
+      route.optionalFields.forEach(field => allRouteFields.add(String(field)));
+    }
+    if (currentStep?.collect) {
+      currentStep.collect.forEach(field => allRouteFields.add(String(field)));
+    }
+
+    if (allRouteFields.size > 0) {
+      const stepCollectFields = new Set(currentStep?.collect?.map(f => String(f)) || []);
+      const fieldDescriptions: string[] = [];
       
-      // Add route required fields
-      if (route.requiredFields) {
-        route.requiredFields.forEach(field => allRouteFields.add(String(field)));
-      }
-      
-      // Add route optional fields
-      if (route.optionalFields) {
-        route.optionalFields.forEach(field => allRouteFields.add(String(field)));
-      }
-      
-      // Add current step's collect fields (in case they're not in route fields)
-      if (currentStep?.collect) {
-        currentStep.collect.forEach(field => allRouteFields.add(String(field)));
-      }
-      
-      if (allRouteFields.size > 0) {
-        const stepCollectFields = new Set(currentStep?.collect?.map(f => String(f)) || []);
-        const fieldDescriptions: string[] = [];
-        
-        for (const field of allRouteFields) {
+      for (const field of allRouteFields) {
+        if (agentSchema?.properties) {
           const fieldSchema = agentSchema.properties[field];
           if (fieldSchema) {
             const fieldName = field;
@@ -193,33 +199,40 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
             
             fieldDescriptions.push(fieldInfo);
           }
+        } else {
+          // No agent schema - generate dynamic description from field name
+          let fieldInfo = `  • ${field} (string): ${field}`;
+          if (stepCollectFields.has(field)) {
+            fieldInfo += ` ← FOCUS FOR THIS STEP`;
+          }
+          fieldDescriptions.push(fieldInfo);
         }
+      }
+      
+      if (fieldDescriptions.length > 0) {
+        const instruction = [
+          `## Data Collection Rules`,
+          ``,
+          `CRITICAL: You MUST extract ALL relevant information from the user's message, not just what this step asks for.`,
+          ``,
+          `Available fields to extract:`,
+          ...fieldDescriptions,
+          ``,
+          `**How to collect data:**`,
+          `1. Read the user's message carefully`,
+          `2. Extract EVERY piece of information that matches ANY field above`,
+          `3. Users often provide multiple details at once (e.g., "I need a checkup next Tuesday at 2 PM")`,
+          `4. Include ALL extracted fields in your JSON response as top-level properties`,
+          `5. Field names must match EXACTLY as shown above`,
+          `6. Only include fields that the user actually mentioned`,
+          ``,
+          `**Example:** If user says "I need a checkup next Tuesday at 2 PM", extract:`,
+          `- appointmentType: "checkup"`,
+          `- preferredDate: "next Tuesday"`,
+          `- preferredTime: "2 PM"`,
+        ].join('\n');
         
-        if (fieldDescriptions.length > 0) {
-          const instruction = [
-            `## Data Collection Rules`,
-            ``,
-            `CRITICAL: You MUST extract ALL relevant information from the user's message, not just what this step asks for.`,
-            ``,
-            `Available fields to extract:`,
-            ...fieldDescriptions,
-            ``,
-            `**How to collect data:**`,
-            `1. Read the user's message carefully`,
-            `2. Extract EVERY piece of information that matches ANY field above`,
-            `3. Users often provide multiple details at once (e.g., "I need a checkup next Tuesday at 2 PM")`,
-            `4. Include ALL extracted fields in your JSON response as top-level properties`,
-            `5. Field names must match EXACTLY as shown above`,
-            `6. Only include fields that the user actually mentioned`,
-            ``,
-            `**Example:** If user says "I need a checkup next Tuesday at 2 PM", extract:`,
-            `- appointmentType: "checkup"`,
-            `- preferredDate: "next Tuesday"`,
-            `- preferredTime: "2 PM"`,
-          ].join('\n');
-          
-          await pc.addInstruction(instruction);
-        }
+        await pc.addInstruction(instruction);
       }
     }
     
@@ -227,24 +240,8 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
     // Generate example JSON based on actual schema fields
     const exampleFields: string[] = ['  "message": "your response to the user"'];
     
-    if (agentSchema?.properties) {
-      // Collect all fields from route's required and optional fields
-      const allRouteFields = new Set<string>();
-      
-      if (route.requiredFields) {
-        route.requiredFields.forEach(field => allRouteFields.add(String(field)));
-      }
-      
-      if (route.optionalFields) {
-        route.optionalFields.forEach(field => allRouteFields.add(String(field)));
-      }
-      
-      if (currentStep?.collect) {
-        currentStep.collect.forEach(field => allRouteFields.add(String(field)));
-      }
-      
-      // Generate example values for each field
-      for (const field of allRouteFields) {
+    for (const field of allRouteFields) {
+      if (agentSchema?.properties) {
         const fieldSchema = agentSchema.properties[field];
         if (fieldSchema) {
           const fieldType = Array.isArray(fieldSchema.type) ? fieldSchema.type[0] : fieldSchema.type;
@@ -263,6 +260,9 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
           
           exampleFields.push(`  "${field}": ${exampleValue}`);
         }
+      } else {
+        // No agent schema - use string as default
+        exampleFields.push(`  "${field}": "extracted value"`);
       }
     }
     

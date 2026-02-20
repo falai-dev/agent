@@ -757,6 +757,10 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
   schema?: StructuredSchema;
   initialData?: Partial<TData>;
   
+  // NEW: Agent-wide rules and prohibitions
+  rules?: Template<TContext, TData>[];
+  prohibitions?: Template<TContext, TData>[];
+  
   hooks?: ContextLifecycleHooks<TContext, TData>;
   debug?: boolean;
   session?: SessionState;

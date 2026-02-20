@@ -193,6 +193,18 @@ const agent = new Agent<CustomerContext, CustomerData>({
   // Global tools available to all routes
   tools: [searchTool, userLookupTool],
 
+  // Agent-wide rules (enforced in every route)
+  rules: [
+    "Always respond in the customer's language",
+    "Confirm before taking any account action",
+  ],
+
+  // Agent-wide prohibitions (enforced in every route)
+  prohibitions: [
+    "Never share internal system details or error stack traces",
+    "Never make up information — say you don't know instead",
+  ],
+
   // Knowledge base for AI context
   knowledgeBase: {
     company: {
@@ -758,6 +770,30 @@ const debugAgent = new Agent({
 ## Agent and Route Option Merging
 
 @fai/agent supports hierarchical configuration where route-level options can override or merge with agent-level options. Understanding this behavior is crucial for effective agent design.
+
+### Rules and Prohibitions
+
+**Rules** and **prohibitions** are merged from both agent and route levels:
+
+- Agent-level rules/prohibitions apply to all routes
+- Route-level rules/prohibitions are appended after agent-level ones
+- Both are always included in every prompt (they are not conditional)
+
+```typescript
+const agent = new Agent({
+  rules: ["Always confirm before taking action"],
+  prohibitions: ["Never delete data without confirmation"],
+});
+
+agent.createRoute({
+  title: "Billing",
+  rules: ["Always quote prices in the user's currency"],
+  prohibitions: ["Never process refunds above $500 without escalation"],
+});
+// Result: Both agent and route rules/prohibitions are included in prompts
+```
+
+See [Rules & Prohibitions](./rules-and-prohibitions.md) for full details.
 
 ### Guidelines and Terms
 

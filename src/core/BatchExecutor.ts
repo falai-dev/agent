@@ -326,6 +326,16 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
           field => (sessionData as Record<string, unknown>)[String(field)] === undefined
         ) || [];
         const collectFields = step.collect || [];
+
+        // Warn about missing required fields from previous steps
+        if (missingRequires.length > 0) {
+          const warning = `[Agent] Step "${step.description || step.id}" requires data [${missingRequires.join(', ')}] that was not collected by previous steps. ` +
+            `Ensure earlier steps collect these fields before this step can proceed.`;
+          logger.warn(warning);
+          // Also log to console for developer visibility
+          console.warn(warning);
+        }
+
         logger.debug(`[BatchExecutor] Step ${step.id} needs input, stopping batch. Missing requires: [${missingRequires.join(', ')}], Collect fields: [${collectFields.join(', ')}]`);
         
         // Emit batch_stop event (Requirement 11.3)

@@ -376,13 +376,18 @@ if (routes.length === 1) {
 }
 ```
 
-### Candidate Limiting
+### Sticky Route Switching
 
-Applies configurable limits to prevent excessive AI calls:
+When the agent is already on a route, it won't switch unless an alternative route scores higher by a configurable margin. This prevents flip-flopping on marginal score differences:
 
 ```typescript
-const limited = maxCandidates ? entries.slice(0, maxCandidates) : entries;
+const agent = new Agent({
+  // ...
+  routeSwitchMargin: 15, // default: 15, range 0-100
+});
 ```
+
+A margin of 15 means the best alternative must outscore the current route by at least 15 points before a switch occurs.
 
 ## Error Handling & Resilience
 
@@ -408,13 +413,12 @@ Robust validation ensures system stability:
 
 ## Configuration Options
 
-### Routing Engine Options
+### Routing Configuration
 
 ```typescript
-const routingEngine = new RoutingEngine({
-  allowRouteSwitch: true, // Allow switching between routes
-  switchThreshold: 70, // Minimum score to switch routes
-  maxCandidates: 5, // Limit AI evaluation candidates
+const agent = new Agent({
+  // ...
+  routeSwitchMargin: 15, // Score margin before switching routes (0-100, default: 15)
 });
 ```
 
