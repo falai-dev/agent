@@ -6,6 +6,8 @@ This directory contains migration guides for major changes and updates to the `@
 
 ### [Multi-Step Execution Migration Guide](./multi-step-execution.md)
 
+**v1.1.0 - Breaking Change** - `maxStepsPerBatch` now defaults to `1` (single-step execution). Set `maxStepsPerBatch: Infinity` to restore v1.0.x batching behavior.
+
 **v1.0.0 - Major Release** - Guide for understanding and migrating to multi-step batch execution.
 
 **Breaking Changes:**

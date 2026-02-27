@@ -342,6 +342,7 @@ describe("BatchExecutor - determineBatch", () => {
               currentStep: undefined, // Start from beginning
               sessionData,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Get all steps in the route
@@ -420,6 +421,7 @@ describe("BatchExecutor - determineBatch", () => {
               currentStep: undefined,
               sessionData,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should stop with needs_input
@@ -459,6 +461,7 @@ describe("BatchExecutor - determineBatch", () => {
               currentStep: undefined,
               sessionData,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Step should be included in batch
@@ -487,6 +490,7 @@ describe("BatchExecutor - determineBatch", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should complete the route
@@ -509,6 +513,7 @@ describe("BatchExecutor - determineBatch", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       expect(['route_complete', 'end_route']).toContain(result.stoppedReason);
@@ -529,6 +534,7 @@ describe("BatchExecutor - determineBatch", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       expect(result.steps.length).toBeGreaterThanOrEqual(1);
@@ -549,6 +555,7 @@ describe("BatchExecutor - determineBatch", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should need input because collect field has no data
@@ -571,6 +578,7 @@ describe("BatchExecutor - determineBatch", () => {
         currentStep: undefined,
         sessionData: { field1: 'value' },
         context: {},
+        maxSteps: Infinity,
       });
       
       // Step should be included
@@ -634,6 +642,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             if (skipCondition) {
@@ -681,6 +690,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Step should be included (treated as non-skippable due to error)
@@ -719,6 +729,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Skipped step should not be in batch
@@ -773,6 +784,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // None of the skipped steps should be in batch
@@ -819,6 +831,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Async skipped step should not be in batch
@@ -848,6 +861,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Step should be included
@@ -877,6 +891,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: {},
         context: { shouldSkip: true },
+        maxSteps: Infinity,
       });
       
       const hasStep1 = result1.steps.some(s => s.id === 'context_skip_step');
@@ -888,6 +903,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: {},
         context: { shouldSkip: false },
+        maxSteps: Infinity,
       });
       
       const hasStep2 = result2.steps.some(s => s.id === 'context_skip_step');
@@ -915,6 +931,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: { field1: 'skip' },
         context: {},
+        maxSteps: Infinity,
       });
       
       const hasStep1 = result1.steps.some(s => s.id === 'data_skip_step');
@@ -926,6 +943,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: { field1: 'keep' },
         context: {},
+        maxSteps: Infinity,
       });
       
       const hasStep2 = result2.steps.some(s => s.id === 'data_skip_step');
@@ -948,6 +966,7 @@ describe("BatchExecutor - skipIf Evaluation", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // No steps should be in batch
@@ -2792,6 +2811,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData: sessionDataBeforePreExtraction,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should stop with needs_input because step1 requires fields
@@ -2808,6 +2828,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData: sessionDataAfterPreExtraction,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Step1 should be included because its requires are satisfied
@@ -2844,6 +2865,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             expect(resultWithoutData.stoppedReason).toBe('needs_input');
@@ -2858,6 +2880,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData: sessionDataWithPreExtraction,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Step1 should be included because at least one collect field has data
@@ -2904,6 +2927,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData: sessionDataWithAllFields,
               context: {},
+              maxSteps: Infinity,
             });
             
             // All steps should be included since all requirements are satisfied
@@ -2957,6 +2981,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should include exactly numSatisfiedSteps steps
@@ -3002,6 +3027,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData: sessionWithOnlyRequires,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should need input because collect field has no data
@@ -3017,6 +3043,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
               currentStep: undefined,
               sessionData: sessionWithBoth,
               context: {},
+              maxSteps: Infinity,
             });
             
             // Step should be included
@@ -3047,6 +3074,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should still need input
@@ -3072,6 +3100,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
         currentStep: undefined,
         sessionData,
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should still need input (undefined is not a valid value)
@@ -3097,6 +3126,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
         currentStep: undefined,
         sessionData,
         context: {},
+        maxSteps: Infinity,
       });
       
       // Empty string is a valid value, so step should be included
@@ -3122,6 +3152,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
         currentStep: undefined,
         sessionData: sessionData1,
         context: {},
+        maxSteps: Infinity,
       });
       
       const result2 = await executor.determineBatch({
@@ -3129,6 +3160,7 @@ describe("BatchExecutor - Pre-Extraction Affects Batch Determination", () => {
         currentStep: undefined,
         sessionData: sessionData2,
         context: {},
+        maxSteps: Infinity,
       });
       
       // Both should produce the same result
@@ -3869,6 +3901,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Property: Should stop with 'end_route' reason
@@ -3908,6 +3941,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Property: Should stop with 'end_route' after processing initial step
@@ -3947,6 +3981,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Property: Should stop with 'route_complete' reason
@@ -3980,6 +4015,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Property: Single step route should complete
@@ -4174,6 +4210,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Property: Should stop with 'needs_input' reason
@@ -4211,6 +4248,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should reach END_ROUTE after skipping
@@ -4236,6 +4274,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should complete route with only non-skipped step
@@ -4260,6 +4299,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should stop with needs_input, not route_complete
@@ -4283,6 +4323,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should stop at END_ROUTE
@@ -4351,6 +4392,7 @@ describe("BatchExecutor - Stopping Conditions", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should stop at needs_input (first stopping condition encountered)
@@ -4933,6 +4975,7 @@ describe("BatchExecutor - Event Emission", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should have emitted batch_start event
@@ -4976,6 +5019,7 @@ describe("BatchExecutor - Event Emission", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should have emitted step_included for each step in batch
@@ -5033,6 +5077,7 @@ describe("BatchExecutor - Event Emission", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should have emitted step_skipped for each skipped step
@@ -5087,6 +5132,7 @@ describe("BatchExecutor - Event Emission", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // Should have emitted batch_stop event
@@ -5202,6 +5248,7 @@ describe("BatchExecutor - Event Emission", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // No events should have been captured
@@ -5235,6 +5282,7 @@ describe("BatchExecutor - Event Emission", () => {
               currentStep: undefined,
               sessionData: {},
               context: {},
+              maxSteps: Infinity,
             });
             
             // All listeners should have received the same events
@@ -5269,6 +5317,7 @@ describe("BatchExecutor - Event Emission", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Events should be in order: batch_start, step_skipped, step_included, batch_stop
@@ -5309,6 +5358,7 @@ describe("BatchExecutor - Event Emission", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       const afterTime = new Date();
@@ -5347,6 +5397,7 @@ describe("BatchExecutor - Event Emission", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Should still emit batch_start and batch_stop
@@ -5379,6 +5430,7 @@ describe("BatchExecutor - Event Emission", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       expect(goodEvents.length).toBeGreaterThan(0);
@@ -5473,6 +5525,7 @@ describe("BatchExecutor - Event Emission", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       expect(events.length).toBe(0);
@@ -5529,6 +5582,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: {},
                 context: {},
+                maxSteps: Infinity,
               });
               
               // Property: Single step should be included and route should complete
@@ -5565,6 +5619,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: {},
                 context: {},
+                maxSteps: Infinity,
               });
               
               expect(resultWithoutData.stoppedReason).toBe('needs_input');
@@ -5579,6 +5634,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: sessionWithData,
                 context: {},
+                maxSteps: Infinity,
               });
               
               expect(resultWithData.steps.length).toBe(1);
@@ -5613,6 +5669,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: {},
                 context: {},
+                maxSteps: Infinity,
               });
               
               expect(resultWithoutData.stoppedReason).toBe('needs_input');
@@ -5627,6 +5684,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: sessionWithData,
                 context: {},
+                maxSteps: Infinity,
               });
               
               expect(resultWithData.steps.length).toBe(1);
@@ -5671,6 +5729,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: {},
                 context: {},
+                maxSteps: Infinity,
               });
               
               expect(result.stoppedReason).toBe('needs_input');
@@ -5714,6 +5773,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData,
                 context: {},
+                maxSteps: Infinity,
               });
               
               // Should include first step and stop at second
@@ -5762,6 +5822,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData,
                 context: {},
+                maxSteps: Infinity,
               });
               
               // Should include all steps and complete
@@ -5799,6 +5860,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: {},
                 context: {},
+                maxSteps: Infinity,
               });
               
               // Count expected steps (non-skipped)
@@ -5857,6 +5919,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData: {},
                 context: { skipStep: shouldSkip },
+                maxSteps: Infinity,
               });
               
               if (shouldSkip) {
@@ -5906,6 +5969,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData,
                 context: {},
+                maxSteps: Infinity,
               });
               
               const shouldSkip = fieldValue === 'skip_me';
@@ -5957,6 +6021,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData,
                 context: {},
+                maxSteps: Infinity,
               });
               
               if (skipStep) {
@@ -6072,6 +6137,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
                 currentStep: undefined,
                 sessionData,
                 context: {},
+                maxSteps: Infinity,
               });
               
               if (expectedOutcome === 'complete') {
@@ -6179,6 +6245,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Empty route should complete (or end_route depending on implementation)
@@ -6200,6 +6267,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Route with only END_ROUTE may complete as 'route_complete' or 'end_route'
@@ -6226,6 +6294,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // All steps skipped, route should complete
@@ -6252,6 +6321,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
         currentStep: undefined,
         sessionData,
         context: {},
+        maxSteps: Infinity,
       });
       
       // First step has requires satisfied and collect has data
@@ -6286,6 +6356,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Async skipIf should work correctly
@@ -6315,6 +6386,7 @@ describe("BatchExecutor - Backward Compatibility", () => {
         currentStep: undefined,
         sessionData: {},
         context: {},
+        maxSteps: Infinity,
       });
       
       // Step with error in skipIf should be treated as non-skippable
@@ -6387,6 +6459,251 @@ describe("BatchExecutor - Backward Compatibility", () => {
       expect(result.executedSteps[1].id).toBe('step2');
       expect(result.executedSteps[2].id).toBe('step3');
       expect(result.executedSteps.every(s => s.routeId === 'test-route')).toBe(true);
+    });
+  });
+});
+
+
+/**
+ * Tests for maxStepsPerBatch limiting behavior
+ *
+ * Validates that the maxSteps parameter in determineBatch correctly limits
+ * the number of steps included in a batch.
+ */
+describe("BatchExecutor - maxStepsPerBatch", () => {
+  describe("default behavior (maxSteps = 1)", () => {
+    test("includes only one step when maxSteps is not specified", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Multi Step Route',
+        steps: [
+          { id: 'step1', requires: [], collect: [] },
+          { id: 'step2', requires: [], collect: [] },
+          { id: 'step3', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        // maxSteps defaults to 1
+      });
+
+      expect(result.steps.length).toBe(1);
+      expect(result.steps[0].id).toBe('step1');
+      expect(result.stoppedReason).toBe('max_steps_reached');
+    });
+
+    test("explicit maxSteps: 1 behaves the same as default", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Multi Step Route',
+        steps: [
+          { id: 'step1', requires: [], collect: [] },
+          { id: 'step2', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        maxSteps: 1,
+      });
+
+      expect(result.steps.length).toBe(1);
+      expect(result.stoppedReason).toBe('max_steps_reached');
+    });
+  });
+
+  describe("custom maxSteps values", () => {
+    test("maxSteps: 2 includes at most 2 steps", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Multi Step Route',
+        steps: [
+          { id: 'step1', requires: [], collect: [] },
+          { id: 'step2', requires: [], collect: [] },
+          { id: 'step3', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        maxSteps: 2,
+      });
+
+      expect(result.steps.length).toBe(2);
+      expect(result.steps[0].id).toBe('step1');
+      expect(result.steps[1].id).toBe('step2');
+      expect(result.stoppedReason).toBe('max_steps_reached');
+    });
+
+    test("maxSteps: Infinity allows all eligible steps", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Multi Step Route',
+        steps: [
+          { id: 'step1', requires: [], collect: [] },
+          { id: 'step2', requires: [], collect: [] },
+          { id: 'step3', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        maxSteps: Infinity,
+      });
+
+      expect(result.steps.length).toBe(3);
+      expect(['route_complete', 'end_route']).toContain(result.stoppedReason);
+    });
+
+    test("maxSteps larger than route length returns all steps", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Short Route',
+        steps: [
+          { id: 'step1', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        maxSteps: 10,
+      });
+
+      expect(result.steps.length).toBe(1);
+      // Should NOT be max_steps_reached since we didn't hit the limit
+      expect(result.stoppedReason).not.toBe('max_steps_reached');
+    });
+  });
+
+  describe("interaction with other stopping conditions", () => {
+    test("needs_input takes precedence over maxSteps", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Needs Input Route',
+        steps: [
+          { id: 'step1', requires: ['field1'], collect: [] },
+          { id: 'step2', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        maxSteps: 5,
+      });
+
+      expect(result.steps.length).toBe(0);
+      expect(result.stoppedReason).toBe('needs_input');
+    });
+
+    test("skipped steps do not count toward maxSteps", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Skip Route',
+        steps: [
+          { id: 'skipped1', requires: [], collect: [], skipIf: () => true },
+          { id: 'skipped2', requires: [], collect: [], skipIf: () => true },
+          { id: 'included1', requires: [], collect: [] },
+          { id: 'included2', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        maxSteps: 2,
+      });
+
+      expect(result.steps.length).toBe(2);
+      expect(result.steps[0].id).toBe('included1');
+      expect(result.steps[1].id).toBe('included2');
+    });
+
+    test("maxSteps: 1 with skipped first step still returns one step", async () => {
+      const route = new Route<unknown, BatchTestData>({
+        title: 'Skip First Route',
+        steps: [
+          { id: 'skipped', requires: [], collect: [], skipIf: () => true },
+          { id: 'included', requires: [], collect: [] },
+          { id: 'not_reached', requires: [], collect: [] },
+        ],
+      });
+
+      const executor = new BatchExecutor<unknown, BatchTestData>();
+
+      const result = await executor.determineBatch({
+        route,
+        currentStep: undefined,
+        sessionData: {},
+        context: {},
+        maxSteps: 1,
+      });
+
+      expect(result.steps.length).toBe(1);
+      expect(result.steps[0].id).toBe('included');
+      expect(result.stoppedReason).toBe('max_steps_reached');
+    });
+  });
+
+  describe("property-based tests", () => {
+    test("batch size never exceeds maxSteps", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 1, max: 5 }),
+          fc.integer({ min: 1, max: 10 }),
+          async (maxSteps, numSteps) => {
+            const steps: StepOptions<unknown, BatchTestData>[] = [];
+            for (let i = 0; i < numSteps; i++) {
+              steps.push({ id: `step_${i}`, requires: [], collect: [] });
+            }
+
+            const route = new Route<unknown, BatchTestData>({
+              title: 'Property Test Route',
+              steps,
+            });
+
+            const executor = new BatchExecutor<unknown, BatchTestData>();
+
+            const result = await executor.determineBatch({
+              route,
+              currentStep: undefined,
+              sessionData: {},
+              context: {},
+              maxSteps,
+            });
+
+            expect(result.steps.length).toBeLessThanOrEqual(maxSteps);
+          }
+        ),
+        { numRuns: 100 }
+      );
     });
   });
 });

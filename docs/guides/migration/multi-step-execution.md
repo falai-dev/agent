@@ -103,9 +103,14 @@ const response3 = await agent.respond("2 people");
 
 ### After: Multi-Step Execution
 
-Now, multiple steps can execute in a single call when data requirements are satisfied:
+Now, multiple steps can execute in a single call when data requirements are satisfied and `maxStepsPerBatch` is set higher than `1`:
 
 ```typescript
+const agent = new Agent({
+  // ...
+  maxStepsPerBatch: Infinity, // Enable batching
+});
+
 // Turn 1
 const response = await agent.respond("Book Grand Hotel for 2 on Friday");
 // Pre-extraction captures: { hotel: "Grand Hotel", date: "Friday", guests: 2 }
@@ -114,6 +119,8 @@ const response = await agent.respond("Book Grand Hotel for 2 on Friday");
 
 // Total: 1 LLM call
 ```
+
+> **Note:** By default, `maxStepsPerBatch` is `1`, which preserves the classic single-step behavior. You must explicitly opt in to batching.
 
 ## What Changed
 
@@ -326,9 +333,20 @@ const step2 = { skipIf: (d) => !!d.email }; // Skipped if email exists
 // - Both steps skipped, route may complete immediately
 ```
 
-## Opting Out of Batching
+## Controlling Batching with `maxStepsPerBatch`
 
-If you need single-step behavior for specific steps, use `requires` to create dependencies:
+As of v1.1.0, batching is **off by default** (`maxStepsPerBatch: 1`). To enable multi-step batching, set the option on your agent:
+
+```typescript
+const agent = new Agent({
+  name: "Assistant",
+  provider: provider,
+  maxStepsPerBatch: Infinity, // Batch all eligible steps (v1.0.x behavior)
+  // maxStepsPerBatch: 3,     // Or cap at 3 steps per batch
+});
+```
+
+If you need single-step behavior for specific steps while batching is enabled, use `requires` to create dependencies:
 
 ```typescript
 // Force step2 to wait for step1's data
@@ -363,11 +381,13 @@ const agent = new Agent({
 
 ## Summary
 
-1. **Multiple steps can now execute together** - reducing LLM calls
-2. **Pre-extraction happens before batch determination** - maximizing batching
-3. **New response fields** - `executedSteps`, `stoppedReason`, `error`
-4. **Hook execution order changed** - all prepare, then LLM, then all finalize
-5. **SkipIf affects batching** - evaluated during batch determination
-6. **Partial progress preserved** - on errors, completed steps are retained
+1. **`maxStepsPerBatch` defaults to `1`** - single-step execution by default (v1.1.0 breaking change)
+2. **Set `maxStepsPerBatch: Infinity`** to restore v1.0.x batching behavior
+3. **Multiple steps can execute together** when batching is enabled, reducing LLM calls
+4. **Pre-extraction happens before batch determination** - maximizing batching
+5. **New response fields** - `executedSteps`, `stoppedReason`, `error`
+6. **Hook execution order changed** - all prepare, then LLM, then all finalize
+7. **SkipIf affects batching** - evaluated during batch determination
+8. **Partial progress preserved** - on errors, completed steps are retained
 
 The changes improve efficiency and UX while maintaining API compatibility. Most existing code will work without changes, but reviewing hook dependencies and test expectations is recommended.

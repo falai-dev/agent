@@ -17,7 +17,7 @@ The agent-level data collection system provides:
 
 ## Data Collection Across Batched Steps
 
-When multiple steps execute in a single batch, data collection works across all steps simultaneously.
+When multiple steps execute in a single batch (requires `maxStepsPerBatch` > 1), data collection works across all steps simultaneously.
 
 ### How Batch Data Collection Works
 

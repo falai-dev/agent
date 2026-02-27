@@ -761,6 +761,9 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
   rules?: Template<TContext, TData>[];
   prohibitions?: Template<TContext, TData>[];
   
+  // NEW: Control multi-step batching
+  maxStepsPerBatch?: number; // Default: 1 (single-step). Set higher or Infinity to batch.
+  
   hooks?: ContextLifecycleHooks<TContext, TData>;
   debug?: boolean;
   session?: SessionState;
@@ -935,13 +938,14 @@ Types for multi-step batch execution:
  * Reason why batch execution stopped
  */
 type StoppedReason =
-  | 'needs_input'      // Step requires uncollected data
-  | 'end_route'        // Reached END_ROUTE
-  | 'route_complete'   // All Steps processed
-  | 'prepare_error'    // Error in prepare hook
-  | 'llm_error'        // Error during LLM call
-  | 'validation_error' // Error validating collected data
-  | 'finalize_error';  // Error in finalize hook (non-fatal)
+  | 'needs_input'        // Step requires uncollected data
+  | 'end_route'          // Reached END_ROUTE
+  | 'route_complete'     // All Steps processed
+  | 'max_steps_reached'  // Batch hit the maxStepsPerBatch limit
+  | 'prepare_error'      // Error in prepare hook
+  | 'llm_error'          // Error during LLM call
+  | 'validation_error'   // Error validating collected data
+  | 'finalize_error';    // Error in finalize hook (non-fatal)
 
 /**
  * Result of batch determination - which steps can execute together

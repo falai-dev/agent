@@ -575,6 +575,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     currentStep,
                     sessionData: updatedSession.data || {},
                     context: params.context,
+                    maxSteps: this.agent.getAgentOptions().maxStepsPerBatch,
                 });
 
                 batchSteps = batchResult.steps;

@@ -23,6 +23,7 @@ When executing multiple steps in a batch, the engine stops for specific reasons 
 | `needs_input` | Step requires data not yet available | Batch stops, LLM generates response to collect data |
 | `end_route` | Reached END_ROUTE marker | Route is complete, no more steps to execute |
 | `route_complete` | All steps in route processed | Route finished successfully |
+| `max_steps_reached` | Batch hit the `maxStepsPerBatch` limit | Batch stops, remaining steps execute in subsequent calls |
 | `prepare_error` | Error in prepare hook | Batch stops, error returned with last successful state |
 | `llm_error` | Error during LLM call | Batch stops, session state preserved |
 | `validation_error` | Data validation failed | Batch continues, errors included in response |
@@ -129,6 +130,9 @@ const response = await agent.respond("Book a hotel");
 switch (response.stoppedReason) {
   case 'needs_input':
     console.log("Waiting for user input");
+    break;
+  case 'max_steps_reached':
+    console.log("Batch limit reached, more steps pending");
     break;
   case 'end_route':
   case 'route_complete':

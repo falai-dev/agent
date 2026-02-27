@@ -2,6 +2,29 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.1.0]
+
+### Breaking Changes
+
+- **`maxStepsPerBatch` defaults to `1`**: Steps now execute one at a time by default, restoring the classic single-step behavior. Previously, all eligible steps would batch together in a single LLM call, which was confusing when steps had no `collect`/`requires` fields and the entire route would complete in one shot. Set `maxStepsPerBatch` to a higher value or `Infinity` to re-enable batching.
+
+### Added
+
+- **`maxStepsPerBatch` option**: New `AgentOptions` property to control how many steps execute in a single batch. Accepts any positive integer or `Infinity` (default: `1`).
+- **`max_steps_reached` stopped reason**: New `StoppedReason` value emitted when a batch stops because it hit the `maxStepsPerBatch` limit.
+
+### Migration from 1.0.x
+
+If you relied on multi-step batching, add `maxStepsPerBatch: Infinity` to your agent options to restore the previous behavior:
+
+```typescript
+const agent = new Agent({
+  name: "Assistant",
+  provider: provider,
+  maxStepsPerBatch: Infinity, // Restore v1.0.x batching behavior
+});
+```
+
 ## [1.0.2]
 
 ### Fixed

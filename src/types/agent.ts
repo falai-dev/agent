@@ -121,6 +121,17 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
    * @default 15
    */
   routeSwitchMargin?: number;
+  /**
+   * Maximum number of steps to execute in a single batch.
+   * Controls how many consecutive steps can run together in one LLM call.
+   *
+   * - `1` (default): Steps execute one at a time (classic behavior)
+   * - `Infinity`: No limit — all eligible steps batch together
+   * - Any positive integer: Cap the batch to that many steps
+   *
+   * @default 1
+   */
+  maxStepsPerBatch?: number;
 }
 
 /**

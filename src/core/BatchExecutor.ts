@@ -108,6 +108,12 @@ export interface DetermineBatchParams<TContext, TData> {
   sessionData: Partial<TData>;
   /** Agent context for condition evaluation */
   context: TContext;
+  /**
+   * Maximum number of steps to include in this batch.
+   * When reached, the batch stops with 'max_steps_reached'.
+   * Defaults to 1 (single-step execution).
+   */
+  maxSteps?: number;
 }
 
 /**
@@ -222,7 +228,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
    * **Validates: Requirements 1.1, 1.4, 1.5, 7.1, 7.2, 7.3**
    */
   async determineBatch(params: DetermineBatchParams<TContext, TData>): Promise<BatchResult<TContext, TData>> {
-    const { route, currentStep, sessionData, context } = params;
+    const { route, currentStep, sessionData, context, maxSteps = 1 } = params;
     const startTime = Date.now();
     
     const batchSteps: StepOptions<TContext, TData>[] = [];
@@ -360,6 +366,21 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         reason: 'All requirements satisfied, no input needed',
         batchSize: batchSteps.length,
       });
+      
+      // Check if we've reached the max steps limit
+      if (batchSteps.length >= maxSteps) {
+        stoppedReason = 'max_steps_reached';
+        
+        logger.debug(`[BatchExecutor] Reached maxStepsPerBatch limit (${maxSteps}), stopping batch`);
+        
+        this.emitBatchEvent('batch_stop', {
+          stepId: step.id,
+          reason: `Reached maxStepsPerBatch limit (${maxSteps})`,
+          stoppedReason: 'max_steps_reached',
+          batchSize: batchSteps.length,
+        });
+        break;
+      }
       
       // Move to next step in the sequence
       const transitions = step.getTransitions();

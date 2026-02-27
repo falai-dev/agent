@@ -269,9 +269,8 @@ describe("RoutingEngine Integration with Flexible Conditions", () => {
             });
 
             expect(premiumResponse.session?.currentRoute?.id).toBe("complex-workflow");
-            // With multi-step batch execution, steps without requires/collect fields
-            // are executed together in a single batch, ending at the final step
-            expect(premiumResponse.session?.currentStep?.id).toBe("completion-step");
+            // With maxStepsPerBatch defaulting to 1, only the first eligible step executes
+            expect(premiumResponse.session?.currentStep?.id).toBe("initial-step");
 
             // Test basic user without payment
             session = createSession<TestData>();
@@ -284,9 +283,8 @@ describe("RoutingEngine Integration with Flexible Conditions", () => {
             });
 
             expect(basicResponse.session?.currentRoute?.id).toBe("complex-workflow");
-            // With multi-step batch execution, steps without requires/collect fields
-            // are executed together in a single batch
-            expect(basicResponse.session?.currentStep?.id).toBe("completion-step");
+            // With maxStepsPerBatch defaulting to 1, only the first eligible step executes
+            expect(basicResponse.session?.currentStep?.id).toBe("initial-step");
         });
 
         test("should handle step progression with conditions", async () => {
@@ -411,9 +409,9 @@ describe("RoutingEngine Integration with Flexible Conditions", () => {
             });
 
             expect(response.session?.currentRoute?.id).toBe("skip-steps-route");
-            // With multi-step batch execution, steps without requires/collect fields
-            // are executed together in a single batch, ending at the final step
-            expect(response.session?.currentStep?.id).toBe("final-step");
+            // With maxStepsPerBatch defaulting to 1, only the first eligible step executes
+            // (always-step, since conditional steps are skipped)
+            expect(response.session?.currentStep?.id).toBe("always-step");
         });
     });
 

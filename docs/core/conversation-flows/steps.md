@@ -147,7 +147,9 @@ const dataStep = previousStep.nextStep({
 
 ## Multi-Step Batch Execution
 
-Steps can execute together in a single LLM call when their data requirements are already satisfied. This reduces unnecessary back-and-forth and minimizes LLM costs.
+Steps can execute together in a single LLM call when their data requirements are already satisfied and `maxStepsPerBatch` is set higher than `1`. This reduces unnecessary back-and-forth and minimizes LLM costs.
+
+> **Note:** By default, `maxStepsPerBatch` is `1` (single-step execution). Set it to a higher value or `Infinity` on the agent to enable batching.
 
 ### How Steps Are Batched
 

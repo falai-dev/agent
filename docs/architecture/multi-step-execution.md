@@ -6,6 +6,28 @@
 
 The core insight is simple: **if a Step's data requirements are already satisfied, there's no reason to pause and wait for user input**. By detecting which Steps can execute together and combining them into a single batch, we reduce LLM calls while improving conversation UX.
 
+> **Note:** Multi-step batching is **opt-in**. By default, `maxStepsPerBatch` is `1`, meaning steps execute one at a time (classic behavior). Set `maxStepsPerBatch` to a higher value or `Infinity` to enable batching.
+
+## Configuration
+
+Control batching behavior with the `maxStepsPerBatch` option on the agent:
+
+```typescript
+const agent = new Agent({
+  name: "Assistant",
+  provider: provider,
+  // Default: 1 (single-step execution)
+  // Set higher to enable batching
+  maxStepsPerBatch: Infinity, // No limit — batch all eligible steps
+});
+```
+
+| Value | Behavior |
+|-------|----------|
+| `1` (default) | Steps execute one at a time |
+| `N` (e.g. `3`) | Up to N steps per batch |
+| `Infinity` | No limit — all eligible steps batch together |
+
 ## Design Priorities
 
 1. **Conversation UX** - Reduce unnecessary back-and-forth
@@ -23,7 +45,9 @@ flowchart TD
     D -->|Yes| E[Evaluate Step]
     E --> F{Needs Input?}
     F -->|No| G[Add to Batch]
-    G --> D
+    G --> G2{maxStepsPerBatch reached?}
+    G2 -->|No| D
+    G2 -->|Yes| H[Stop Batch]
     F -->|Yes| H[Stop Batch]
     D -->|No| H
     H --> I[Execute Prepare Hooks]
@@ -67,8 +91,10 @@ For each Step starting from current position:
   c. If skipIf is true → skip Step, continue to next
   d. If skipIf throws error → treat as non-skippable
   e. Evaluate needsInput(step, sessionDataAfterPreExtraction)
-  f. If needsInput is false → include Step in batch, continue to next
+  f. If needsInput is false → include Step in batch
   g. If needsInput is true → stop with 'needs_input'
+  h. Check if batch size reached maxStepsPerBatch → stop with 'max_steps_reached'
+  i. Continue to next Step
 ```
 
 ### Phase 3: Hook Execution (Prepare)
@@ -170,6 +196,13 @@ Combines multiple Step prompts into a single coherent prompt:
 ## Example: Multi-Step Batch
 
 ```typescript
+// Enable batching to process multiple steps at once
+const agent = new Agent({
+  name: "Booking Agent",
+  provider: provider,
+  maxStepsPerBatch: Infinity, // Enable full batching
+});
+
 // User provides all booking info at once
 const response = await agent.respond(
   "I want to book the Grand Hotel for 2 people next Friday"
@@ -202,7 +235,8 @@ Enable debug mode to see batch execution decisions:
 const agent = new Agent({
   name: "Assistant",
   provider: provider,
-  debug: true  // Enable detailed logging
+  debug: true,             // Enable detailed logging
+  maxStepsPerBatch: 5,     // Allow up to 5 steps per batch
 });
 ```
 

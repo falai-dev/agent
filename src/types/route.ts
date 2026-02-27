@@ -12,13 +12,14 @@ import { Template, ConditionTemplate } from "./template";
  * Used to indicate the stopping condition for multi-step execution
  */
 export type StoppedReason =
-  | 'needs_input'      // Step requires uncollected data
-  | 'end_route'        // Reached END_ROUTE
-  | 'route_complete'   // All Steps processed
-  | 'prepare_error'    // Error in prepare hook
-  | 'llm_error'        // Error during LLM call
-  | 'validation_error' // Error validating collected data
-  | 'finalize_error';  // Error in finalize hook (non-fatal, logged)
+  | 'needs_input'        // Step requires uncollected data
+  | 'end_route'          // Reached END_ROUTE
+  | 'route_complete'     // All Steps processed
+  | 'max_steps_reached'  // Batch hit the maxStepsPerBatch limit
+  | 'prepare_error'      // Error in prepare hook
+  | 'llm_error'          // Error during LLM call
+  | 'validation_error'   // Error validating collected data
+  | 'finalize_error';    // Error in finalize hook (non-fatal, logged)
 
 /**
  * Event types for batch execution observability
