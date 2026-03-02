@@ -2,6 +2,30 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.1.1]
+
+### Added
+
+- **`createSession` function overloading**: `createSession` now accepts either the classic `(sessionId?, metadata?)` signature or a `Partial<SessionState<TData>>` object that is merged with sensible defaults. This allows pre-populating any session fields (data, history, currentRoute, etc.) in a single call.
+
+```typescript
+// Classic (unchanged)
+const session = createSession<MyData>("session_123", { userId: "u1" });
+
+// New: partial state overload
+const session = createSession<MyData>({
+  id: "session_123",
+  data: { name: "Alice" },
+  history: restoredHistory,
+});
+```
+
+- **`createSessionId` public export**: The `createSessionId()` utility is now exported from the package, allowing consumers to generate unique session IDs without creating a full session object.
+
+### Changed
+
+- **Standardized session ID generation**: All adapters (`MongoAdapter`, `PostgreSQLAdapter`, `PrismaAdapter`, `MemoryAdapter`, `OpenSearchAdapter`) and core classes (`SessionManager`, `BatchExecutor`) now use `createSessionId()` or `createSession()` instead of inline `session_${Date.now()}_${Math.random()...}` patterns. This ensures consistent ID formatting across the codebase.
+
 ## [1.1.0]
 
 ### Breaking Changes

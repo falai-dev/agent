@@ -13,6 +13,7 @@ import type {
   CollectedStateData,
   CreateSessionData,
 } from "../types";
+import { createSessionId } from "../utils";
 
 /**
  * MongoDB collection interface - matches mongodb driver
@@ -100,9 +101,7 @@ export interface MongoAdapterOptions {
  * });
  * ```
  */
-export class MongoAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class MongoAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private client: MongoClient;
@@ -133,9 +132,8 @@ export class MongoAdapter<TData = Record<string, unknown>>
  * MongoDB Session Repository
  */
 class MongoSessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
-  constructor(private collection: MongoCollection<SessionData<TData>>) {}
+  implements SessionRepository<TData> {
+  constructor(private collection: MongoCollection<SessionData<TData>>) { }
 
   async create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
     const now = new Date();
@@ -143,7 +141,7 @@ class MongoSessionRepository<TData = Record<string, unknown>>
       ...data,
       id:
         data.id ||
-        `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        createSessionId(),
       status: data.status || "active",
       messageCount: data.messageCount || 0,
       createdAt: now,
@@ -249,7 +247,7 @@ class MongoSessionRepository<TData = Record<string, unknown>>
  * MongoDB Message Repository
  */
 class MongoMessageRepository implements MessageRepository {
-  constructor(private collection: MongoCollection<MessageData>) {}
+  constructor(private collection: MongoCollection<MessageData>) { }
 
   async create(
     data: Omit<MessageData, "id" | "createdAt">

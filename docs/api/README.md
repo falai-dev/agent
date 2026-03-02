@@ -2856,13 +2856,18 @@ console.log(response.session?.data.destination); // Type-safe!
 ### Session Helper Functions
 
 #### `createSession<TData>(sessionId?, metadata?): SessionState<TData>`
+#### `createSession<TData>(state: Partial<SessionState<TData>>): SessionState<TData>`
 
-Creates a new session step object.
+Creates a new session state object. Supports two overloaded signatures:
 
-**Parameters:**
+**Signature 1 — ID + metadata (original):**
 
 - `sessionId` (optional): Unique session identifier from database
 - `metadata` (optional): Additional metadata to attach
+
+**Signature 2 — Partial state (new):**
+
+- `state`: A `Partial<SessionState<TData>>` object that is merged with sensible defaults (auto-generated `id`, empty `data`, empty `routeHistory`, and timestamped `metadata`)
 
 **Example:**
 
@@ -2878,6 +2883,30 @@ const session = createSession<OnboardingData>("session_123", {
   userId: "user_456",
   channel: "whatsapp",
 });
+
+// NEW: From partial state — pre-populate any fields
+const session = createSession<OnboardingData>({
+  id: "session_123",
+  data: { fullName: "Alice" },
+  history: previousHistory,
+  currentRoute: { id: "onboarding", title: "Onboarding" },
+});
+
+// NEW: Minimal partial — only override what you need
+const session = createSession<OnboardingData>({
+  history: restoredHistory,
+});
+```
+
+#### `createSessionId(): string`
+
+Generates a unique session ID string in the format `session_{timestamp}_{random}`. Use this when you need to generate an ID without creating a full session object.
+
+**Example:**
+
+```typescript
+const id = createSessionId();
+// e.g. "session_1709388025123_k8f2m9x"
 ```
 
 #### `enterRoute<TData>(session, routeId, routeTitle): SessionState<TData>`

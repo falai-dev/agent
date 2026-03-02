@@ -33,6 +33,7 @@
  */
 
 import { cloneDeep } from "../utils/clone";
+import { createSessionId } from "../utils";
 import type {
   PersistenceAdapter,
   SessionRepository,
@@ -140,9 +141,7 @@ export interface OpenSearchAdapterOptions {
  * Stores sessions and messages as documents in OpenSearch indices.
  * Compatible with OpenSearch 1.x, 2.x and Elasticsearch 7.x.
  */
-export class OpenSearchAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class OpenSearchAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   readonly sessionRepository: SessionRepository<TData>;
   readonly messageRepository: MessageRepository;
 
@@ -248,17 +247,16 @@ export class OpenSearchAdapter<TData = Record<string, unknown>>
  * OpenSearch-based session repository implementation
  */
 class OpenSearchSessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
+  implements SessionRepository<TData> {
   constructor(
     private client: OpenSearchClient,
     private index: string,
     private refresh: boolean | "wait_for"
-  ) {}
+  ) { }
 
   async create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
     const id =
-      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      data.id || createSessionId();
     const now = new Date();
 
     const session: SessionData<TData> = {
@@ -514,7 +512,7 @@ class OpenSearchMessageRepository implements MessageRepository {
     private client: OpenSearchClient,
     private index: string,
     private refresh: boolean | "wait_for"
-  ) {}
+  ) { }
 
   async create(
     data: Omit<MessageData, "id" | "createdAt">

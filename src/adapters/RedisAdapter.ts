@@ -74,9 +74,7 @@ export interface RedisAdapterOptions {
  * });
  * ```
  */
-export class RedisAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class RedisAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private redis: RedisClient;
@@ -112,13 +110,12 @@ export class RedisAdapter<TData = Record<string, unknown>>
  * Redis Session Repository
  */
 class RedisSessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
+  implements SessionRepository<TData> {
   constructor(
     private redis: RedisClient,
     private keyPrefix: string,
     private ttl: number
-  ) {}
+  ) { }
 
   private getKey(id: string): string {
     return `${this.keyPrefix}session:${id}`;
@@ -267,7 +264,7 @@ class RedisMessageRepository implements MessageRepository {
     private redis: RedisClient,
     private keyPrefix: string,
     private ttl: number
-  ) {}
+  ) { }
 
   private getKey(id: string): string {
     return `${this.keyPrefix}message:${id}`;

@@ -22,7 +22,7 @@ import type {
   SessionStatus,
   CollectedStateData,
 } from "../../src/types";
-import { Agent, GeminiProvider } from "../../src";
+import { Agent, GeminiProvider, createSessionId } from "../../src";
 
 /**
  * Simple in-memory storage for demonstration
@@ -40,7 +40,7 @@ class InMemoryStorage {
     }
   ): SessionData {
     const id =
-      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      data.id || createSessionId();
     const session: SessionData = {
       ...data,
       id,
@@ -249,9 +249,8 @@ class InMemoryStorage {
  * Custom Session Repository implementation
  */
 class CustomSessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
-  constructor(private storage: InMemoryStorage) {}
+  implements SessionRepository<TData> {
+  constructor(private storage: InMemoryStorage) { }
 
   async create(
     data: Omit<SessionData<TData>, "createdAt" | "updatedAt"> & {
@@ -263,7 +262,7 @@ class CustomSessionRepository<TData = Record<string, unknown>>
         ...data,
         id:
           data.id ||
-          `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          createSessionId(),
       }) as SessionData<TData>
     );
   }
@@ -278,7 +277,7 @@ class CustomSessionRepository<TData = Record<string, unknown>>
     const sessions = this.storage.getSessionsByUserId(userId);
     return Promise.resolve(
       (sessions.find((s) => s.status === "active") as SessionData<TData>) ||
-        null
+      null
     );
   }
 
@@ -354,7 +353,7 @@ class CustomSessionRepository<TData = Record<string, unknown>>
  * Custom Message Repository implementation
  */
 class CustomMessageRepository implements MessageRepository {
-  constructor(private storage: InMemoryStorage) {}
+  constructor(private storage: InMemoryStorage) { }
 
   async create(
     data: Omit<MessageData, "id" | "createdAt">
@@ -398,9 +397,7 @@ class CustomMessageRepository implements MessageRepository {
  * This adapter demonstrates how to implement a custom persistence layer.
  * Replace the InMemoryStorage with actual database calls for production use.
  */
-export class CustomAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class CustomAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   private storage = new InMemoryStorage();
 
   readonly sessionRepository: SessionRepository<TData>;
@@ -479,9 +476,9 @@ async function demonstrateCustomAdapter() {
 
   // First interaction
   console.log("\n💬 First interaction:");
-  
+
   await agent.session.addMessage("user", "Hi, I need help booking a flight", "Alice");
-  
+
   const response1 = await agent.respond({
     history: agent.session.getHistory(),
   });
@@ -493,9 +490,9 @@ async function demonstrateCustomAdapter() {
 
   // Second interaction
   console.log("\n💬 Second interaction:");
-  
+
   await agent.session.addMessage("user", "I want to fly to Paris next week", "Alice");
-  
+
   const response2 = await agent.respond({
     history: agent.session.getHistory(),
   });

@@ -10,6 +10,7 @@ import type { History, HistoryItem } from "../types/history";
 import { PersistenceManager } from "./PersistenceManager";
 import type { PersistenceAdapter } from "../types/persistence";
 import type { Agent } from "./Agent";
+import { createSession } from "../utils";
 
 /**
  * SessionManager handles session lifecycle and conversation history
@@ -93,20 +94,10 @@ export class SessionManager<TData = unknown> {
    * Create a new session with optional custom ID
    */
   private async create(sessionId?: string): Promise<SessionState<TData>> {
-    const id =
-      sessionId ||
-      `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-    const session: SessionState<TData> = {
-      id,
-      data: {} as Partial<TData>, // Agent-level data structure
-      routeHistory: [],
+    const session = createSession<TData>({
+      id: sessionId,
       history: [], // Session manages its own history
-      metadata: {
-        createdAt: new Date(),
-        lastUpdatedAt: new Date(),
-      },
-    };
+    });
 
     this.currentSession = session;
 

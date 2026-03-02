@@ -481,8 +481,15 @@ const hasRequirements = step.hasRequires(collectedData);
 ### Route Testing
 
 ```typescript
-// Simulate route execution
+// Simulate route execution — classic signature
 const mockSession = createSession();
+
+// Or pre-populate with known data using partial state overload
+const prepopSession = createSession({
+  data: { name: "Test User" },
+  history: [{ role: "user", content: "Hello" }],
+});
+
 const mockHistory = [
   {
     role: "user",

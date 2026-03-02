@@ -16,6 +16,7 @@ import type {
   CreateSessionData,
 } from "../types";
 import { logger } from '../utils'
+import { createSessionId } from '../utils';
 
 /**
  * Prisma model operations
@@ -120,9 +121,7 @@ export interface PrismaAdapterOptions {
  * });
  * ```
  */
-export class PrismaAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class PrismaAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private prisma: PrismaClient;
@@ -199,8 +198,7 @@ export class PrismaAdapter<TData = Record<string, unknown>>
  * Internal implementation - users should use PrismaAdapter instead
  */
 class PrismaSessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
+  implements SessionRepository<TData> {
   private prisma: PrismaClient;
   private tableName: string;
   private fieldMap: Partial<Record<keyof SessionData<TData>, string>>;
@@ -270,7 +268,7 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
       ...data,
       id:
         data.id ||
-        `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        createSessionId(),
     });
     const result = await this.getModel().create({
       data: mapped,

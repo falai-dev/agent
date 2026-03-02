@@ -9,11 +9,11 @@ export { Agent } from "./core/Agent";
 export { Route } from "./core/Route";
 export { Step } from "./core/Step";
 export { ResponseModal } from "./core/ResponseModal";
-export type { 
-  ResponseModalOptions, 
-  RespondParams, 
-  StreamOptions, 
-  GenerateOptions 
+export type {
+  ResponseModalOptions,
+  RespondParams,
+  StreamOptions,
+  GenerateOptions
 } from "./core/ResponseModal";
 export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
@@ -73,11 +73,11 @@ export { END_ROUTE, END_ROUTE_ID } from "./constants";
 // Utils
 export { generateRouteId, generateStepId, generateToolId } from "./utils/id";
 export { formatKnowledgeBase } from "./utils/template";
-export { 
-  ConditionEvaluator, 
-  createConditionEvaluator, 
-  extractAIContextStrings, 
-  hasProgrammaticConditions 
+export {
+  ConditionEvaluator,
+  createConditionEvaluator,
+  extractAIContextStrings,
+  hasProgrammaticConditions
 } from "./utils/condition";
 export {
   normalizeHistory,
@@ -163,4 +163,4 @@ export type {
   BatchExecutionError,
 } from "./types";
 export { CompositionMode, EventKind, MessageRole } from "./types";
-export { createSession, enterRoute, enterStep, mergeCollected } from "./utils";
+export { createSession, createSessionId, enterRoute, enterStep, mergeCollected } from "./utils";

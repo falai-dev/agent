@@ -17,6 +17,7 @@ import {
   SessionState,
   END_ROUTE,
   History,
+  createSessionId,
 } from "../../src";
 
 /**
@@ -64,7 +65,7 @@ class CustomDatabase {
     data: Omit<CustomDatabaseSession, "id" | "createdAt" | "updatedAt">
   ): CustomDatabaseSession {
     const session: CustomDatabaseSession = {
-      id: `session_${Date.now()}`,
+      id: createSessionId(),
       ...data,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -266,7 +267,7 @@ async function example() {
    * Simulate conversation with automatic sync
    */
   console.log("\n--- Turn 1 ---");
-  
+
   // Add user message to SessionManager
   await agent.session.addMessage("user", "Hi! I'm John Smith and my email is john@acme.com", "User");
 
@@ -286,7 +287,7 @@ async function example() {
 
   // Turn 2: User provides company
   console.log("\n--- Turn 2 ---");
-  
+
   await agent.session.addMessage("user", "I work for Acme Corporation", "User");
 
   const response2 = await agent.respond({
@@ -312,7 +313,7 @@ async function example() {
    * Demonstrate session recovery with new Agent instance
    */
   console.log("\n--- Session Recovery (New Agent Instance) ---");
-  
+
   // Create new agent instance (simulating app restart)
   const newAgent = new Agent({
     name: "Onboarding Assistant",
@@ -360,11 +361,11 @@ async function example() {
 
   // Continue conversation with recovered session
   await newAgent.session.addMessage("user", "Can you confirm my details?");
-  
+
   const confirmResponse = await newAgent.respond({
     history: newAgent.session.getHistory(),
   });
-  
+
   console.log("🤖 Confirmation:", confirmResponse.message);
   await newAgent.session.addMessage("assistant", confirmResponse.message);
 
@@ -414,7 +415,7 @@ async function syncSessionToDatabase(
 /**
  * Mock function to simulate processing the completed onboarding data.
  */
-async function processOnboarding(data) {
+async function processOnboarding(data: Partial<OnboardingData>) {
   console.log("\n🚀 Processing onboarding data...");
   console.log(
     `   - Creating account for ${data?.fullName} at ${data?.companyName}`
@@ -542,7 +543,7 @@ async function serverEndpointExample() {
     });
 
     // Load or create session
-    const effectiveSessionId = sessionId || `session_${userId}_${Date.now()}`;
+    const effectiveSessionId = sessionId || createSessionId();
     await agent.session.getOrCreate(effectiveSessionId);
 
     // Try to load from database if session exists
@@ -571,7 +572,7 @@ async function serverEndpointExample() {
 
     // Add user message and respond
     await agent.session.addMessage("user", message);
-    
+
     const response = await agent.respond({
       history: agent.session.getHistory(),
     });

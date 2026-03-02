@@ -12,6 +12,7 @@ import type {
   SessionStatus,
   PersistenceAdapter,
 } from "../types";
+import { createSessionId } from "../utils";
 
 /**
  * PostgreSQL query result interface
@@ -77,9 +78,7 @@ export interface PostgreSQLAdapterOptions {
  * });
  * ```
  */
-export class PostgreSQLAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class PostgreSQLAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private client: PgClient;
@@ -159,9 +158,8 @@ export class PostgreSQLAdapter<TData = Record<string, unknown>>
  * PostgreSQL Session Repository
  */
 class PostgreSQLSessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
-  constructor(private client: PgClient, private tableName: string) {}
+  implements SessionRepository<TData> {
+  constructor(private client: PgClient, private tableName: string) { }
 
   async create(
     data: Omit<SessionData<TData>, "createdAt" | "updatedAt"> & {
@@ -169,7 +167,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
     }
   ): Promise<SessionData<TData>> {
     const id =
-      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      data.id || createSessionId();
     const now = new Date();
 
     const result = await this.client.query<SessionData<TData>>(
@@ -335,7 +333,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
  * PostgreSQL Message Repository
  */
 class PostgreSQLMessageRepository implements MessageRepository {
-  constructor(private client: PgClient, private tableName: string) {}
+  constructor(private client: PgClient, private tableName: string) { }
 
   async create(
     data: Omit<MessageData, "id" | "createdAt">

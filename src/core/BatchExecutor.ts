@@ -5,12 +5,12 @@
  * and orchestrating their execution with a single LLM call.
  */
 
-import type { 
-  BatchResult, 
-  StoppedReason, 
-  StepOptions, 
-  BatchExecutionError, 
-  BatchExecutionResult, 
+import type {
+  BatchResult,
+  StoppedReason,
+  StepOptions,
+  BatchExecutionError,
+  BatchExecutionResult,
   StepRef,
   BatchExecutionEvent,
   BatchExecutionEventListener,
@@ -22,7 +22,7 @@ import type { StructuredSchema } from '../types/schema';
 import { Step } from './Step';
 import { Route } from './Route';
 import { END_ROUTE_ID } from '../constants';
-import { logger, createTemplateContext, mergeCollected } from '../utils';
+import { logger, createTemplateContext, mergeCollected, createSession } from '../utils';
 
 /**
  * Step configuration relevant for needs-input detection
@@ -201,7 +201,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       details,
     };
     this.emitEvent(event);
-    
+
     // Also log the event when debug mode is enabled
     logger.debug(`[BatchExecutor] Event: ${type}`, details);
   }
@@ -230,14 +230,14 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
   async determineBatch(params: DetermineBatchParams<TContext, TData>): Promise<BatchResult<TContext, TData>> {
     const { route, currentStep, sessionData, context, maxSteps = 1 } = params;
     const startTime = Date.now();
-    
+
     const batchSteps: StepOptions<TContext, TData>[] = [];
     let stoppedReason: StoppedReason = 'route_complete';
     let stoppedAtStep: StepOptions<TContext, TData> | undefined;
-    
+
     // Get all steps in the route for traversal
     const allSteps = route.getAllSteps();
-    
+
     // Find starting position
     let startIndex = 0;
     if (currentStep) {
@@ -246,40 +246,37 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         startIndex = currentIndex;
       }
     }
-    
+
     // Log batch determination start (Requirement 11.1)
     logger.debug(`[BatchExecutor] Starting batch determination from step index ${startIndex}, total steps: ${allSteps.length}`);
-    
+
     // Emit batch_start event (Requirement 11.3)
     this.emitBatchEvent('batch_start', {
       stepId: currentStep?.id,
       reason: `Starting batch determination from ${currentStep?.id || 'initial step'}`,
       batchSize: 0,
     });
-    
+
     // Create template context for condition evaluation
     const templateContext = createTemplateContext<TContext, TData>({
       context,
       data: sessionData,
-      session: { 
-        id: `batch-${Date.now()}`,
-        data: sessionData 
-      } as SessionState<TData>,
+      session: createSession<TData>({ data: sessionData }),
     });
-    
+
     // Walk through steps starting from current position
     for (let i = startIndex; i < allSteps.length; i++) {
       const step = allSteps[i];
       const stepOptions = step.toOptions();
-      
+
       // Check for END_ROUTE (Requirement 2.2)
       if (step.id === END_ROUTE_ID) {
         stoppedReason = 'end_route';
         stoppedAtStep = stepOptions;
-        
+
         // Log stopping reason (Requirement 11.2)
         logger.debug(`[BatchExecutor] Reached END_ROUTE, stopping batch`);
-        
+
         // Emit batch_stop event (Requirement 11.3)
         this.emitBatchEvent('batch_stop', {
           stepId: step.id,
@@ -289,14 +286,14 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         });
         break;
       }
-      
+
       // Evaluate skipIf condition (Requirements 7.1, 7.2, 7.3)
       let shouldSkip = false;
       if (step.skipIf) {
         try {
           const skipResult = await step.evaluateSkipIf(templateContext);
           shouldSkip = skipResult.shouldSkip;
-          
+
           // Log skipIf evaluation (Requirement 11.1)
           logger.debug(`[BatchExecutor] Step ${step.id} skipIf evaluated to: ${shouldSkip}`);
         } catch (error) {
@@ -305,12 +302,12 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
           shouldSkip = false;
         }
       }
-      
+
       // If skipIf is true, skip this step and continue (Requirement 7.2)
       if (shouldSkip) {
         // Log step skip (Requirement 11.1)
         logger.debug(`[BatchExecutor] Skipping step ${step.id} due to skipIf condition`);
-        
+
         // Emit step_skipped event (Requirement 11.3)
         this.emitBatchEvent('step_skipped', {
           stepId: step.id,
@@ -318,15 +315,15 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         });
         continue;
       }
-      
+
       // Evaluate needsInput (Requirements 1.2, 1.3)
       const stepNeedsInput = needsInput(step, sessionData);
-      
+
       if (stepNeedsInput) {
         // Requirement 1.5: Stop when a step needs input
         stoppedReason = 'needs_input';
         stoppedAtStep = stepOptions;
-        
+
         // Log stopping reason with details (Requirement 11.1, 11.2)
         const missingRequires = step.requires?.filter(
           field => (sessionData as Record<string, unknown>)[String(field)] === undefined
@@ -343,7 +340,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         }
 
         logger.debug(`[BatchExecutor] Step ${step.id} needs input, stopping batch. Missing requires: [${missingRequires.join(', ')}], Collect fields: [${collectFields.join(', ')}]`);
-        
+
         // Emit batch_stop event (Requirement 11.3)
         this.emitBatchEvent('batch_stop', {
           stepId: step.id,
@@ -353,26 +350,26 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         });
         break;
       }
-      
+
       // Requirement 1.4: Step doesn't need input, include in batch
       batchSteps.push(stepOptions);
-      
+
       // Log step inclusion with reason (Requirement 11.1)
       logger.debug(`[BatchExecutor] Including step ${step.id} in batch (all requirements satisfied)`);
-      
+
       // Emit step_included event (Requirement 11.3)
       this.emitBatchEvent('step_included', {
         stepId: step.id,
         reason: 'All requirements satisfied, no input needed',
         batchSize: batchSteps.length,
       });
-      
+
       // Check if we've reached the max steps limit
       if (batchSteps.length >= maxSteps) {
         stoppedReason = 'max_steps_reached';
-        
+
         logger.debug(`[BatchExecutor] Reached maxStepsPerBatch limit (${maxSteps}), stopping batch`);
-        
+
         this.emitBatchEvent('batch_stop', {
           stepId: step.id,
           reason: `Reached maxStepsPerBatch limit (${maxSteps})`,
@@ -381,16 +378,16 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         });
         break;
       }
-      
+
       // Move to next step in the sequence
       const transitions = step.getTransitions();
       if (transitions.length === 0) {
         // No more transitions, route is complete
         stoppedReason = 'route_complete';
-        
+
         // Log stopping reason (Requirement 11.2)
         logger.debug(`[BatchExecutor] No more transitions from step ${step.id}, route complete`);
-        
+
         // Emit batch_stop event (Requirement 11.3)
         this.emitBatchEvent('batch_stop', {
           stepId: step.id,
@@ -400,7 +397,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         });
         break;
       }
-      
+
       // For linear routes, follow the first transition
       // For branching routes, we'd need more complex logic
       const nextStep = transitions[0];
@@ -414,10 +411,10 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
           // Next step is END_ROUTE
           stoppedReason = 'end_route';
           stoppedAtStep = nextStep.toOptions();
-          
+
           // Log stopping reason (Requirement 11.2)
           logger.debug(`[BatchExecutor] Next step is END_ROUTE, stopping batch`);
-          
+
           // Emit batch_stop event (Requirement 11.3)
           this.emitBatchEvent('batch_stop', {
             stepId: nextStep.id,
@@ -429,11 +426,11 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         }
       }
     }
-    
+
     // Log batch determination complete with timing (Requirement 11.1, 11.2)
     const determinationTime = Date.now() - startTime;
     logger.debug(`[BatchExecutor] Batch determination complete. Steps: ${batchSteps.length}, Stopped reason: ${stoppedReason}, Time: ${determinationTime}ms`);
-    
+
     return {
       steps: batchSteps,
       stoppedReason,
@@ -455,13 +452,13 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
   async executePrepareHooks(params: ExecuteHooksParams<TContext, TData>): Promise<HookExecutionResult> {
     const { steps, context, data, executeHook } = params;
     const executedSteps: string[] = [];
-    
+
     logger.debug(`[BatchExecutor] Executing prepare hooks for ${steps.length} steps`);
-    
+
     for (const step of steps) {
       if (step.prepare) {
         logger.debug(`[BatchExecutor] Executing prepare hook for step: ${step.id}`);
-        
+
         try {
           await executeHook(step.prepare, context, data, step);
           executedSteps.push(step.id || 'unknown');
@@ -470,7 +467,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
           // Requirement 5.4: Stop on prepare hook failure
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error(`[BatchExecutor] Prepare hook failed for step ${step.id}: ${errorMessage}`);
-          
+
           return {
             success: false,
             executedSteps,
@@ -484,7 +481,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         }
       }
     }
-    
+
     logger.debug(`[BatchExecutor] All prepare hooks completed successfully`);
     return {
       success: true,
@@ -508,13 +505,13 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
     const { steps, context, data, executeHook } = params;
     const executedSteps: string[] = [];
     const errors: Array<{ stepId: string; error: BatchExecutionError }> = [];
-    
+
     logger.debug(`[BatchExecutor] Executing finalize hooks for ${steps.length} steps`);
-    
+
     for (const step of steps) {
       if (step.finalize) {
         logger.debug(`[BatchExecutor] Executing finalize hook for step: ${step.id}`);
-        
+
         try {
           await executeHook(step.finalize, context, data, step);
           executedSteps.push(step.id || 'unknown');
@@ -523,7 +520,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
           // Requirement 5.5: Log error and continue with remaining hooks
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error(`[BatchExecutor] Finalize hook failed for step ${step.id}: ${errorMessage}`);
-          
+
           errors.push({
             stepId: step.id || 'unknown',
             error: {
@@ -533,18 +530,18 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
               details: error,
             },
           });
-          
+
           // Continue to next step despite error
         }
       }
     }
-    
+
     if (errors.length > 0) {
       logger.warn(`[BatchExecutor] ${errors.length} finalize hook(s) failed, but execution continued`);
     } else {
       logger.debug(`[BatchExecutor] All finalize hooks completed successfully`);
     }
-    
+
     // Always return success for finalize hooks (errors are logged but don't stop execution)
     return {
       success: true,
@@ -592,36 +589,36 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
    * **Validates: Requirements 9.1, 9.2, 9.3, 2.4**
    */
   async executeBatch(params: ExecuteBatchParams<TContext, TData>): Promise<BatchExecutionResult<TData>> {
-    const { 
-      batch, 
-      session: initialSession, 
-      context, 
-      executeHook, 
-      generateMessage, 
+    const {
+      batch,
+      session: initialSession,
+      context,
+      executeHook,
+      generateMessage,
       schema,
       routeId,
     } = params;
-    
+
     // Track timing for each phase (Requirement 11.1)
     const timing: BatchExecutionTiming = {
       totalMs: 0,
     };
     const batchStartTime = Date.now();
-    
+
     // Track the last successful session state for error recovery
     let lastSuccessfulSession = initialSession;
     let currentSession = initialSession;
-    
+
     // Track executed steps for the response
     const executedSteps: StepRef[] = [];
-    
+
     // Log batch execution start with details (Requirement 11.1)
     logger.debug(`[BatchExecutor] Starting batch execution with ${batch.steps.length} steps, route: ${routeId || 'unknown'}`);
-    
+
     // If batch is empty, return early with appropriate reason
     if (batch.steps.length === 0) {
       logger.debug(`[BatchExecutor] Empty batch, returning with stopped reason: ${batch.stoppedReason}`);
-      
+
       // Emit batch_complete event for empty batch (Requirement 11.3)
       timing.totalMs = Date.now() - batchStartTime;
       this.emitBatchEvent('batch_complete', {
@@ -630,7 +627,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         reason: 'Empty batch',
         timing,
       });
-      
+
       return {
         message: '',
         session: currentSession,
@@ -639,26 +636,26 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         collectedData: {},
       };
     }
-    
+
     // PHASE 1: Execute prepare hooks (Requirement 5.4 - stop on failure)
     const prepareStartTime = Date.now();
     logger.debug(`[BatchExecutor] Phase 1: Executing prepare hooks`);
-    
+
     const prepareResult = await this.executePrepareHooks({
       steps: batch.steps,
       context,
       data: currentSession.data,
       executeHook,
     });
-    
+
     timing.prepareHooksMs = Date.now() - prepareStartTime;
     logger.debug(`[BatchExecutor] Prepare hooks completed in ${timing.prepareHooksMs}ms`);
-    
+
     if (!prepareResult.success) {
       // Requirement 9.3: Preserve partial progress on errors
       // Requirement 2.4: Stop and include error information
       logger.error(`[BatchExecutor] Prepare hook failed:`, prepareResult.error);
-      
+
       // Emit batch_complete event with error (Requirement 11.3)
       timing.totalMs = Date.now() - batchStartTime;
       this.emitBatchEvent('batch_complete', {
@@ -667,7 +664,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         reason: `Prepare hook failed: ${prepareResult.error?.message}`,
         timing,
       });
-      
+
       return {
         message: '',
         session: lastSuccessfulSession, // Return last successful state
@@ -679,22 +676,22 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         error: prepareResult.error,
       };
     }
-    
+
     // Update last successful session after prepare hooks complete
     lastSuccessfulSession = currentSession;
-    
+
     // PHASE 2: Make LLM call (Requirement 9.1 - preserve session state on failure)
     const llmStartTime = Date.now();
     logger.debug(`[BatchExecutor] Phase 2: Making LLM call`);
-    
+
     let llmResponse: Record<string, unknown>;
     let message: string;
-    
+
     try {
       const result = await generateMessage();
       llmResponse = result.structured || {};
       message = result.message || '';
-      
+
       timing.llmCallMs = Date.now() - llmStartTime;
       logger.debug(`[BatchExecutor] LLM call successful in ${timing.llmCallMs}ms`);
     } catch (error) {
@@ -702,7 +699,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       const errorMessage = error instanceof Error ? error.message : String(error);
       timing.llmCallMs = Date.now() - llmStartTime;
       logger.error(`[BatchExecutor] LLM call failed after ${timing.llmCallMs}ms:`, errorMessage);
-      
+
       // Emit batch_complete event with error (Requirement 11.3)
       timing.totalMs = Date.now() - batchStartTime;
       this.emitBatchEvent('batch_complete', {
@@ -711,7 +708,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         reason: `LLM call failed: ${errorMessage}`,
         timing,
       });
-      
+
       return {
         message: '',
         session: lastSuccessfulSession, // Preserve session state
@@ -724,50 +721,50 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         },
       };
     }
-    
+
     // Update last successful session after LLM call
     lastSuccessfulSession = currentSession;
-    
+
     // PHASE 3: Collect and validate data (Requirement 9.2 - include validation errors)
     const collectStartTime = Date.now();
     logger.debug(`[BatchExecutor] Phase 3: Collecting and validating data`);
-    
+
     const collectResult = this.collectBatchData({
       steps: batch.steps,
       llmResponse,
       session: currentSession,
       schema,
     });
-    
+
     timing.dataCollectionMs = Date.now() - collectStartTime;
     logger.debug(`[BatchExecutor] Data collection completed in ${timing.dataCollectionMs}ms`);
-    
+
     // Update session with collected data (even if validation failed)
     currentSession = collectResult.session;
-    
+
     // Track collected data for response
     const collectedData = collectResult.collectedData;
-    
+
     // Check for validation errors
     let validationError: BatchExecutionError | undefined;
     if (!collectResult.success && collectResult.validationErrors && collectResult.validationErrors.length > 0) {
       // Requirement 9.2: Include validation errors in response
       logger.warn(`[BatchExecutor] Data validation failed:`, collectResult.validationErrors);
-      
+
       validationError = {
         type: 'data_validation',
         message: `Validation failed for ${collectResult.validationErrors.length} field(s): ${collectResult.validationErrors.map(e => e.field).join(', ')}`,
         details: collectResult.validationErrors,
       };
-      
+
       // Note: We continue execution despite validation errors
       // The error is included in the response for the caller to handle
     }
-    
+
     // Update last successful session after data collection
     // (even with validation errors, we preserve the collected data)
     lastSuccessfulSession = currentSession;
-    
+
     // Build executed steps list
     for (const step of batch.steps) {
       if (step.id) {
@@ -777,26 +774,26 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         });
       }
     }
-    
+
     // PHASE 4: Execute finalize hooks (Requirement 5.5 - continue on failure)
     const finalizeStartTime = Date.now();
     logger.debug(`[BatchExecutor] Phase 4: Executing finalize hooks`);
-    
+
     const finalizeResult = await this.executeFinalizeHooks({
       steps: batch.steps,
       context,
       data: currentSession.data,
       executeHook,
     });
-    
+
     timing.finalizeHooksMs = Date.now() - finalizeStartTime;
     logger.debug(`[BatchExecutor] Finalize hooks completed in ${timing.finalizeHooksMs}ms`);
-    
+
     // Log finalize errors but don't fail the batch
     let finalizeError: BatchExecutionError | undefined;
     if (finalizeResult.errors && finalizeResult.errors.length > 0) {
       logger.warn(`[BatchExecutor] Some finalize hooks failed:`, finalizeResult.errors);
-      
+
       // Create a summary error for finalize failures
       finalizeError = {
         type: 'finalize_hook',
@@ -804,12 +801,12 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         details: finalizeResult.errors,
       };
     }
-    
+
     // Determine the final stopped reason
     // Priority: validation_error > finalize_error > batch.stoppedReason
     let finalStoppedReason: StoppedReason = batch.stoppedReason;
     let finalError: BatchExecutionError | undefined;
-    
+
     if (validationError) {
       finalStoppedReason = 'validation_error';
       finalError = validationError;
@@ -818,11 +815,11 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       // but include the error in the response
       finalError = finalizeError;
     }
-    
+
     // Calculate total time and log completion (Requirement 11.1, 11.2)
     timing.totalMs = Date.now() - batchStartTime;
     logger.debug(`[BatchExecutor] Batch execution complete. Stopped reason: ${finalStoppedReason}, Executed steps: ${executedSteps.length}, Total time: ${timing.totalMs}ms`);
-    
+
     // Emit batch_complete event (Requirement 11.3)
     this.emitBatchEvent('batch_complete', {
       batchSize: executedSteps.length,
@@ -830,7 +827,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       reason: `Batch completed with ${executedSteps.length} steps`,
       timing,
     });
-    
+
     return {
       message,
       session: currentSession,
@@ -857,9 +854,9 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
    */
   collectBatchData(params: CollectBatchDataParams<TData>): CollectBatchDataResult<TData> {
     const { steps, llmResponse, session, schema } = params;
-    
+
     logger.debug(`[BatchExecutor] Collecting batch data from ${steps.length} steps`);
-    
+
     // Requirement 6.1: Gather all collect fields from all steps in the batch
     const allCollectFields = new Set<string>();
     for (const step of steps) {
@@ -869,9 +866,9 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         }
       }
     }
-    
+
     logger.debug(`[BatchExecutor] Collect fields to extract: ${Array.from(allCollectFields).join(', ')}`);
-    
+
     // If no fields to collect, return early with unchanged session
     if (allCollectFields.size === 0) {
       logger.debug(`[BatchExecutor] No collect fields defined, skipping data collection`);
@@ -882,12 +879,12 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         fieldsCollected: [],
       };
     }
-    
+
     // Extract data from LLM response for all collect fields
     const collectedData: Partial<TData> = {};
     const fieldsCollected: string[] = [];
     const fieldsMissing: string[] = [];
-    
+
     for (const field of allCollectFields) {
       // Check if the field exists in the LLM response
       if (field in llmResponse && llmResponse[field] !== undefined) {
@@ -899,20 +896,20 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         logger.debug(`[BatchExecutor] Field '${field}' not found in LLM response`);
       }
     }
-    
+
     // Requirement 6.2: Validate collected data against the agent schema
     const validationErrors: ValidationError[] = [];
-    
+
     if (schema && Object.keys(collectedData).length > 0) {
       logger.debug(`[BatchExecutor] Validating collected data against schema`);
-      
+
       const validationResult = this.validateAgainstSchema(collectedData, schema);
       if (!validationResult.valid) {
         validationErrors.push(...validationResult.errors);
         logger.warn(`[BatchExecutor] Schema validation found ${validationErrors.length} error(s)`);
       }
     }
-    
+
     // Requirement 6.3: Update session data with all collected values
     // Only merge valid data (data that passed validation or had no schema to validate against)
     let updatedSession = session;
@@ -922,11 +919,11 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       updatedSession = mergeCollected(session, collectedData);
       logger.debug(`[BatchExecutor] Updated session with collected data`);
     }
-    
+
     const success = validationErrors.length === 0;
-    
+
     logger.debug(`[BatchExecutor] Data collection complete. Success: ${success}, Fields collected: ${fieldsCollected.length}, Fields missing: ${fieldsMissing.length}`);
-    
+
     return {
       success,
       collectedData,
@@ -956,7 +953,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
     schema: StructuredSchema
   ): { valid: boolean; errors: ValidationError[] } {
     const errors: ValidationError[] = [];
-    
+
     // Check if provided fields exist in schema
     if (schema.properties) {
       for (const [key, value] of Object.entries(data)) {
@@ -977,7 +974,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         }
       }
     }
-    
+
     return {
       valid: errors.length === 0,
       errors,
@@ -997,18 +994,18 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       // Null/undefined values are handled separately (required field check)
       return null;
     }
-    
+
     const expectedType = fieldSchema.type;
     if (!expectedType) {
       // No type specified, consider valid
       return null;
     }
-    
+
     const actualType = Array.isArray(value) ? 'array' : typeof value;
-    
+
     // Handle array of types
     const allowedTypes = Array.isArray(expectedType) ? expectedType : [expectedType];
-    
+
     // Map JavaScript types to JSON Schema types
     const typeMapping: Record<string, string> = {
       'string': 'string',
@@ -1017,9 +1014,9 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       'object': 'object',
       'array': 'array',
     };
-    
+
     const mappedActualType = typeMapping[actualType] || actualType;
-    
+
     // Check if actual type matches any allowed type
     // Also handle 'integer' as a valid number type
     const isValidType = allowedTypes.some(t => {
@@ -1028,7 +1025,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
       }
       return t === mappedActualType;
     });
-    
+
     if (!isValidType) {
       return {
         field,
@@ -1037,7 +1034,7 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
         schemaPath: `properties.${field}.type`,
       };
     }
-    
+
     return null;
   }
 }
@@ -1068,7 +1065,7 @@ export interface ExecuteHooksParams<TContext, TData> {
 /**
  * Type for the hook execution function
  */
-export type HookFunction<TContext, TData> = 
+export type HookFunction<TContext, TData> =
   | string
   | Tool<TContext, TData>
   | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);

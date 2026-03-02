@@ -4,19 +4,57 @@ import type { CollectedStateData } from "../types/persistence";
 
 /**
  * Helper to create a new session
+ *
+ * Overload 1: Create with optional sessionId and metadata
  * @param sessionId - Optional session ID (e.g., from database)
  * @param metadata - Optional metadata to attach
+ *
+ * Overload 2: Create from a partial session state (merged with defaults)
+ * @param state - Partial session state to merge with defaults
  */
 export function createSession<TData = Record<string, unknown>>(
   sessionId?: string,
   metadata?: SessionState<TData>["metadata"]
+): SessionState<TData>;
+export function createSession<TData = Record<string, unknown>>(
+  state: Partial<SessionState<TData>>
+): SessionState<TData>;
+export function createSession<TData = Record<string, unknown>>(
+  sessionIdOrState?: string | Partial<SessionState<TData>>,
+  metadata?: SessionState<TData>["metadata"]
 ): SessionState<TData> {
+  // Overload 2: partial state object
+  if (typeof sessionIdOrState === "object" && sessionIdOrState !== null) {
+    const state = sessionIdOrState;
+    const now = new Date();
+    const id =
+      state.id ||
+      `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    return {
+      id,
+      data: state.data ?? ({} as Partial<TData>),
+      routeHistory: state.routeHistory ?? [],
+      currentRoute: state.currentRoute,
+      currentStep: state.currentStep,
+      pendingTransition: state.pendingTransition,
+      history: state.history,
+      metadata: {
+        createdAt: now,
+        lastUpdatedAt: now,
+        ...state.metadata,
+      },
+    };
+  }
+
+  // Overload 1: sessionId + metadata
   const id =
-    sessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    sessionIdOrState ||
+    `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
   return {
     id,
-    data: {} as Partial<TData>, // Agent-level data structure
+    data: {} as Partial<TData>,
     routeHistory: [],
     metadata: {
       ...metadata,
@@ -184,17 +222,17 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
     id: sessionId,
     currentRoute: data.currentRoute
       ? {
-          id: data.currentRoute,
-          title: collectedData.currentRouteTitle || data.currentRoute,
-          enteredAt: new Date(),
-        }
+        id: data.currentRoute,
+        title: collectedData.currentRouteTitle || data.currentRoute,
+        enteredAt: new Date(),
+      }
       : undefined,
     currentStep: data.currentStep
       ? {
-          id: data.currentStep,
-          description: collectedData.currentStepDescription || undefined,
-          enteredAt: new Date(),
-        }
+        id: data.currentStep,
+        description: collectedData.currentStepDescription || undefined,
+        enteredAt: new Date(),
+      }
       : undefined,
     data: collectedData.data || {},
     routeHistory: collectedData.routeHistory || [],

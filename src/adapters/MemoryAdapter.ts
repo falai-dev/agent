@@ -14,6 +14,7 @@ import type {
   CreateSessionData,
 } from "../types";
 import { cloneDeep } from "../utils/clone";
+import { createSessionId } from "../utils";
 
 /**
  * Memory Adapter - Provider-style API for in-memory persistence
@@ -38,9 +39,7 @@ import { cloneDeep } from "../utils/clone";
  * });
  * ```
  */
-export class MemoryAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class MemoryAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private sessions: Map<string, SessionData<TData>>;
@@ -80,13 +79,12 @@ export class MemoryAdapter<TData = Record<string, unknown>>
  * Memory Session Repository
  */
 class MemorySessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
-  constructor(private sessions: Map<string, SessionData<TData>>) {}
+  implements SessionRepository<TData> {
+  constructor(private sessions: Map<string, SessionData<TData>>) { }
 
   create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
     const id =
-      data.id || `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      data.id || createSessionId();
     const now = new Date();
 
     const session: SessionData<TData> = {
@@ -208,7 +206,7 @@ class MemorySessionRepository<TData = Record<string, unknown>>
  * Memory Message Repository
  */
 class MemoryMessageRepository implements MessageRepository {
-  constructor(private messages: Map<string, MessageData>) {}
+  constructor(private messages: Map<string, MessageData>) { }
 
   async create(
     data: Omit<MessageData, "id" | "createdAt">

@@ -1110,10 +1110,14 @@ interface GenerateMessageInput<TContext = unknown> {
 ### Session Utilities
 
 ```typescript
-createSession<TData = unknown>(initialData?: {
-  data?: Partial<TData>;
-  metadata?: SessionMetadata;
-}): SessionState<TData>
+// Overload 1: Classic — ID + metadata
+createSession<TData = unknown>(sessionId?: string, metadata?: SessionMetadata): SessionState<TData>
+
+// Overload 2: Partial state — merge with defaults
+createSession<TData = unknown>(state: Partial<SessionState<TData>>): SessionState<TData>
+
+// Generate a unique session ID without creating a full session
+createSessionId(): string
 
 enterRoute<TData>(
   session: SessionState<TData>,

@@ -709,8 +709,14 @@ const dynamicRoute = agent
 ### Testing
 
 ```typescript
-// Test data collection
+// Test data collection — classic signature
 const mockSession = createSession();
+
+// Or pre-populate fields with the partial state overload
+const prepopulatedSession = createSession({
+  data: { name: "Test User", email: "test@example.com" },
+});
+
 const testData = {
   name: "Test User",
   email: "test@example.com",

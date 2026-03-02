@@ -154,11 +154,23 @@ model AgentMessage {
 While sessions are managed automatically, you can perform manual operations when needed:
 
 ```typescript
+import { createSession, createSessionId } from "@falai/agent";
+
 // Access session manager directly
 const sessionManager = agent.session;
 
 // Create session with specific ID
 await sessionManager.getOrCreate("custom-session-id");
+
+// Generate a session ID without creating a session object
+const id = createSessionId();
+
+// Create a pre-populated session using the partial state overload
+const restoredSession = createSession<MyDataType>({
+  id: "custom-session-id",
+  data: { userName: "John" },
+  history: previousHistory,
+});
 
 // Session data management
 await sessionManager.setData({

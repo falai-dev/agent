@@ -71,9 +71,7 @@ export interface SQLiteAdapterOptions {
  * });
  * ```
  */
-export class SQLiteAdapter<TData = Record<string, unknown>>
-  implements PersistenceAdapter<TData>
-{
+export class SQLiteAdapter<TData = Record<string, unknown>> implements PersistenceAdapter<TData> {
   public readonly sessionRepository: SessionRepository<TData>;
   public readonly messageRepository: MessageRepository;
   private db: SqliteDatabase;
@@ -154,9 +152,8 @@ export class SQLiteAdapter<TData = Record<string, unknown>>
  * SQLite Session Repository
  */
 class SQLiteSessionRepository<TData = Record<string, unknown>>
-  implements SessionRepository<TData>
-{
-  constructor(private db: SqliteDatabase, private tableName: string) {}
+  implements SessionRepository<TData> {
+  constructor(private db: SqliteDatabase, private tableName: string) { }
 
   create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
     const id = data.id || createSessionId();
@@ -332,8 +329,8 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       currentStep: (row.current_step as string) || undefined,
       collectedData: row.collected_data
         ? (JSON.parse(
-            row.collected_data as string
-          ) as CollectedStateData<TData>)
+          row.collected_data as string
+        ) as CollectedStateData<TData>)
         : undefined,
       messageCount: (row.message_count as number) || 0,
       lastMessageAt: row.last_message_at
@@ -352,7 +349,7 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
  * SQLite Message Repository
  */
 class SQLiteMessageRepository implements MessageRepository {
-  constructor(private db: SqliteDatabase, private tableName: string) {}
+  constructor(private db: SqliteDatabase, private tableName: string) { }
 
   create(data: Omit<MessageData, "id" | "createdAt">): Promise<MessageData> {
     const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
