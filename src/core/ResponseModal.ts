@@ -514,7 +514,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             });
 
             let updatedSession = routingResult.session;
-            let isRouteComplete = routingResult.isRouteComplete;
+            const isRouteComplete = routingResult.isRouteComplete;
 
             // PRE-EXTRACTION: If entering a route that collects data, extract data from user message first
             // This allows us to skip steps whose data is already provided

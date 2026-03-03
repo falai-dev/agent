@@ -54,7 +54,7 @@
     "release:major": "npm version major && npm publish",
     "release:alpha": "npm publish --tag alpha",
     "release": "npm publish",
-    "test": "bun run tests/*.test.ts",
+    "test": "bun test tests/*.test.ts",
     "preinstall": "node preinstall.js"
   },
   "keywords": [

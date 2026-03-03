@@ -335,8 +335,11 @@ export class BatchExecutor<TContext = unknown, TData = unknown> {
           const warning = `[Agent] Step "${step.description || step.id}" requires data [${missingRequires.join(', ')}] that was not collected by previous steps. ` +
             `Ensure earlier steps collect these fields before this step can proceed.`;
           logger.warn(warning);
-          // Also log to console for developer visibility
-          console.warn(warning);
+
+          // Also log to console for developer visibility (but silence in test suites to prevent fast-check spam)
+          if (process.env.NODE_ENV !== 'test') {
+            console.warn(warning);
+          }
         }
 
         logger.debug(`[BatchExecutor] Step ${step.id} needs input, stopping batch. Missing requires: [${missingRequires.join(', ')}], Collect fields: [${collectFields.join(', ')}]`);
