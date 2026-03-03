@@ -317,12 +317,11 @@ if (response.isRouteComplete) {
 // Route completion with error handling
 const checkRouteCompletion = (route: Route, collectedData: any) => {
   try {
-    // Check if all required fields are present
+    // Required fields are a prerequisite for completion, not the trigger itself
     const missingFields = route.getMissingRequiredFields(collectedData);
     
-    if (missingFields.length === 0) {
-      // All required data collected
-      return { complete: true, reason: "all_data_collected" };
+    if (missingFields.length > 0) {
+      return { complete: false, missingFields };
     }
     
     // Check if route explicitly ended

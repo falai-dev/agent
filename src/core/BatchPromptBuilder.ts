@@ -66,7 +66,7 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
    */
   async buildBatchPrompt(params: BuildBatchPromptParams<TContext, TData>): Promise<BatchPromptResult> {
     const { steps, route, history, context, session, agentOptions } = params;
-    
+
     // Create template context for rendering
     const templateContext = createTemplateContext<TContext, TData>({
       context,
@@ -74,7 +74,7 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
       session,
       history,
     });
-    
+
     // Collect all collect fields from all steps
     const collectFields: string[] = [];
     for (const step of steps) {
@@ -87,13 +87,13 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
         }
       }
     }
-    
+
     // Build the combined prompt using PromptComposer for consistency
     const composer = new PromptComposer<TContext, TData>(templateContext);
-    
+
     // Add agent meta information
     await composer.addAgentMeta(agentOptions);
-    
+
     // Add route-specific identity/personality if available
     if (route.identity) {
       const identity = await render(route.identity, templateContext);
@@ -101,25 +101,25 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
         await composer.addInstruction(`**Route Identity:** ${identity}`);
       }
     }
-    
+
     if (route.personality) {
       const personality = await render(route.personality, templateContext);
       if (personality) {
         await composer.addInstruction(`**Route Personality:** ${personality}`);
       }
     }
-    
+
     // Add knowledge base if available
     await composer.addKnowledgeBase(agentOptions.knowledgeBase, route.getKnowledgeBase());
-    
+
     // Add glossary terms
     const allTerms = [...(agentOptions.terms || []), ...route.getTerms()];
     await composer.addGlossary(allTerms);
-    
+
     // Add guidelines
     const allGuidelines = [...(agentOptions.guidelines || []), ...route.getGuidelines()];
     await composer.addGuidelines(allGuidelines);
-    
+
     // Add combined rules (agent + route)
     const allRules = [...(agentOptions.rules || []), ...route.getRules()];
     if (allRules.length > 0) {
@@ -128,7 +128,7 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
         await composer.addInstruction(`Rules:\n- ${renderedRules.join('\n- ')}`);
       }
     }
-    
+
     // Add combined prohibitions (agent + route)
     const allProhibitions = [...(agentOptions.prohibitions || []), ...route.getProhibitions()];
     if (allProhibitions.length > 0) {
@@ -137,13 +137,13 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
         await composer.addInstruction(`Prohibitions:\n- ${renderedProhibitions.join('\n- ')}`);
       }
     }
-    
+
     // Add interaction history
     await composer.addInteractionHistory(history, 'Recent conversation context:');
-    
+
     // Build the step sections
     const stepSections = await this.buildStepSections(steps, templateContext);
-    
+
     // Add the conversation flow section
     if (steps.length > 1) {
       await composer.addInstruction(
@@ -157,27 +157,27 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
         stepSections
       );
     }
-    
+
     // Add data collection section if there are fields to collect
     if (collectFields.length > 0) {
       const collectionSection = this.buildDataCollectionSection(collectFields, agentOptions);
       await composer.addInstruction(collectionSection);
     }
-    
+
     // Add response format instructions
     const responseFormat = this.buildResponseFormatSection(collectFields);
     await composer.addInstruction(responseFormat);
-    
+
     // Build the final prompt
     const prompt = await composer.build();
-    
+
     return {
       prompt,
       collectFields,
       stepCount: steps.length,
     };
   }
-  
+
   /**
    * Build the step sections of the prompt
    * 
@@ -190,15 +190,15 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
     templateContext: ReturnType<typeof createTemplateContext<TContext, TData>>
   ): Promise<string> {
     const sections: string[] = [];
-    
+
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       const stepNumber = i + 1;
-      
+
       // Build step header
       const description = step.description || `Step ${stepNumber}`;
       let section = `### Step ${stepNumber}: ${description}\n`;
-      
+
       // Render and add step prompt if available
       if (step.prompt) {
         const renderedPrompt = await render(step.prompt, templateContext);
@@ -206,19 +206,19 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
           section += `\n${renderedPrompt}\n`;
         }
       }
-      
+
       // Add collect fields for this step if any
       if (step.collect && step.collect.length > 0) {
         const collectList = step.collect.map(f => `\`${String(f)}\``).join(', ');
         section += `\n**Collect:** ${collectList}\n`;
       }
-      
+
       sections.push(section);
     }
-    
+
     return sections.join('\n');
   }
-  
+
   /**
    * Build the data collection section of the prompt
    * 
@@ -236,36 +236,36 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
       'Extract the following information from your response:',
       ''
     ];
-    
+
     // Get schema information if available
     const schema = agentOptions.schema;
-    
+
     for (const field of collectFields) {
       let fieldDescription = field;
-      
+
       // Try to get field type/description from schema
       if (schema?.properties && schema.properties[field]) {
         const fieldSchema = schema.properties[field] as Record<string, unknown>;
         const rawType = fieldSchema.type;
         const rawDescription = fieldSchema.description;
-        
+
         // Safely convert to string, handling objects and primitives
         const type = typeof rawType === 'string' ? rawType : 'string';
         const description = typeof rawDescription === 'string' ? rawDescription : '';
-        
+
         if (description) {
           fieldDescription = `${field} (${type}): ${description}`;
         } else {
           fieldDescription = `${field} (${type})`;
         }
       }
-      
+
       lines.push(`- ${fieldDescription}`);
     }
-    
+
     return lines.join('\n');
   }
-  
+
   /**
    * Build the response format section of the prompt
    * 
@@ -277,17 +277,20 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
       '## Response Format',
       '',
       'Return JSON with:',
-      '- `message`: Your response to the user'
+      '- `message`: A natural, conversational response directed at the user. This MUST read like a human conversation.',
+      '',
+      'CRITICAL: The `message` field must NEVER contain field names, JSON keys, raw data values, or technical information.',
+      'Data goes in the separate JSON fields below, NOT in the message text.',
     ];
-    
+
     if (collectFields.length > 0) {
       lines.push('');
-      lines.push('Include the following collected fields as top-level properties:');
+      lines.push('Include the following collected fields as top-level properties (separate from message):');
       for (const field of collectFields) {
         lines.push(`- \`${field}\``);
       }
     }
-    
+
     return lines.join('\n');
   }
 }

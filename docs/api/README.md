@@ -449,7 +449,7 @@ interface RespondOutput {
   }>;
   /**
    * NEW: Indicates if the current route has reached END_ROUTE
-   * When true, all required data has been collected and the route is complete.
+   * When true, the step flow has reached its end and the route is complete.
    * Your application should handle this appropriately (e.g., process collected data,
    * show completion UI, start a new route, etc.)
    */
@@ -657,7 +657,7 @@ interface StreamChunk {
   }>;
   /**
    * Indicates if the current route has reached END_ROUTE (only in final chunk)
-   * When true, all required data has been collected and the route is complete.
+   * When true, the step flow has reached its end and the route is complete.
    */
   isRouteComplete?: boolean;
 }

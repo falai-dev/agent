@@ -43,9 +43,9 @@ When a user message arrives:
 }
 ```
 
-### Phase 2: Route Completion Check
+### Phase 2: Step Skipping
 
-After pre-extraction, the system checks if the route is complete:
+After pre-extraction, the system evaluates the route's steps:
 
 ```typescript
 // Route defines required fields
@@ -55,11 +55,11 @@ agent.createRoute({
   // ...
 });
 
-// After pre-extraction, all required fields are present
-// Route is marked as COMPLETE immediately
+// After pre-extraction, all required fields are present.
+// The data is now in the session, which allows steps to be evaluated.
 ```
 
-**Key Insight:** Routes complete when `requiredFields` are collected, NOT when reaching END_ROUTE step.
+**Key Insight:** Routes complete by naturally reaching the `END_ROUTE` step. If all required data is pre-extracted, the system will rapidly skip through the data-collection steps and naturally reach the end of the route.
 
 ### Phase 3: Smart Step Selection
 
@@ -111,8 +111,8 @@ User: "I want to book the Grand Hotel for 2 people next Friday"
 System:
 1. Routes to "Book Hotel" (AI scoring)
 2. Pre-extracts: { hotelName: "Grand Hotel", guests: 2, date: "next Friday" }
-3. Checks completion: All required fields present ✓
-4. Generates completion message
+3. Evaluates steps: All collection steps are skipped (data already present)
+4. Reaches END_ROUTE and generates completion message
 5. Marks route as complete
 
 AI: "Perfect! Booking confirmed for 2 guests at Grand Hotel on Friday!"
@@ -152,8 +152,8 @@ User: "2 people next Friday"
 System:
 1. Already in "Book Hotel" route
 2. Pre-extracts: { guests: 2, date: "next Friday" }
-3. Checks completion: All required fields present ✓
-4. Generates completion message
+3. Evaluates steps: All collection steps are skipped (data already present)
+4. Reaches END_ROUTE and generates completion message
 
 AI: "Booking confirmed for 2 guests at Grand Hotel on Friday!"
 ```
@@ -171,10 +171,9 @@ This minimizes unnecessary AI calls for purely conversational routes.
 ### 2. Route Completion Logic
 
 A route is complete when:
-- **All `requiredFields` are collected**, OR
-- **Reached END_ROUTE marker in step flow**
+- **It reaches the END_ROUTE marker in its step flow**
 
-Whichever comes first.
+`requiredFields` act as a validation gate. While they must be collected, simply collecting them doesn't instantly end the route; the conversation naturally progresses through any remaining steps (or skips them) until it finishes.
 
 ### 3. Completed Route Exclusion
 
@@ -273,10 +272,9 @@ agent.createRoute({
   title: "Booking",
   requiredFields: ["hotel", "date"],
   optionalFields: ["specialRequests", "dietaryRestrictions"],
-  
-  // Route completes when required fields are collected
-  // Optional fields can be collected if user provides them
-  // But won't block completion
+  // Route completes when it naturally reaches END_ROUTE
+  // Optional fields can be collected if user provides them,
+  // but they won't block steps from progressing.
 });
 ```
 
@@ -340,8 +338,8 @@ Look for these log messages:
 ```
 [ResponseModal] Pre-extracting data for route: Book Hotel
 [ResponseModal] Pre-extracted data: { hotelName: "Grand Hotel", ... }
-[ResponseModal] Route Book Hotel completed after pre-extraction
-[RoutingEngine] Excluding completed route: Book Hotel (100% complete)
+[RoutingEngine] Route Book Hotel completed - END_ROUTE reached
+[RoutingEngine] Excluding completed route: Book Hotel
 ```
 
 ## Summary
@@ -350,7 +348,7 @@ The pre-extraction system creates efficient conversations by:
 
 1. **Extracting data early** - Before entering steps
 2. **Skipping unnecessary steps** - When data is already present
-3. **Completing automatically** - When required fields are collected
+3. **Reaching completion naturally** - By skipping to the end when data is gathered
 4. **Protecting completed routes** - Preventing re-entry
 
 This results in natural, efficient conversations that respect user time.

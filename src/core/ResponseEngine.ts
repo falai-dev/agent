@@ -44,47 +44,47 @@ export interface BuildFallbackPromptParams<TContext = unknown, TData = unknown> 
 
 export class ResponseEngine<TContext = unknown, TData = unknown> {
   responseSchemaForRoute(
-      route: Route<TContext, TData>,
-      currentStep?: Step<TContext, TData>,
-      agentSchema?: StructuredSchema
-    ): StructuredSchema {
-      const base: StructuredSchema = {
-        type: "object",
-        properties: {
-          message: { type: "string", description: "Final user-facing message" },
-        },
-        required: ["message"],
-        additionalProperties: false,
-      };
+    route: Route<TContext, TData>,
+    currentStep?: Step<TContext, TData>,
+    agentSchema?: StructuredSchema
+  ): StructuredSchema {
+    const base: StructuredSchema = {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Natural, conversational response directed at the user. Must NOT contain field names, raw data, or internal information." },
+      },
+      required: ["message"],
+      additionalProperties: false,
+    };
 
-      // Add data field only if route has responseOutputSchema
-      if (route.responseOutputSchema) {
-        base.properties!.data = route.responseOutputSchema;
-      }
+    // Add data field only if route has responseOutputSchema
+    if (route.responseOutputSchema) {
+      base.properties!.data = route.responseOutputSchema;
+    }
 
-      // Add collect fields from current step
-      if (currentStep?.collect) {
-        if (agentSchema?.properties) {
-          // Use agent schema definitions for collect fields
-          for (const field of currentStep.collect) {
-            const fieldSchema = agentSchema.properties[field as string];
-            if (fieldSchema) {
-              base.properties![field as string] = fieldSchema;
-            }
-          }
-        } else {
-          // No agent schema - generate dynamic schema from collect fields
-          for (const field of currentStep.collect) {
-            base.properties![field as string] = {
-              type: "string",
-              description: `Collected value for ${String(field)}`,
-            };
+    // Add collect fields from current step
+    if (currentStep?.collect) {
+      if (agentSchema?.properties) {
+        // Use agent schema definitions for collect fields
+        for (const field of currentStep.collect) {
+          const fieldSchema = agentSchema.properties[field as string];
+          if (fieldSchema) {
+            base.properties![field as string] = fieldSchema;
           }
         }
+      } else {
+        // No agent schema - generate dynamic schema from collect fields
+        for (const field of currentStep.collect) {
+          base.properties![field as string] = {
+            type: "string",
+            description: `Collected value for ${String(field)}`,
+          };
+        }
       }
-
-      return base;
     }
+
+    return base;
+  }
 
   async buildResponsePrompt(
     params: BuildResponsePromptParams<TContext, TData>
@@ -155,11 +155,11 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
 
     await pc.addInteractionHistory(history);
     await pc.addLastMessage(lastMessage);
-    
+
     // Add data collection instructions - include ALL route fields, not just current step
     // Collect all fields from route's required and optional fields
     const allRouteFields = new Set<string>();
-    
+
     if (route.requiredFields) {
       route.requiredFields.forEach(field => allRouteFields.add(String(field)));
     }
@@ -173,7 +173,7 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
     if (allRouteFields.size > 0) {
       const stepCollectFields = new Set(currentStep?.collect?.map(f => String(f)) || []);
       const fieldDescriptions: string[] = [];
-      
+
       for (const field of allRouteFields) {
         if (agentSchema?.properties) {
           const fieldSchema = agentSchema.properties[field];
@@ -181,22 +181,22 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
             const fieldName = field;
             const fieldDesc = fieldSchema.description || fieldName;
             const fieldType = Array.isArray(fieldSchema.type) ? fieldSchema.type[0] : fieldSchema.type;
-            
+
             let fieldInfo = `  • ${fieldName} (${fieldType})`;
-            
+
             // Add enum values if present
             if (fieldSchema.enum && Array.isArray(fieldSchema.enum)) {
               fieldInfo += ` [${fieldSchema.enum.join(' | ')}]`;
             }
-            
+
             // Add description
             fieldInfo += `: ${fieldDesc}`;
-            
+
             // Mark if this is the current step's focus
             if (stepCollectFields.has(field)) {
               fieldInfo += ` ← FOCUS FOR THIS STEP`;
             }
-            
+
             fieldDescriptions.push(fieldInfo);
           }
         } else {
@@ -208,7 +208,7 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
           fieldDescriptions.push(fieldInfo);
         }
       }
-      
+
       if (fieldDescriptions.length > 0) {
         const instruction = [
           `## Data Collection Rules`,
@@ -231,22 +231,22 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
           `- preferredDate: "next Tuesday"`,
           `- preferredTime: "2 PM"`,
         ].join('\n');
-        
+
         await pc.addInstruction(instruction);
       }
     }
-    
+
     // Add response format instructions with explicit JSON structure
     // Generate example JSON based on actual schema fields
     const exampleFields: string[] = ['  "message": "your response to the user"'];
-    
+
     for (const field of allRouteFields) {
       if (agentSchema?.properties) {
         const fieldSchema = agentSchema.properties[field];
         if (fieldSchema) {
           const fieldType = Array.isArray(fieldSchema.type) ? fieldSchema.type[0] : fieldSchema.type;
           let exampleValue = '"value if extracted"';
-          
+
           // Generate type-appropriate example
           if (fieldSchema.enum && Array.isArray(fieldSchema.enum) && fieldSchema.enum.length > 0) {
             exampleValue = `"${fieldSchema.enum[0]}"`;
@@ -257,7 +257,7 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
           } else if (fieldType === 'boolean') {
             exampleValue = 'true';
           }
-          
+
           exampleFields.push(`  "${field}": ${exampleValue}`);
         }
       } else {
@@ -265,7 +265,7 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
         exampleFields.push(`  "${field}": "extracted value"`);
       }
     }
-    
+
     await pc.addInstruction(
       [
         `## Response Format`,
@@ -277,14 +277,17 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
         ``,
         `CRITICAL RULES:`,
         `- Return ONLY the JSON object, no other text`,
-        `- The "message" field is REQUIRED and must contain your response to the user`,
-        `- Include ALL extracted data fields as top-level properties`,
+        `- The "message" field is REQUIRED and must contain a natural, conversational response directed at the user`,
+        `- The "message" MUST read like a human conversation - warm, natural, and contextual`,
+        `- NEVER include field names, JSON keys, schema properties, raw data values, or technical/internal information in the "message"`,
+        `- NEVER echo back data in the format "fieldName: value" in the "message" - data goes in the JSON fields, not the message`,
+        `- Include ALL extracted data fields as separate top-level JSON properties (NOT inside the message text)`,
         `- Only include data fields that were actually mentioned by the user`,
         `- Do not wrap the JSON in markdown code blocks`,
         `- Do not add any explanatory text before or after the JSON`,
       ].join('\n')
     );
-    
+
     return pc.build();
   }
 

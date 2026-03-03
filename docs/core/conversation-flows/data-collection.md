@@ -8,7 +8,7 @@ The agent-level data collection system provides:
 
 - **Centralized JSON Schema**: Define comprehensive data structures at the agent level
 - **Cross-Route Data Sharing**: Data collected by any route is available to all routes
-- **Route Completion Logic**: Routes complete when their required fields are satisfied
+- **Route Completion Logic**: Routes complete when step flows reach `END_ROUTE`, with required fields acting as validation gates along the way
 - **Type-Safe Extraction**: Automatic mapping from AI responses to typed data
 - **Natural Conversations**: AI handles information gathering conversationally
 - **Validation & Enrichment**: Agent-level lifecycle hooks for data processing
@@ -330,7 +330,7 @@ const profileRoute = agent
     requires: ["name", "email"],
   });
 
-// Route completes when all required fields are collected
+// Route completes when the step flow naturally reaches its end
 // Data is available to all other routes
 ```
 

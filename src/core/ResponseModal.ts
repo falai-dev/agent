@@ -358,7 +358,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (this.agent && 'tool' in this.agent && this.agent.tool) {
             return this.agent.tool;
         }
-        
+
         // Log warning if ToolManager is not available
         logger.warn(`[ResponseModal] ToolManager not available on agent - tool execution will use fallback methods`);
         return undefined;
@@ -544,15 +544,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         updatedSession = mergeCollected(updatedSession, extractedData);
                         // Also update agent's collected data
                         await this.agent.updateCollectedData(extractedData);
-
-                        // Re-check route completion after pre-extraction
-                        const allRequiredFieldsCollected = routingResult.selectedRoute.isComplete(updatedSession.data || {});
-                        if (allRequiredFieldsCollected) {
-                            logger.debug(
-                                `[ResponseModal] Route ${routingResult.selectedRoute.title} completed after pre-extraction`
-                            );
-                            isRouteComplete = true;
-                        }
                     }
                 }
             }
@@ -565,7 +556,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             if (routingResult.selectedRoute && !isRouteComplete) {
                 // Determine current step position for batch determination
-                const currentStep = routingResult.selectedStep || 
+                const currentStep = routingResult.selectedStep ||
                     (updatedSession.currentStep ? routingResult.selectedRoute.getStep(updatedSession.currentStep.id) : undefined);
 
                 logger.debug(`[ResponseModal] Determining batch starting from step: ${currentStep?.id || 'initial'}`);
@@ -642,7 +633,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         session: SessionState<TData>;
         signal?: AbortSignal;
     }): Promise<Partial<TData>> {
-        const { route, history, context, signal } = params;
+        const { route, history, signal } = params;
 
         // Build a schema for data extraction based on route's fields
         const extractionSchema = this.agent.getSchema();
@@ -683,7 +674,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             const result = await agentOptions.provider.generateMessage<TContext, Partial<TData>>({
                 prompt: extractionPrompt.join('\n'),
                 history,
-                context,
+                context: {} as TContext, // Passed as empty object so AI doesn't "extract" from context
+                // NOTE: context is intentionally NOT passed here.
+                // Passing context caused the AI to "extract" data from the lead's context
+                // (e.g., name, sector, city) instead of from what the user actually said.
                 signal,
                 parameters: {
                     jsonSchema: extractionSchema,
@@ -705,13 +699,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     private async generateUnifiedResponse(
         responseContext: ResponseContext<TContext, TData>
     ): Promise<AgentResponse<TData>> {
-        const { 
-            effectiveContext, 
-            session: initialSession, 
-            history, 
-            selectedRoute, 
-            selectedStep, 
-            responseDirectives, 
+        const {
+            effectiveContext,
+            session: initialSession,
+            history,
+            selectedRoute,
+            selectedStep,
+            responseDirectives,
             isRouteComplete,
             batchSteps,
             batchStoppedReason,
@@ -729,7 +723,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         let stoppedReason: StoppedReason | undefined;
 
 
-        
+
         if (selectedRoute && !isRouteComplete) {
             // Check if we have batch steps to execute
             if (batchSteps && batchSteps.length > 0) {
@@ -770,7 +764,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 message = result.message;
                 toolCalls = result.toolCalls;
                 session = result.session;
-                
+
                 // Track executed step for single-step execution
                 if (selectedStep) {
                     executedSteps = [{
@@ -815,7 +809,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 context: effectiveContext,
                 session,
             });
-            
+
             // For fallback responses, set empty executedSteps and no stoppedReason
             // since there's no route/step execution happening
             executedSteps = [];
@@ -897,12 +891,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             logger.error(`[ResponseModal] Prepare hook failed:`, prepareResult.error);
             throw new ResponseGenerationError(
                 `Prepare hook failed: ${prepareResult.error?.message}`,
-                { 
-                    phase: 'prepare_hooks', 
-                    context: { 
+                {
+                    phase: 'prepare_hooks',
+                    context: {
                         stepId: prepareResult.error?.stepId,
                         executedSteps: prepareResult.executedSteps,
-                    } 
+                    }
                 }
             );
         }
@@ -1029,35 +1023,35 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private buildBatchResponseSchema(collectFields: string[]): Record<string, unknown> {
-            const properties: Record<string, unknown> = {
-                message: {
+        const properties: Record<string, unknown> = {
+            message: {
+                type: "string",
+                description: "Natural, conversational response directed at the user. Must NOT contain field names, raw data, or internal information.",
+            },
+        };
+
+        const agentSchema = this.agent.getSchema();
+
+        // Add collect fields to schema, using agent schema definitions when available
+        for (const field of collectFields) {
+            if (agentSchema?.properties && agentSchema.properties[field]) {
+                properties[field] = agentSchema.properties[field];
+            } else {
+                // Dynamic fallback when no agent schema is defined
+                properties[field] = {
                     type: "string",
-                    description: "Your response to the user",
-                },
-            };
-
-            const agentSchema = this.agent.getSchema();
-
-            // Add collect fields to schema, using agent schema definitions when available
-            for (const field of collectFields) {
-                if (agentSchema?.properties && agentSchema.properties[field]) {
-                    properties[field] = agentSchema.properties[field];
-                } else {
-                    // Dynamic fallback when no agent schema is defined
-                    properties[field] = {
-                        type: "string",
-                        description: `Collected value for ${field}`,
-                    };
-                }
+                    description: `Collected value for ${field}`,
+                };
             }
-
-            return {
-                type: "object",
-                properties,
-                required: ["message"],
-                additionalProperties: true,
-            };
         }
+
+        return {
+            type: "object",
+            properties,
+            required: ["message"],
+            additionalProperties: true,
+        };
+    }
 
     /**
      * Collect available tools from all steps in the batch
@@ -1114,13 +1108,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     private async *generateUnifiedStreamingResponse(
         responseContext: ResponseContext<TContext, TData>
     ): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { 
-            effectiveContext, 
-            session: initialSession, 
-            history, 
-            selectedRoute, 
-            selectedStep, 
-            responseDirectives, 
+        const {
+            effectiveContext,
+            session: initialSession,
+            history,
+            selectedRoute,
+            selectedStep,
+            responseDirectives,
             isRouteComplete,
             batchSteps,
             batchStoppedReason,
@@ -1414,13 +1408,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Get candidate steps based on current position in the route
             const routingEngine = this.agent.getRoutingEngine();
             const candidates = await routingEngine.getCandidateStepsWithConditions(
-                selectedRoute, 
+                selectedRoute,
                 currentStep, // Pass current step instead of undefined to maintain progression
                 createTemplateContext({ data: session.data, session, context })
             );
-            
+
             logger.debug(`[ResponseModal] Found ${candidates.length} candidate steps${currentStep ? ' from current step ' + currentStep.id : ' (new route entry)'}`);
-            
+
             if (candidates.length > 0) {
                 nextStep = candidates[0].step;
                 logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`);
@@ -1563,11 +1557,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Get candidate steps based on current position in the route
             const routingEngine = this.agent.getRoutingEngine();
             const candidates = await routingEngine.getCandidateStepsWithConditions(
-                selectedRoute, 
+                selectedRoute,
                 currentStep, // Pass current step instead of undefined to maintain progression
                 createTemplateContext({ data: session.data, session, context })
             );
-            
+
             if (candidates.length > 0) {
                 nextStep = candidates[0].step;
                 logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`);
@@ -1841,7 +1835,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // After first iteration, don't provide tools to force a text response
                 const agentOptions = this.agent.getAgentOptions();
                 const shouldProvideTools = toolLoopCount === 1;
-                
+
                 logger.debug(`[ResponseModal] Making follow-up AI call (loop ${toolLoopCount}):`, {
                     providingTools: shouldProvideTools,
                     toolsCount: shouldProvideTools ? availableTools.length : 0,
@@ -1991,17 +1985,17 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                     // Collect ALL route fields (required + optional) from structured response
                     const allRouteFields = new Set<string>();
-                    
+
                     // Add route required fields
                     if (selectedRoute.requiredFields) {
                         selectedRoute.requiredFields.forEach(field => allRouteFields.add(String(field)));
                     }
-                    
+
                     // Add route optional fields
                     if (selectedRoute.optionalFields) {
                         selectedRoute.optionalFields.forEach(field => allRouteFields.add(String(field)));
                     }
-                    
+
                     // Also include current step's collect fields (in case they're not in route fields)
                     if (nextStep?.collect) {
                         nextStep.collect.forEach(field => allRouteFields.add(String(field)));
@@ -2081,7 +2075,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             id: endStepSpec.id || END_ROUTE_ID,
             collect: endStepSpec.collect,
             requires: endStepSpec.requires,
-            prompt: endStepSpec.prompt || "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
+            prompt: endStepSpec.prompt || "Send a brief, natural farewell message thanking the user. Do NOT list or mention any collected data, field names, or internal information.",
         });
 
         // Build response schema for completion (message only, no data collection)
@@ -2090,13 +2084,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             properties: {
                 message: {
                     type: "string",
-                    description: "Completion message confirming what was accomplished",
+                    description: "A natural, warm farewell message for the user. Must NOT contain task names, field names, collected data, or any internal/technical information.",
                 },
             },
             required: ["message"],
             additionalProperties: false,
         };
-        
+
         const templateContext = createTemplateContext({ context, session, history: historyEvents });
 
         // Build completion response prompt using ResponseEngine
@@ -2105,8 +2099,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             ...this.agent.getGuidelines().filter(g => !g.condition),
             ...selectedRoute.getGuidelines().filter(g => !g.condition),
         ];
-        let completitionPrompt =  "Summarize what was accomplished and confirm completion"
-        if(endStepSpec.prompt){
+        let completitionPrompt = "Send a brief, natural farewell message. Do NOT mention internal data or task details."
+        if (endStepSpec.prompt) {
             completitionPrompt = await render(endStepSpec.prompt, templateContext)
         }
 
@@ -2116,9 +2110,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: [
-                `Task completed: ${selectedRoute.title}`,
-                `Collected data: ${JSON.stringify(session.data, null, 2)}`,
-                "Do NOT ask for more information - the task is complete",
+                "The conversation task has been completed successfully",
+                "Generate a natural, friendly farewell message for the user",
+                "Do NOT mention task names, route names, collected data, field names, or any internal/technical information",
+                "Do NOT list or summarize the data you collected - the user already knows what they told you",
+                "Do NOT use words like 'tarefa', 'dados coletados', 'prospecção', 'concluída' or similar internal terms",
+                "Keep it brief, warm, and conversational - as if ending a natural conversation",
+                "Do NOT ask for more information - the conversation is ending",
                 completitionPrompt,
             ],
             history: historyEvents,
@@ -2197,7 +2195,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             id: endStepSpec.id || END_ROUTE_ID,
             collect: endStepSpec.collect,
             requires: endStepSpec.requires,
-            prompt: endStepSpec.prompt || "Summarize what was accomplished and confirm completion based on the conversation history and collected data",
+            prompt: endStepSpec.prompt || "Send a brief, natural farewell message thanking the user. Do NOT list or mention any collected data, field names, or internal information.",
         });
 
         // Build response schema for completion
@@ -2443,7 +2441,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Fallback to legacy resolution if ToolManager not available
         logger.warn(`[ResponseModal] ToolManager not available, using legacy tool resolution for: ${toolName}`);
-        
+
         // Check route-level tools first (if route provided)
         if (route) {
             const routeTool = route
@@ -2487,7 +2485,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Fallback to legacy collection logic if ToolManager not available
         logger.warn(`[ResponseModal] ToolManager not available, using legacy tool collection`);
-        
+
         const availableTools = new Map<string, Tool<TContext, TData>>();
 
         // Add agent-level tools
@@ -2581,7 +2579,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 } else {
                     // Fallback to legacy resolution if ToolManager not available
                     logger.warn(`[ResponseModal] ToolManager not available, using legacy tool resolution for prepare/finalize: ${prepareOrFinalize}`);
-                    
+
                     const availableTools = new Map<string, Tool<TContext, TData>>();
 
                     // Add agent-level tools

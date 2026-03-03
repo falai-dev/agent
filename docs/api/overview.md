@@ -317,7 +317,7 @@ getAllSteps(): Step<TContext, TData>[]
 isComplete(data: Partial<TData>): boolean
 ```
 
-Checks if the route is complete based on agent-level data.
+Checks if all required fields are collected based on agent-level data.
 
 ```typescript
 getMissingRequiredFields(data: Partial<TData>): (keyof TData)[]

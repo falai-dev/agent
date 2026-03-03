@@ -179,18 +179,17 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       }
     }
 
-    // No candidates means route is likely complete or has no valid next steps
+    // No candidates means route has no valid next steps (edge case)
+    // Don't mark as complete based on data alone — only END_ROUTE completes a route
     if (candidates.length === 0) {
-      const dataComplete = route.isComplete(updatedSession.data || {});
       logger.debug(
-        `[RoutingEngine] Single-route: No valid steps found - ` +
-        `(data: ${dataComplete ? 'complete' : 'incomplete'}, marking as ${dataComplete ? 'complete' : 'incomplete'})`
+        `[RoutingEngine] Single-route: No valid candidate steps found`
       );
       return {
         selectedRoute,
         selectedStep: undefined,
         session: updatedSession,
-        isRouteComplete: dataComplete,
+        isRouteComplete: false,
         completedRoutes,
       };
     }
@@ -379,26 +378,9 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     templateContext: TemplateContext<TContext, TData>
   ): Promise<CandidateStep<TContext, TData>[]> {
     const candidates: CandidateStep<TContext, TData>[] = [];
-    const data = templateContext.data || {};
-
-    // Check if all required fields are collected
-    const allRequiredFieldsCollected = route.isComplete(data);
 
     if (!currentStep) {
-      // Entering route for the first time
-
-      // If all required fields already collected, route is immediately complete
-      if (allRequiredFieldsCollected) {
-        logger.debug(
-          `[RoutingEngine] Route ${route.title} complete on entry: all required fields already collected`
-        );
-        // Return a completion marker - use initial step with completion flag
-        candidates.push({
-          step: route.initialStep,
-          isRouteComplete: true,
-        });
-        return candidates;
-      }
+      // Entering route for the first time — always start the step flow
 
       const initialStep = route.initialStep;
       const skipResult = await initialStep.evaluateSkipIf(templateContext);
@@ -437,68 +419,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       return candidates;
     }
 
-    // Check if all required fields are now collected (may have been collected during this step)
-    if (allRequiredFieldsCollected) {
-      // Required fields are complete - check if we should continue for optional fields
-      const transitions = currentStep.getTransitions();
-      const optionalFieldCandidates: CandidateStep<TContext, TData>[] = [];
-
-      for (const transition of transitions) {
-        const target = transition;
-
-        // Check for END_ROUTE transition
-        if (target && target.id === END_ROUTE_ID) {
-          continue;
-        }
-
-        if (!target) continue;
-
-        // Check if this step collects only optional fields
-        const collectsOnlyOptional = target.collect && target.collect.length > 0 &&
-          target.collect.every(field =>
-            route.optionalFields?.includes(field)
-          );
-
-        if (collectsOnlyOptional) {
-          // This step collects optional fields - it's a candidate
-          const skipResult = await target.evaluateSkipIf(templateContext);
-          if (!skipResult.shouldSkip) {
-            optionalFieldCandidates.push({
-              step: target,
-              isRouteComplete: false,
-            });
-          }
-        }
-      }
-
-      // If we have optional field candidates, include them along with END_ROUTE option
-      if (optionalFieldCandidates.length > 0) {
-        logger.debug(
-          `[RoutingEngine] Required fields complete, but ${optionalFieldCandidates.length} optional field steps available`
-        );
-        // Add optional field steps as candidates
-        candidates.push(...optionalFieldCandidates);
-        // Also add END_ROUTE as a candidate (AI can choose to skip optional fields)
-        candidates.push({
-          step: currentStep,
-          isRouteComplete: true,
-        });
-        return candidates;
-      }
-
-      // No optional fields to collect - route is complete
-      logger.debug(
-        `[RoutingEngine] Route ${route.title} complete: all required fields collected, no optional fields remain`
-      );
-      return [
-        {
-          step: currentStep,
-          isRouteComplete: true,
-        },
-      ];
-    }
-
-    // Required fields not yet complete - continue normal step progression
+    // Continue normal step progression — routes complete via END_ROUTE, not via data collection
     const transitions = currentStep.getTransitions();
     let hasEndRoute = false;
 
@@ -690,12 +611,9 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
           // Don't include steps in routing if route is complete
           activeRouteSteps = undefined;
         } else if (candidates.length === 0) {
-          // No candidates - check if data is complete
-          const dataComplete = activeRoute.isComplete(updatedSession.data || {});
-          isRouteComplete = dataComplete;
+          // No candidates available — don't end route based on data alone
           logger.debug(
-            `[RoutingEngine] Route ${activeRoute.title} has no valid steps - ` +
-            `marking as ${isRouteComplete ? 'complete' : 'incomplete'}`
+            `[RoutingEngine] Route ${activeRoute.title} has no valid candidate steps`
           );
           activeRouteSteps = undefined;
         } else {
@@ -911,76 +829,76 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
    * @returns Route that should be prioritized for continuation
    */
   selectOptimalRoute(
-      routes: Route<TContext, TData>[],
-      data: Partial<TData>,
-      routeScores: Record<string, number>,
-      currentRouteId?: string
-    ): Route<TContext, TData> | undefined {
-      const completionStatus = this.getRouteCompletionStatus(routes, data);
-      const switchMargin = this.options?.routeSwitchMargin ?? 15;
+    routes: Route<TContext, TData>[],
+    data: Partial<TData>,
+    routeScores: Record<string, number>,
+    currentRouteId?: string
+  ): Route<TContext, TData> | undefined {
+    const completionStatus = this.getRouteCompletionStatus(routes, data);
+    const switchMargin = this.options?.routeSwitchMargin ?? 15;
 
-      // Create weighted scores combining AI intent scores with completion progress
-      const weightedScores: Array<{ route: Route<TContext, TData>; score: number }> = [];
+    // Create weighted scores combining AI intent scores with completion progress
+    const weightedScores: Array<{ route: Route<TContext, TData>; score: number }> = [];
 
-      for (const route of routes) {
-        const aiScore = routeScores[route.id] || 0;
-        const completionProgress = completionStatus.get(route.id) || 0;
+    for (const route of routes) {
+      const aiScore = routeScores[route.id] || 0;
+      const completionProgress = completionStatus.get(route.id) || 0;
 
-        // ALWAYS skip fully completed routes to prevent re-entering finished tasks
-        if (completionProgress >= 1.0) {
-          logger.debug(
-            `[RoutingEngine] Excluding completed route: ${route.title} (100% complete)`
-          );
-          continue;
-        }
-
-        // Boost partially complete routes that match user intent
-        let weightedScore = aiScore;
-        if (completionProgress > 0 && completionProgress < 1.0) {
-          weightedScore += (completionProgress * 20); // Up to 20 point boost
-        }
-
-        weightedScores.push({ route, score: weightedScore });
+      // ALWAYS skip fully completed routes to prevent re-entering finished tasks
+      if (completionProgress >= 1.0) {
+        logger.debug(
+          `[RoutingEngine] Excluding completed route: ${route.title} (100% complete)`
+        );
+        continue;
       }
 
-      // Sort by weighted score descending
-      weightedScores.sort((a, b) => b.score - a.score);
-
-      if (weightedScores.length === 0) {
-        return undefined;
+      // Boost partially complete routes that match user intent
+      let weightedScore = aiScore;
+      if (completionProgress > 0 && completionProgress < 1.0) {
+        weightedScore += (completionProgress * 20); // Up to 20 point boost
       }
 
-      // Apply sticky routing: if there's a current route, only switch if the
-      // best alternative exceeds the current route's score by the configured margin
-      if (currentRouteId) {
-        const currentEntry = weightedScores.find(e => e.route.id === currentRouteId);
-        const bestEntry = weightedScores[0];
-
-        if (currentEntry && bestEntry.route.id !== currentRouteId) {
-          if (bestEntry.score < currentEntry.score + switchMargin) {
-            logger.debug(
-              `[RoutingEngine] Staying on current route: ${currentEntry.route.title} ` +
-              `(current: ${currentEntry.score}, best alternative: ${bestEntry.score}, ` +
-              `margin required: ${switchMargin})`
-            );
-            return currentEntry.route;
-          }
-          logger.debug(
-            `[RoutingEngine] Switching route: ${currentEntry.route.title} → ${bestEntry.route.title} ` +
-            `(current: ${currentEntry.score}, alternative: ${bestEntry.score}, ` +
-            `margin: ${switchMargin})`
-          );
-        }
-      }
-
-      logger.debug(
-        `[RoutingEngine] Selected optimal route: ${weightedScores[0].route.title} ` +
-        `(AI: ${routeScores[weightedScores[0].route.id]}, ` +
-        `Completion: ${(completionStatus.get(weightedScores[0].route.id) || 0) * 100}%, ` +
-        `Weighted: ${weightedScores[0].score})`
-      );
-      return weightedScores[0].route;
+      weightedScores.push({ route, score: weightedScore });
     }
+
+    // Sort by weighted score descending
+    weightedScores.sort((a, b) => b.score - a.score);
+
+    if (weightedScores.length === 0) {
+      return undefined;
+    }
+
+    // Apply sticky routing: if there's a current route, only switch if the
+    // best alternative exceeds the current route's score by the configured margin
+    if (currentRouteId) {
+      const currentEntry = weightedScores.find(e => e.route.id === currentRouteId);
+      const bestEntry = weightedScores[0];
+
+      if (currentEntry && bestEntry.route.id !== currentRouteId) {
+        if (bestEntry.score < currentEntry.score + switchMargin) {
+          logger.debug(
+            `[RoutingEngine] Staying on current route: ${currentEntry.route.title} ` +
+            `(current: ${currentEntry.score}, best alternative: ${bestEntry.score}, ` +
+            `margin required: ${switchMargin})`
+          );
+          return currentEntry.route;
+        }
+        logger.debug(
+          `[RoutingEngine] Switching route: ${currentEntry.route.title} → ${bestEntry.route.title} ` +
+          `(current: ${currentEntry.score}, alternative: ${bestEntry.score}, ` +
+          `margin: ${switchMargin})`
+        );
+      }
+    }
+
+    logger.debug(
+      `[RoutingEngine] Selected optimal route: ${weightedScores[0].route.title} ` +
+      `(AI: ${routeScores[weightedScores[0].route.id]}, ` +
+      `Completion: ${(completionStatus.get(weightedScores[0].route.id) || 0) * 100}%, ` +
+      `Weighted: ${weightedScores[0].score})`
+    );
+    return weightedScores[0].route;
+  }
 
   /**
    * Build prompt for step selection within a single route
