@@ -120,21 +120,21 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
     const allGuidelines = [...(agentOptions.guidelines || []), ...route.getGuidelines()];
     await composer.addGuidelines(allGuidelines);
 
-    // Add combined rules (agent + route)
-    const allRules = [...(agentOptions.rules || []), ...route.getRules()];
-    if (allRules.length > 0) {
-      const renderedRules = await renderMany(allRules, templateContext);
+    // Add route-level rules (agent-level rules are already in addAgentMeta)
+    const routeRules = route.getRules();
+    if (routeRules.length > 0) {
+      const renderedRules = await renderMany(routeRules, templateContext);
       if (renderedRules.length > 0) {
-        await composer.addInstruction(`Rules:\n- ${renderedRules.join('\n- ')}`);
+        await composer.addInstruction(`Route Rules:\n- ${renderedRules.join('\n- ')}`);
       }
     }
 
-    // Add combined prohibitions (agent + route)
-    const allProhibitions = [...(agentOptions.prohibitions || []), ...route.getProhibitions()];
-    if (allProhibitions.length > 0) {
-      const renderedProhibitions = await renderMany(allProhibitions, templateContext);
+    // Add route-level prohibitions (agent-level prohibitions are already in addAgentMeta)
+    const routeProhibitions = route.getProhibitions();
+    if (routeProhibitions.length > 0) {
+      const renderedProhibitions = await renderMany(routeProhibitions, templateContext);
       if (renderedProhibitions.length > 0) {
-        await composer.addInstruction(`Prohibitions:\n- ${renderedProhibitions.join('\n- ')}`);
+        await composer.addInstruction(`Route Prohibitions:\n- ${renderedProhibitions.join('\n- ')}`);
       }
     }
 

@@ -1462,8 +1462,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const responsePrompt = await this.responseEngine.buildResponsePrompt({
             route: selectedRoute,
             currentStep: nextStep,
-            rules: [...this.agent.getRules(), ...selectedRoute.getRules()],
-            prohibitions: [...this.agent.getProhibitions(), ...selectedRoute.getProhibitions()],
+            rules: selectedRoute.getRules(),
+            prohibitions: selectedRoute.getProhibitions(),
             directives: responseDirectives,
             history: historyEvents, // Use Event[] for buildResponsePrompt
             lastMessage: lastMessageText, // Use string for buildResponsePrompt
@@ -1605,8 +1605,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const responsePrompt = await this.responseEngine.buildResponsePrompt({
             route: selectedRoute,
             currentStep: nextStep,
-            rules: [...this.agent.getRules(), ...selectedRoute.getRules()],
-            prohibitions: [...this.agent.getProhibitions(), ...selectedRoute.getProhibitions()],
+            rules: selectedRoute.getRules(),
+            prohibitions: selectedRoute.getProhibitions(),
             directives: responseDirectives,
             history: historyEvents, // Use Event[] for buildResponsePrompt
             lastMessage: lastMessageText, // Use string for buildResponsePrompt

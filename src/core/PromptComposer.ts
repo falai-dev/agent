@@ -16,24 +16,41 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
 
   async addAgentMeta(agent: AgentOptions<TContext, TData>): Promise<this> {
     const lines: string[] = [];
-    lines.push("## Agent");
-    lines.push(`**Name:** ${agent.name}`);
-    if (agent.goal) {
-      lines.push(`**Goal:** ${agent.goal}`);
-    }
-    if (agent.description) {
-      lines.push(`**Description:** ${agent.description}`);
-    }
+    lines.push("## Agent Identity");
+    lines.push(
+      `You are "${agent.name}". Always refer to yourself by this name.`
+    );
     if (agent.identity) {
-      lines.push(
-        `**Identity:** ${await render(agent.identity, this.renderContext)}`
-      );
+      lines.push(await render(agent.identity, this.renderContext));
     }
     if (agent.personality) {
       lines.push(
-        `**Personality:** ${await render(
+        `Communicate in the following style: ${await render(
           agent.personality,
           this.renderContext
+        )}`
+      );
+    }
+    if (agent.goal) {
+      lines.push(`Your primary goal: ${agent.goal}`);
+    }
+    if (agent.description) {
+      lines.push(`About you: ${agent.description}`);
+    }
+    if (agent.rules?.length) {
+      const renderedRules = await renderMany(agent.rules, this.renderContext);
+      lines.push(
+        `You MUST always follow these rules:\n- ${renderedRules.join("\n- ")}`
+      );
+    }
+    if (agent.prohibitions?.length) {
+      const renderedProhibitions = await renderMany(
+        agent.prohibitions,
+        this.renderContext
+      );
+      lines.push(
+        `You MUST NEVER do the following:\n- ${renderedProhibitions.join(
+          "\n- "
         )}`
       );
     }
@@ -113,10 +130,10 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     for (const guideline of enabled) {
       if (guideline.condition) {
         const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
-        
+
         // Collect AI context strings for prompt
         allAIContextStrings.push(...evaluation.aiContextStrings);
-        
+
         // Include guideline if:
         // 1. No programmatic conditions (only strings) - always active
         // 2. Programmatic conditions evaluate to true
@@ -154,7 +171,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     } else {
       this.parts.push(`## Guidelines\n\n${renderedGuidelines.join("\n")}`);
     }
-    
+
     return this;
   }
 
