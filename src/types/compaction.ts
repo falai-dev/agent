@@ -38,7 +38,7 @@ export interface CompactionOptions {
 /**
  * Result of a compaction operation
  */
-export interface CompactionResult<_TData = unknown> {
+export interface CompactionResult {
     /** The compacted history */
     history: HistoryItem[];
     /** Strategy that was applied */

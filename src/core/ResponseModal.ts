@@ -1676,7 +1676,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             if (update.dataUpdate) {
                                 try {
                                     const updateDataMethod = this.agent.getUpdateDataMethod();
-                                    session = await updateDataMethod(session, update.dataUpdate as Partial<TData>);
+                                    session = await updateDataMethod(session, update.dataUpdate);
                                 } catch (error) {
                                     logger.error(`[ResponseModal] Failed to update data from concurrent tool:`, error);
                                 }

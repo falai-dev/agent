@@ -1003,21 +1003,24 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       data: data || {} as Partial<TData>,
       history: history || [],
       step: step ? { id: step.id, routeId: route?.id || '' } : undefined,
-      updateContext: async (updates: Partial<TContext>) => {
+      updateContext: (updates: Partial<TContext>): Promise<void> => {
         Object.assign(context as Record<string, unknown>, updates);
+        return Promise.resolve();
       },
-      updateData: async (updates: Partial<TData>) => {
+      updateData: (updates: Partial<TData>): Promise<void> => {
         if (data) {
           Object.assign(data as Record<string, unknown>, updates);
         }
+        return Promise.resolve();
       },
       getField: <K extends keyof TData>(key: K): TData[K] | undefined => {
         return data?.[key];
       },
-      setField: async <K extends keyof TData>(key: K, value: TData[K]): Promise<void> => {
+      setField: <K extends keyof TData>(key: K, value: TData[K]): Promise<void> => {
         if (data) {
           (data as TData)[key] = value;
         }
+        return Promise.resolve();
       },
       hasField: <K extends keyof TData>(key: K): boolean => {
         return data != null && key in (data as Record<string, unknown>);
