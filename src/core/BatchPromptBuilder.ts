@@ -14,6 +14,7 @@ import type { Event } from '../types/history';
 import type { Route } from './Route';
 import { render, renderMany, createTemplateContext } from '../utils/template';
 import { PromptComposer } from './PromptComposer';
+import type { PromptSectionCache } from './PromptSectionCache';
 
 /**
  * Parameters for building a batch prompt
@@ -56,6 +57,8 @@ export interface BatchPromptResult {
  * **Validates: Requirements 4.1, 4.2, 4.3, 4.4**
  */
 export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
+  constructor(private readonly promptSectionCache?: PromptSectionCache) { }
+
   /**
    * Build a combined prompt for a batch of Steps
    * 
@@ -89,7 +92,7 @@ export class BatchPromptBuilder<TContext = unknown, TData = unknown> {
     }
 
     // Build the combined prompt using PromptComposer for consistency
-    const composer = new PromptComposer<TContext, TData>(templateContext);
+    const composer = new PromptComposer<TContext, TData>(templateContext, this.promptSectionCache);
 
     // Add agent meta information
     await composer.addAgentMeta(agentOptions);

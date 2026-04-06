@@ -21,6 +21,10 @@ export { SessionManager } from "./core/SessionManager";
 export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager";
 export { BatchExecutor, needsInput, type NeedsInputStep, type DetermineBatchParams } from "./core/BatchExecutor";
 export { BatchPromptBuilder, type BuildBatchPromptParams, type BatchPromptResult } from "./core/BatchPromptBuilder";
+export { CompactionEngine } from "./core/CompactionEngine";
+export { StreamingToolExecutor } from "./core/StreamingToolExecutor";
+export { PromptSectionCache } from "./core/PromptSectionCache";
+export type { PromptSectionType, PromptCacheConfig, SectionCompute } from "./core/PromptSectionCache";
 
 // Providers
 export { GeminiProvider } from "./providers/GeminiProvider";
@@ -94,6 +98,7 @@ export {
 // Types
 export type {
   AgentOptions,
+  AgentCompactionConfig,
   AgentResponse,
   Term,
   Guideline,
@@ -118,6 +123,19 @@ export type {
   ToolResult,
   ToolHandler,
   Tool,
+
+  EnhancedTool,
+  ToolValidationResult,
+  ToolPermissionResult,
+  ToolCallRequest,
+  ToolExecutionUpdate,
+
+  CompactionOptions,
+  CompactionResult,
+
+  PromptSectionType,
+  PromptCacheConfig,
+  SectionCompute,
 
   DataEnrichmentConfig,
   ValidationConfig,

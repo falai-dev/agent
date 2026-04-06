@@ -2,6 +2,44 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.0]
+
+### Added
+
+- **StreamingToolExecutor**: New concurrency-controlled tool executor that begins executing tools as they arrive from the LLM stream. Read-only tools (`isConcurrencySafe`) run in parallel; write tools run serially. Includes sibling abort propagation, configurable max parallel executions (default: 10), progress message yielding, and per-tool result size budgeting.
+
+- **CompactionEngine**: New context management component that automatically reduces conversation history size when approaching token limits. Applies strategies in order of cost: tool result budgeting → micro-compaction → LLM summarization. Configurable via `compaction` option on `AgentOptions`.
+
+- **EnhancedTool interface**: Extends the existing `Tool` interface with optional metadata methods: `isConcurrencySafe`, `isReadOnly`, `isDestructive`, `interruptBehavior`, `validateInput`, `checkPermissions`, and `maxResultSizeChars`. Existing `Tool` definitions continue to work without modification.
+
+- **Validation and permission gates in ToolManager**: `validateInput` and `checkPermissions` on `EnhancedTool` are checked before calling the handler. If validation fails or permission is denied, the handler is never invoked.
+
+- **`executeWithConcurrency` method on ToolManager**: Async generator that creates a `StreamingToolExecutor`, resolves tools, queues them, and yields `ToolExecutionUpdate` results in request order.
+
+- **PromptSectionCache**: New prompt generation optimization component that memoizes static prompt sections (agent identity, glossary, knowledge base, route descriptions) across turns and recomputes dynamic sections per-turn. Configurable via `promptCache` option on `AgentOptions` with `enabled` and `volatileKeys` settings. Supports targeted invalidation via `invalidate(key)` and full reset via `invalidateAll()`.
+
+- **Native history format**: Conversation history is now sent as native provider messages via `GenerateMessageInput.history` instead of being JSON-serialized into the system prompt. This saves tokens and lets providers optimize for their native message format. The `addInteractionHistory()` and `addLastMessage()` methods on `PromptComposer` are deprecated but remain functional for backward compatibility.
+
+- **Automatic cache invalidation**: `agent.updateContext()` invalidates context-dependent cached sections, session changes invalidate all cached sections, and route switches invalidate route-dependent sections — no manual cache management required.
+
+- **Documentation**: Guides for streaming tool execution, context compaction, EnhancedTool interface, and prompt optimization in `docs/`. Updated API overview and README.
+
+- **Examples**: Working examples for streaming tool execution, context compaction, and enhanced tool metadata in `examples/`.
+
+### Fixed
+
+- **Provider tool call handling across all providers**: Tool-only responses (no text content) no longer throw `"No response from ..."`. All four providers (Anthropic, OpenAI, OpenRouter, Gemini) now correctly handle responses that contain only function calls.
+
+- **Streaming tool calls dropped without JSON schema**: In OpenAI and Gemini streaming, tool calls were silently lost when no JSON schema was configured because `structured` was only set for JSON schema responses. Tool calls now always produce a `structured` response.
+
+- **Structured response spread order**: All providers had `{ message, toolCalls, ...structured }` which allowed a parsed JSON schema response to overwrite actual `toolCalls`. Fixed to `{ ...structured, message, toolCalls }` so real tool calls always take precedence.
+
+- **Gemini tool parameter schema conversion**: Tool parameters were passed as raw JSON Schema to Gemini's `FunctionDeclaration.parameters`, which expects Gemini's own `Schema` type. Parameters now go through `adaptSchemaForGemini()` with proper type enum conversion and empty-object handling.
+
+- **Gemini `response.text` / `chunk.text` safety**: The `.text` getter can throw when the response contains only function calls. Added `safeExtractText()` that falls back to manually extracting text parts from candidates.
+
+- **Gemini abort signal passthrough**: `AbortSignal` from `input.signal` is now forwarded to both `generateContent` and `generateContentStream` via `config.abortSignal`.
+
 ## [1.1.3]
 
 ### Changed

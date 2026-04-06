@@ -222,8 +222,7 @@ export class OpenAIProvider implements AiProvider {
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
         logger.debug(
-          `[OPENAI] Trying backup model ${i + 1}/${
-            this.backupModels.length
+          `[OPENAI] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
@@ -336,10 +335,7 @@ export class OpenAIProvider implements AiProvider {
       // Fall back to regular chat completions API if no schema provided
       const response = await this.client.chat.completions.create(params);
 
-      const message = response.choices[0]?.message?.content;
-      if (!message) {
-        throw new Error("No response from OpenAI");
-      }
+      const message = response.choices[0]?.message?.content || "";
 
       let toolCalls: Array<{
         toolName: string;
@@ -368,7 +364,11 @@ export class OpenAIProvider implements AiProvider {
             };
           });
       }
-      // Extract tool calls from response
+
+      // Only throw error if we have no text AND no function calls
+      if (!message && toolCalls.length === 0) {
+        throw new Error("No response from OpenAI");
+      }
 
       return {
         message,
@@ -423,8 +423,7 @@ export class OpenAIProvider implements AiProvider {
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
         logger.debug(
-          `[OPENAI] Trying backup model ${i + 1}/${
-            this.backupModels.length
+          `[OPENAI] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
@@ -530,9 +529,9 @@ export class OpenAIProvider implements AiProvider {
             try {
               toolCallArguments = toolCall.function.arguments
                 ? (JSON.parse(toolCall.function.arguments) as Record<
-                    string,
-                    unknown
-                  >)
+                  string,
+                  unknown
+                >)
                 : {};
             } catch (error) {
               logger.warn(
@@ -584,6 +583,15 @@ export class OpenAIProvider implements AiProvider {
       }
     }
 
+    // Include tool calls in structured response (even without JSON schema)
+    if (toolCalls.length > 0) {
+      structured = {
+        ...(structured || {}),
+        message: (structured as AgentStructuredResponse | undefined)?.message || accumulated,
+        toolCalls,
+      } as TStructured;
+    }
+
     // Yield final chunk
     yield {
       delta: "",
@@ -596,7 +604,7 @@ export class OpenAIProvider implements AiProvider {
         promptTokens,
         completionTokens,
       },
-      structured: structured ? { ...structured, toolCalls } : undefined,
+      structured,
     };
   }
 }

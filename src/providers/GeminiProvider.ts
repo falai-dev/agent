@@ -153,6 +153,66 @@ export class GeminiProvider implements AiProvider {
   }
 
   /**
+   * Convert tool parameter schemas (JSON Schema) to Gemini's Schema format.
+   * Gemini's FunctionDeclaration.parameters expects its own Schema type,
+   * not raw JSON Schema. This method handles the conversion, including
+   * edge cases like empty objects that Gemini rejects.
+   *
+   * @private
+   */
+  private convertToolParameters(parameters: unknown): Schema | undefined {
+    if (!parameters || typeof parameters !== "object") {
+      return undefined;
+    }
+    try {
+      return this.adaptSchemaForGemini(parameters as StructuredSchema);
+    } catch (error) {
+      logger.warn(`[GeminiProvider] Failed to convert tool parameters, passing as-is:`, error);
+      return parameters as Schema;
+    }
+  }
+
+  /**
+   * Safely extract text from a Gemini response or chunk.
+   * The `.text` getter can throw when the response contains only function calls
+   * (observed in some SDK versions). This method falls back to manually
+   * extracting text parts from candidates.
+   *
+   * @private
+   */
+  private safeExtractText(responseOrChunk: { text?: string; candidates?: Array<{ content?: { parts?: Array<{ text?: string; functionCall?: unknown }> } }> }): string {
+    try {
+      return responseOrChunk.text || "";
+    } catch {
+      // .text getter threw — extract text parts manually
+      const parts = responseOrChunk.candidates?.[0]?.content?.parts;
+      if (parts) {
+        return parts
+          .filter((p) => p.text != null)
+          .map((p) => p.text)
+          .join("");
+      }
+      return "";
+    }
+  }
+
+  /**
+   * Build Gemini function declarations from framework tool definitions.
+   * Converts JSON Schema parameters to Gemini's Schema format.
+   *
+   * @private
+   */
+  private buildFunctionDeclarations(
+    tools: Array<{ id: string; name?: string; description?: string; parameters?: unknown }>
+  ): FunctionDeclaration[] {
+    return tools.map((tool) => ({
+      name: tool.name || tool.id,
+      description: tool.description || "",
+      parameters: this.convertToolParameters(tool.parameters),
+    }));
+  }
+
+  /**
    * Adapt common schema format to Gemini's specific requirements.
    * Gemini has strict validation:
    * - OBJECT types MUST have non-empty properties
@@ -356,15 +416,8 @@ export class GeminiProvider implements AiProvider {
       if (hasTools) {
         const toolNames = input.tools?.map((tool) => tool.name || tool.id) || [];
         logger.debug(`[GeminiProvider] Configuring ${toolNames.length} tools for model ${model}:`, toolNames);
-        configOverride.tools = [
-          {
-            functionDeclarations: input.tools?.map((tool) => ({
-              name: tool.name || tool.id,
-              description: tool.description || "",
-              parameters: tool.parameters as FunctionDeclaration["parameters"], // JSON schema
-            })),
-          },
-        ];
+        const functionDeclarations = this.buildFunctionDeclarations(input.tools!);
+        configOverride.tools = [{ functionDeclarations }];
 
       } else if (hasJsonSchema) {
         // Only set JSON schema if no tools are present
@@ -380,7 +433,10 @@ export class GeminiProvider implements AiProvider {
         response = await this.genAI.models.generateContent({
           model,
           contents: input.prompt,
-          config: configOverride,
+          config: {
+            ...configOverride,
+            ...(input.signal ? { abortSignal: input.signal } : {}),
+          },
         });
       } catch (error: unknown) {
         logger.error(`[GeminiProvider] API call failed:`, error);
@@ -399,7 +455,7 @@ export class GeminiProvider implements AiProvider {
           if (part.functionCall) {
             toolCalls.push({
               toolName: part.functionCall.name || "",
-              arguments: part.functionCall.args as Record<string, unknown>,
+              arguments: (part.functionCall.args as Record<string, unknown>) || {},
             });
           }
         }
@@ -408,30 +464,13 @@ export class GeminiProvider implements AiProvider {
       // Debug logging for response structure
       if (!response.text && toolCalls.length === 0) {
         logger.debug(`[GeminiProvider] Debug - Response structure:`, {
-          hasText: !!response.text,
           candidatesCount: response.candidates?.length || 0,
-          firstCandidateContent: response.candidates?.[0]?.content,
           firstCandidateParts: response.candidates?.[0]?.content?.parts?.length || 0,
         });
       }
-      // Try to get text from response, handling function calls properly
-      let message = "";
-      try {
-        message = response.text || "";
-      } catch (textError) {
-        // Sometimes response.text throws when there are function calls
-        logger.debug(`[GeminiProvider] Could not get response.text (likely due to function calls):`, textError);
 
-        // Try to extract text parts manually
-        if (response.candidates && response.candidates[0]?.content?.parts) {
-          const textParts = response.candidates[0].content.parts
-            .filter(part => part.text)
-            .map(part => part.text)
-            .join('');
-          message = textParts;
-          logger.debug(`[GeminiProvider] Extracted text from parts:`, message);
-        }
-      }
+      // Safely extract text — .text getter can throw when response has only function calls
+      const message = this.safeExtractText(response);
 
       // Only throw error if we have no text AND no function calls
       if (!message && toolCalls.length === 0) {
@@ -443,14 +482,7 @@ export class GeminiProvider implements AiProvider {
       // Log when we have function calls but no text (this is normal)
       if (toolCalls.length > 0 && !message) {
         logger.debug(`[GeminiProvider] Function calls detected without text message:`, toolCalls.map(tc => tc.toolName));
-      } else if (toolCalls.length > 0 && message) {
-        logger.debug(`[GeminiProvider] Response has both text and function calls:`, {
-          messageLength: message.length,
-          toolCalls: toolCalls.map(tc => tc.toolName),
-        });
       }
-
-
 
       // Parse JSON response if schema was provided
       let structured: AgentStructuredResponse | undefined;
@@ -574,15 +606,8 @@ export class GeminiProvider implements AiProvider {
     if (hasTools) {
       const toolNames = input.tools?.map((tool) => tool.name || tool.id) || [];
       logger.debug(`[GeminiProvider] Configuring ${toolNames.length} tools for streaming:`, toolNames);
-      configOverride.tools = [
-        {
-          functionDeclarations: input.tools?.map((tool) => ({
-            name: tool.name || tool.id,
-            description: tool.description || "",
-            parameters: tool.parameters as FunctionDeclaration["parameters"],
-          })),
-        },
-      ];
+      const functionDeclarations = this.buildFunctionDeclarations(input.tools!);
+      configOverride.tools = [{ functionDeclarations }];
 
     } else if (hasJsonSchema) {
       // Only set JSON schema if no tools are present
@@ -598,7 +623,10 @@ export class GeminiProvider implements AiProvider {
       stream = await this.genAI.models.generateContentStream({
         model,
         contents: input.prompt,
-        config: configOverride,
+        config: {
+          ...configOverride,
+          ...(input.signal ? { abortSignal: input.signal } : {}),
+        },
       });
     } catch (error: unknown) {
       logger.error(`[GeminiProvider] Streaming API call failed:`, error);
@@ -615,7 +643,10 @@ export class GeminiProvider implements AiProvider {
     }> = [];
 
     for await (const chunk of stream) {
-      const delta = chunk.text || "";
+      if (input.signal?.aborted) break;
+
+      // Safely extract text — chunk.text can throw when chunk has only function calls
+      const delta = this.safeExtractText(chunk);
 
       // Extract tool calls from chunk
       if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
@@ -623,7 +654,7 @@ export class GeminiProvider implements AiProvider {
           if (part.functionCall) {
             toolCalls.push({
               toolName: part.functionCall.name || "",
-              arguments: part.functionCall.args as Record<string, unknown>,
+              arguments: (part.functionCall.args as Record<string, unknown>) || {},
             });
           }
         }
@@ -657,12 +688,12 @@ export class GeminiProvider implements AiProvider {
       }
     }
 
-    // If tools were used, include them in structured response
+    // Include tool calls in structured response (even without JSON schema)
     if (toolCalls.length > 0) {
       structured = {
         message: structured?.message || accumulated,
-        toolCalls,
         ...structured,
+        toolCalls,
       } as AgentStructuredResponse;
     }
 

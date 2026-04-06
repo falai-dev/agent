@@ -104,6 +104,7 @@ After building production AI applications, we found existing solutions either:
 - **Advanced Tool System** - Context-aware tools with data access and lifecycle integration
 - **Dynamic Tool Calling** - AI can call tools during streaming responses
 - **Tool Result Processing** - Tools update context and collected data automatically
+- **EnhancedTool Interface** - Optional concurrency, validation, and permission metadata
 
 </td>
 </tr>
@@ -132,6 +133,10 @@ After building production AI applications, we found existing solutions either:
 ### 🚀 **Advanced Features**
 
 - **Streaming Responses** - Real-time response generation with tool execution
+- **Streaming Tool Execution** - Tools begin executing as they arrive from the LLM stream with concurrency control
+- **Context Compaction** - Automatic conversation history management when approaching token limits
+- **Enhanced Tool Metadata** - Rich tool annotations for concurrency, permissions, validation, and result budgeting
+- **Prompt Section Caching** - Memoize static prompt sections across turns for faster prompt generation with native history format
 - **Lifecycle Hooks** - `prepare`/`finalize` functions or tools on steps, context/data update hooks
 - **Sequential Steps** - Define linear conversation flows with `steps` array
 - **Route Transitions** - Automatic flow transitions when routes complete
@@ -636,6 +641,8 @@ app.post('/chat', async (req, res) => {
 - **[Tool Definition](./docs/core/tools/tool-definition.md)** - Creating and configuring tools
 - **[Tool Execution](./docs/core/tools/tool-execution.md)** - Dynamic tool calling and context updates
 - **[Tool Scoping](./docs/core/tools/tool-scoping.md)** - Agent, route, and step-level tool management
+- **[Streaming Tool Execution](./docs/core/tools/streaming-execution.md)** - Concurrency-controlled streaming execution
+- **[EnhancedTool Reference](./docs/core/tools/enhanced-tool.md)** - Rich tool metadata interface
 
 ### 💾 Persistence
 
@@ -646,6 +653,8 @@ app.post('/chat', async (req, res) => {
 
 - **[Building Agents](./docs/guides/building-agents/)** - Complete agent construction patterns
 - **[Advanced Patterns](./docs/guides/advanced-patterns/)** - Complex use cases & integrations
+- **[Context Compaction](./docs/guides/context-compaction.md)** - Automatic conversation history management
+- **[Prompt Optimization](./docs/guides/prompt-optimization.md)** - Prompt section caching and native history format
 - **[Multi-Step Execution Migration](./docs/guides/migration/multi-step-execution.md)** - Migrating to batch execution
 - **[API Reference](./docs/api/overview.md)** - Complete API documentation
 

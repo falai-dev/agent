@@ -10,6 +10,7 @@ import { enterRoute, mergeCollected } from "../utils";
 import type { Route } from "./Route";
 import type { Step } from "./Step";
 import { PromptComposer } from "./PromptComposer";
+import { PromptSectionCache } from "./PromptSectionCache";
 import { END_ROUTE_ID } from "../constants";
 import { createTemplateContext, getLastMessageFromHistory, logger } from "../utils";
 
@@ -41,6 +42,15 @@ export interface RoutingEngineOptions {
    * @default 15
    */
   routeSwitchMargin?: number;
+  /**
+   * Callback invoked when the active route changes.
+   * Used by Agent to invalidate route-dependent prompt cache sections.
+   */
+  onRouteSwitch?: () => void;
+  /**
+   * Shared prompt section cache for memoizing static prompt sections.
+   */
+  promptSectionCache?: PromptSectionCache;
 }
 
 export interface BuildStepSelectionPromptParams<
@@ -91,6 +101,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
         );
       }
       logger.debug(`[RoutingEngine] Entered route: ${route.title}`);
+      this.options?.onRouteSwitch?.();
       return updatedSession;
     }
     return session;
@@ -921,7 +932,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       includeEndRoute = false,
     } = params;
     const templateContext = createTemplateContext({ context, session, history });
-    const pc = new PromptComposer<TContext, TData>(templateContext);
+    const pc = new PromptComposer<TContext, TData>(templateContext, this.options?.promptSectionCache);
 
     // Add agent metadata
     if (agentOptions) {
@@ -1173,7 +1184,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       routeConditionContext,
     } = params;
     const templateContext = createTemplateContext({ context, session, history });
-    const pc = new PromptComposer<TContext, TData>(templateContext);
+    const pc = new PromptComposer<TContext, TData>(templateContext, this.options?.promptSectionCache);
     if (agentOptions) {
       await pc.addAgentMeta(agentOptions);
     }

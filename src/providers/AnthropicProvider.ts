@@ -199,8 +199,7 @@ export class AnthropicProvider implements AiProvider {
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
         logger.debug(
-          `[ANTHROPIC] Trying backup model ${i + 1}/${
-            this.backupModels.length
+          `[ANTHROPIC] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
@@ -299,10 +298,6 @@ export class AnthropicProvider implements AiProvider {
       );
       const message = textContent?.type === "text" ? textContent.text : "";
 
-      if (!message) {
-        throw new Error("No response from Anthropic");
-      }
-
       // Extract tool calls from response
       const toolCalls: Array<{
         toolName: string;
@@ -319,6 +314,11 @@ export class AnthropicProvider implements AiProvider {
         }
       }
 
+      // Only throw error if we have no text AND no function calls
+      if (!message && toolCalls.length === 0) {
+        throw new Error("No response from Anthropic");
+      }
+
       // Parse JSON response if schema was provided
       let structured: AgentStructuredResponse | undefined;
       if (input.parameters?.jsonSchema) {
@@ -333,9 +333,9 @@ export class AnthropicProvider implements AiProvider {
       // If tools were used, include them in structured response
       if (toolCalls.length > 0) {
         structured = {
-          message,
+          ...(structured || {}),
+          message: structured?.message || message,
           toolCalls,
-          ...structured,
         } as AgentStructuredResponse;
       }
 
@@ -390,8 +390,7 @@ export class AnthropicProvider implements AiProvider {
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
         logger.debug(
-          `[ANTHROPIC] Trying backup model ${i + 1}/${
-            this.backupModels.length
+          `[ANTHROPIC] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
@@ -536,9 +535,9 @@ export class AnthropicProvider implements AiProvider {
     // If tools were used, include them in structured response
     if (toolCalls.length > 0) {
       structured = {
-        message: accumulated,
+        ...(structured || {}),
+        message: structured?.message || accumulated,
         toolCalls,
-        ...structured,
       } as AgentStructuredResponse;
     }
 

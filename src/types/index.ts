@@ -5,6 +5,7 @@
 // Agent types
 export type {
   AgentOptions,
+  AgentCompactionConfig,
   Term,
   Guideline,
   GuidelineMatch,
@@ -58,18 +59,38 @@ export * from "./route";
 export type { SessionState, PendingTransition } from "./session";
 
 // Tool types
-export type { 
-  Tool, 
-  ToolContext, 
-  ToolResult, 
+export type {
+  Tool,
+  ToolContext,
+  ToolResult,
   ToolHandler,
   ToolExecutionResult,
+  EnhancedTool,
+  ToolValidationResult,
+  ToolPermissionResult,
+  ToolCallRequest,
+  ToolExecutionUpdate,
+  TrackedTool,
+  ToolStatus,
   DataEnrichmentConfig,
   ValidationConfig,
   ApiCallConfig,
   ComputationConfig
 } from "./tool";
 export { ToolScope } from "./tool";
+
+// Compaction types
+export type {
+  CompactionOptions,
+  CompactionResult,
+} from "./compaction";
+
+// Prompt cache types (re-exported from core)
+export type {
+  PromptSectionType,
+  PromptCacheConfig,
+  SectionCompute,
+} from "../core/PromptSectionCache";
 
 // AI provider types
 export type {
@@ -105,15 +126,15 @@ export type {
 export * from "./persistence";
 
 // Template types
-export type { 
-  Template, 
-  TemplateContext, 
-  ConditionTemplate, 
-  ConditionEvaluationResult 
+export type {
+  Template,
+  TemplateContext,
+  ConditionTemplate,
+  ConditionEvaluationResult
 } from "./template";
-export { 
-  ConditionEvaluator, 
-  createConditionEvaluator, 
-  extractAIContextStrings, 
-  hasProgrammaticConditions 
+export {
+  ConditionEvaluator,
+  createConditionEvaluator,
+  extractAIContextStrings,
+  hasProgrammaticConditions
 } from "../utils/condition";

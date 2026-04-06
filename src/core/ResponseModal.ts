@@ -16,6 +16,7 @@ import type {
     AgentStructuredResponse,
     Term,
     StoppedReason,
+    ToolCallRequest,
 } from "../types";
 import { EventKind, MessageRole } from "../types";
 import type { Agent } from "./Agent";
@@ -157,7 +158,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         private readonly options?: ResponseModalOptions
     ) {
         // Initialize response engine
-        this.responseEngine = new ResponseEngine<TContext, TData>();
+        this.responseEngine = new ResponseEngine<TContext, TData>(this.agent.promptSectionCache);
 
         // Initialize response pipeline with agent dependencies
         this.responsePipeline = new ResponsePipeline<TContext, TData>(
@@ -175,7 +176,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         this.batchExecutor = new BatchExecutor<TContext, TData>();
 
         // Initialize batch prompt builder for combined prompts
-        this.batchPromptBuilder = new BatchPromptBuilder<TContext, TData>();
+        this.batchPromptBuilder = new BatchPromptBuilder<TContext, TData>(this.agent.promptSectionCache);
     }
 
     /**
@@ -1640,21 +1641,81 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             if (chunk.done && chunk.structured?.toolCalls) {
                 toolCalls = chunk.structured.toolCalls;
 
-                // Execute tools with unified loop handling
-                const toolResult = await this.executeUnifiedToolLoop({
-                    toolCalls,
-                    context,
-                    session,
-                    history,
-                    selectedRoute,
-                    responsePrompt,
-                    availableTools,
-                    responseSchema,
-                    signal,
-                });
+                const toolManager = this.getToolManager();
 
-                session = toolResult.session;
-                toolCalls = toolResult.finalToolCalls;
+                // Use concurrent execution for the initial batch of tool calls
+                if (toolManager && typeof toolManager.executeWithConcurrency === 'function') {
+                    const toolCallRequests: ToolCallRequest[] = toolCalls.map((tc, i) => ({
+                        id: `${tc.toolName}-${i}-${Date.now()}`,
+                        toolName: tc.toolName,
+                        arguments: tc.arguments,
+                    }));
+
+                    const historyEvents = historyToEvents(history);
+
+                    try {
+                        for await (const update of toolManager.executeWithConcurrency({
+                            toolCalls: toolCallRequests,
+                            context,
+                            data: session.data,
+                            history: historyEvents,
+                            signal,
+                            route: selectedRoute,
+                            step: nextStep,
+                        })) {
+                            // Apply context updates
+                            if (update.contextUpdate) {
+                                try {
+                                    await this.agent.updateContext(update.contextUpdate as Partial<TContext>);
+                                } catch (error) {
+                                    logger.error(`[ResponseModal] Failed to update context from concurrent tool:`, error);
+                                }
+                            }
+
+                            // Apply data updates
+                            if (update.dataUpdate) {
+                                try {
+                                    const updateDataMethod = this.agent.getUpdateDataMethod();
+                                    session = await updateDataMethod(session, update.dataUpdate as Partial<TData>);
+                                } catch (error) {
+                                    logger.error(`[ResponseModal] Failed to update data from concurrent tool:`, error);
+                                }
+                            }
+
+                            // Yield progress updates immediately
+                            if (update.progress) {
+                                yield {
+                                    delta: '',
+                                    accumulated: chunk.accumulated,
+                                    done: false,
+                                    session,
+                                    toolCalls: undefined,
+                                    isRouteComplete: false,
+                                    metadata: { toolProgress: update.progress, toolCallId: update.toolCallId },
+                                };
+                            }
+                        }
+
+                        logger.debug(`[ResponseModal] Concurrent tool execution completed for ${toolCallRequests.length} tools`);
+                    } catch (error) {
+                        logger.error(`[ResponseModal] Concurrent tool execution failed, falling back to sequential:`, error);
+                        // Fall back to the unified tool loop on failure
+                        const toolResult = await this.executeUnifiedToolLoop({
+                            toolCalls, context, session, history, selectedRoute,
+                            responsePrompt, availableTools, responseSchema, signal,
+                        });
+                        session = toolResult.session;
+                        toolCalls = toolResult.finalToolCalls;
+                    }
+                } else {
+                    // Fallback: no ToolManager or no executeWithConcurrency, use unified tool loop
+                    const toolResult = await this.executeUnifiedToolLoop({
+                        toolCalls, context, session, history, selectedRoute,
+                        responsePrompt, availableTools, responseSchema, signal,
+                    });
+                    session = toolResult.session;
+                    toolCalls = toolResult.finalToolCalls;
+                }
             }
 
             // Extract collected data on final chunk

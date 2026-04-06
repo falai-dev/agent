@@ -9,6 +9,39 @@ import type { PersistenceConfig } from "./persistence";
 import type { SessionState } from "./session";
 import type { StructuredSchema } from "./schema";
 import { Template, ConditionTemplate } from "./template";
+import type { PromptCacheConfig } from "../core/PromptSectionCache";
+
+/**
+ * Agent-level compaction configuration.
+ * Unlike CompactionOptions, this does not require a `provider` since the agent already has one.
+ */
+export interface AgentCompactionConfig {
+  /** Maximum token budget for the conversation */
+  maxTokens: number;
+  /**
+   * Threshold ratio (0–1) at which to trigger compaction.
+   * Must be between 0.5 and 0.95.
+   * @default 0.8
+   */
+  compactionThreshold?: number;
+  /**
+   * Number of recent messages to always preserve unchanged.
+   * Must be >= 2.
+   * @default 4
+   */
+  preserveRecentCount?: number;
+  /**
+   * Maximum characters per tool result before truncation.
+   * Must be > 0.
+   * @default 5000
+   */
+  maxToolResultChars?: number;
+  /**
+   * Whether compaction is enabled.
+   * @default true when config is provided
+   */
+  enabled?: boolean;
+}
 
 /**
  * Composition mode determines how the agent processes and structures responses
@@ -132,6 +165,18 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
    * @default 1
    */
   maxStepsPerBatch?: number;
+  /**
+   * Optional compaction configuration for managing conversation history size.
+   * When provided, the agent will validate the options and make them available
+   * for use by the SessionManager/CompactionEngine.
+   */
+  compaction?: AgentCompactionConfig;
+  /**
+   * Optional prompt cache configuration for controlling section memoization behavior.
+   * When provided, controls whether prompt sections are cached across turns.
+   * @default { enabled: true }
+   */
+  promptCache?: PromptCacheConfig;
 }
 
 /**

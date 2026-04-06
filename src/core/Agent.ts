@@ -18,6 +18,7 @@ import type {
   ValidationError,
   ValidationResult,
   AiProvider,
+  CompactionOptions,
 } from "../types";
 import { CompositionMode } from "../types";
 import type { StreamOptions, GenerateOptions, RespondParams } from "./ResponseModal";
@@ -35,9 +36,11 @@ import { Step } from "./Step";
 import { PersistenceManager } from "./PersistenceManager";
 import { SessionManager } from "./SessionManager";
 import { RoutingEngine } from "./RoutingEngine";
+import { PromptSectionCache } from "./PromptSectionCache";
 
 import { ResponseModal } from "./ResponseModal";
 import { ToolManager } from "./ToolManager";
+import { CompactionEngine } from "./CompactionEngine";
 
 /**
  * Error thrown when data validation fails
@@ -78,6 +81,8 @@ export class Agent<TContext = any, TData = any> {
   private _knowledgeBase: Record<string, unknown> = {};
   private _schema?: StructuredSchema;
   private _collectedData: Partial<TData> = {};
+  private _compactionOptions?: CompactionOptions;
+  private _promptSectionCache: PromptSectionCache;
 
   /** Public session manager for easy session management */
   public session: SessionManager<TData>;
@@ -125,9 +130,14 @@ export class Agent<TContext = any, TData = any> {
     // Initialize current session if provided
     this._currentSession = options.session;
 
+    // Initialize prompt section cache
+    this._promptSectionCache = new PromptSectionCache(options.promptCache);
+
     // Initialize routing engine
     this._routingEngine = new RoutingEngine<TContext, TData>({
       routeSwitchMargin: options.routeSwitchMargin,
+      onRouteSwitch: () => this.invalidateRouteSections(),
+      promptSectionCache: this._promptSectionCache,
     });
 
     // Initialize ResponseModal for handling all response generation
@@ -203,6 +213,20 @@ export class Agent<TContext = any, TData = any> {
     // Initialize knowledge base
     if (options.knowledgeBase) {
       this._knowledgeBase = { ...options.knowledgeBase };
+    }
+
+    // Initialize compaction options if configured
+    if (options.compaction && options.compaction.enabled !== false) {
+      const compactionOptions: CompactionOptions = {
+        maxTokens: options.compaction.maxTokens,
+        compactionThreshold: options.compaction.compactionThreshold ?? 0.8,
+        preserveRecentCount: options.compaction.preserveRecentCount ?? 4,
+        maxToolResultChars: options.compaction.maxToolResultChars ?? 5000,
+        provider: options.provider,
+      };
+      CompactionEngine.validateOptions(compactionOptions);
+      this._compactionOptions = compactionOptions;
+      logger.debug("[Agent] Compaction options initialized and validated");
     }
 
     // Initialize session manager with reference to this agent for bidirectional sync
@@ -506,6 +530,13 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
+   * Get the prompt section cache instance
+   */
+  get promptSectionCache(): PromptSectionCache {
+    return this._promptSectionCache;
+  }
+
+  /**
    * Get the maximum steps per batch
    * @default 1
    */
@@ -620,6 +651,7 @@ export class Agent<TContext = any, TData = any> {
    */
   set currentSession(value: SessionState | undefined) {
     this._currentSession = value;
+    this._promptSectionCache.invalidateAll();
   }
 
   // ---------------------------------------------------------------------------
@@ -705,6 +737,7 @@ export class Agent<TContext = any, TData = any> {
    */
   setCurrentSession(session: SessionState): void {
     this.currentSession = session;
+    this._promptSectionCache.invalidateAll();
   }
 
   /**
@@ -713,6 +746,18 @@ export class Agent<TContext = any, TData = any> {
    */
   clearCurrentSession(): void {
     this._currentSession = undefined;
+    this._promptSectionCache.invalidateAll();
+  }
+
+  /**
+   * Invalidate route-dependent prompt cache sections.
+   * Called automatically when the active route changes.
+   */
+  invalidateRouteSections(): void {
+    this._promptSectionCache.invalidate('activeRoutes');
+    this._promptSectionCache.invalidate('routeRules');
+    this._promptSectionCache.invalidate('routeProhibitions');
+    this._promptSectionCache.invalidate('routeKnowledgeBase');
   }
 
   /**
@@ -727,6 +772,13 @@ export class Agent<TContext = any, TData = any> {
    */
   hasPersistence(): boolean {
     return this._persistenceManager !== undefined;
+  }
+
+  /**
+   * Get the resolved compaction options (if compaction is configured)
+   */
+  getCompactionOptions(): CompactionOptions | undefined {
+    return this._compactionOptions;
   }
 
   // ---------------------------------------------------------------------------
@@ -876,6 +928,10 @@ export class Agent<TContext = any, TData = any> {
     if (this.options.hooks?.onContextUpdate && previousContext !== undefined) {
       await this.options.hooks.onContextUpdate(this._context, previousContext);
     }
+
+    // Invalidate context-dependent prompt cache sections
+    this._promptSectionCache.invalidate('agentMeta');
+    this._promptSectionCache.invalidate('knowledgeBase');
   }
 
   /**
@@ -939,7 +995,7 @@ export class Agent<TContext = any, TData = any> {
   /**
    * Generate a response based on history and context as a stream
    */
-  async *respondStream(params: RespondParams<TContext, TData>): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+  async * respondStream(params: RespondParams<TContext, TData>): AsyncGenerator<AgentResponseStreamChunk<TData>> {
     // Delegate to ResponseModal
     yield* this._responseModal.respondStream(params);
   }
@@ -1210,7 +1266,7 @@ export class Agent<TContext = any, TData = any> {
    * Modern streaming API - simple interface like chat() but returns a stream
    * Automatically manages conversation history through the session
    */
-  async *stream(
+  async * stream(
     message?: string,
     options?: StreamOptions<TContext>
   ): AsyncGenerator<AgentResponseStreamChunk<TData>> {

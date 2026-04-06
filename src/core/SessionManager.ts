@@ -5,9 +5,11 @@
  * in both server and client environments.
  */
 
+import log from "loglevel";
 import type { SessionState } from "../types/session";
 import type { History, HistoryItem } from "../types/history";
 import { PersistenceManager } from "./PersistenceManager";
+import { CompactionEngine } from "./CompactionEngine";
 import type { PersistenceAdapter } from "../types/persistence";
 import type { Agent } from "./Agent";
 import { createSession } from "../utils";
@@ -134,6 +136,23 @@ export class SessionManager<TData = unknown> {
 
     // Ensure currentSession is updated
     this.currentSession = session;
+
+    // Apply compaction if configured
+    try {
+      const compactionOptions = this.agent?.getCompactionOptions();
+      if (compactionOptions) {
+        const result = await CompactionEngine.checkAndCompact(session.history, compactionOptions);
+        if (result.strategy !== 'none') {
+          session.history = result.history;
+          log.info(
+            `CompactionEngine: applied strategy '${result.strategy}', ` +
+            `estimatedTokens=${result.estimatedTokens}, messagesCompacted=${result.messagesCompacted}`
+          );
+        }
+      }
+    } catch (error) {
+      log.warn("CompactionEngine: compaction failed, continuing without compaction", error);
+    }
 
     // Auto-save to persistence
     await this.save();

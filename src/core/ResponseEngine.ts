@@ -10,6 +10,7 @@ import type {
 import type { Route } from "./Route";
 import type { Step } from "./Step";
 import { PromptComposer } from "./PromptComposer";
+import { PromptSectionCache } from "./PromptSectionCache";
 import { createTemplateContext, render } from "../utils/template";
 
 export interface BuildResponsePromptParams<
@@ -43,6 +44,8 @@ export interface BuildFallbackPromptParams<TContext = unknown, TData = unknown> 
 }
 
 export class ResponseEngine<TContext = unknown, TData = unknown> {
+  constructor(private readonly promptSectionCache?: PromptSectionCache) { }
+
   responseSchemaForRoute(
     route: Route<TContext, TData>,
     currentStep?: Step<TContext, TData>,
@@ -105,7 +108,7 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
       agentSchema,
     } = params;
     const templateContext = createTemplateContext({ context, session, history });
-    const pc = new PromptComposer(templateContext);
+    const pc = new PromptComposer(templateContext, this.promptSectionCache);
 
     // Create combined agent options with route overrides
     let effectiveAgentOptions = agentOptions;
@@ -153,8 +156,8 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
       await pc.addGlossary(combinedTerms);
     }
 
-    await pc.addInteractionHistory(history);
-    await pc.addLastMessage(lastMessage);
+    // History is now passed natively via GenerateMessageInput.history
+    // instead of being embedded in the prompt string (Requirements 17.1, 17.2)
 
     // Add data collection instructions - include ALL route fields, not just current step
     // Collect all fields from route's required and optional fields
@@ -297,10 +300,11 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
     const { history, agentOptions, terms, guidelines, context, session } =
       params;
     const templateContext = createTemplateContext({ context, session, history });
-    const pc = new PromptComposer(templateContext);
+    const pc = new PromptComposer(templateContext, this.promptSectionCache);
 
     await pc.addAgentMeta(agentOptions);
-    await pc.addInteractionHistory(history);
+    // History is now passed natively via GenerateMessageInput.history
+    // instead of being embedded in the prompt string (Requirements 17.1, 17.2)
     await pc.addGlossary(terms);
     await pc.addGuidelines(guidelines);
     await pc.addKnowledgeBase(agentOptions.knowledgeBase);

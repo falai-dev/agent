@@ -14,6 +14,7 @@ import {
   AnthropicProvider,
   OpenAIProvider,
   GeminiProvider,
+  type EnhancedTool,
 } from "../../src/index";
 
 // Custom context type
@@ -141,8 +142,8 @@ async function legacyStreamingWithAnthropic() {
 
     // Legacy respondStream API - requires manual session management
     let fullMessage = "";
-    for await (const chunk of agent.respondStream({ 
-      history: agent.session.getHistory() 
+    for await (const chunk of agent.respondStream({
+      history: agent.session.getHistory()
     })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
@@ -157,7 +158,7 @@ async function legacyStreamingWithAnthropic() {
         );
         console.log(`   - Data:`, agent.session.getData() || "None");
         console.log(`   - Tool Calls: ${chunk.toolCalls?.length || 0}`);
-        
+
         // Manual session history management required
         await agent.session.addMessage("assistant", fullMessage);
         console.log(`   - Session Messages: ${agent.session.getHistory().length}`);
@@ -220,7 +221,7 @@ async function modernStreamingWithOpenAI() {
           `   - Route: ${chunk.session?.currentRoute?.title || "None"}`
         );
         console.log(`   - Data:`, agent.session.getData() || "None");
-        
+
         // Session automatically updated - no manual work needed!
         console.log(`   - Session Messages: ${agent.session.getHistory().length}`);
       }
@@ -267,10 +268,10 @@ async function modernStreamingComparison() {
 
     // Manual session management
     await agent.session.addMessage("user", userMessage);
-    
+
     let oldWayMessage = "";
-    for await (const chunk of agent.respondStream({ 
-      history: agent.session.getHistory() 
+    for await (const chunk of agent.respondStream({
+      history: agent.session.getHistory()
     })) {
       if (chunk.delta) {
         process.stdout.write(chunk.delta);
@@ -528,6 +529,81 @@ async function logFeedback(data: { rating: number; comments: string }) {
   console.log("✨ Feedback logged successfully!");
 }
 
+async function streamingWithToolExecution() {
+  console.log("\n🤖 Example 7: Streaming with Tool Execution\n");
+
+  const provider = new AnthropicProvider({
+    apiKey: process.env.ANTHROPIC_API_KEY || "",
+    model: "claude-sonnet-4-5",
+  });
+
+  // Define EnhancedTools with concurrency metadata
+  const readFileTool: EnhancedTool = {
+    id: "read_file",
+    name: "Read File",
+    description: "Read a file from disk",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    },
+    handler: async (_ctx, args) => {
+      await new Promise((r) => setTimeout(r, 200));
+      return { data: `Contents of ${args?.path}`, success: true };
+    },
+    isConcurrencySafe: () => true,
+    isReadOnly: () => true,
+    interruptBehavior: () => "cancel",
+  };
+
+  const writeFileTool: EnhancedTool = {
+    id: "write_file",
+    name: "Write File",
+    description: "Write content to a file",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+    },
+    handler: async (_ctx, args) => {
+      await new Promise((r) => setTimeout(r, 150));
+      return { data: `Wrote to ${args?.path}`, success: true };
+    },
+    isConcurrencySafe: () => false,
+    isDestructive: () => true,
+    interruptBehavior: () => "block",
+    maxResultSizeChars: 1_000,
+  };
+
+  const agent = new Agent({
+    name: "ToolStreamingAssistant",
+    description: "Demonstrates streaming with concurrent tool execution",
+    provider,
+    tools: [readFileTool, writeFileTool],
+  });
+
+  try {
+    console.log("📤 Streaming with tool execution...\n");
+    console.log("When the LLM calls multiple read-only tools, they execute in parallel.");
+    console.log("Write tools wait for exclusive access.\n");
+    console.log("Response: ");
+
+    for await (const chunk of agent.stream("Read index.ts and utils.ts, then write output.ts")) {
+      if (chunk.delta) {
+        process.stdout.write(chunk.delta);
+      }
+
+      if (chunk.done) {
+        console.log("\n\n✅ Stream complete!");
+        console.log(`   Tool Calls: ${chunk.toolCalls?.length || 0}`);
+        console.log(`   Session Messages: ${agent.session.getHistory().length}`);
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error:", error);
+  }
+}
+
 async function main() {
   console.log("🚀 Starting Streaming Examples\n");
   console.log("=".repeat(60));
@@ -539,6 +615,7 @@ async function main() {
     { name: "API Comparison (Gemini)", fn: modernStreamingComparison },
     { name: "Modern Streaming with Routes", fn: modernStreamingWithRoutes },
     { name: "Modern Streaming with Abort", fn: modernStreamingWithAbortSignal },
+    { name: "Streaming with Tool Execution", fn: streamingWithToolExecution },
   ];
 
   console.log("\nAvailable Examples:");
@@ -553,6 +630,7 @@ async function main() {
   console.log("   - Streaming provides real-time responses for better UX");
   console.log("   - Use AbortSignal to cancel long-running streams");
   console.log("   - Access chunk.route and chunk.step for flow information");
+  console.log("   - NEW: EnhancedTool metadata enables parallel read-only tool execution");
 
   console.log("\n" + "=".repeat(60));
 

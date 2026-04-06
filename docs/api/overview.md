@@ -12,10 +12,14 @@ Complete API documentation for `@falai/agent`. This framework provides a strongl
   - [RoutingEngine](#routingengine)
   - [ResponseEngine](#responseengine)
   - [PromptComposer](#promptcomposer)
+  - [StreamingToolExecutor](#streamingtoolexecutor)
+  - [CompactionEngine](#compactionengine)
+  - [PromptSectionCache](#promptsectioncache)
 
 - [AI Providers](#ai-providers)
 - [Persistence Adapters](#persistence-adapters)
 - [Types & Interfaces](#types--interfaces)
+  - [EnhancedTool](#enhancedtool)
 - [Utilities](#utilities)
 
 ---
@@ -604,6 +608,119 @@ build(): Promise<string>
 
 ---
 
+### StreamingToolExecutor
+
+Executes tools as they arrive from the LLM stream with concurrency control, abort handling, and ordered result yielding.
+
+#### Constructor
+
+```typescript
+new StreamingToolExecutor<TContext, TData>(
+  toolContext: ToolContext<TContext, TData>,
+  options?: {
+    maxParallel?: number;   // default: 10
+    signal?: AbortSignal;
+  }
+)
+```
+
+#### Methods
+
+```typescript
+addTool(toolCall: ToolCallRequest, tool: EnhancedTool<TContext, TData>): void
+```
+
+Queue a tool for execution. Concurrency safety is evaluated once at queue time.
+
+```typescript
+getCompletedResults(): Generator<ToolExecutionUpdate<TData>>
+```
+
+Synchronous generator yielding available results in request order.
+
+```typescript
+getRemainingResults(): AsyncGenerator<ToolExecutionUpdate<TData>>
+```
+
+Async generator yielding all results, waiting for pending tools.
+
+```typescript
+discard(): void
+getUpdatedContext(): TContext
+hasUnfinishedTools(): boolean
+```
+
+See [Streaming Execution Guide](../core/tools/streaming-execution.md) for detailed usage.
+
+---
+
+### CompactionEngine
+
+Manages conversation history size through multi-layered compaction strategies.
+
+#### Static Methods
+
+```typescript
+CompactionEngine.estimateTokens(history: HistoryItem[]): number
+CompactionEngine.applyToolResultBudget(history: HistoryItem[], maxCharsPerResult: number): HistoryItem[]
+CompactionEngine.validateOptions(options: CompactionOptions): void
+CompactionEngine.checkAndCompact(history: HistoryItem[], options: CompactionOptions): Promise<CompactionResult>
+```
+
+See [Context Compaction Guide](../guides/context-compaction.md) for detailed usage.
+
+---
+
+### PromptSectionCache
+
+Memoizes static prompt sections across turns, recomputing only dynamic sections per-turn. Integrates with `PromptComposer` for optimized prompt generation.
+
+#### Constructor
+
+```typescript
+new PromptSectionCache(config?: PromptCacheConfig)
+```
+
+#### Configuration
+
+```typescript
+interface PromptCacheConfig {
+  enabled?: boolean;       // default: true
+  volatileKeys?: string[]; // keys that always recompute
+}
+```
+
+#### Methods
+
+```typescript
+register(key: string, type: PromptSectionType, compute: () => string | null | Promise<string | null>): void
+```
+
+Register a section as `'static'` (cached) or `'dynamic'` (recomputed every turn).
+
+```typescript
+get(key: string): Promise<string | null>
+```
+
+Get a section's value, using cache for static sections.
+
+```typescript
+resolveAll(): Promise<(string | null)[]>
+```
+
+Resolve all sections in registration order.
+
+```typescript
+invalidate(key: string): void
+invalidateAll(): void
+```
+
+Invalidate a specific section or all sections.
+
+See [Prompt Optimization Guide](../guides/prompt-optimization.md) for detailed usage.
+
+---
+
 ## AI Providers
 
 ### OpenAIProvider
@@ -1075,6 +1192,29 @@ type ToolHandler<TContext, TArgs extends unknown[], TResult, TData> = (
   contextUpdate?: Partial<TContext>;
   dataUpdate?: Partial<TData>;
 }>;
+```
+
+### EnhancedTool
+
+Extends `Tool` with optional metadata for concurrency, permissions, validation, and result budgeting. See [EnhancedTool Reference](../core/tools/enhanced-tool.md) for full documentation.
+
+```typescript
+interface EnhancedTool<TContext, TData, TResult> extends Tool<TContext, TData, TResult> {
+  isConcurrencySafe?(input?: Record<string, unknown>): boolean;
+  isReadOnly?(input?: Record<string, unknown>): boolean;
+  isDestructive?(input?: Record<string, unknown>): boolean;
+  interruptBehavior?(): 'cancel' | 'block';
+  maxResultSizeChars?: number;
+  validateInput?(input: Record<string, unknown>, context: ToolContext<TContext, TData>): Promise<ToolValidationResult> | ToolValidationResult;
+  checkPermissions?(input: Record<string, unknown>, context: ToolContext<TContext, TData>): Promise<ToolPermissionResult> | ToolPermissionResult;
+}
+
+interface ToolValidationResult { valid: boolean; error?: string; correctedInput?: Record<string, unknown>; }
+interface ToolPermissionResult { allowed: boolean; reason?: string; canOverride?: boolean; }
+interface ToolCallRequest { id: string; toolName: string; arguments: Record<string, unknown>; }
+interface ToolExecutionUpdate<TData> { toolCallId: string; result?: ToolExecutionResult; progress?: string; contextUpdate?: Record<string, unknown>; dataUpdate?: Partial<TData>; }
+interface CompactionOptions { maxTokens: number; compactionThreshold: number; preserveRecentCount: number; maxToolResultChars: number; provider: AiProvider; }
+interface CompactionResult<TData> { history: HistoryItem[]; strategy: 'none' | 'tool_result_budget' | 'micro_compact' | 'auto_compact'; estimatedTokens: number; messagesCompacted: number; summary?: string; }
 ```
 
 ### AI Provider Types

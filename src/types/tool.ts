@@ -116,6 +116,114 @@ export enum ToolScope {
 
 
 
+// --- EnhancedTool and supporting types ---
+
+/**
+ * Result of input validation on a tool call
+ */
+export interface ToolValidationResult {
+  valid: boolean;
+  error?: string;
+  /** Suggested corrected input */
+  correctedInput?: Record<string, unknown>;
+}
+
+/**
+ * Result of a permission check on a tool call
+ */
+export interface ToolPermissionResult {
+  allowed: boolean;
+  reason?: string;
+  /** If not allowed, can the user override? */
+  canOverride?: boolean;
+}
+
+/**
+ * A single tool invocation request from the LLM
+ */
+export interface ToolCallRequest {
+  /** Unique ID for this tool call instance */
+  id: string;
+  /** Tool name/ID to execute */
+  toolName: string;
+  /** Arguments passed to the tool */
+  arguments: Record<string, unknown>;
+}
+
+/**
+ * Result or progress update from a tool execution
+ */
+export interface ToolExecutionUpdate<TData = unknown> {
+  /** The tool call this update relates to */
+  toolCallId: string;
+  /** Result message (undefined for progress updates) */
+  result?: ToolExecutionResult;
+  /** Progress message for long-running tools */
+  progress?: string;
+  /** Updated context after tool execution */
+  contextUpdate?: Record<string, unknown>;
+  /** Updated data after tool execution */
+  dataUpdate?: Partial<TData>;
+}
+
+/**
+ * Internal status of a tracked tool in the executor queue
+ */
+export type ToolStatus = 'queued' | 'executing' | 'completed' | 'yielded';
+
+/**
+ * Internal type tracking the state of a queued or executing tool
+ */
+export interface TrackedTool<TContext = unknown, TData = unknown> {
+  id: string;
+  toolCall: ToolCallRequest;
+  tool: EnhancedTool<TContext, TData>;
+  status: ToolStatus;
+  isConcurrencySafe: boolean;
+  promise?: Promise<void>;
+  results: ToolExecutionResult[];
+  pendingProgress: string[];
+}
+
+/**
+ * Extended tool interface with rich metadata for concurrency control,
+ * permission gating, input validation, and result size management.
+ *
+ * All additional methods/properties are optional — plain `Tool` objects
+ * remain fully compatible.
+ */
+export interface EnhancedTool<
+  TContext = any,
+  TData = any,
+  TResult = any
+> extends Tool<TContext, TData, TResult> {
+  /** Whether this tool is safe to run concurrently with other concurrent-safe tools */
+  isConcurrencySafe?(input?: Record<string, unknown>): boolean;
+  /** Whether this tool only reads data without side effects */
+  isReadOnly?(input?: Record<string, unknown>): boolean;
+  /** Whether this tool performs destructive/irreversible operations */
+  isDestructive?(input?: Record<string, unknown>): boolean;
+
+  /** How the tool responds to abort signals: 'cancel' = immediate abort, 'block' = allow completion */
+  interruptBehavior?(): 'cancel' | 'block';
+  /** Maximum characters for the tool result before truncation */
+  maxResultSizeChars?: number;
+
+  /** Validate input before execution */
+  validateInput?(
+    input: Record<string, unknown>,
+    context: ToolContext<TContext, TData>
+  ): Promise<ToolValidationResult> | ToolValidationResult;
+
+  /** Check permissions before execution */
+  checkPermissions?(
+    input: Record<string, unknown>,
+    context: ToolContext<TContext, TData>
+  ): Promise<ToolPermissionResult> | ToolPermissionResult;
+}
+
+// --- Existing tool configuration types ---
+
 /**
  * Configuration for data enrichment tools
  */

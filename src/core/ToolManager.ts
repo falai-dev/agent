@@ -12,6 +12,9 @@ import type {
   ApiCallConfig,
   ComputationConfig,
   ToolContext,
+  ToolCallRequest,
+  ToolExecutionUpdate,
+  EnhancedTool,
   Event,
 } from "../types";
 import { ToolScope } from "../types";
@@ -19,6 +22,7 @@ import { logger } from "../utils";
 import { Agent } from "./Agent";
 import { Route } from "./Route";
 import { Step } from "./Step";
+import { StreamingToolExecutor } from "./StreamingToolExecutor";
 
 /**
  * Error thrown when tool creation fails
@@ -283,13 +287,13 @@ export class ToolManager<TContext = unknown, TData = unknown> {
 
       this.toolRegistry.set(tool.id, tool);
       logger.debug(`[ToolManager] Registered tool: ${tool.id} (${tool.name || 'unnamed'})`);
-      
+
       return tool;
     } catch (error) {
       if (error instanceof ToolCreationError) {
         throw error;
       }
-      
+
       const toolId = tool?.id || 'unknown';
       throw new ToolCreationError(
         `Failed to register tool '${toolId}': ${error instanceof Error ? error.message : String(error)}`,
@@ -387,14 +391,14 @@ export class ToolManager<TContext = unknown, TData = unknown> {
     if (!tool || !tool.id || !tool.handler) {
       throw new ToolCreationError('Invalid tool: must have id and handler properties', tool?.id || 'unknown');
     }
-    
+
     // Add to agent's tools array using the unified interface
     if (this.agent) {
       this.agent.addTool(tool);
     } else {
       logger.warn(`[ToolManager] No agent available, tool not added to agent scope: ${tool.id}`);
     }
-    
+
     logger.debug(`[ToolManager] Added tool to agent scope: ${tool.id}`);
     return tool;
   }
@@ -403,7 +407,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
    * Add a tool to a specific route scope (creates and adds in one operation)
    */
   addToRoute(
-    route: Route<TContext, TData>, 
+    route: Route<TContext, TData>,
     tool: Tool<TContext, TData>
   ): Tool<TContext, TData> {
     // Add to route's tools array using the existing createTool method
@@ -412,7 +416,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
     } else {
       logger.warn(`[ToolManager] Route does not support createTool method, tool not added to route scope: ${tool.id}`);
     }
-    
+
     logger.debug(`[ToolManager] Added tool to route scope: ${tool.id}`);
     return tool;
   }
@@ -479,7 +483,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
         logger.debug(`[ToolManager] Found tool in registry: ${toolId}`);
         return registeredTool;
       }
-      
+
       // Also check by name in registry
       for (const [id, tool] of Array.from(this.toolRegistry.entries())) {
         if (tool.name === toolId) {
@@ -557,7 +561,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
 
     // Convert map to array, preserving priority order
     const allTools = Array.from(toolMap.values());
-    
+
     // If we have step-specific tools, prioritize them
     if (resolvedTools.length > 0) {
       // Add resolved step tools first, then other tools not already included
@@ -575,7 +579,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
    * Consolidates tool execution logic from ToolExecutor and ResponseModal
    */
   async execute(
-    toolId: string, 
+    toolId: string,
     args?: Record<string, unknown>,
     context?: {
       step?: Step<TContext, TData>;
@@ -610,14 +614,14 @@ export class ToolManager<TContext = unknown, TData = unknown> {
           // Tool not found - try fallback tools if available
           if (fallbackTools.length > 0) {
             logger.warn(`[ToolManager] Primary tool '${toolId}' not found, trying fallback tools: ${fallbackTools.join(', ')}`);
-            
+
             for (const fallbackId of fallbackTools) {
               const fallbackResult = await this.execute(fallbackId, args, {
                 ...context,
                 fallbackTools: [], // Prevent infinite recursion
                 retryCount: 0 // Don't retry fallback tools
               });
-              
+
               if (fallbackResult.success) {
                 logger.info(`[ToolManager] Fallback tool '${fallbackId}' succeeded for primary tool '${toolId}'`);
                 return {
@@ -676,13 +680,13 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         const errorMessage = lastError.message;
-        
+
         // Check if this is a transient error that should be retried
         const isTransientError = this.isTransientError(lastError);
-        
+
         if (attempt < maxRetries && isTransientError) {
           logger.warn(`[ToolManager] Tool execution attempt ${attempt + 1} failed for ${toolId}, retrying: ${errorMessage}`);
-          
+
           // Exponential backoff for retries
           const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
           await new Promise(resolve => setTimeout(resolve, delay));
@@ -697,7 +701,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
     // All retries failed - try fallback tools
     if (fallbackTools.length > 0) {
       logger.warn(`[ToolManager] Primary tool '${toolId}' failed after retries, trying fallback tools: ${fallbackTools.join(', ')}`);
-      
+
       for (const fallbackId of fallbackTools) {
         try {
           const fallbackResult = await this.execute(fallbackId, args, {
@@ -705,7 +709,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
             fallbackTools: [], // Prevent infinite recursion
             retryCount: 0 // Don't retry fallback tools
           });
-          
+
           if (fallbackResult.success) {
             logger.info(`[ToolManager] Fallback tool '${fallbackId}' succeeded for failed primary tool '${toolId}'`);
             return {
@@ -769,7 +773,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   }): Promise<ToolExecutionResult> {
     const { tool, context, updateContext, updateData, history, data, toolArguments } = params;
     const startTime = Date.now();
-    
+
     try {
       // Validate tool before execution
       if (!tool || !tool.handler || typeof tool.handler !== 'function') {
@@ -802,6 +806,40 @@ export class ToolManager<TContext = unknown, TData = unknown> {
 
       logger.debug(`[ToolManager] Executing tool: ${tool.id} with args:`, toolArguments);
 
+      // EnhancedTool validation gate (Req 9.2, 10.6)
+      const enhanced = tool as EnhancedTool<TContext, TData>;
+      if (typeof enhanced.validateInput === 'function' && toolArguments) {
+        const validation = await enhanced.validateInput(toolArguments, toolContext);
+        if (!validation.valid) {
+          const executionTime = Date.now() - startTime;
+          logger.warn(`[ToolManager] Tool ${tool.id} input validation failed: ${validation.error}`);
+          return {
+            success: false,
+            error: `Validation failed: ${validation.error || 'Invalid input'}`,
+            metadata: { toolId: tool.id, executionTime, gate: 'validateInput' }
+          };
+        }
+      }
+
+      // EnhancedTool permission gate (Req 9.3, 10.6)
+      if (typeof enhanced.checkPermissions === 'function' && toolArguments) {
+        const permission = await enhanced.checkPermissions(toolArguments, toolContext);
+        if (!permission.allowed) {
+          const executionTime = Date.now() - startTime;
+          logger.warn(`[ToolManager] Tool ${tool.id} permission denied: ${permission.reason}`);
+          return {
+            success: false,
+            error: `Permission denied: ${permission.reason || 'Not allowed'}`,
+            metadata: {
+              toolId: tool.id,
+              executionTime,
+              gate: 'checkPermissions',
+              canOverride: permission.canOverride
+            }
+          };
+        }
+      }
+
       // Execute tool with timeout protection
       const executionTimeout = 30000; // 30 seconds default timeout
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -818,7 +856,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
 
       // Handle different result types
       let toolResult: ToolResult<unknown, TContext, TData>;
-      
+
       if (result && typeof result === 'object' && ('data' in result || 'success' in result || 'error' in result)) {
         // It's already a ToolResult-like object
         toolResult = result as ToolResult<unknown, TContext, TData>;
@@ -882,9 +920,9 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      
+
       logger.error(`[ToolManager] Tool execution error for ${tool.id} after ${executionTime}ms:`, error);
-      
+
       // Re-throw the error so the execute method can handle retries
       throw error;
     }
@@ -937,6 +975,75 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   }
 
   /**
+   * Execute tool calls with concurrency control using StreamingToolExecutor.
+   * Creates a StreamingToolExecutor, resolves tools, queues them, and yields
+   * ToolExecutionUpdate results in original request order.
+   *
+   * Concurrency-safe tools run in parallel; non-safe tools run serially.
+   * Progress messages are yielded immediately.
+   */
+  async *executeWithConcurrency(params: {
+    toolCalls: ToolCallRequest[];
+    context: TContext;
+    data?: Partial<TData>;
+    history?: Event[];
+    signal?: AbortSignal;
+    route?: Route<TContext, TData>;
+    step?: Step<TContext, TData>;
+  }): AsyncGenerator<ToolExecutionUpdate<TData>> {
+    const { toolCalls, context, data, history, signal, route, step } = params;
+
+    if (toolCalls.length === 0) {
+      return;
+    }
+
+    // Build a ToolContext for the executor
+    const toolContext: ToolContext<TContext, TData> = {
+      context,
+      data: data || {} as Partial<TData>,
+      history: history || [],
+      step: step ? { id: step.id, routeId: route?.id || '' } : undefined,
+      updateContext: async (updates: Partial<TContext>) => {
+        Object.assign(context as Record<string, unknown>, updates);
+      },
+      updateData: async (updates: Partial<TData>) => {
+        if (data) {
+          Object.assign(data as Record<string, unknown>, updates);
+        }
+      },
+      getField: <K extends keyof TData>(key: K): TData[K] | undefined => {
+        return data?.[key];
+      },
+      setField: async <K extends keyof TData>(key: K, value: TData[K]): Promise<void> => {
+        if (data) {
+          (data as TData)[key] = value;
+        }
+      },
+      hasField: <K extends keyof TData>(key: K): boolean => {
+        return data != null && key in (data as Record<string, unknown>);
+      },
+    };
+
+    const executor = new StreamingToolExecutor<TContext, TData>(toolContext, {
+      signal,
+    });
+
+    // Resolve and queue each tool call
+    for (const toolCall of toolCalls) {
+      const tool = this.find(toolCall.toolName, undefined, step, route);
+      if (!tool) {
+        logger.warn(`[ToolManager] Tool not found for concurrent execution: ${toolCall.toolName}`);
+        continue;
+      }
+      // Cast to EnhancedTool — plain Tools are compatible (defaults apply)
+      executor.addTool(toolCall, tool as EnhancedTool<TContext, TData>);
+    }
+
+    // Yield all results in order
+    yield* executor.getRemainingResults();
+  }
+
+  /**
    * Create a data enrichment tool that modifies collected data
    * Returns a tool instance that can be registered or added to scope
    */
@@ -945,7 +1052,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   ): Tool<TContext, TData, void> {
     // Validate configuration first
     this.validateDataEnrichmentConfig(config);
-    
+
     const tool: Tool<TContext, TData, void> = {
       id: config.id,
       name: config.name || `Data Enrichment: ${config.id}`,
@@ -982,7 +1089,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
           }
 
           logger.debug(`[ToolManager] Data enrichment completed for tool: ${config.id}`);
-          
+
           return {
             success: true,
             dataUpdate: enrichedData
@@ -1012,7 +1119,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   ): Tool<TContext, TData, ValidationResult> {
     // Validate configuration first
     this.validateValidationConfig(config);
-    
+
     const tool: Tool<TContext, TData, ValidationResult> = {
       id: config.id,
       name: config.name || `Validation: ${config.id}`,
@@ -1048,7 +1155,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error(`[ToolManager] Validation failed for ${config.id}: ${errorMessage}`);
-          
+
           // Return validation failure result instead of throwing
           return {
             valid: false,
@@ -1076,7 +1183,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   ): Tool<TContext, TData, TResult> {
     // Validate configuration first
     this.validateApiCallConfig(config);
-    
+
     const tool: Tool<TContext, TData, TResult> = {
       id: config.id,
       name: config.name || `API Call: ${config.id}`,
@@ -1098,7 +1205,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       handler: async (context: ToolContext<TContext, TData>, args?: Record<string, unknown>): Promise<TResult> => {
         try {
           // Resolve endpoint URL
-          const endpoint = typeof config.endpoint === 'function' 
+          const endpoint = typeof config.endpoint === 'function'
             ? config.endpoint(context.context, context.data)
             : config.endpoint;
 
@@ -1124,7 +1231,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
 
           // Make the API call
           const response = await fetch(endpoint, requestOptions);
-          
+
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
@@ -1146,7 +1253,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error(`[ToolManager] API call failed for ${config.id}: ${errorMessage}`);
-          
+
           throw new ToolExecutionError(
             `API call failed: ${errorMessage}`,
             config.id,
@@ -1169,7 +1276,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   ): Tool<TContext, TData, TResult> {
     // Validate configuration first
     this.validateComputationConfig(config);
-    
+
     const tool: Tool<TContext, TData, TResult> = {
       id: config.id,
       name: config.name || `Computation: ${config.id}`,
@@ -1205,7 +1312,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error(`[ToolManager] Computation failed for ${config.id}: ${errorMessage}`);
-          
+
           throw new ToolExecutionError(
             `Computation failed: ${errorMessage}`,
             config.id,
@@ -1229,36 +1336,36 @@ export class ToolManager<TContext = unknown, TData = unknown> {
     metadata?: Record<string, unknown>;
   } {
     const tool = this.find(toolId, scope, step, route);
-    
+
     if (!tool) {
       return { found: false };
     }
 
     // Determine which scope the tool was found in
     let foundScope = 'unknown';
-    
+
     // Check step scope
     if (step?.tools) {
-      const stepTool = step.tools.find((t) => 
-        (typeof t === 'string' && t === toolId) || 
+      const stepTool = step.tools.find((t) =>
+        (typeof t === 'string' && t === toolId) ||
         (typeof t === 'object' && (t.id === toolId || t.name === toolId))
       );
       if (stepTool) foundScope = 'step';
     }
-    
+
     // Check route scope
     if (foundScope === 'unknown' && route?.tools) {
       const routeTool = route.tools.find((t) => t.id === toolId || t.name === toolId);
       if (routeTool) foundScope = 'route';
     }
-    
+
     // Check agent scope
     if (foundScope === 'unknown' && this.agent) {
       const agentTools = this.agent.getTools();
       const agentTool = agentTools.find((t) => t.id === toolId || t.name === toolId);
       if (agentTool) foundScope = 'agent';
     }
-    
+
     // Check registry
     if (foundScope === 'unknown' && this.toolRegistry.has(toolId)) {
       foundScope = 'registry';
@@ -1293,7 +1400,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
 
     for (const toolId of toolIds) {
       const info = this.getToolInfo(toolId, ToolScope.ALL, step, route);
-      
+
       if (info.found) {
         found.push(toolId);
         details.push({ id: toolId, found: true, scope: info.scope });
@@ -1324,10 +1431,10 @@ export class ToolManager<TContext = unknown, TData = unknown> {
     const registeredToolIds = Array.from(this.toolRegistry.keys());
     const agentTools = this.agent ? this.agent.getTools() : [];
     const agentToolIds = agentTools.map((t) => t.id);
-    
+
     // Find duplicate IDs between registry and agent
     const duplicateIds = registeredToolIds.filter(id => agentToolIds.includes(id));
-    
+
     const allAvailable = this.getAvailable();
 
     return {
@@ -1368,7 +1475,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       if (!tool.handler || typeof tool.handler !== 'function') {
         issues.push(`Tool '${id}' has invalid or missing handler`);
       }
-      
+
       if (!tool.id || tool.id.trim() === '') {
         issues.push(`Tool has empty or invalid ID: ${JSON.stringify(tool)}`);
       }

@@ -229,8 +229,7 @@ export class OpenRouterProvider implements AiProvider {
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
         logger.debug(
-          `[OPENROUTER] Trying backup model ${i + 1}/${
-            this.backupModels.length
+          `[OPENROUTER] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
@@ -345,10 +344,7 @@ export class OpenRouterProvider implements AiProvider {
       // Fall back to regular chat completions API if no schema provided
       const response = await this.client.chat.completions.create(params);
 
-      const message = response.choices[0]?.message?.content;
-      if (!message) {
-        throw new Error("No response from OpenRouter");
-      }
+      const message = response.choices[0]?.message?.content || "";
 
       let toolCalls: Array<{
         toolName: string;
@@ -376,6 +372,11 @@ export class OpenRouterProvider implements AiProvider {
               arguments: toolCallArguments,
             };
           });
+      }
+
+      // Only throw error if we have no text AND no function calls
+      if (!message && toolCalls.length === 0) {
+        throw new Error("No response from OpenRouter");
       }
 
       return {
@@ -428,8 +429,7 @@ export class OpenRouterProvider implements AiProvider {
       for (let i = 0; i < this.backupModels.length; i++) {
         const backupModel = this.backupModels[i];
         logger.debug(
-          `[OPENROUTER] Trying backup model ${i + 1}/${
-            this.backupModels.length
+          `[OPENROUTER] Trying backup model ${i + 1}/${this.backupModels.length
           }: ${backupModel}`
         );
 
@@ -532,9 +532,9 @@ export class OpenRouterProvider implements AiProvider {
             try {
               toolCallArguments = toolCall.function.arguments
                 ? (JSON.parse(toolCall.function.arguments) as Record<
-                    string,
-                    unknown
-                  >)
+                  string,
+                  unknown
+                >)
                 : {};
             } catch (error) {
               logger.warn(
@@ -589,9 +589,9 @@ export class OpenRouterProvider implements AiProvider {
     // If tools were used, include them in structured response
     if (toolCalls.length > 0) {
       structured = {
-        message: accumulated,
+        ...(structured || {}),
+        message: (structured as AgentStructuredResponse | undefined)?.message || accumulated,
         toolCalls,
-        ...structured,
       } as TStructured;
     }
 
