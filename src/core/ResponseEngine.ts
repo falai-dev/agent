@@ -99,7 +99,6 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
       prohibitions,
       directives,
       history,
-      lastMessage,
       agentOptions,
       combinedGuidelines,
       combinedTerms,

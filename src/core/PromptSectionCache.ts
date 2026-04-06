@@ -30,8 +30,6 @@ interface PromptSectionEntry {
     cachedValue?: string | null;
 }
 
-const SENTINEL = Symbol("NOT_COMPUTED");
-
 export class PromptSectionCache {
     private sections: Map<string, PromptSectionEntry> = new Map();
     private insertionOrder: string[] = [];

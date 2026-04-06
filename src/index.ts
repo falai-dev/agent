@@ -133,10 +133,6 @@ export type {
   CompactionOptions,
   CompactionResult,
 
-  PromptSectionType,
-  PromptCacheConfig,
-  SectionCompute,
-
   DataEnrichmentConfig,
   ValidationConfig,
   ValidationError,
