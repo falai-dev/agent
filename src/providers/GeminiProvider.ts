@@ -19,6 +19,7 @@ import type {
   AgentStructuredResponse,
   StructuredSchema,
 } from "../types";
+import type { HistoryItem } from "../types/history";
 import { withTimeoutAndRetry } from "../utils/retry";
 import { tryParseJSONResponse } from "../utils/json";
 import { logger } from "../utils/logger";
@@ -150,6 +151,62 @@ export class GeminiProvider implements AiProvider {
       timeout: retryConfig?.timeout || DEFAULT_RETRY_CONFIG.timeout,
       retries: retryConfig?.retries || DEFAULT_RETRY_CONFIG.retries,
     };
+  }
+
+  /**
+   * Build Gemini-formatted contents from HistoryItem[] array.
+   * Gemini uses "user"/"model" roles (not "assistant").
+   * System messages are extracted separately for systemInstruction.
+   * Tool results map to functionResponse parts, tool calls to functionCall parts.
+   */
+  private buildGeminiContents(history: HistoryItem[]): {
+    contents: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+    systemInstructions: string[];
+  } {
+    const contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> = [];
+    const systemInstructions: string[] = [];
+
+    for (const item of history) {
+      switch (item.role) {
+        case "system":
+          systemInstructions.push(item.content);
+          break;
+        case "user":
+          contents.push({ role: "user", parts: [{ text: item.content }] });
+          break;
+        case "assistant":
+          if (item.tool_calls && item.tool_calls.length > 0) {
+            const parts: Array<Record<string, unknown>> = [];
+            if (item.content) {
+              parts.push({ text: item.content });
+            }
+            for (const tc of item.tool_calls) {
+              parts.push({
+                functionCall: { name: tc.name, args: tc.arguments },
+              });
+            }
+            contents.push({ role: "model", parts });
+          } else {
+            contents.push({ role: "model", parts: [{ text: item.content || "" }] });
+          }
+          break;
+        case "tool":
+          contents.push({
+            role: "user",
+            parts: [
+              {
+                functionResponse: {
+                  name: item.name,
+                  response: typeof item.content === "object" ? item.content : { result: item.content },
+                },
+              },
+            ],
+          });
+          break;
+      }
+    }
+
+    return { contents, systemInstructions };
   }
 
   /**
@@ -430,9 +487,25 @@ export class GeminiProvider implements AiProvider {
 
       let response: GenerateContentResponse;
       try {
+        // Build contents from history
+        const { contents: historyContents, systemInstructions } = this.buildGeminiContents(input.history);
+
+        // Append the current prompt as the final user content
+        historyContents.push({ role: "user", parts: [{ text: input.prompt }] });
+
+        // Set system instruction from history if present
+        if (systemInstructions.length > 0) {
+          const existingSystem = configOverride.systemInstruction;
+          if (typeof existingSystem === "string") {
+            configOverride.systemInstruction = `${existingSystem}\n\n${systemInstructions.join("\n\n")}`;
+          } else {
+            configOverride.systemInstruction = systemInstructions.join("\n\n");
+          }
+        }
+
         response = await this.genAI.models.generateContent({
           model,
-          contents: input.prompt,
+          contents: historyContents,
           config: {
             ...configOverride,
             ...(input.signal ? { abortSignal: input.signal } : {}),
@@ -620,9 +693,25 @@ export class GeminiProvider implements AiProvider {
 
     let stream;
     try {
+      // Build contents from history
+      const { contents: historyContents, systemInstructions } = this.buildGeminiContents(input.history);
+
+      // Append the current prompt as the final user content
+      historyContents.push({ role: "user", parts: [{ text: input.prompt }] });
+
+      // Set system instruction from history if present
+      if (systemInstructions.length > 0) {
+        const existingSystem = configOverride.systemInstruction;
+        if (typeof existingSystem === "string") {
+          configOverride.systemInstruction = `${existingSystem}\n\n${systemInstructions.join("\n\n")}`;
+        } else {
+          configOverride.systemInstruction = systemInstructions.join("\n\n");
+        }
+      }
+
       stream = await this.genAI.models.generateContentStream({
         model,
-        contents: input.prompt,
+        contents: historyContents,
         config: {
           ...configOverride,
           ...(input.signal ? { abortSignal: input.signal } : {}),

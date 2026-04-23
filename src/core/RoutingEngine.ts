@@ -12,7 +12,7 @@ import type { Step } from "./Step";
 import { PromptComposer } from "./PromptComposer";
 import { PromptSectionCache } from "./PromptSectionCache";
 import { END_ROUTE_ID } from "../constants";
-import { createTemplateContext, getLastMessageFromHistory, logger } from "../utils";
+import { createTemplateContext, getLastMessageFromHistory, logger, eventsToHistory } from "../utils";
 
 export interface CandidateStep<TContext = unknown, TData = unknown> {
   step: Step<TContext, TData>;
@@ -246,7 +246,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       }
     >({
       prompt: stepPrompt,
-      history,
+      history: eventsToHistory(history),
       context,
       signal,
       parameters: {
@@ -659,7 +659,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       RoutingDecisionOutput
     >({
       prompt: routingPrompt,
-      history,
+      history: eventsToHistory(history),
       context,
       signal,
       parameters: {

@@ -2,6 +2,22 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.1]
+
+### Fixed
+
+- **Critical: Agent stuck on initial step** — The 1.2.0 "native history format" change removed history from the prompt but providers weren't updated to use `input.history` for building conversation messages. The LLM received zero conversation context, causing it to regenerate the initial greeting on every turn.
+
+### Changed
+
+- **Providers now use native multi-turn messages** — All four providers (Anthropic, OpenAI, Gemini, OpenRouter) now build proper multi-turn conversation messages from `input.history` instead of relying on history being embedded in the prompt string. This means the LLM sees real user/assistant turns rather than JSON-serialized events, improving response quality and reducing token usage.
+
+- **`GenerateMessageInput.history` type changed from `Event[]` to `HistoryItem[]`** — The history field now accepts the native `HistoryItem[]` format (with `user`/`assistant`/`tool`/`system` roles) that maps directly to each provider's API. Callers updated accordingly.
+
+- **History removed from system prompt** — `addInteractionHistory()` and `addLastMessage()` are no longer called in `buildResponsePrompt()` and `buildFallbackPrompt()`. The `lastMessage` param is removed from `BuildResponsePromptParams`. History flows exclusively through the provider's native message format.
+
+- **`addInteractionHistory()` deprecated** — The method remains on `PromptComposer` for backward compatibility but is no longer used internally.
+
 ## [1.2.0]
 
 ### Added

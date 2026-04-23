@@ -15,6 +15,7 @@ import type {
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types";
+import type { HistoryItem } from "../types/history";
 import { withTimeoutAndRetry, logger } from "../utils";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -152,6 +153,67 @@ export class AnthropicProvider implements AiProvider {
     };
   }
 
+  /**
+   * Build Anthropic-formatted messages from HistoryItem[] array.
+   * System messages are extracted separately (Anthropic uses a `system` param).
+   * Tool results are mapped to Anthropic's tool_result content blocks.
+   * Assistant tool_calls are mapped to tool_use content blocks.
+   */
+  private buildAnthropicMessages(history: HistoryItem[]): {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    messages: any[];
+    systemMessages: string[];
+  } {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const messages: any[] = [];
+    const systemMessages: string[] = [];
+
+    for (const item of history) {
+      switch (item.role) {
+        case "system":
+          systemMessages.push(item.content);
+          break;
+        case "user":
+          messages.push({ role: "user", content: item.content });
+          break;
+        case "assistant":
+          if (item.tool_calls && item.tool_calls.length > 0) {
+            const content: Array<Record<string, unknown>> = [];
+            if (item.content) {
+              content.push({ type: "text", text: item.content });
+            }
+            for (const tc of item.tool_calls) {
+              content.push({
+                type: "tool_use",
+                id: tc.id,
+                name: tc.name,
+                input: tc.arguments,
+              });
+            }
+            messages.push({ role: "assistant", content });
+          } else {
+            messages.push({ role: "assistant", content: item.content || "" });
+          }
+          break;
+        case "tool":
+          // Anthropic tool results are sent as user messages with tool_result content blocks
+          messages.push({
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: item.tool_call_id,
+                content: typeof item.content === "string" ? item.content : JSON.stringify(item.content),
+              },
+            ],
+          });
+          break;
+      }
+    }
+
+    return { messages, systemMessages };
+  }
+
   async generateMessage<
     TContext = unknown,
     TStructured = AgentStructuredResponse
@@ -248,17 +310,35 @@ export class AnthropicProvider implements AiProvider {
       // Anthropic requires max_tokens to be specified
       const maxTokens = input.parameters?.maxOutputTokens || 4096;
 
+      // Build messages from history
+      const { messages: historyMessages, systemMessages } = this.buildAnthropicMessages(input.history);
+
+      // Append the current prompt as the final user message
+      historyMessages.push({
+        role: "user",
+        content: input.prompt,
+      });
+
       const params: MessageCreateParamsNonStreaming = {
         model,
         max_tokens: maxTokens,
-        messages: [
-          {
-            role: "user",
-            content: input.prompt,
-          },
-        ],
+        messages: historyMessages,
         ...this.config,
       };
+
+      // Set system messages from history if present
+      if (systemMessages.length > 0) {
+        if (typeof this.config?.system === "string") {
+          params.system = `${this.config.system}\n\n${systemMessages.join("\n\n")}`;
+        } else if (Array.isArray(this.config?.system)) {
+          params.system = [
+            ...this.config.system,
+            ...systemMessages.map(s => ({ type: "text" as const, text: s })),
+          ];
+        } else {
+          params.system = systemMessages.join("\n\n");
+        }
+      }
 
       // Add tools if provided
       if (input.tools && input.tools.length > 0) {
@@ -438,18 +518,36 @@ export class AnthropicProvider implements AiProvider {
     // Anthropic requires max_tokens to be specified
     const maxTokens = input.parameters?.maxOutputTokens || 4096;
 
+    // Build messages from history
+    const { messages: historyMessages, systemMessages } = this.buildAnthropicMessages(input.history);
+
+    // Append the current prompt as the final user message
+    historyMessages.push({
+      role: "user" as const,
+      content: input.prompt,
+    });
+
     const params = {
       model,
       max_tokens: maxTokens,
-      messages: [
-        {
-          role: "user" as const,
-          content: input.prompt,
-        },
-      ],
+      messages: historyMessages,
       stream: true,
       ...this.config,
     };
+
+    // Set system messages from history if present
+    if (systemMessages.length > 0) {
+      if (typeof this.config?.system === "string") {
+        params.system = `${this.config.system}\n\n${systemMessages.join("\n\n")}`;
+      } else if (Array.isArray(this.config?.system)) {
+        params.system = [
+          ...this.config.system,
+          ...systemMessages.map(s => ({ type: "text" as const, text: s })),
+        ];
+      } else {
+        params.system = systemMessages.join("\n\n");
+      }
+    }
 
     // Add tools if provided
     if (input.tools && input.tools.length > 0) {

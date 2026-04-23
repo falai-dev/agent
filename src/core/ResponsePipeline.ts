@@ -10,7 +10,7 @@ import type {
   Tool,
   RouteTransitionConfig,
 } from "../types";
-import { EventKind, MessageRole } from "../types/history";
+import type { HistoryItem } from "../types/history";
 import {
   createSession,
   enterRoute,
@@ -18,6 +18,7 @@ import {
   mergeCollected,
   logger,
   render,
+  historyToEvents,
 } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import { Route } from "../core/Route";
@@ -171,7 +172,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         };
       }
     }
-    
+
     // If no pending transition or transition handled, do normal routing
     if (routes.length > 0 && !selectedRoute) {
       const orchestration = await this.routingEngine.decideRouteAndStep({
@@ -242,7 +243,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         currentStep, // Pass current step instead of undefined to maintain progression
         createTemplateContext({ data: session.data, session, context: contextToUse })
       );
-      
+
       if (candidates.length > 0) {
         nextStep = candidates[0].step;
         logger.debug(
@@ -368,7 +369,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     selectedRoute?: Route<TContext, TData>;
     nextStep: Step<TContext, TData>;
     responsePrompt: string;
-    history: Event[];
+    history: HistoryItem[];
     context: TContext;
     session: SessionState<TData>;
     responseSchema: Record<string, unknown>;
@@ -400,31 +401,30 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       );
 
       // Add tool execution results to history so AI knows what happened
-      const toolResultsEvents: Event[] = [];
+      const toolResultItems: HistoryItem[] = [];
       for (const toolCall of currentToolCalls || []) {
         const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
         if (tool) {
-          toolResultsEvents.push({
-            kind: EventKind.TOOL,
-            source: MessageRole.AGENT,
-            timestamp: new Date().toISOString(),
-            data: {
-              tool_calls: [
-                {
-                  tool_id: toolCall.toolName,
-                  arguments: toolCall.arguments,
-                  result: {
-                    data: "Tool executed successfully",
-                  },
-                },
-              ],
-            },
+          toolResultItems.push({
+            role: "assistant" as const,
+            content: null,
+            tool_calls: [{
+              id: toolCall.toolName,
+              name: toolCall.toolName,
+              arguments: toolCall.arguments,
+            }],
+          });
+          toolResultItems.push({
+            role: "tool" as const,
+            tool_call_id: toolCall.toolName,
+            name: toolCall.toolName,
+            content: "Tool executed successfully",
           });
         }
       }
 
       // Create updated history with tool results
-      const updatedHistory = [...history, ...toolResultsEvents];
+      const updatedHistory = [...history, ...toolResultItems];
 
       // Make follow-up AI call to see if more tools are needed
       const followUpResult = await this.options.provider.generateMessage({
@@ -454,7 +454,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           selectedRoute,
           context,
           session: currentSession,
-          history: updatedHistory,
+          history: historyToEvents(updatedHistory),
           isStreaming,
         });
 

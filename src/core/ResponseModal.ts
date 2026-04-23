@@ -12,13 +12,11 @@ import type {
     HistoryItem,
     Tool,
     Event,
-    ToolEventData,
     AgentStructuredResponse,
     Term,
     StoppedReason,
     ToolCallRequest,
 } from "../types";
-import { EventKind, MessageRole } from "../types";
 import type { Agent } from "./Agent";
 import type { Route } from "./Route";
 import { Step } from "./Step";
@@ -26,7 +24,7 @@ import { ResponseEngine } from "./ResponseEngine";
 import { ResponsePipeline } from "./ResponsePipeline";
 import { BatchExecutor, type HookFunction } from "./BatchExecutor";
 import { BatchPromptBuilder } from "./BatchPromptBuilder";
-import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents } from "../utils";
+import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents, eventsToHistory } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
 import { END_ROUTE_ID } from "../constants";
@@ -669,12 +667,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             `Return ONLY the extracted data as JSON. If no data can be extracted, return an empty object {}.`
         );
 
+        // Convert Event[] to HistoryItem[] for provider call
+        const historyItems = eventsToHistory(history);
+
         // Call AI to extract data
         const agentOptions = this.agent.getAgentOptions();
         try {
             const result = await agentOptions.provider.generateMessage<TContext, Partial<TData>>({
                 prompt: extractionPrompt.join('\n'),
-                history,
+                history: historyItems,
                 context: {} as TContext, // Passed as empty object so AI doesn't "extract" from context
                 // NOTE: context is intentionally NOT passed here.
                 // Passing context caused the AI to "extract" data from the lead's context
@@ -716,7 +717,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // Get last user message (needed for both route and completion handling)
         // Convert HistoryItem[] to Event[] for internal processing
         const historyEvents = historyToEvents(history);
-        const lastMessageText = getLastMessageFromHistory(historyEvents);
 
         let message: string;
         let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
@@ -757,7 +757,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     session,
                     history,
                     context: effectiveContext,
-                    lastMessageText,
                     historyEvents,
                     signal: undefined,
                 });
@@ -785,7 +784,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     selectedRoute,
                     session,
                     context: effectiveContext,
-                    lastMessageText,
+                    history,
                     historyEvents,
                     signal: undefined,
                 });
@@ -806,7 +805,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Fallback: No routes defined, generate a simple response
 
             message = await this.generateFallbackResponse({
-                history: historyEvents, // Use Event[] for fallback response
+                history,
                 context: effectiveContext,
                 session,
             });
@@ -926,7 +925,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const result = await agentOptions.provider.generateMessage({
             prompt: batchPromptResult.prompt,
-            history: historyEvents,
+            history, // Use HistoryItem[] for AI provider
             context,
             tools: availableTools,
             signal,
@@ -1125,7 +1124,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // Get last user message (needed for both route and completion handling)
         // Convert HistoryItem[] to Event[] for internal processing
         const historyEvents = historyToEvents(history);
-        const lastMessageText = getLastMessageFromHistory(historyEvents);
 
         if (selectedRoute && !isRouteComplete) {
             // Check if we have batch steps to execute
@@ -1153,7 +1151,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     session,
                     history,
                     context: effectiveContext,
-                    lastMessageText,
                     historyEvents,
                 });
             }
@@ -1164,14 +1161,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 selectedRoute,
                 session,
                 context: effectiveContext,
-                lastMessageText,
+                history,
                 historyEvents,
             });
 
         } else {
             // Fallback: No routes defined, stream a simple response
             yield* this.streamFallbackResponse({
-                history: historyEvents, // Use Event[] for fallback response
+                history,
                 context: effectiveContext,
                 session,
             });
@@ -1196,7 +1193,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         batchStoppedReason?: StoppedReason;
         signal?: AbortSignal;
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { selectedRoute, batchSteps, context, historyEvents, batchStoppedReason, signal } = params;
+        const { selectedRoute, batchSteps, history, context, historyEvents, batchStoppedReason, signal } = params;
         let session = params.session;
 
         // Create hook executor function
@@ -1251,7 +1248,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const stream = agentOptions.provider.generateMessageStream({
             prompt: batchPromptResult.prompt,
-            history: historyEvents,
+            history, // Use HistoryItem[] for AI provider
             context,
             tools: availableTools,
             signal,
@@ -1380,17 +1377,16 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         selectedStep?: Step<TContext, TData>;
         responseDirectives?: string[];
         session: SessionState<TData>;
-        history: HistoryItem[]; // Keep as HistoryItem[] for AI provider compatibility
+        history: HistoryItem[];
         context: TContext;
-        lastMessageText: string; // String version for buildResponsePrompt
-        historyEvents: Event[]; // Event[] version for buildResponsePrompt
+        historyEvents: Event[];
         signal?: AbortSignal;
     }): Promise<{
         message: string;
         toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         session: SessionState<TData>;
     }> {
-        const { selectedRoute, selectedStep, responseDirectives, history, context, lastMessageText, historyEvents, signal } = params;
+        const { selectedRoute, selectedStep, responseDirectives, history, context, historyEvents, signal } = params;
         let session = params.session;
 
         // Determine next step
@@ -1466,8 +1462,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: responseDirectives,
-            history: historyEvents, // Use Event[] for buildResponsePrompt
-            lastMessage: lastMessageText, // Use string for buildResponsePrompt
+            history: historyEvents,
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -1483,7 +1478,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const result = await agentOptions.provider.generateMessage({
             prompt: responsePrompt,
-            history: historyEvents, // Use Event[] for AI provider
+            history, // Use HistoryItem[] for AI provider
             context,
             tools: availableTools,
             signal,
@@ -1538,11 +1533,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         session: SessionState<TData>;
         history: HistoryItem[];
         context: TContext;
-        lastMessageText: string; // String version for buildResponsePrompt
-        historyEvents: Event[]; // Event[] version for buildResponsePrompt
+        historyEvents: Event[];
         signal?: AbortSignal;
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { selectedRoute, selectedStep, responseDirectives, history, context, lastMessageText, historyEvents, signal } = params;
+        const { selectedRoute, selectedStep, responseDirectives, history, context, historyEvents, signal } = params;
         let session = params.session;
 
         // Determine next step (same logic as non-streaming)
@@ -1609,8 +1603,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: responseDirectives,
-            history: historyEvents, // Use Event[] for buildResponsePrompt
-            lastMessage: lastMessageText, // Use string for buildResponsePrompt
+            history: historyEvents,
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -1626,7 +1619,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const stream = agentOptions.provider.generateMessageStream({
             prompt: responsePrompt,
-            history: historyEvents, // Use Event[] for AI provider
+            history, // Use HistoryItem[] for AI provider
             context,
             tools: availableTools,
             signal,
@@ -1863,34 +1856,34 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 toolLoopCount++;
                 logger.debug(`[ResponseModal] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS} with ${toolCalls?.length || 0} tool calls`);
 
-                // Create tool result events with proper Event format structure
-                const toolResultEvents: Event<ToolEventData>[] = [];
+                // Create tool result history items
+                const toolResultHistoryItems: HistoryItem[] = [];
                 for (const toolCall of toolCalls || []) {
                     const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
                     if (tool) {
-                        // Create proper Event format for tool results
-                        const toolResultEvent: Event<ToolEventData> = {
-                            kind: EventKind.TOOL,
-                            source: MessageRole.AGENT,
-                            timestamp: new Date().toISOString(),
-                            data: {
-                                tool_calls: [
-                                    {
-                                        tool_id: toolCall.toolName,
-                                        arguments: toolCall.arguments,
-                                        result: {
-                                            data: "Tool executed successfully",
-                                        },
-                                    },
-                                ],
-                            },
-                        };
-                        toolResultEvents.push(toolResultEvent);
+                        // Create HistoryItem format for tool results
+                        // Add assistant message with tool_calls
+                        toolResultHistoryItems.push({
+                            role: "assistant" as const,
+                            content: null,
+                            tool_calls: [{
+                                id: toolCall.toolName,
+                                name: toolCall.toolName,
+                                arguments: toolCall.arguments,
+                            }],
+                        });
+                        // Add tool result
+                        toolResultHistoryItems.push({
+                            role: "tool" as const,
+                            tool_call_id: toolCall.toolName,
+                            name: toolCall.toolName,
+                            content: "Tool executed successfully",
+                        });
                     }
                 }
 
-                // Create updated history with tool results (combine Event arrays)
-                const updatedHistoryEvents = [...historyEvents, ...toolResultEvents];
+                // Create updated history with tool results
+                const updatedHistory = [...history, ...toolResultHistoryItems];
 
                 // Make follow-up AI call to see if more tools are needed
                 // After first iteration, don't provide tools to force a text response
@@ -1905,7 +1898,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                 const followUpResult = await agentOptions.provider.generateMessage({
                     prompt: responsePrompt + (toolLoopCount > 1 ? "\n\nProvide a text response to the user based on the tool results." : ""),
-                    history: updatedHistoryEvents, // Use Event[] for AI provider
+                    history: updatedHistory, // Use HistoryItem[] for AI provider
                     context,
                     tools: shouldProvideTools ? availableTools : [], // Only provide tools on first iteration
                     parameters: responseSchema ? {
@@ -1949,7 +1942,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                                     context,
                                     updateContext: this.agent.updateContext.bind(this.agent),
                                     updateData: this.agent.updateCollectedData.bind(this.agent),
-                                    history: updatedHistoryEvents, // Use Event[] for tool execution
+                                    history: historyToEvents(updatedHistory), // Convert to Event[] for tool execution
                                     data: session.data,
                                     toolArguments: toolCall.arguments,
                                 });
@@ -2121,11 +2114,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         selectedRoute: Route<TContext, TData>;
         session: SessionState<TData>;
         context: TContext;
-        lastMessageText: string; // String version for buildResponsePrompt
-        historyEvents: Event[]; // Event[] version for buildResponsePrompt
+        history: HistoryItem[];
+        historyEvents: Event[];
         signal?: AbortSignal;
     }): Promise<string> {
-        const { selectedRoute, session, context, lastMessageText, historyEvents, signal } = params;
+        const { selectedRoute, session, context, history, historyEvents, signal } = params;
 
         // Get endStep spec from route
         const endStepSpec = selectedRoute.endStepSpec;
@@ -2181,7 +2174,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 completitionPrompt,
             ],
             history: historyEvents,
-            lastMessage: lastMessageText,
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: alwaysActiveGuidelines, // Only non-conditional guidelines
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -2196,7 +2188,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         const completionResult = await agentOptions.provider.generateMessage({
             prompt: completionPrompt,
-            history: historyEvents,
+            history, // Use HistoryItem[] for AI provider
             context,
             signal,
             parameters: { jsonSchema: completionSchema, schemaName: "completion_message" },
@@ -2240,11 +2232,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         selectedRoute: Route<TContext, TData>;
         session: SessionState<TData>;
         context: TContext;
-        lastMessageText: string; // String version for buildResponsePrompt
-        historyEvents: Event[]; // Event[] version for buildResponsePrompt
+        history: HistoryItem[];
+        historyEvents: Event[];
         signal?: AbortSignal;
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { selectedRoute, context, lastMessageText, historyEvents, signal } = params;
+        const { selectedRoute, context, history, historyEvents, signal } = params;
         let session = params.session;
 
         // Get endStep spec from route
@@ -2270,8 +2262,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             rules: selectedRoute.getRules(),
             prohibitions: selectedRoute.getProhibitions(),
             directives: undefined, // No directives for completion
-            history: historyEvents, // Use Event[] for buildResponsePrompt
-            lastMessage: lastMessageText, // Use string for buildResponsePrompt
+            history: historyEvents,
             agentOptions: this.agent.getAgentOptions(),
             combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
             combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
@@ -2284,7 +2275,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const agentOptions = this.agent.getAgentOptions();
         const stream = agentOptions.provider.generateMessageStream({
             prompt: completionPrompt,
-            history: historyEvents, // Use Event[] for AI provider
+            history, // Use HistoryItem[] for AI provider
             context,
             signal,
             parameters: { jsonSchema: responseSchema, schemaName: "completion_message_stream" },
@@ -2353,7 +2344,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async generateFallbackResponse(params: {
-        history: Event[]; // Use Event[] for buildFallbackPrompt
+        history: HistoryItem[];
         context: TContext;
         session: SessionState<TData>;
         signal?: AbortSignal;
@@ -2364,7 +2355,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Build basic response prompt without route context
         const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
-            history,
             agentOptions: this.agent.getAgentOptions(),
             terms: this.agent.getTerms(),
             guidelines: this.agent.getGuidelines(),
@@ -2397,7 +2387,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async *streamFallbackResponse(params: {
-        history: Event[]; // Use Event[] for buildFallbackPrompt
+        history: HistoryItem[];
         context: TContext;
         session: SessionState<TData>;
         signal?: AbortSignal;
@@ -2405,7 +2395,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         const { history, context, session, signal } = params;
 
         const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
-            history,
             agentOptions: this.agent.getAgentOptions(),
             terms: this.agent.getTerms(),
             guidelines: this.agent.getGuidelines(),

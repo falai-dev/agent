@@ -15,6 +15,7 @@ import type {
   GenerateMessageStreamChunk,
   StructuredSchema,
 } from "../types";
+import type { HistoryItem } from "../types/history";
 import { withTimeoutAndRetry, logger } from "../utils";
 
 const DEFAULT_RETRY_CONFIG = {
@@ -172,6 +173,52 @@ export class OpenRouterProvider implements AiProvider {
   }
 
   /**
+   * Build OpenRouter-formatted messages from HistoryItem[] array.
+   * OpenRouter uses OpenAI-compatible format.
+   */
+  private buildOpenRouterMessages(history: HistoryItem[]): Array<unknown> {
+    const messages: Array<unknown> = [];
+
+    for (const item of history) {
+      switch (item.role) {
+        case "system":
+          messages.push({ role: "system", content: item.content });
+          break;
+        case "user":
+          messages.push({ role: "user", content: item.content });
+          break;
+        case "assistant":
+          if (item.tool_calls && item.tool_calls.length > 0) {
+            messages.push({
+              role: "assistant",
+              content: item.content || null,
+              tool_calls: item.tool_calls.map(tc => ({
+                id: tc.id,
+                type: "function",
+                function: {
+                  name: tc.name,
+                  arguments: JSON.stringify(tc.arguments),
+                },
+              })),
+            });
+          } else {
+            messages.push({ role: "assistant", content: item.content || "" });
+          }
+          break;
+        case "tool":
+          messages.push({
+            role: "tool",
+            tool_call_id: item.tool_call_id,
+            content: typeof item.content === "string" ? item.content : JSON.stringify(item.content),
+          });
+          break;
+      }
+    }
+
+    return messages;
+  }
+
+  /**
    * Adapt common schema format to OpenRouter's format.
    * OpenRouter is OpenAI-compatible and uses standard JSON Schema.
    *
@@ -272,14 +319,12 @@ export class OpenRouterProvider implements AiProvider {
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
     const operation = async (): Promise<GenerateMessageOutput> => {
+      const historyMessages = this.buildOpenRouterMessages(input.history);
+      historyMessages.push({ role: "user", content: input.prompt });
+
       const params: ChatCompletionCreateParamsNonStreaming = {
         model,
-        messages: [
-          {
-            role: "user",
-            content: input.prompt,
-          },
-        ],
+        messages: historyMessages as ChatCompletionCreateParamsNonStreaming["messages"],
         ...this.config,
       };
 
@@ -471,15 +516,13 @@ export class OpenRouterProvider implements AiProvider {
     model: string,
     input: GenerateMessageInput<TContext>
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
+    const historyMessages = this.buildOpenRouterMessages(input.history);
+    historyMessages.push({ role: "user" as const, content: input.prompt });
+
     const params = {
       ...this.config,
       model,
-      messages: [
-        {
-          role: "user" as const,
-          content: input.prompt,
-        },
-      ],
+      messages: historyMessages as ChatCompletionCreateParamsNonStreaming["messages"],
       stream: true as const,
     };
 

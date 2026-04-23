@@ -2,7 +2,7 @@
  * AI provider strategy types
  */
 
-import type { Event } from "./history";
+import type { HistoryItem } from "./history";
 
 /**
  * Reasoning/thinking configuration for AI models
@@ -36,7 +36,7 @@ export interface GenerateMessageInput<TContext = unknown> {
   /** The constructed prompt */
   prompt: string;
   /** Interaction history */
-  history: Event[];
+  history: HistoryItem[];
   /** Context data */
   context: TContext;
   /** Tools available for AI to call during this interaction */

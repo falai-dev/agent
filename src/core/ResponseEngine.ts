@@ -23,7 +23,6 @@ export interface BuildResponsePromptParams<
   prohibitions: Template<TContext, TData>[];
   directives: string[] | undefined;
   history: Event[];
-  lastMessage: string;
   agentOptions?: AgentOptions<TContext, TData>;
   // Combined properties from agent and route
   combinedGuidelines?: Guideline<TContext, TData>[];
@@ -35,7 +34,6 @@ export interface BuildResponsePromptParams<
 }
 
 export interface BuildFallbackPromptParams<TContext = unknown, TData = unknown> {
-  history: Event[];
   agentOptions: AgentOptions<TContext, TData>;
   terms: Term<TContext, TData>[];
   guidelines: Guideline<TContext, TData>[];
@@ -154,9 +152,6 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
     if (combinedTerms && combinedTerms.length > 0) {
       await pc.addGlossary(combinedTerms);
     }
-
-    // History is now passed natively via GenerateMessageInput.history
-    // instead of being embedded in the prompt string (Requirements 17.1, 17.2)
 
     // Add data collection instructions - include ALL route fields, not just current step
     // Collect all fields from route's required and optional fields
@@ -296,14 +291,12 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
   async buildFallbackPrompt(
     params: BuildFallbackPromptParams<TContext, TData>
   ): Promise<string> {
-    const { history, agentOptions, terms, guidelines, context, session } =
+    const { agentOptions, terms, guidelines, context, session } =
       params;
-    const templateContext = createTemplateContext({ context, session, history });
+    const templateContext = createTemplateContext({ context, session });
     const pc = new PromptComposer(templateContext, this.promptSectionCache);
 
     await pc.addAgentMeta(agentOptions);
-    // History is now passed natively via GenerateMessageInput.history
-    // instead of being embedded in the prompt string (Requirements 17.1, 17.2)
     await pc.addGlossary(terms);
     await pc.addGuidelines(guidelines);
     await pc.addKnowledgeBase(agentOptions.knowledgeBase);
