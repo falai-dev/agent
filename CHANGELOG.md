@@ -16,7 +16,7 @@ All notable changes to `@falai/agent` will be documented in this file.
 
 - **History removed from system prompt** — `addInteractionHistory()` and `addLastMessage()` are no longer called in `buildResponsePrompt()` and `buildFallbackPrompt()`. The `lastMessage` param is removed from `BuildResponsePromptParams`. History flows exclusively through the provider's native message format.
 
-- **`addInteractionHistory()` deprecated** — The method remains on `PromptComposer` for backward compatibility but is no longer used internally.
+- **`addInteractionHistory()` deprecated for response generation** — The method remains on `PromptComposer` because it's still used by `RoutingEngine` and `BatchPromptBuilder` for route/step selection prompts (single-shot classification calls where history belongs in the prompt). It is no longer used for main response generation.
 
 ## [1.2.0]
 
