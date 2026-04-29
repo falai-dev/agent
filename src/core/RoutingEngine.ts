@@ -144,7 +144,7 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     );
 
     // Enter route if needed (merges initialData, no-op if already entered)
-    let updatedSession = this.enterRouteIfNeeded(session, presetRoute);
+    const updatedSession = this.enterRouteIfNeeded(session, presetRoute);
 
     // Evaluate cross-route completions
     const completedRoutes = this.evaluateRouteCompletions(routes, updatedSession.data || {});
