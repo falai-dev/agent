@@ -146,6 +146,59 @@ const agent = new Agent<{}, BookingData>({
   sessionId: "user-123",
   // ... other config
 });
+```
+
+### Session Resume: Pre-Set Route and Step
+
+When a session is created (or restored from persistence) with `currentRoute` and optionally `currentStep` already set, the framework honors that position on the first interaction — as long as the conversation history contains **no user messages**.
+
+This is useful for:
+
+- **Resuming from persistence**: A session loaded from a database already has route/step state. The first system message picks up where it left off.
+- **Programmatic placement**: Starting a user at a specific point in the flow without AI routing.
+
+```typescript
+import { createSession } from "@falai/agent";
+
+// Create a session pre-positioned at a specific route and step
+const session = createSession<MyData>({
+  id: "user-456",
+  currentRoute: {
+    id: "onboarding_route",
+    title: "Onboarding",
+  },
+  currentStep: {
+    id: "ask_email",
+    description: "Collect user email",
+  },
+  data: { name: "Alice" }, // Pre-populated data
+});
+
+// First call with a system message — route/step are honored, no AI routing
+const response = await agent.respond({
+  history: [
+    { role: "system", content: "Resume the onboarding flow for this user." },
+  ],
+  session,
+});
+// → Agent stays on "Onboarding" route, "ask_email" step
+
+// If the first message is from a user, normal AI routing applies
+const response2 = await agent.respond({
+  history: [
+    { role: "user", content: "I need help with billing" },
+  ],
+  session,
+});
+// → AI evaluates intent and may switch to a different route
+```
+
+**Rules:**
+
+- If `currentRoute` is set and there are **no user messages** in history → pre-set route (and step) are honored
+- If `currentRoute` is set but there **is a user message** → normal AI routing runs (user intent takes priority)
+- If `currentStep` is set but not found in the route → falls back to resolving from the route's initial step
+- If `currentRoute` is set but not found among available routes → falls back to normal AI routing
 
 try {
   // Update agent data - automatically syncs with session

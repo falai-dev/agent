@@ -70,6 +70,8 @@ Routes are created using the agent's `createRoute()` method with required fields
 
 Routes are selected by the AI routing system based on user intent and conversation context, with access to all agent-level data.
 
+**Session resume**: If a session already has a `currentRoute` set and the conversation starts with no user messages (system-only or empty history), the pre-set route is honored without AI routing. This supports persistence-based resume and programmatic session placement. See [Session Management](../agent/session-management.md#session-resume-pre-set-route-and-step) for details.
+
 ### Route Completion
 
 Routes complete when all their required fields are present in the agent's collected data, regardless of which route collected the data. This enables flexible cross-route completion scenarios.

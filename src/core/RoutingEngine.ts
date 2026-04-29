@@ -6,6 +6,7 @@ import type {
   AiProvider,
   TemplateContext,
 } from "../types";
+import { MessageRole } from "../types";
 import { enterRoute, mergeCollected } from "../utils";
 import type { Route } from "./Route";
 import type { Step } from "./Step";
@@ -82,6 +83,148 @@ export interface BuildRoutingPromptParams<TContext = unknown, TData = unknown> {
 
 export class RoutingEngine<TContext = unknown, TData = unknown> {
   constructor(private readonly options?: RoutingEngineOptions) { }
+
+  /**
+   * Check whether the history contains any user messages.
+   * Used to detect "session resume" scenarios where a route/step was
+   * pre-set programmatically and the conversation starts with only
+   * system messages (or no messages at all).
+   * @private
+   */
+  private hasUserMessages(history: Event[]): boolean {
+    return history.some(
+      (event) => event.source === MessageRole.USER
+    );
+  }
+
+  /**
+   * Handle the "session resume" fast-path: when a session already has a
+   * pre-set currentRoute (and optionally currentStep) and the conversation
+   * history contains no user messages, honor the pre-set position instead
+   * of running AI route/step selection.
+   *
+   * Returns `undefined` when the fast-path does not apply.
+   * @private
+   */
+  private async handleSessionResume(params: {
+    routes: Route<TContext, TData>[];
+    session: SessionState<TData>;
+    history: Event[];
+    context: TContext;
+  }): Promise<{
+    selectedRoute?: Route<TContext, TData>;
+    selectedStep?: Step<TContext, TData>;
+    session: SessionState<TData>;
+    isRouteComplete?: boolean;
+    completedRoutes?: Route<TContext, TData>[];
+  } | undefined> {
+    const { routes, session, history, context } = params;
+
+    // Fast-path only applies when:
+    // 1. Session already has a currentRoute set
+    // 2. There are no user messages in the history (system-only or empty)
+    if (!session.currentRoute || this.hasUserMessages(history)) {
+      return undefined;
+    }
+
+    // Find the pre-set route among available routes
+    const presetRoute = routes.find(
+      (r) => r.id === session.currentRoute!.id
+    );
+
+    if (!presetRoute) {
+      logger.warn(
+        `[RoutingEngine] Session resume: pre-set route '${session.currentRoute.id}' not found among available routes, falling back to normal routing`
+      );
+      return undefined;
+    }
+
+    logger.debug(
+      `[RoutingEngine] Session resume: honoring pre-set route '${presetRoute.title}' (no user messages in history)`
+    );
+
+    // Enter route if needed (merges initialData, no-op if already entered)
+    let updatedSession = this.enterRouteIfNeeded(session, presetRoute);
+
+    // Evaluate cross-route completions
+    const completedRoutes = this.evaluateRouteCompletions(routes, updatedSession.data || {});
+
+    // If a currentStep is also pre-set, honor it — stay on that step
+    if (session.currentStep) {
+      const presetStep = presetRoute.getStep(session.currentStep.id);
+
+      if (presetStep) {
+        logger.debug(
+          `[RoutingEngine] Session resume: honoring pre-set step '${presetStep.id}'`
+        );
+        return {
+          selectedRoute: presetRoute,
+          selectedStep: presetStep,
+          session: updatedSession,
+          isRouteComplete: false,
+          completedRoutes,
+        };
+      }
+
+      logger.warn(
+        `[RoutingEngine] Session resume: pre-set step '${session.currentStep.id}' not found in route '${presetRoute.title}', resolving from initial step`
+      );
+    }
+
+    // No currentStep pre-set (or it wasn't found) — resolve from initialStep
+    // using the standard candidate logic (handles skipIf, etc.)
+    const templateContext = createTemplateContext({
+      context,
+      session: updatedSession,
+      history,
+      data: updatedSession.data,
+    });
+
+    const candidates = await this.getCandidateStepsWithConditions(
+      presetRoute,
+      undefined, // No current step — start from beginning
+      templateContext
+    );
+
+    if (candidates.length === 0) {
+      logger.warn(
+        `[RoutingEngine] Session resume: no valid steps found for route '${presetRoute.title}'`
+      );
+      return {
+        selectedRoute: presetRoute,
+        selectedStep: undefined,
+        session: updatedSession,
+        isRouteComplete: false,
+        completedRoutes,
+      };
+    }
+
+    const candidate = candidates[0];
+
+    if (candidate.isRouteComplete) {
+      logger.debug(
+        `[RoutingEngine] Session resume: route '${presetRoute.title}' is already complete`
+      );
+      return {
+        selectedRoute: presetRoute,
+        selectedStep: undefined,
+        session: updatedSession,
+        isRouteComplete: true,
+        completedRoutes,
+      };
+    }
+
+    logger.debug(
+      `[RoutingEngine] Session resume: resolved initial step '${candidate.step.id}'`
+    );
+    return {
+      selectedRoute: presetRoute,
+      selectedStep: candidate.step,
+      session: updatedSession,
+      isRouteComplete: false,
+      completedRoutes,
+    };
+  }
 
   /**
    * Enter a route if not already in it, merging initial data
@@ -541,6 +684,19 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
 
     if (routes.length === 0) {
       return { session };
+    }
+
+    // SESSION RESUME: If the session has a pre-set route and there are no user
+    // messages in the history, honor the pre-set position without AI routing.
+    // This supports programmatic session setup and persistence-based resume.
+    const resumeResult = await this.handleSessionResume({
+      routes,
+      session,
+      history,
+      context,
+    });
+    if (resumeResult) {
+      return resumeResult;
     }
 
     // CROSS-ROUTE COMPLETION EVALUATION: Check all routes for completion

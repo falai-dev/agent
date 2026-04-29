@@ -2,6 +2,16 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.2]
+
+### Added
+
+- **Session resume: honor pre-set route and step on first message** — When a session has a `currentRoute` (and optionally `currentStep`) already set and the conversation history contains no user messages (system-only or empty), the routing engine now skips AI route/step selection and honors the pre-set position. This supports two key scenarios:
+  - **Persistence-based resume**: A session loaded from storage already has route/step state; the first system message should pick up where it left off rather than re-routing.
+  - **Programmatic placement**: A developer creates a session with `createSession({ currentRoute: { id, title }, currentStep: { id } })` to start the user at a specific point in the flow.
+
+  If the first message is a user message, normal AI routing still applies — the user's intent takes priority over any pre-set state.
+
 ## [1.2.1]
 
 ### Fixed
