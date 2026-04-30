@@ -278,6 +278,11 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
             whenContextStrings.length > 0
               ? `\n\n  **Triggered when:** ${whenContextStrings.join(" OR ")}`
               : "";
+          const skipIfContextStrings = r.skipIf ? extractAIContextStrings(r.skipIf) : [];
+          const skipConditions =
+            skipIfContextStrings.length > 0
+              ? `\n\n  **Skip when:** ${skipIfContextStrings.join(" OR ")}`
+              : "";
           const desc = r.description
             ? `\n\n  **Description:** ${r.description}`
             : "";
@@ -296,8 +301,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
                 .map((x) => `  - ${x}`)
                 .join("\n  ")}`
               : "";
-          return `### Route ${i + 1}: ${r.title
-            }${desc}${conditions}${rulesInfo}${prohibitionsInfo}`;
+          return `### Route ${i + 1}: ${r.title} (ID: ${r.id})${desc}${conditions}${skipConditions}${rulesInfo}${prohibitionsInfo}`;
         })
       );
       return `## Available Routes\n\n${renderedRoutes.join("\n\n")}`;

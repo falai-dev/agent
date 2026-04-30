@@ -2,6 +2,15 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.3.0]
+
+### Fixed
+
+- **Aggressive route switching (Scheduling Route)**: Fixed an issue where the AI would aggressively switch to specific routes (like scheduling) even when not explicitly requested by the user. 
+  - **Route IDs in Prompt**: Route IDs and `skipIf` conditions are now explicitly shown in the prompt's `Available Routes` section alongside the route titles, removing ambiguity during the AI's route scoring phase.
+  - **Removed Global Condition Leak**: Fixed a prompt construction flaw where all `when` conditions from all eligible routes were combined into a single global list at the end of the routing prompt. Conditions are now properly scoped only to their respective routes, preventing the AI from misinterpreting a specific route's trigger condition as a global conversation objective.
+
+
 ## [1.2.2]
 
 ### Added

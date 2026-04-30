@@ -78,7 +78,6 @@ export interface BuildRoutingPromptParams<TContext = unknown, TData = unknown> {
   session?: SessionState<TData>;
   activeRouteSteps?: Step<TContext, TData>[];
   context?: TContext;
-  routeConditionContext?: string[]; // AI context strings from route conditions
 }
 
 export class RoutingEngine<TContext = unknown, TData = unknown> {
@@ -738,9 +737,6 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     const skipIfResult = await this.filterRoutesBySkipIf(routes, templateContext);
     const whenResult = await this.filterRoutesByWhen(skipIfResult.eligibleRoutes, templateContext);
 
-    // Collect all AI context strings from route conditions
-    const routeConditionContext = [...skipIfResult.aiContextStrings, ...whenResult.aiContextStrings];
-
     // Use filtered routes for further processing
     const eligibleRoutes = whenResult.eligibleRoutes;
 
@@ -807,7 +803,6 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       session,
       activeRouteSteps,
       context,
-      routeConditionContext, // Pass AI context strings from route conditions
     });
 
     const routingResult = await provider.generateMessage<
@@ -1337,7 +1332,6 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
       session,
       activeRouteSteps,
       context,
-      routeConditionContext,
     } = params;
     const templateContext = createTemplateContext({ context, session, history });
     const pc = new PromptComposer<TContext, TData>(templateContext, this.options?.promptSectionCache);
@@ -1465,18 +1459,6 @@ export class RoutingEngine<TContext = unknown, TData = unknown> {
     await pc.addLastMessage(lastMessage);
     await pc.addRoutingOverview(routes);
 
-    // Add route condition context if available
-    if (routeConditionContext && routeConditionContext.length > 0) {
-      await pc.addInstruction(
-        [
-          "",
-          "Additional routing context from route conditions:",
-          ...routeConditionContext.map(ctx => `- ${ctx}`),
-          "",
-          "Consider this context when scoring routes for relevance.",
-        ].join("\n")
-      );
-    }
     await pc.addInstruction(
       [
         "Scoring rules:",
