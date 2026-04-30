@@ -2,7 +2,7 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
-## [1.3.0]
+## [1.2.3]
 
 ### Fixed
 
