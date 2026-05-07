@@ -67,3 +67,6 @@ export {
 
 // JSON utilities
 export { parseJSONResponse, tryParseJSONResponse } from "./json";
+
+// Serialization utilities
+export { serializeToolResult } from "./serialize";

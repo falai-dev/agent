@@ -24,7 +24,7 @@ import { ResponseEngine } from "./ResponseEngine";
 import { ResponsePipeline } from "./ResponsePipeline";
 import { BatchExecutor, type HookFunction } from "./BatchExecutor";
 import { BatchPromptBuilder } from "./BatchPromptBuilder";
-import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents, eventsToHistory } from "../utils";
+import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents, eventsToHistory, serializeToolResult } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
 import { END_ROUTE_ID } from "../constants";
@@ -1812,7 +1812,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         }
 
                         // Store the actual tool result data for history
-                        toolResultsMap.set(toolCall.toolName, this.serializeToolResult(toolResult));
+                        toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
 
                         // Check if tool execution was successful
                         if (!toolResult.success) {
@@ -1983,7 +1983,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             }
 
                             // Store the follow-up tool result for potential next loop iteration
-                            toolResultsMap.set(toolCall.toolName, this.serializeToolResult(toolResult));
+                            toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
 
                             logger.debug(`[ResponseModal] Executed follow-up tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                         } catch (error) {
@@ -2483,24 +2483,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     // UTILITY METHODS - Helper methods for tool management and other utilities
     // ============================================================================
 
-    /**
-     * Serialize a tool execution result into a string for inclusion in conversation history.
-     * Ensures the AI receives actual tool output data rather than a static placeholder.
-     * @private
-     */
-    private serializeToolResult(result: { success: boolean; data?: unknown; error?: string }): string {
-        if (!result.success) {
-            return `Tool execution failed: ${result.error || 'Unknown error'}`;
-        }
-        if (result.data !== undefined && result.data !== null) {
-            try {
-                return typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-            } catch {
-                return String(result.data);
-            }
-        }
-        return 'Tool executed successfully';
-    }
 
     /**
      * Find an available tool by name for the given route using ToolManager
