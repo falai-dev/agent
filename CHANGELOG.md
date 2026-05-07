@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.4]
+
+### Fixed
+
+- **Tool result data discarded in tool loop**: The tool execution loop in both `ResponseModal` and `ResponsePipeline` was replacing actual tool result data with a static `"Tool executed successfully"` string when building conversation history for follow-up AI calls. The AI could never see what a tool actually returned, making it unable to reason about tool outputs or incorporate them into its responses. Tool results are now serialized from the `ToolExecutionResult.data` field and passed through as the tool message content in conversation history.
+
 ## [1.2.3]
 
 ### Fixed

@@ -46,6 +46,8 @@ export interface ToolExecutionResult<TData = unknown> {
   toolCalls:
   | Array<{ toolName: string; arguments: Record<string, unknown> }>
   | undefined;
+  /** Map of tool name to serialized result data for inclusion in conversation history */
+  toolResults?: Map<string, string>;
 }
 
 export interface DataCollectionResult<TData = unknown> {
@@ -303,6 +305,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       toolName: string;
       arguments: Record<string, unknown>;
     }> = [];
+    const toolResults = new Map<string, string>();
 
     for (const toolCall of toolCalls) {
       const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
@@ -328,6 +331,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       }
 
       executedToolCalls.push(toolCall);
+
+      // Store the actual tool result data for history
+      toolResults.set(toolCall.toolName, this.serializeToolResult(result));
 
       // Update context with tool results
       if (result.contextUpdate) {
@@ -356,6 +362,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     return {
       session: updatedSession,
       toolCalls: executedToolCalls.length > 0 ? executedToolCalls : undefined,
+      toolResults,
     };
   }
 
@@ -392,6 +399,8 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     let currentToolCalls = initialToolCalls;
     let hasToolCalls = currentToolCalls && currentToolCalls.length > 0;
     let currentSession = session;
+    // Track tool results across loop iterations for history
+    let currentToolResults = new Map<string, string>();
 
     while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
       toolLoopCount++;
@@ -418,7 +427,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
             role: "tool" as const,
             tool_call_id: toolCall.toolName,
             name: toolCall.toolName,
-            content: "Tool executed successfully",
+            content: currentToolResults.get(toolCall.toolName) || "Tool executed successfully",
           });
         }
       }
@@ -460,6 +469,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
         currentSession = toolResult.session;
         currentToolCalls = followUpToolCalls;
+        currentToolResults = toolResult.toolResults || new Map();
       } else {
         logger.debug(
           `[ResponseHandler] ${isStreaming ? "Streaming " : ""
@@ -610,6 +620,24 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     );
 
     return { session: updatedSession, hasTransition: false };
+  }
+
+  /**
+   * Serialize a tool execution result into a string for inclusion in conversation history.
+   * Ensures the AI receives actual tool output data rather than a static placeholder.
+   */
+  private serializeToolResult(result: { success: boolean; data?: unknown; error?: string }): string {
+    if (!result.success) {
+      return `Tool execution failed: ${result.error || 'Unknown error'}`;
+    }
+    if (result.data !== undefined && result.data !== null) {
+      try {
+        return typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+      } catch {
+        return String(result.data);
+      }
+    }
+    return 'Tool executed successfully';
   }
 
   /**

@@ -1777,6 +1777,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Convert HistoryItem[] to Event[] for internal processing
             const historyEvents = historyToEvents(history);
 
+            // Map to store tool execution results for history
+            const toolResultsMap = new Map<string, string>();
+
             // Execute initial dynamic tool calls
             if (toolCalls && toolCalls.length > 0) {
                 logger.debug(`[ResponseModal] Executing ${toolCalls.length} dynamic tool calls:`, toolCalls.map(tc => tc.toolName));
@@ -1807,6 +1810,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             // Fallback: execute tool directly if ToolManager not available
                             throw new Error(`ToolManager not available for tool execution: ${toolCall.toolName}`);
                         }
+
+                        // Store the actual tool result data for history
+                        toolResultsMap.set(toolCall.toolName, this.serializeToolResult(toolResult));
 
                         // Check if tool execution was successful
                         if (!toolResult.success) {
@@ -1877,7 +1883,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             role: "tool" as const,
                             tool_call_id: toolCall.toolName,
                             name: toolCall.toolName,
-                            content: "Tool executed successfully",
+                            content: toolResultsMap.get(toolCall.toolName) || "Tool executed successfully",
                         });
                     }
                 }
@@ -1975,6 +1981,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                                     logger.error(`[ResponseModal] Failed to update data from follow-up tool ${toolCall.toolName}:`, error);
                                 }
                             }
+
+                            // Store the follow-up tool result for potential next loop iteration
+                            toolResultsMap.set(toolCall.toolName, this.serializeToolResult(toolResult));
 
                             logger.debug(`[ResponseModal] Executed follow-up tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                         } catch (error) {
@@ -2473,6 +2482,25 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     // ============================================================================
     // UTILITY METHODS - Helper methods for tool management and other utilities
     // ============================================================================
+
+    /**
+     * Serialize a tool execution result into a string for inclusion in conversation history.
+     * Ensures the AI receives actual tool output data rather than a static placeholder.
+     * @private
+     */
+    private serializeToolResult(result: { success: boolean; data?: unknown; error?: string }): string {
+        if (!result.success) {
+            return `Tool execution failed: ${result.error || 'Unknown error'}`;
+        }
+        if (result.data !== undefined && result.data !== null) {
+            try {
+                return typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+            } catch {
+                return String(result.data);
+            }
+        }
+        return 'Tool executed successfully';
+    }
 
     /**
      * Find an available tool by name for the given route using ToolManager
