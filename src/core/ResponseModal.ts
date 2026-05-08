@@ -139,6 +139,8 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
     batchStoppedReason?: StoppedReason;
     /** Step that caused batch to stop (if applicable) */
     batchStoppedAtStep?: StepOptions<TContext, TData>;
+    /** AbortSignal for cancellation propagation */
+    signal?: AbortSignal;
 }
 
 /**
@@ -260,18 +262,26 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         // Stream response using existing respondStream method
         let finalMessage = "";
+        let finalizedSession: SessionState<TData> | undefined;
         for await (const chunk of this.respondStream({
             history,
             session,
             contextOverride: options?.contextOverride,
             signal: options?.signal,
         })) {
-            // Accumulate the final message for session history
+            // Accumulate the final message and capture finalized session
             if (chunk.done) {
                 finalMessage = chunk.accumulated;
+                finalizedSession = chunk.session;
             }
 
             yield chunk;
+        }
+
+        // Sync finalized session to agent.session.current (skip in override-history mode)
+        // Must happen BEFORE addMessage so the assistant message is added on top of the synced session state
+        if (!options?.history && finalizedSession) {
+            this.agent.session.syncSession(finalizedSession);
         }
 
         // Add agent response to session history (only if not using override history)
@@ -319,6 +329,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             contextOverride: options?.contextOverride,
             signal: options?.signal,
         });
+
+        // Sync finalized session to agent.session.current (skip in override-history mode)
+        // Must happen BEFORE addMessage so the assistant message is added on top of the synced session state
+        if (!options?.history && result.session) {
+            this.agent.session.syncSession(result.session);
+        }
 
         // Add agent response to session history (only if not using override history)
         if (!options?.history) {
@@ -469,6 +485,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 batchSteps: routingResult.batchSteps,
                 batchStoppedReason: routingResult.batchStoppedReason,
                 batchStoppedAtStep: routingResult.batchStoppedAtStep,
+                signal,
             };
         } catch (error) {
             // Re-throw ResponseGenerationError as-is, wrap others
@@ -711,6 +728,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             isRouteComplete,
             batchSteps,
             batchStoppedReason,
+            signal,
         } = responseContext;
         let session = initialSession;
 
@@ -758,7 +776,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     history,
                     context: effectiveContext,
                     historyEvents,
-                    signal: undefined,
+                    signal,
                 });
 
                 message = result.message;
@@ -786,7 +804,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     context: effectiveContext,
                     history,
                     historyEvents,
-                    signal: undefined,
+                    signal,
                 });
 
                 // Set step to END_ROUTE marker
@@ -1517,7 +1535,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         }
 
         // Collect data from response
-        session = await this.collectDataFromResponse({ result, selectedRoute, nextStep, session });
+        // Use follow-up structured data from tool loop when available, fall back to original result
+        const dataSource = toolResult.structured
+            ? { structured: toolResult.structured }
+            : result;
+        session = await this.collectDataFromResponse({ result: dataSource, selectedRoute, nextStep, session });
 
         return { message, toolCalls, session };
     }
@@ -1769,6 +1791,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         session: SessionState<TData>;
         finalToolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         finalMessage?: string;
+        structured?: AgentStructuredResponse;
     }> {
         try {
             const { context, history, selectedRoute, responsePrompt, availableTools, responseSchema, signal } = params;
@@ -1857,6 +1880,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             let toolLoopCount = 0;
             let hasToolCalls = toolCalls && toolCalls.length > 0;
             let finalMessage: string | undefined;
+            let followUpStructured: AgentStructuredResponse | undefined;
 
             while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
                 toolLoopCount++;
@@ -1998,6 +2022,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     logger.debug(`[ResponseModal] Tool loop completed after ${toolLoopCount} iterations`);
                     // Update final message and toolCalls from follow-up result if no more tools
                     finalMessage = followUpResult.structured?.message || followUpResult.message;
+                    followUpStructured = followUpResult.structured;
                     toolCalls = followUpToolCalls || [];
                     break;
                 }
@@ -2018,6 +2043,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session,
                 finalToolCalls: toolCalls,
                 finalMessage,
+                structured: followUpStructured,
             };
         } catch (error) {
             throw ResponseGenerationError.fromError(error, 'tool_execution', params, {

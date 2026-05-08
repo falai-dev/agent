@@ -792,10 +792,11 @@ describe("Route Data Collection and Validation", () => {
       optionalFields: ["customerName", "email"],
     });
 
-    // Route with no required fields should always be complete
-    expect(route.isComplete({})).toBe(true);
+    // Route with only optional fields (no required fields) is NOT complete based on data
+    // Optional-only routes can only complete via END_ROUTE or explicit route flow
+    expect(route.isComplete({})).toBe(false);
     expect(route.getMissingRequiredFields({})).toEqual([]);
-    expect(route.getCompletionProgress({})).toBe(1);
+    expect(route.getCompletionProgress({})).toBe(0);
   });
 });
 

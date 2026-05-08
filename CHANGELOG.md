@@ -2,6 +2,18 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.5]
+
+### Fixed
+
+- **Session state not synced after `stream()`/`generate()` completion**: The modern APIs (`chat()`, `stream()`, `generate()`) completed without writing the finalized session (route, step, data) back to `agent.session.current`, causing route progress to be lost between turns. Added `syncSession()` to `SessionManager` and explicit sync calls in `stream()` and `generate()` after completion.
+
+- **AbortSignal not propagated to sub-calls**: `generateUnifiedResponse()` passed `signal: undefined` to both `processRouteResponse()` and `handleRouteCompletion()`, preventing cancellation from reaching the AI provider. The caller's signal is now forwarded correctly.
+
+- **Tool follow-up structured data discarded**: `executeUnifiedToolLoop()` did not return `followUpResult.structured`, and `processRouteResponse()` passed the original (pre-tool) response to `collectDataFromResponse()` instead of the follow-up. The tool loop now returns structured data, and `processRouteResponse()` uses it when available.
+
+- **Optional-only routes incorrectly marked as complete**: Routes with only `optionalFields` (no `requiredFields`) had `isComplete()` returning `true` and `getCompletionProgress()` returning `1.0`, making them unselectable by the routing engine. They now correctly return `false`/`0` and can only complete via `END_ROUTE`.
+
 ## [1.2.4]
 
 ### Fixed

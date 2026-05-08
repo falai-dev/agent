@@ -299,6 +299,18 @@ export class SessionManager<TData = unknown> {
   }
 
   /**
+   * Sync the session state without triggering persistence save.
+   * Used by modern APIs (stream, generate, chat) to push the finalized session
+   * back to `currentSession` after completion. Persistence is handled separately
+   * by `finalizeSession()`.
+   *
+   * @internal Called from ResponseModal after stream()/generate() completion
+   */
+  syncSession(session: SessionState<TData>): void {
+    this.currentSession = session;
+  }
+
+  /**
    * Get the persistence manager (for testing purposes)
    */
   getPersistenceManager(): PersistenceManager<TData> | undefined {

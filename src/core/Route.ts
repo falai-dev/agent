@@ -567,9 +567,8 @@ export class Route<TContext = unknown, TData = unknown> {
    * @param data - Currently collected agent-level data
    * @returns true if all required fields are present, false otherwise
    * 
-   * Note: Routes with no requiredFields AND no optionalFields are never complete
-   * based on data (they complete via END_ROUTE). Routes with only optionalFields
-   * are always complete (optional data doesn't block completion).
+   * Note: Routes with no requiredFields (whether they have optionalFields or not)
+   * are never complete based on data — they can only complete via END_ROUTE.
    */
   isComplete(data: Partial<TData>): boolean {
     // If route has required fields, check if they're all collected
@@ -580,9 +579,10 @@ export class Route<TContext = unknown, TData = unknown> {
       });
     }
 
-    // If route has optional fields but no required fields, it's always complete
+    // If route has optional fields but no required fields, it's NOT complete
+    // Optional-only routes can only complete via END_ROUTE
     if (this.optionalFields && this.optionalFields.length > 0) {
-      return true;
+      return false;
     }
 
     // No required or optional fields - route doesn't complete based on data
@@ -623,9 +623,10 @@ export class Route<TContext = unknown, TData = unknown> {
       return completedFields.length / this.requiredFields.length;
     }
 
-    // If route has optional fields but no required fields, it's always complete
+    // If route has optional fields but no required fields, it's NOT complete
+    // Optional-only routes can only complete via END_ROUTE, progress is 0
     if (this.optionalFields && this.optionalFields.length > 0) {
-      return 1;
+      return 0;
     }
 
     // No required or optional fields - route doesn't complete based on data
