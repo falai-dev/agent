@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.7]
+
+### Fixed
+
+- **Tool loop retry used stale `toolCalls` reference for history**: The fallback LLM call added in 1.2.6 iterated `toolCalls` to build tool-result history, but `toolCalls` had already been reassigned to the empty follow-up array when the while loop broke. The retry call received no tool context, so the LLM couldn't reason about what the tools returned. Now uses `toolResultsMap` directly — which accumulates all tool executions throughout the loop — to build the history for the retry call.
+
 ## [1.2.6]
 
 ### Fixed

@@ -803,10 +803,19 @@ describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
         }
 
         // Third call (retry from our fix): return proper text response
-        return {
-          message: "Here is the information you requested based on the tool results.",
-          structured: {
+        // Verify that tool results are present in the history
+        if (input.history.some(h => h.role === "tool")) {
+          return {
             message: "Here is the information you requested based on the tool results.",
+            structured: {
+              message: "Here is the information you requested based on the tool results.",
+            } as any,
+          };
+        }
+        return {
+          message: "No tool results were provided.",
+          structured: {
+            message: "No tool results were provided.",
           } as any,
         };
       }
@@ -856,15 +865,15 @@ describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
           id: "lookup_step",
           prompt: "I'll look that up for you.",
           collect: ["issue"],
-          tools: [
-            {
-              id: "lookup_info",
-              name: "lookup_info",
-              description: "Looks up information",
-              parameters: { type: "object", properties: { query: { type: "string" } } },
-              handler: async () => ({ success: true, data: { result: "Found info" } }),
-            },
-          ],
+        },
+      ],
+      tools: [
+        {
+          id: "lookup_info",
+          name: "lookup_info",
+          description: "Looks up information",
+          parameters: { type: "object", properties: { query: { type: "string" } } },
+          handler: async () => ({ success: true, data: { result: "Found info about your query" } }),
         },
       ],
     });

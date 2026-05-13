@@ -2039,23 +2039,26 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             if (!finalMessage && toolLoopCount > 0) {
                 logger.debug(`[ResponseModal] No final message after tool loop, making additional LLM call for text response`);
 
-                // Build tool result history for the final call
+                // Build tool result history from toolResultsMap which contains ALL
+                // tool executions (initial + follow-up). We can't use `toolCalls` here
+                // because it was reassigned to the (empty) follow-up tool calls when
+                // the while loop broke out.
                 const finalToolResultHistoryItems: HistoryItem[] = [];
-                for (const toolCall of toolCalls || []) {
+                for (const [toolName, toolResult] of toolResultsMap) {
                     finalToolResultHistoryItems.push({
                         role: "assistant" as const,
                         content: null,
                         tool_calls: [{
-                            id: toolCall.toolName,
-                            name: toolCall.toolName,
-                            arguments: toolCall.arguments,
+                            id: toolName,
+                            name: toolName,
+                            arguments: {},
                         }],
                     });
                     finalToolResultHistoryItems.push({
                         role: "tool" as const,
-                        tool_call_id: toolCall.toolName,
-                        name: toolCall.toolName,
-                        content: toolResultsMap.get(toolCall.toolName) || "Tool executed successfully",
+                        tool_call_id: toolName,
+                        name: toolName,
+                        content: toolResult,
                     });
                 }
 
