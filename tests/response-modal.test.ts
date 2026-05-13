@@ -60,7 +60,7 @@ function createTestAgent(provider?: MockProvider): Agent<TestContext, TestData> 
 
 function createTestAgentWithRoute(provider?: MockProvider): Agent<TestContext, TestData> {
   const agent = createTestAgent(provider);
-  
+
   // Add a test route
   agent.createRoute({
     title: "Support Request",
@@ -104,7 +104,7 @@ describe("ResponseModal Core Functionality", () => {
   test("should have access to agent dependencies", () => {
     const responseEngine = responseModal.getResponseEngine();
     const responsePipeline = responseModal.getResponsePipeline();
-    
+
     expect(responseEngine).toBeDefined();
     expect(responsePipeline).toBeDefined();
   });
@@ -173,7 +173,7 @@ describe("ResponseModal.respond() Method", () => {
   test("should handle route-based responses", async () => {
     const agentWithRoute = createTestAgentWithRoute();
     const responseModalWithRoute = new ResponseModal(agentWithRoute);
-    
+
     const session = createSession<TestData>();
     const history = [
       {
@@ -474,7 +474,7 @@ describe("ResponseModal.stream() Method - Modern API", () => {
     }
 
     expect(chunks.length).toBeGreaterThan(0);
-    
+
     // Session history should not be modified when using custom history
     const sessionHistory = agent.session.getHistory();
     expect(sessionHistory.length).toBe(0); // No messages added to session
@@ -516,7 +516,7 @@ describe("ResponseModal.generate() Method - Modern API", () => {
     const response = await responseModal.generate("Test message");
 
     expect(response.session).toBeDefined();
-    
+
     // Check that message was added to session history
     const history = agent.session.getHistory();
     expect(history.length).toBeGreaterThanOrEqual(2); // User message + assistant response
@@ -560,7 +560,7 @@ describe("ResponseModal.generate() Method - Modern API", () => {
 
     expect(response).toBeDefined();
     expect(response.message).toBe(MOCK_RESPONSES.GREETING);
-    
+
     // Session history should not be modified when using custom history
     const sessionHistory = agent.session.getHistory();
     expect(sessionHistory.length).toBe(0); // No messages added to session
@@ -584,7 +584,7 @@ describe("ResponseModal.generate() Method - Modern API", () => {
 
     expect(response).toBeDefined();
     expect(response.session).toBeDefined();
-    
+
     // Check that collected data was merged
     const collectedData = agent.getCollectedData();
     expect(collectedData.name).toBe("John Doe");
@@ -604,7 +604,7 @@ describe("ResponseModal Error Handling", () => {
   test("should create ResponseGenerationError with details", () => {
     const originalError = new Error("Original error");
     const params = { history: [] };
-    
+
     const error = new ResponseGenerationError("Test error", {
       originalError,
       params,
@@ -686,7 +686,7 @@ describe("ResponseModal Integration with Agent Features", () => {
 
     expect(response).toBeDefined();
     expect(response.session).toBeDefined();
-    
+
     // Check that data is preserved
     const collectedData = agent.getCollectedData();
     expect(collectedData.issue).toBe("Login problem");
@@ -697,7 +697,7 @@ describe("ResponseModal Integration with Agent Features", () => {
     const responseModal = new ResponseModal(agent);
 
     // Complete the route by providing all required data
-    await agent.updateCollectedData({ 
+    await agent.updateCollectedData({
       issue: "Login problem",
       priority: "high" as const,
     });
@@ -723,5 +723,158 @@ describe("ResponseModal Integration with Agent Features", () => {
     // Check history
     const history = agent.session.getHistory();
     expect(history.length).toBe(4); // 2 user + 2 assistant messages
+  });
+});
+
+describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
+  /**
+   * Stateful mock provider that simulates the bug scenario:
+   * - Route selection: returns routing scores
+   * - Step selection: returns first step
+   * - Pre-extraction: returns empty (no data to extract)
+   * - Response generation: returns tool calls with a "Let me check..." message
+   * - Tool follow-up: returns EMPTY message (the bug trigger)
+   * - Retry (from fix): returns proper text response
+   */
+  class ToolLoopEmptyMessageProvider implements import("../src/types/ai").AiProvider {
+    readonly name = "ToolLoopEmptyMessageProvider";
+    private responseCallCount = 0;
+
+    async generateMessage<TContext = unknown, TStructured = import("../src/types/ai").AgentStructuredResponse>(
+      input: import("../src/types/ai").GenerateMessageInput<TContext>
+    ): Promise<import("../src/types/ai").GenerateMessageOutput<TStructured>> {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      const schemaName = input.parameters?.schemaName || "";
+      const schema = input.parameters?.jsonSchema as any;
+
+      // Route selection call - return routing scores
+      if (schema?.properties?.routes?.properties) {
+        const routeIds = Object.keys(schema.properties.routes.properties);
+        const routes: Record<string, number> = {};
+        routeIds.forEach((routeId, index) => {
+          routes[routeId] = 90 - index * 10;
+        });
+        return {
+          message: "",
+          structured: { context: "User needs tool help", routes, responseDirectives: [] } as any,
+        };
+      }
+
+      // Step selection call
+      if (schema?.properties?.selectedStepId) {
+        const stepIds = schema.properties.selectedStepId.enum || [];
+        return {
+          message: "",
+          structured: { reasoning: "First step", selectedStepId: stepIds[0] } as any,
+        };
+      }
+
+      // Data extraction call - return empty (no data to extract from message)
+      if (schemaName.includes("extraction") || schemaName.includes("data")) {
+        return {
+          message: "",
+          structured: {} as any,
+        };
+      }
+
+      // Response generation calls (message schema) - track calls to simulate the bug
+      if (schema?.properties?.message || schemaName.includes("response")) {
+        this.responseCallCount++;
+
+        // First response call: return tool calls with a placeholder message
+        if (this.responseCallCount === 1) {
+          return {
+            message: "Deixe-me verificar isso para você...",
+            structured: {
+              message: "Deixe-me verificar isso para você...",
+              toolCalls: [{ toolName: "lookup_info", arguments: { query: "test" } }],
+            } as any,
+          };
+        }
+
+        // Second call (follow-up after tool execution): return EMPTY message
+        // This is the bug scenario - the LLM returns nothing useful
+        if (this.responseCallCount === 2) {
+          return {
+            message: "",
+            structured: { message: "" } as any,
+          };
+        }
+
+        // Third call (retry from our fix): return proper text response
+        return {
+          message: "Here is the information you requested based on the tool results.",
+          structured: {
+            message: "Here is the information you requested based on the tool results.",
+          } as any,
+        };
+      }
+
+      // Default fallback
+      return {
+        message: "Default response",
+        structured: { message: "Default response" } as any,
+      };
+    }
+
+    async *generateMessageStream<TContext = unknown, TStructured = import("../src/types/ai").AgentStructuredResponse>(
+      _input: import("../src/types/ai").GenerateMessageInput<TContext>
+    ): AsyncGenerator<import("../src/types/ai").GenerateMessageStreamChunk<TStructured>> {
+      yield { delta: "stream", accumulated: "stream", done: true };
+    }
+  }
+
+  test("should not return tool-invocation message when follow-up LLM call returns empty", async () => {
+    const provider = new ToolLoopEmptyMessageProvider();
+
+    const agent = new Agent<TestContext, TestData>({
+      name: "ToolLoopTestAgent",
+      description: "Tests tool loop empty message handling",
+      goal: "Verify the agent retries when follow-up returns empty",
+      context: { userId: "test-user", sessionCount: 0 },
+      provider,
+      schema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          email: { type: "string" },
+          issue: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+    });
+
+    // Add a route with a tool so the tool loop path is exercised
+    agent.createRoute({
+      title: "Lookup Route",
+      description: "Route that uses tools",
+      when: ["User asks to look something up"],
+      requiredFields: ["issue"],
+      steps: [
+        {
+          id: "lookup_step",
+          prompt: "I'll look that up for you.",
+          collect: ["issue"],
+          tools: [
+            {
+              id: "lookup_info",
+              name: "lookup_info",
+              description: "Looks up information",
+              parameters: { type: "object", properties: { query: { type: "string" } } },
+              handler: async () => ({ success: true, data: { result: "Found info" } }),
+            },
+          ],
+        },
+      ],
+    });
+
+    const responseModal = new ResponseModal(agent);
+    const response = await responseModal.generate("Look up something for me");
+
+    // The key assertion: the response should NOT be the tool-invocation placeholder
+    expect(response.message).not.toBe("Deixe-me verificar isso para você...");
+    // It should be the proper text response from the retry call
+    expect(response.message).toBe("Here is the information you requested based on the tool results.");
   });
 });

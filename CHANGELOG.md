@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.6]
+
+### Fixed
+
+- **Tool loop returns placeholder message when follow-up LLM call is empty**: After `executeUnifiedToolLoop` executed tools successfully, the follow-up LLM call could return an empty or undefined message. Because `processRouteResponse` only overwrites the original message when `toolResult.finalMessage` is truthy, the initial tool-invocation placeholder (e.g. "Deixe-me verificar...") was sent to the user as the final response — making it look like the agent hung. The tool loop now detects this case and makes one additional LLM call with no tools available, forcing a proper text response from the tool results.
+
 ## [1.2.5]
 
 ### Fixed

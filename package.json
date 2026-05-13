@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -60,8 +60,9 @@
   "keywords": [
     "ai",
     "agent",
+    "agentic",
     "typescript",
-    "conversational-ai",
+    "conversational",
     "gemini",
     "llm",
     "chatbot",

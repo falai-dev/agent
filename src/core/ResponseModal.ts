@@ -2032,6 +2032,64 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 logger.warn(`[ResponseModal] Tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`);
             }
 
+            // If tools were executed but no final text message was produced,
+            // make one more LLM call to generate a proper text response from tool results.
+            // This prevents the original tool-invocation message (e.g. "Let me check...")
+            // from being returned as the final user-facing response.
+            if (!finalMessage && toolLoopCount > 0) {
+                logger.debug(`[ResponseModal] No final message after tool loop, making additional LLM call for text response`);
+
+                // Build tool result history for the final call
+                const finalToolResultHistoryItems: HistoryItem[] = [];
+                for (const toolCall of toolCalls || []) {
+                    finalToolResultHistoryItems.push({
+                        role: "assistant" as const,
+                        content: null,
+                        tool_calls: [{
+                            id: toolCall.toolName,
+                            name: toolCall.toolName,
+                            arguments: toolCall.arguments,
+                        }],
+                    });
+                    finalToolResultHistoryItems.push({
+                        role: "tool" as const,
+                        tool_call_id: toolCall.toolName,
+                        name: toolCall.toolName,
+                        content: toolResultsMap.get(toolCall.toolName) || "Tool executed successfully",
+                    });
+                }
+
+                const finalHistory = [...history, ...finalToolResultHistoryItems];
+                const agentOptions = this.agent.getAgentOptions();
+
+                try {
+                    const textResult = await agentOptions.provider.generateMessage({
+                        prompt: responsePrompt + "\n\nProvide a text response to the user based on the tool results. Do not call any tools.",
+                        history: finalHistory,
+                        context,
+                        tools: [], // No tools - force text response
+                        parameters: responseSchema ? {
+                            jsonSchema: responseSchema,
+                            schemaName: "tool_final_text",
+                        } : undefined,
+                        signal,
+                    });
+
+                    finalMessage = textResult.structured?.message || textResult.message;
+                    if (textResult.structured) {
+                        followUpStructured = textResult.structured;
+                    }
+
+                    logger.debug(`[ResponseModal] Generated final text response after tool loop:`, {
+                        hasMessage: !!finalMessage,
+                        messageLength: finalMessage?.length || 0,
+                    });
+                } catch (error) {
+                    logger.error(`[ResponseModal] Failed to generate final text response after tool loop:`, error);
+                    // finalMessage remains undefined; caller will use original message as fallback
+                }
+            }
+
             logger.debug(`[ResponseModal] Tool loop completed:`, {
                 totalIterations: toolLoopCount,
                 hasFinalMessage: !!finalMessage,
