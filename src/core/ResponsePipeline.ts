@@ -261,6 +261,28 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       }
     }
 
+    // Before entering the step, check if requires fields are satisfied
+    if (nextStep.requires && nextStep.requires.length > 0) {
+      const sessionData = session.data || {};
+      const missingRequires = nextStep.requires.filter(
+        field => (sessionData as Record<string, unknown>)[String(field)] === undefined
+      );
+      if (missingRequires.length > 0) {
+        logger.debug(
+          `[ResponseHandler] Cannot enter step "${nextStep.id}": missing required fields [${missingRequires.join(', ')}]. Staying at current step.`
+        );
+        // Stay at current step - don't enter the next one
+        const currentStepId = session.currentStep?.id;
+        if (currentStepId && selectedRoute) {
+          const currentStepInstance = selectedRoute.getStep(currentStepId);
+          if (currentStepInstance) {
+            nextStep = currentStepInstance;
+          }
+        }
+        return { nextStep, session };
+      }
+    }
+
     // Update session with next step
     const updatedSession = enterStep(
       session,

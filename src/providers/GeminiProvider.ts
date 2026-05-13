@@ -231,24 +231,26 @@ export class GeminiProvider implements AiProvider {
 
   /**
    * Safely extract text from a Gemini response or chunk.
-   * The `.text` getter can throw when the response contains only function calls
-   * (observed in some SDK versions). This method falls back to manually
-   * extracting text parts from candidates.
+   * Bypasses the SDK's `.text` getter entirely to avoid warnings about
+   * non-text parts (e.g., "thoughtSignature") in the response.
+   * Manually concatenates only text parts from candidates.
    *
    * @private
    */
   private safeExtractText(responseOrChunk: { text?: string; candidates?: Array<{ content?: { parts?: Array<{ text?: string; functionCall?: unknown }> } }> }): string {
+    // Always extract text parts manually to avoid SDK warnings about
+    // non-text parts like "thoughtSignature" in the response.
+    const parts = responseOrChunk.candidates?.[0]?.content?.parts;
+    if (parts) {
+      return parts
+        .filter((p) => p.text != null)
+        .map((p) => p.text)
+        .join("");
+    }
+    // Fallback: try the .text getter if no candidates structure exists
     try {
       return responseOrChunk.text || "";
     } catch {
-      // .text getter threw — extract text parts manually
-      const parts = responseOrChunk.candidates?.[0]?.content?.parts;
-      if (parts) {
-        return parts
-          .filter((p) => p.text != null)
-          .map((p) => p.text)
-          .join("");
-      }
       return "";
     }
   }
@@ -534,16 +536,16 @@ export class GeminiProvider implements AiProvider {
         }
       }
 
+      // Safely extract text — avoids SDK warning about non-text parts
+      const message = this.safeExtractText(response);
+
       // Debug logging for response structure
-      if (!response.text && toolCalls.length === 0) {
+      if (!message && toolCalls.length === 0) {
         logger.debug(`[GeminiProvider] Debug - Response structure:`, {
           candidatesCount: response.candidates?.length || 0,
           firstCandidateParts: response.candidates?.[0]?.content?.parts?.length || 0,
         });
       }
-
-      // Safely extract text — .text getter can throw when response has only function calls
-      const message = this.safeExtractText(response);
 
       // Only throw error if we have no text AND no function calls
       if (!message && toolCalls.length === 0) {

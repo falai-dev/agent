@@ -1802,6 +1802,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             // Map to store tool execution results for history
             const toolResultsMap = new Map<string, string>();
+            // Map to store tool call arguments for history reconstruction
+            const toolArgsMap = new Map<string, Record<string, unknown>>();
 
             // Execute initial dynamic tool calls
             if (toolCalls && toolCalls.length > 0) {
@@ -1836,6 +1838,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                         // Store the actual tool result data for history
                         toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
+                        toolArgsMap.set(toolCall.toolName, toolCall.arguments);
 
                         // Check if tool execution was successful
                         if (!toolResult.success) {
@@ -2008,6 +2011,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                             // Store the follow-up tool result for potential next loop iteration
                             toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
+                            toolArgsMap.set(toolCall.toolName, toolCall.arguments);
 
                             logger.debug(`[ResponseModal] Executed follow-up tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                         } catch (error) {
@@ -2051,7 +2055,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         tool_calls: [{
                             id: toolName,
                             name: toolName,
-                            arguments: {},
+                            arguments: toolArgsMap.get(toolName) || {},
                         }],
                     });
                     finalToolResultHistoryItems.push({

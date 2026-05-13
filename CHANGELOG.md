@@ -2,6 +2,14 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.2.8]
+
+### Fixed
+
+- **Duplicate step-entry corrupts session when `requires` fields are missing**: `ResponsePipeline.determineNextStep()` unconditionally called `enterStep()` on the candidate step, mutating `session.currentStep` before `ResponseModal.processRouteResponse()` could evaluate its `requires` guard. When the guard fired, it read the already-advanced step from the session and stayed on it — effectively entering the step it was supposed to block. The pipeline now checks `requires` fields against `session.data` before calling `enterStep()`; if any are missing, it returns the session unchanged and falls back to the current step.
+
+- **Gemini SDK logs "non-text parts thoughtSignature" warning on every response**: The `safeExtractText` method used the SDK's `.text` getter as the primary path, which internally logs a warning when the response contains non-text parts like `thoughtSignature` (thinking/reasoning tokens). Inverted the extraction logic to always read text parts directly from `candidates[0].content.parts`, bypassing the getter entirely. The `.text` getter is now only a last-resort fallback when no candidates structure exists.
+
 ## [1.2.7]
 
 ### Fixed
