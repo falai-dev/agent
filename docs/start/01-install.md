@@ -67,7 +67,7 @@ import { GeminiProvider } from "@falai/agent";
 
 const provider = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
-  model: "models/gemini-2.5-pro",
+  model: "gemini-3.1-pro-preview",
 });
 
 console.log("Provider ready:", provider.constructor.name);

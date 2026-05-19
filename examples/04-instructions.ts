@@ -22,7 +22,7 @@ const agent = createAgent<unknown, SupportData>({
     name: "SupportBot",
     provider: new GeminiProvider({
         apiKey: process.env.GEMINI_API_KEY,
-        model: "models/gemini-2.5-flash",
+        model: "gemini-3.1-flash-lite",
     }),
     schema: {
         type: "object",

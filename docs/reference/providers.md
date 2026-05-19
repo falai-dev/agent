@@ -35,12 +35,12 @@ import {
 
 const provider =
   process.env.PROVIDER === "openai"
-    ? new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY!, model: "gpt-5-mini" })
+    ? new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY!, model: "gpt-5.5" })
     : process.env.PROVIDER === "anthropic"
-    ? new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY!, model: "claude-sonnet-4-5" })
+    ? new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY!, model: "claude-sonnet-4-6" })
     : process.env.PROVIDER === "openrouter"
-    ? new OpenRouterProvider({ apiKey: process.env.OPENROUTER_API_KEY!, model: "anthropic/claude-sonnet-4.5" })
-    : new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY!, model: "models/gemini-2.5-pro" });
+    ? new OpenRouterProvider({ apiKey: process.env.OPENROUTER_API_KEY!, model: "anthropic/claude-sonnet-4.6" })
+    : new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY!, model: "gemini-3.1-pro-preview" });
 
 const agent = createAgent({ provider, schema, flows });
 ```
@@ -66,7 +66,7 @@ interface GeminiProviderOptions {
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
 | `apiKey` | `string` | yes | — | Throws if empty. |
-| `model` | `string` | yes | — | Use the fully-qualified id, e.g. `"models/gemini-2.5-pro"`. |
+| `model` | `string` | yes | — | Use the model id, e.g. `"gemini-3.1-pro-preview"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on 429/500/503/overload errors. |
 | `config` | `Partial<GenerateContentConfig>` | no | — | Vendor-typed defaults (e.g. `temperature`, `systemInstruction`). |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
@@ -77,8 +77,8 @@ interface GeminiProviderOptions {
 ```typescript
 const gemini = new GeminiProvider({
   apiKey: process.env.GEMINI_API_KEY!,
-  model: "models/gemini-2.5-pro",
-  backupModels: ["models/gemini-2.5-flash"],
+  model: "gemini-3.1-pro-preview",
+  backupModels: ["gemini-3.1-flash-lite"],
   config: { temperature: 0.3 },
 });
 ```
@@ -106,7 +106,7 @@ interface OpenAIProviderOptions {
 |-------|------|----------|---------|-------|
 | `apiKey` | `string` | yes | — | Throws if empty. |
 | `organization` | `string` | no | — | Forwarded as `OpenAI-Organization`. |
-| `model` | `string` | yes | — | e.g. `"gpt-5"`, `"gpt-5-mini"`. |
+| `model` | `string` | yes | — | e.g. `"gpt-5.5"`, `"gpt-5.4"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on overload/rate-limit errors. |
 | `config` | OpenAI params | no | — | Defaults for `temperature`, `top_p`, etc. |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
@@ -117,7 +117,7 @@ interface OpenAIProviderOptions {
 ```typescript
 const openai = new OpenAIProvider({
   apiKey: process.env.OPENAI_API_KEY!,
-  model: "gpt-5-mini",
+  model: "gpt-5.5",
   organization: "org_abc",
   config: { temperature: 0.2 },
 });
@@ -144,7 +144,7 @@ interface AnthropicProviderOptions {
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
 | `apiKey` | `string` | yes | — | Throws if empty. |
-| `model` | `string` | yes | — | e.g. `"claude-sonnet-4-5"`, `"claude-opus-4-1"`. |
+| `model` | `string` | yes | — | e.g. `"claude-sonnet-4-6"`, `"claude-opus-4-7"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on 429/500/503/529/overload. |
 | `config` | Anthropic params | no | — | Defaults for `max_tokens`, `system`, etc. The provider sets `max_tokens=4096` if neither `config.max_tokens` nor `parameters.maxOutputTokens` is set. |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
@@ -155,7 +155,7 @@ interface AnthropicProviderOptions {
 ```typescript
 const anthropic = new AnthropicProvider({
   apiKey: process.env.ANTHROPIC_API_KEY!,
-  model: "claude-sonnet-4-5",
+  model: "claude-sonnet-4-6",
   config: { max_tokens: 8192 },
 });
 ```
@@ -185,7 +185,7 @@ interface OpenRouterProviderOptions {
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
 | `apiKey` | `string` | yes | — | Throws if empty. |
-| `model` | `string` | yes | — | OpenRouter model id, e.g. `"anthropic/claude-sonnet-4.5"`. See [openrouter.ai/models](https://openrouter.ai/models). |
+| `model` | `string` | yes | — | OpenRouter model id, e.g. `"anthropic/claude-sonnet-4.6"`. See [openrouter.ai/models](https://openrouter.ai/models). |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on overload/capacity errors. |
 | `siteUrl` | `string` | no | `""` | Sent as `HTTP-Referer` for OpenRouter rankings. |
 | `siteName` | `string` | no | `""` | Sent as `X-Title` for OpenRouter rankings. |
@@ -198,8 +198,8 @@ interface OpenRouterProviderOptions {
 ```typescript
 const openrouter = new OpenRouterProvider({
   apiKey: process.env.OPENROUTER_API_KEY!,
-  model: "anthropic/claude-sonnet-4.5",
-  backupModels: ["openai/gpt-5-mini", "google/gemini-2.5-pro"],
+  model: "anthropic/claude-sonnet-4.6",
+  backupModels: ["openai/gpt-5.5", "google/gemini-3.1-pro-preview"],
   siteName: "My App",
 });
 ```

@@ -1,6 +1,15 @@
+---
+title: "Documentation"
+description: "Typed conversations where code stays in charge. Docs for @falai/agent."
+type: overview
+order: 0
+---
+
 # Documentation
 
-Documentation for `@falai/agent`. The AI understands; the code is in control.
+**Typed conversations where code stays in charge.**
+
+Define flows, steps, and tools in TypeScript; the framework calls the LLM only for the parts that need language — routing, extraction, and generation.
 
 ## New here?
 
@@ -12,7 +21,7 @@ Walk through a five-step tutorial that builds a working agent end to end, from i
 
 Eight task-shaped recipes covering conditions, branching, flow control, instructions, persistence, streaming, errors, and compaction.
 
-[Browse the guides](./guides/)
+[Browse the guides](./guides/conditions.md)
 
 ## Want the why?
 
@@ -24,7 +33,7 @@ Three concept pages that build the mental model: the seven primitives, the per-t
 
 One page per public type. Signatures, field tables, errors, and short runnable examples for `createAgent`, `Flow`, `Step`, `Tool`, `Instruction`, `Directive`, signals, providers, adapters, and more.
 
-[Open the reference](./reference/)
+[Open the reference](./reference/create-agent.md)
 
 ---
 

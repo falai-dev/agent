@@ -13,7 +13,7 @@ interface Data { intent: string; query: string; answer: string }
 
 const provider = new GeminiProvider({
     apiKey: process.env.GEMINI_API_KEY!,
-    model: "models/gemini-2.5-flash",
+    model: "gemini-3.1-flash-lite",
 });
 
 // ─── Steps with branches ─────────────────────────────────────────────────────

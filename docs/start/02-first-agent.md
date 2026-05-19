@@ -185,7 +185,7 @@ A few common failure modes and where to look:
 - **`Missing API key`** or a 401 from Gemini — `GEMINI_API_KEY` is unset or your `.env` did not load. Bun loads `.env` automatically; Node needs `--env-file=.env`.
 - **`FlowConfigurationError: collect references unknown key 'foo'`** — the schema does not declare `foo` as a property. Add it to `schema.properties` or fix the `collect` array.
 - **`FlowConfigurationError: duplicate flow id` / `duplicate step id`** — two flows or two steps share the same auto-derived id. Set explicit `id` values to disambiguate.
-- **The LLM call hangs** — check the `model` (Gemini's free tier expects `"models/gemini-2.5-pro"` or `"models/gemini-2.5-flash"`) and your network. Provider errors surface as `ResponseGenerationError`.
+- **The LLM call hangs** — check the `model` (Gemini's free tier expects `"gemini-3.1-pro-preview"` or `"gemini-3.1-flash-lite"`) and your network. Provider errors surface as `ResponseGenerationError`.
 
 The full set of typed errors and the `[<ErrorClass>] <what>: <why>. <how to fix>.` format contract live in the [Errors reference](../reference/errors.md).
 

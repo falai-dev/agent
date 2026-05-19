@@ -36,7 +36,7 @@ const DEFAULT_RETRY_CONFIG = {
 export interface GeminiProviderOptions {
   /** Gemini API key */
   apiKey: string;
-  /** Model to use (required) - e.g., "models/gemini-2.5-pro" */
+  /** Model to use (required) - e.g., "gemini-3.1-pro-preview" */
   model: string;
   /** Backup models to try if primary fails (default: []) */
   backupModels?: string[];
@@ -140,7 +140,7 @@ export class GeminiProvider implements AiProvider {
     }
 
     if (!model) {
-      throw new Error("Model is required. Example: 'models/gemini-2.5-pro'");
+      throw new Error("Model is required. Example: 'gemini-3.1-pro-preview'");
     }
 
     this.genAI = new GoogleGenAI({ apiKey });

@@ -30,7 +30,7 @@ const DEFAULT_RETRY_CONFIG = {
 export interface AnthropicProviderOptions {
   /** Anthropic API key */
   apiKey: string;
-  /** Model to use (required) - e.g., "claude-sonnet-4-5", "claude-opus-4-1" */
+  /** Model to use (required) - e.g., "claude-sonnet-4-6", "claude-opus-4-7" */
   model: string;
   /** Backup models to try if primary fails (default: []) */
   backupModels?: string[];
@@ -138,7 +138,7 @@ export class AnthropicProvider implements AiProvider {
     }
 
     if (!model) {
-      throw new Error("Model is required. Example: 'claude-sonnet-4-5'");
+      throw new Error("Model is required. Example: 'claude-sonnet-4-6'");
     }
 
     this.client = new Anthropic({

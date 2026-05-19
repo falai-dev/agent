@@ -3,6 +3,7 @@ title: "Route → Flow rename"
 description: "Rename the Route domain noun to Flow across symbols, config, persistence, and generated IDs, with per-adapter data migration steps."
 type: migration
 order: 2
+sidebar: false
 ---
 
 # Migration Guide: Route → Flow Rename

@@ -68,22 +68,22 @@ class TestableOpenRouterProvider extends OpenRouterProvider {
 // Create provider instances with dummy API keys (we won't make real API calls)
 const anthropicProvider = new TestableAnthropicProvider({
     apiKey: "test-key",
-    model: "claude-sonnet-4-5",
+    model: "claude-sonnet-4-6",
 });
 
 const openaiProvider = new TestableOpenAIProvider({
     apiKey: "test-key",
-    model: "gpt-5",
+    model: "gpt-5.5",
 });
 
 const geminiProvider = new TestableGeminiProvider({
     apiKey: "test-key",
-    model: "models/gemini-2.5-pro",
+    model: "gemini-3.1-pro-preview",
 });
 
 const openrouterProvider = new TestableOpenRouterProvider({
     apiKey: "test-key",
-    model: "anthropic/claude-sonnet-4-5",
+    model: "anthropic/claude-sonnet-4.6",
 });
 
 // ============================================================================

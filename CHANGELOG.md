@@ -27,6 +27,16 @@ The `Route` domain noun has been renamed to `Flow` across the entire `@falai/age
 
 See the [Migration Guide](docs/guides/migration/route-to-flow-rename.md) for the full rename table, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
 
+## [2.0.1]
+
+### Fixed
+
+- Updated all model references to current 2026 models: Gemini `gemini-3.1-flash-lite` / `gemini-3.1-pro-preview`, OpenAI `gpt-5.5` / `gpt-5.4`, Anthropic `claude-sonnet-4-6` / `claude-opus-4-7`.
+- Fixed `docs/README.md` not rendering as the site homepage (added frontmatter with `type: overview`, `order: 0`).
+- Fixed dead links in docs landing page (`./guides/` and `./reference/` pointed to directories with no index file).
+- Consolidated `docs/migration/README.md` — Route → Flow rename is now presented as part of the v1 → v2 guide, not a separate section.
+- Added `sidebar: false` to `docs/migration/route-to-flow.md` to suppress it from the sidebar (it's linked from v1-to-v2.md §3).
+
 ## [2.0.0]
 
 ### ⚠️ BREAKING CHANGES
