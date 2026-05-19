@@ -11,4 +11,4 @@ Upgrading from `1.x`? The consolidated migration guide covers every breaking cha
 
 [Read the v1 → v2 migration guide](./v1-to-v2.md)
 
-The Route → Flow rename (Section 3) includes per-adapter SQL/Mongo/Redis/OpenSearch migration snippets. If you need the full rename table and ID-prefix guidance in isolation, see the [detailed Route → Flow reference](./route-to-flow.md).
+Section 3 covers the Route → Flow rename in full, including per-adapter SQL/Mongo/Redis/OpenSearch migration snippets and ID-prefix guidance.

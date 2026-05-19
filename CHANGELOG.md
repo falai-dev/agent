@@ -26,7 +26,7 @@ All notable changes to `@falai/agent` will be documented in this file.
 - Fixed `docs/README.md` not rendering as the site homepage (added frontmatter with `type: overview`, `order: 0`).
 - Fixed dead links in docs landing page (`./guides/` and `./reference/` pointed to directories with no index file).
 - Consolidated `docs/migration/README.md` — Route → Flow rename is now presented as part of the v1 → v2 guide, not a separate section.
-- Added `sidebar: false` to `docs/migration/route-to-flow.md` to suppress it from the sidebar (it's linked from v1-to-v2.md §3).
+- Removed standalone `docs/migration/route-to-flow.md` — content merged into v1-to-v2.md §3.
 
 ## [2.0.0]
 
@@ -66,7 +66,7 @@ The verb form `route()` and the gerund "routing" are preserved — routing-as-an
 
 **Persistence changes:** All adapters rename `current_route` → `current_flow`, `route_history` → `flow_history`, and the `route` column/field → `flow`. Generated IDs now use the `flow_` prefix instead of `route_`.
 
-See [Migration Guide](docs/migration/route-to-flow.md) for upgrade instructions, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
+See [Migration Guide](docs/migration/v1-to-v2.md#3-route--flow-rename) for upgrade instructions, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
 
 #### Flow completion releases the session to idle — no hardcoded farewell message
 
@@ -348,7 +348,7 @@ The `Route` domain noun has been renamed to `Flow` across the entire `@falai/age
 
 **ID prefix changed:** Generated IDs now use the `flow_` prefix instead of `route_`. Existing stored IDs with the `route_` prefix must be migrated.
 
-See the [Migration Guide](docs/guides/migration/route-to-flow-rename.md) for the full rename table, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
+See the [Migration Guide](docs/migration/v1-to-v2.md#3-route--flow-rename) for the full rename table, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
 
 ## [1.2.8]
 
