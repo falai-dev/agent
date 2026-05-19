@@ -194,9 +194,11 @@ export class OpenSearchAdapter<TData = Record<string, unknown>> implements Persi
               userId: { type: "keyword" },
               agentName: { type: "keyword" },
               status: { type: "keyword" },
-              currentRoute: { type: "keyword" },
+              currentFlow: { type: "keyword" },
               currentStep: { type: "keyword" },
               collectedData: { type: "object", enabled: false },
+              pendingDirective: { type: "object", enabled: false },
+              signals: { type: "object", enabled: false },
               messageCount: { type: "integer" },
               createdAt: { type: "date" },
               updatedAt: { type: "date" },
@@ -224,7 +226,7 @@ export class OpenSearchAdapter<TData = Record<string, unknown>> implements Persi
               userId: { type: "keyword" },
               role: { type: "keyword" },
               content: { type: "text" },
-              route: { type: "keyword" },
+              flow: { type: "keyword" },
               step: { type: "keyword" },
               toolCalls: { type: "object", enabled: false },
               event: { type: "object", enabled: false },
@@ -407,17 +409,17 @@ class OpenSearchSessionRepository<TData = Record<string, unknown>>
     return await this.findById(id);
   }
 
-  async updateRouteStep(
+  async updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
     const doc: Record<string, unknown> = {
       updatedAt: new Date().toISOString(),
     };
 
-    if (route !== undefined) {
-      doc.currentRoute = route;
+    if (flow !== undefined) {
+      doc.currentFlow = flow;
     }
     if (step !== undefined) {
       doc.currentStep = step;
@@ -479,7 +481,7 @@ class OpenSearchSessionRepository<TData = Record<string, unknown>>
       userId: doc.userId as string | undefined,
       agentName: doc.agentName as string | undefined,
       status: doc.status as SessionData<TData>["status"],
-      currentRoute: doc.currentRoute as string | undefined,
+      currentFlow: doc.currentFlow as string | undefined,
       currentStep: doc.currentStep as string | undefined,
       collectedData: doc.collectedData as CollectedStateData<TData> | undefined,
       messageCount: (doc.messageCount as number) || 0,
@@ -647,7 +649,7 @@ class OpenSearchMessageRepository implements MessageRepository {
       userId: doc.userId as string | undefined,
       role: doc.role as MessageData["role"],
       content: doc.content as string,
-      route: doc.route as string | undefined,
+      flow: doc.flow as string | undefined,
       step: doc.step as string | undefined,
       toolCalls: doc.toolCalls as
         | Array<{ toolName: string; arguments: Record<string, unknown> }>

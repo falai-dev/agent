@@ -2,6 +2,328 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [1.3.0]
+
+### ⚠️ BREAKING CHANGES
+
+#### `Route` domain noun renamed to `Flow`
+
+The `Route` domain noun has been renamed to `Flow` across the entire `@falai/agent` package. This is a clean break with no compatibility shims or dual-naming layer.
+
+**What changed:**
+
+- All `Route`-prefixed symbols, types, methods, fields, and constants have been renamed to their `Flow`-prefixed equivalents (e.g. `Route` → `Flow`, `RouteOptions` → `FlowOptions`, `RoutingEngine` → `FlowRouter`, `RouteConfigurationError` → `FlowConfigurationError`).
+- Agent API: `agent.createRoute()` → `agent.createFlow()`, `agent.getRoutes()` → `agent.getFlows()`, `agent.routes` → `agent.flows`, `AgentOptions.routes` → `flows`, `AgentOptions.routeSwitchMargin` → `flowSwitchMargin`.
+- Session shape: `session.currentRoute` → `session.currentFlow`, `session.routeHistory` → `session.flowHistory`.
+- Constants: `END_ROUTE` → `END_FLOW`, `END_ROUTE_ID` → `END_FLOW_ID`.
+- Utilities: `generateRouteId()` → `generateFlowId()`, `enterRoute()` → `enterFlow()`.
+- Adapter method: `updateRouteStep()` → `updateFlowStep()` on all seven persistence adapters.
+
+**Preserved (verb form and gerund):** The method name `route()` on `FlowRouter` and the gerund "routing" are preserved — routing-as-an-action remains the correct verb for selecting a flow.
+
+**Persistence changes (operators must run migration):** All adapters rename persisted columns/fields: `current_route` → `current_flow`, `route_history` → `flow_history`, and the `route` column/field → `flow`. Operators must run the appropriate migration for their backend before upgrading.
+
+**ID prefix changed:** Generated IDs now use the `flow_` prefix instead of `route_`. Existing stored IDs with the `route_` prefix must be migrated.
+
+See the [Migration Guide](docs/guides/migration/route-to-flow-rename.md) for the full rename table, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
+
+## [2.0.0]
+
+### ⚠️ BREAKING CHANGES
+
+#### `Route` domain noun renamed to `Flow`
+
+The `Route` domain noun has been renamed to `Flow` across the entire `@falai/agent` package. This is a clean break with no compatibility shims or dual-naming layer.
+
+The verb form `route()` and the gerund "routing" are preserved — routing-as-an-action remains the correct verb for selecting a flow.
+
+**Key renames:**
+
+| Old | New |
+|-----|-----|
+| `Route` (class) | `Flow` |
+| `RoutingEngine` (class) | `FlowRouter` |
+| `RouteOptions` | `FlowOptions` |
+| `RouteRef` | `FlowRef` |
+| `RouteTransitionConfig` | `FlowTransitionConfig` |
+| `RouteCompletionHandler` | `FlowCompletionHandler` |
+| `RouteLifecycleHooks` | `FlowLifecycleHooks` |
+| `RouteConfigurationError` | `FlowConfigurationError` |
+| `agent.createRoute()` | `agent.createFlow()` |
+| `agent.getRoutes()` / `agent.routes` | `agent.getFlows()` / `agent.flows` |
+| `agent.nextStepRoute()` | `agent.nextStepFlow()` |
+| `agent.getRoutingEngine()` | `agent.getFlowRouter()` |
+| `AgentOptions.routes` | `AgentOptions.flows` |
+| `AgentOptions.routeSwitchMargin` | `AgentOptions.flowSwitchMargin` |
+| `session.currentRoute` | `session.currentFlow` |
+| `session.routeHistory` | `session.flowHistory` |
+| `END_ROUTE` / `END_ROUTE_ID` | Removed (implicit terminus) |
+| `generateRouteId()` | `generateFlowId()` |
+| `enterRoute()` | `enterFlow()` |
+| `updateRouteStep()` (adapters) | `updateFlowStep()` |
+| `'end_route'` / `'route_complete'` | `'flow_complete'` |
+
+**Persistence changes:** All adapters rename `current_route` → `current_flow`, `route_history` → `flow_history`, and the `route` column/field → `flow`. Generated IDs now use the `flow_` prefix instead of `route_`.
+
+See [Migration Guide](docs/migration/route-to-flow.md) for upgrade instructions, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
+
+#### Flow completion releases the session to idle — no hardcoded farewell message
+
+The completion path is now a pure state transition. The framework emits **no message of its own** when a flow completes. Every word delivered to the user comes from a developer-defined step prompt.
+
+**What changed:**
+
+- The internal `__COMPLETED__` synthetic step (with hardcoded `"Send a brief, natural farewell message…"` prompt) is **removed**.
+- The hardcoded prompt directives shipped on every completion turn (`"Generate a natural, friendly farewell message"`, `"Do NOT mention task names…"`, `"Do NOT use words like 'tarefa', 'dados coletados'…"`, etc.) are **removed**.
+- The hardcoded English fallback `"Thank you! I've recorded all the information for your <flow title>."` is **removed**.
+- The completion-time LLM call (`handleFlowCompletion`'s `provider.generateMessage(...)` and `streamFlowCompletion`'s `provider.generateMessageStream(...)`) is **removed**. Completion no longer costs tokens.
+
+**New idle-state semantics:**
+
+When a flow completes (last step reached, `requiredFields` satisfied, or a `complete` directive fires) and `onComplete` does not produce a transition:
+
+- `session.currentFlow` is set to `undefined`.
+- `session.currentStep` is set to `undefined`.
+- The corresponding `session.flowHistory` entry is updated with `completed: true` and `exitedAt: <now>`.
+- The router excludes any flow whose most recent `flowHistory` entry is `completed: true` from candidate scoring on subsequent turns.
+- If all flows are filtered out, the engine falls back to the no-flow response path (uses agent identity/personality only).
+
+This eliminates the v1 bug where a session pinned `currentFlow` and `currentStep = '__COMPLETED__'` after completion and the router got stuck re-entering the last step on every subsequent turn.
+
+#### `flow.reentrant: boolean` opt-in for re-routable flows
+
+Added `FlowOptions.reentrant` (default `false`). When `true`, a flow can be re-selected by the router after it has completed in the current session — useful for "do another?" patterns (re-book, re-search, repeat-task). On re-entry, the engine clears every field declared in the flow's `requiredFields` and `optionalFields` so the flow starts fresh from its initial step. Fields not owned by this flow are preserved in `session.data`.
+
+`onComplete` always wins over `reentrant`. If `onComplete` returns a target flow, the session transitions there immediately on completion; `reentrant` is consulted only when `onComplete` is absent or returns `undefined`.
+
+```ts
+const agent = new Agent({
+  // ...
+  flows: [
+    {
+      title: 'Search',
+      reentrant: true,  // user can search again after completing
+      requiredFields: ['query'],
+      // ...
+    },
+  ],
+});
+```
+
+#### New session utilities
+
+- **`completeCurrentFlow(session, { clearOwnedFields? })`** — releases the session to idle state. Marks the active `flowHistory` entry as `completed: true`, clears `currentFlow` and `currentStep`, and (when `clearOwnedFields` is provided) removes those fields from `session.data` for `reentrant` re-entry.
+- **`isFlowCompletedThisSession(session, flowId)`** — returns `true` when the flow's most recent `flowHistory` entry is `completed: true`. Used by the router to exclude completed flows.
+
+Both are exported from `@falai/agent`.
+
+**Migration:**
+
+If your v1 code expected the framework to send a farewell message on completion, **add an explicit final step** with your own copy:
+
+```ts
+// Before (v1 — relied on framework-generated farewell)
+flow({
+  title: 'Onboarding',
+  steps: [
+    { id: 'name',  collect: ['name'] },
+    { id: 'email', collect: ['email'] },
+  ],
+});
+
+// After (v2 — author your own closing turn)
+flow({
+  title: 'Onboarding',
+  steps: [
+    { id: 'name',   collect: ['name']  },
+    { id: 'email',  collect: ['email'] },
+    { id: 'thanks', prompt: 'Thank the user warmly. Wish them a great day.' },
+  ],
+});
+```
+
+If your v1 code relied on the router re-entering the last step after completion, that loop is gone — the session is idle and the next turn either applies `onComplete`, re-enters a `reentrant` flow, or runs the no-flow fallback. To restore the v1 loop deliberately, set `reentrant: true` on the flow.
+
+If your tests asserted on the framework's hardcoded farewell language (`"Thank you!"`, `"recorded all the information"`, etc.), update them to assert on your own step prompts instead.
+
+See [`/.kiro/specs/v2-overhaul/flow-completion.md`](.kiro/specs/v2-overhaul/flow-completion.md) for the full design rationale and [docs/migration/v1-to-v2.md](docs/migration/v1-to-v2.md) for the consolidated v2 migration guide covering idle-state semantics, `onComplete` vs `reentrant` precedence, and the final-step idiom.
+
+#### `END_ROUTE` / `endRoute()` removed — implicit terminus
+
+The `END_ROUTE` symbol, `END_ROUTE_ID` constant, `Step.endRoute()` method, and `RouteOptions.endStep` configuration have been completely removed. Route/flow completion is now implicit: **the last step in a flow terminates the route automatically**.
+
+**What changed:**
+
+| Removed | Replacement |
+|---------|-------------|
+| `END_ROUTE` symbol | Just stop chaining — the last step is the terminus |
+| `END_ROUTE_ID` constant | Removed entirely |
+| `Step.endRoute()` method | Not needed — last `.nextStep(...)` is the final step |
+| `StepResult.endRoute` property | Removed from the interface |
+| `RouteOptions.endStep` / `Route.endStepSpec` | Move closing prompt into the last step's `prompt` |
+| `StoppedReason: 'end_flow'` | `'flow_complete'` (covers both "all steps processed" and "last step reached") |
+| `END_ROUTE` in `steps[]` array | Just end the array — last element is the terminus |
+
+**Migration:**
+
+```typescript
+// Before (1.x)
+route.initialStep
+  .nextStep({ prompt: "Collect name", collect: ["name"] })
+  .nextStep({ prompt: "Collect email", collect: ["email"] })
+  .endRoute({ prompt: "Thanks for signing up!" });
+
+// After (2.0)
+route.initialStep
+  .nextStep({ prompt: "Collect name", collect: ["name"] })
+  .nextStep({ prompt: "Collect email", collect: ["email"] })
+  .nextStep({ prompt: "Thanks for signing up!" });
+// ↑ last step is the implicit terminus — no endRoute() needed
+
+// Before: steps array with END_ROUTE
+{ steps: [{ id: "step1", prompt: "..." }, END_ROUTE] }
+
+// After: just end the array
+{ steps: [{ id: "step1", prompt: "..." }] }
+```
+
+**Rationale:** The `END_ROUTE` sentinel was a special-case escape hatch. With implicit terminus, the developer just stops chaining and the flow ends — no sentinel needed. This simplifies the mental model and removes an entire category of "forgot to add END_ROUTE" bugs.
+
+#### Guideline / Rule / Prohibition collapsed into `Instruction`
+
+The three v1 behavioral primitives — `Guideline`, `Rule`, and `Prohibition` — are unified into a single `Instruction<TContext, TData>` type with a `kind: 'must' | 'never' | 'should'` discriminator. Field names align with the rest of the DSL (`route.when`, `step.prompt`):
+
+```typescript
+// 1.x
+{ condition: "user is hesitant", action: "Offer to compare options." }
+// or rules[]: { content: "..." }
+// or prohibitions[]: { content: "..." }
+
+// 2.0
+{ kind: 'should', when: "user is hesitant", prompt: "Offer to compare options." }
+{ kind: 'must',   prompt: "Always confirm the booking before charging." }
+{ kind: 'never',  prompt: "Reveal payment internals." }
+```
+
+#### Migration table — Instruction unification
+
+| 1.x type / field | 2.0 replacement |
+|------------------|-----------------|
+| `Guideline` type | `Instruction` |
+| `ScopedGuidelines` type | `ScopedInstructions` |
+| `AppliedGuideline` type | `AppliedInstruction` |
+| `GuidelineMatch` type | (removed; drop) |
+| `condition: ...` (on Guideline) | `when: ...` (on Instruction) |
+| `action: ...` (on Guideline) | `prompt: ...` (on Instruction) |
+| `Rule` type / `rules: Rule[]` | `instructions: Instruction[]` with `kind: 'must'` |
+| `Prohibition` type / `prohibitions: Prohibition[]` | `instructions: Instruction[]` with `kind: 'never'` |
+| `AgentOptions.guidelines` | `AgentOptions.instructions` |
+| `AgentOptions.rules` | `AgentOptions.instructions` (`kind: 'must'`) |
+| `AgentOptions.prohibitions` | `AgentOptions.instructions` (`kind: 'never'`) |
+| `FlowOptions.guidelines` | `FlowOptions.instructions` |
+| `FlowOptions.rules` | `FlowOptions.instructions` (`kind: 'must'`) |
+| `FlowOptions.prohibitions` | `FlowOptions.instructions` (`kind: 'never'`) |
+| `AgentResponse.appliedGuidelines` | `AgentResponse.appliedInstructions` |
+| `AgentResponseStreamChunk.appliedGuidelines` | `AgentResponseStreamChunk.appliedInstructions` |
+| `agent.evaluateGuidelines(...)` | (removed; evaluation is internal to prompt composition) |
+| `route.evaluateGuidelines(...)` | (removed) |
+| `step.evaluateGuidelines(...)` | (removed) |
+| `agent.createGuideline(...)` | `agent.createInstruction(...)` |
+| `agent.getGuidelines()` / `getRules()` / `getProhibitions()` | `agent.getInstructions()` |
+| `agent.guidelines` / `rules` / `prohibitions` getters/setters | `agent.instructions` |
+| `flow.createGuideline(...)` | `flow.createInstruction(...)` |
+| `flow.getGuidelines()` / `getRules()` / `getProhibitions()` | `flow.getInstructions()` |
+| `flow.guidelines` getter | `flow.instructions` |
+| `step.addGuideline(...)` | `step.addInstruction(...)` |
+| `step.getGuidelines()` | `step.getInstructions()` |
+| `AgentOptions.compositionMode` / `CompositionMode` enum | Removed entirely (had no runtime effect; only `FLUID` was ever observed) |
+
+#### Add `step.branches`: explicit, source-local fork primitive
+
+Add `step.branches`: explicit, source-local fork primitive with `if` (code) and `when` (AI) conditions; coexists with the implicit-fork pattern. Branches are evaluated after the step's post-LLM phase and before linear successor selection. The first matching entry wins (declaration order). Code predicates run first to save tokens — AI conditions are only evaluated when `if` passes or is absent.
+
+See [Branches documentation](docs/reference/branches.md) for full details.
+
+#### Multi-step batching replaced with explicit `auto: true` steps
+
+Replaced multi-step batching with explicit `auto: true` steps. `maxStepsPerBatch` removed, `BatchExecutor` and `BatchPromptBuilder` deleted, `auto` and `maxAutoStepsPerTurn` added. See [docs/migration/v1-to-v2.md](docs/migration/v1-to-v2.md).
+
+#### Prompt shape: `## Instructions` (breaking runtime effect)
+
+The rendered prompt section has changed shape. If you have tests or integrations that assert on prompt output, update them:
+
+- **Section header** changed from `## Guidelines` to `## Instructions`.
+- **Inline scope captions** are now prepended to each line: `[Always]`, `[In: <FlowTitle>]`, `[Step: <stepId>]`.
+- **No numbering** — instructions are rendered as unordered list items (`- [Caption] text`).
+- **No `Additional Context` trailer** — AI context strings from `when` conditions are no longer appended as a separate block.
+
+Example rendered output:
+
+```
+## Instructions
+
+- [Always] Be concise unless the user asks for detail.
+- [In: Booking] Offer to compare two options before pushing for a decision.
+- [Step: payment] If the card is declined, never retry without confirmation.
+```
+
+#### Agent identity consolidated into `persona`
+
+`AgentOptions.description`, `AgentOptions.identity`, and `AgentOptions.personality` are removed. Use the new `AgentOptions.persona?: Template<TContext>` field — a single prompt covering role, tone, and self-concept. The `description` / `identity` / `personality` getters and setters on `Agent` are deleted with no shims.
+
+`FlowOptions.identity` and `FlowOptions.personality` are removed too — agent identity is agent-level only. Flows shape behavior through `instructions`, not their own persona overrides.
+
+#### Tool / EnhancedTool merged into `Tool`
+
+`EnhancedTool` is removed. All metadata fields (`isReadOnly`, `isConcurrencySafe`, `isDestructive`, `interruptBehavior`, `maxResultSizeChars`, `validateInput`, `checkPermissions`) live directly on `Tool`. Existing `Tool` definitions continue to work; references to `EnhancedTool` must be replaced with `Tool`.
+
+The optional `Tool.name` field is removed. **`Tool.id` is the sole identifier**, used for both registry lookup and LLM-facing display.
+
+`Agent.createTool()` is removed; declare tools via `AgentOptions.tools` or pass them through `StepOptions.tools`.
+
+#### Directive replaces `FlowTransitionConfig` / `FlowCompletionHandler`
+
+The legacy transition shapes are removed. `FlowTransitionConfig` collapses into `Directive`. `FlowCompletionHandler` becomes `hooks.onComplete` returning a `Directive`. Top-level `FlowOptions.onComplete` is now a string-only target (flow id or title); handler form moves to `hooks.onComplete`.
+
+#### `Flow.skipIf` removed
+
+`Flow.skipIf` (which was already hardcoded to `undefined` after the v2 condition split) and `Flow.evaluateSkipIf()` are deleted. Use `Flow.if` for code-evaluated activation guards and `Flow.when` for AI-evaluated guards.
+
+#### `FlowOptions` scope cleanup — agent-level only fields
+
+The following `FlowOptions` fields are removed; they exist agent-level only:
+
+| Removed from FlowOptions | Replacement |
+|--------------------------|-------------|
+| `identity` | Agent-level `persona` |
+| `personality` | Agent-level `persona` |
+| `guidelines` | `instructions` (per Instruction unification above) |
+| `rules` | `instructions` with `kind: 'must'` |
+| `prohibitions` | `instructions` with `kind: 'never'` |
+| `terms` | Agent-level `terms` only |
+| `knowledgeBase` | Agent-level `knowledgeBase` only |
+
+Corresponding `Flow` methods are also removed: `Flow.createTerm()`, `Flow.getTerms()`, `Flow.getKnowledgeBase()`.
+
+#### `StepOptions.step` field removed
+
+The `step?: StepRef | symbol` field on `StepOptions` is removed (it was dead since `END_FLOW` removal — implicit terminus replaces all sentinel-based wiring).
+
+#### Deprecated `Agent` accessor cleanup
+
+The following deprecated methods and accessors are removed from `Agent` with no shims:
+
+`getCurrentSession()`, `setCurrentSession()`, `clearCurrentSession()` (session lifecycle moved into `SessionManager`); `getSchema()`, `getKnowledgeBase()` (read via `agent.schema` / `agent.knowledgeBase` instead); `description` / `identity` / `personality` getters and setters (folded into `persona`); `compositionMode` getter and setter (composition mode had no runtime effect).
+
+### Added
+
+- **Flow completion handling** — idle-state semantics, the absence of hardcoded farewell, `onComplete` vs `reentrant` precedence, and the "add a final step for closing copy" idiom (see [docs/migration/v1-to-v2.md](docs/migration/v1-to-v2.md)).
+- **`Instruction<TContext, TData>`** — new exported type unifying `Guideline`, `Rule`, and `Prohibition` behind a `kind: 'must' | 'never' | 'should'` discriminator with `when` (AI-evaluated) and `prompt` fields.
+- **`ScopedInstructions<TContext, TData>`** — new exported type that carries the three scope buckets (`global`, `flow?`, `step?`) through the prompt pipeline.
+- **`AppliedInstruction`** — new exported type (`{ id: string; scope: 'global' | 'flow' | 'step'; scopeRef?: string }`) for deterministic observability of which instructions were active during a turn.
+- **`AgentResponse.appliedInstructions`** — new optional field populated with the set of instructions that passed `enabled` and `when` evaluation and were rendered into the prompt for that turn. Deterministic (derived from rendering, not from LLM self-report).
+- **`AgentResponseStreamChunk.appliedInstructions`** — same field, populated on the final (`done: true`) chunk.
+
 ## [1.2.8]
 
 ### Fixed

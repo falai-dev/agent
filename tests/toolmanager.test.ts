@@ -130,7 +130,6 @@ describe("ToolManager Pattern Helpers", () => {
 
         expect(enrichmentTool).toBeDefined();
         expect(enrichmentTool.id).toBe("enrich-name");
-        expect(enrichmentTool.name).toBe("Data Enrichment: enrich-name");
     });
 
     test("should create validation tool", () => {
@@ -149,7 +148,6 @@ describe("ToolManager Pattern Helpers", () => {
 
         expect(validationTool).toBeDefined();
         expect(validationTool.id).toBe("validate-email");
-        expect(validationTool.name).toBe("Validation: validate-email");
     });
 
     test("should create API call tool", () => {
@@ -165,7 +163,6 @@ describe("ToolManager Pattern Helpers", () => {
 
         expect(apiTool).toBeDefined();
         expect(apiTool.id).toBe("fetch-user");
-        expect(apiTool.name).toBe("API Call: fetch-user");
     });
 
     test("should create computation tool", () => {
@@ -182,7 +179,6 @@ describe("ToolManager Pattern Helpers", () => {
 
         expect(computeTool).toBeDefined();
         expect(computeTool.id).toBe("calculate-score");
-        expect(computeTool.name).toBe("Computation: calculate-score");
     });
 });
 
@@ -314,11 +310,10 @@ describe("ToolManager Error Handling", () => {
         // Test invalid name
         expect(() => {
             toolManager.create({
-                id: "valid-id",
-                name: "",
+                id: "",
                 handler: async () => "result"
             });
-        }).toThrow("Tool name must be a non-empty string");
+        }).toThrow();
     });
 
     test("should validate pattern helper configurations", () => {
@@ -368,11 +363,11 @@ describe("ToolManager Error Handling", () => {
 
         expect(() => {
             toolManager.register({} as any);
-        }).toThrow("Invalid tool provided for registration - must have a handler function");
+        }).toThrow("Invalid tool for registration");
 
         expect(() => {
             toolManager.register(null as any);
-        }).toThrow("Tool is required for registration");
+        }).toThrow("Tool registration failed");
     });
 
     test("should handle tool execution errors gracefully", async () => {
@@ -500,7 +495,7 @@ describe("ToolManager Integration Tests", () => {
 
         // Add tool to agent
         agent.addTool({
-            id: "agent-tool", 
+            id: "agent-tool",
             handler: async () => "agent result"
         });
 
@@ -610,7 +605,7 @@ describe("ToolManager Performance Tests", () => {
 
         // Clear registry
         toolManager.clearRegistry();
-        
+
         expect(toolManager.getRegisteredIds()).toHaveLength(0);
         expect(toolManager.getAllRegistered().size).toBe(0);
     });
@@ -618,8 +613,8 @@ describe("ToolManager Performance Tests", () => {
 
 describe("ToolManager Advanced Features", () => {
     test("should support tool execution with context", async () => {
-        const agent = new Agent<TestContext, TestData>({ 
-            name: "test", 
+        const agent = new Agent<TestContext, TestData>({
+            name: "test",
             provider,
             context: { userId: "test-123", role: "admin" }
         });
@@ -722,14 +717,14 @@ describe("ToolManager Advanced Features", () => {
             handler: async () => "result1"
         });
         toolManager.register({
-            id: "existing-tool-2", 
+            id: "existing-tool-2",
             handler: async () => "result2"
         });
 
         // Validate tool references
         const validation = toolManager.validateToolReferences([
             "existing-tool-1",
-            "existing-tool-2", 
+            "existing-tool-2",
             "nonexistent-tool"
         ]);
 
@@ -781,5 +776,172 @@ describe("ToolManager Advanced Features", () => {
         expect(health.issues).toHaveLength(0);
         expect(health.statistics).toBeDefined();
         expect(health.statistics.registeredTools).toBeGreaterThanOrEqual(1);
+    });
+});
+
+
+describe("ToolManager Transient Layer", () => {
+    test("setTransientTools makes tools available for the turn", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        const transientTool = {
+            id: "transient-1",
+            handler: async () => "transient result"
+        };
+
+        toolManager.setTransientTools([transientTool]);
+
+        expect(toolManager.hasTransientTools()).toBe(true);
+        const found = toolManager.find("transient-1");
+        expect(found).toBe(transientTool);
+    });
+
+    test("clearTransientTools removes all transient tools", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        toolManager.setTransientTools([
+            { id: "t1", handler: async () => "r1" },
+            { id: "t2", handler: async () => "r2" },
+        ]);
+
+        expect(toolManager.hasTransientTools()).toBe(true);
+
+        toolManager.clearTransientTools();
+
+        expect(toolManager.hasTransientTools()).toBe(false);
+        expect(toolManager.find("t1")).toBeUndefined();
+        expect(toolManager.find("t2")).toBeUndefined();
+    });
+
+    test("transient tools take priority over step, flow, and agent tools", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        // Register at agent level
+        agent.addTool({
+            id: "shared-id",
+            name: "agent-version",
+            handler: async () => "agent"
+        });
+
+        // Set transient tool with same ID
+        const transientVersion = {
+            id: "shared-id",
+            name: "transient-version",
+            handler: async () => "transient"
+        };
+        toolManager.setTransientTools([transientVersion]);
+
+        // find() should return the transient version
+        const found = toolManager.find("shared-id");
+        expect(found).toBe(transientVersion);
+        expect(found?.name).toBe("transient-version");
+    });
+
+    test("transient tools appear in getAvailable with highest priority", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        agent.addTool({
+            id: "agent-tool",
+            handler: async () => "agent"
+        });
+
+        const transientTool = {
+            id: "transient-only",
+            handler: async () => "transient"
+        };
+        toolManager.setTransientTools([transientTool]);
+
+        const available = toolManager.getAvailable();
+        expect(available.some(t => t.id === "transient-only")).toBe(true);
+        expect(available.some(t => t.id === "agent-tool")).toBe(true);
+    });
+
+    test("transient layer deduplicates by id with last-definition-wins", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        const toolV1 = { id: "dedup-tool", name: "v1", handler: async () => "v1" };
+        const toolV2 = { id: "dedup-tool", name: "v2", handler: async () => "v2" };
+
+        // Last definition wins — toolV2 should override toolV1
+        toolManager.setTransientTools([toolV1, toolV2]);
+
+        const found = toolManager.find("dedup-tool");
+        expect(found?.name).toBe("v2");
+    });
+
+    test("transient tools are not available after clearTransientTools (try/finally pattern)", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        const transientTool = {
+            id: "one-turn-tool",
+            handler: async () => "one turn"
+        };
+
+        // Simulate try/finally guard pattern
+        toolManager.setTransientTools([transientTool]);
+        try {
+            // During "turn" — tool is available
+            expect(toolManager.find("one-turn-tool")).toBe(transientTool);
+        } finally {
+            toolManager.clearTransientTools();
+        }
+
+        // After "turn" — tool is gone
+        expect(toolManager.find("one-turn-tool")).toBeUndefined();
+        expect(toolManager.hasTransientTools()).toBe(false);
+    });
+
+    test("setTransientTools replaces previous transient tools", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        toolManager.setTransientTools([
+            { id: "first-turn-tool", handler: async () => "first" }
+        ]);
+        expect(toolManager.find("first-turn-tool")).toBeDefined();
+
+        // Next turn sets different tools — previous ones are gone
+        toolManager.setTransientTools([
+            { id: "second-turn-tool", handler: async () => "second" }
+        ]);
+        expect(toolManager.find("first-turn-tool")).toBeUndefined();
+        expect(toolManager.find("second-turn-tool")).toBeDefined();
+    });
+
+    test("transient tools override step tools with same id in getAvailable", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        // Create a mock step with a tool
+        const stepTool = { id: "overlap-tool", name: "step-version", handler: async () => "step" };
+        const mockStep = { tools: [stepTool] } as any;
+
+        // Set a transient tool with same id
+        const transientTool = { id: "overlap-tool", name: "transient-version", handler: async () => "transient" };
+        toolManager.setTransientTools([transientTool]);
+
+        // getAvailable with step context — transient should win
+        const available = toolManager.getAvailable(undefined, mockStep);
+        const resolved = available.find(t => t.id === "overlap-tool");
+        expect(resolved?.name).toBe("transient-version");
+    });
+
+    test("empty array to setTransientTools clears any existing tools", () => {
+        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
+        const toolManager = new ToolManager<TestContext, TestData>(agent);
+
+        toolManager.setTransientTools([
+            { id: "temp", handler: async () => "temp" }
+        ]);
+        expect(toolManager.hasTransientTools()).toBe(true);
+
+        toolManager.setTransientTools([]);
+        expect(toolManager.hasTransientTools()).toBe(false);
     });
 });

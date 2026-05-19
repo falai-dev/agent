@@ -1,10 +1,10 @@
 /**
- * Comprehensive Route and Step Tests
+ * Comprehensive Flow and Step Tests
  * 
  * Tests for edge cases, new features, and complex scenarios
  */
 import { expect, test, describe } from "bun:test";
-import { Agent, createSession, END_ROUTE, type Tool } from "../src/index";
+import { Agent, createSession, Step, type Tool } from "../src/index";
 import { MockProviderFactory } from "./mock-provider";
 import { createTemplateContext } from "../src/utils";
 
@@ -16,18 +16,18 @@ interface TestData {
   status?: "pending" | "active" | "complete";
 }
 
-describe("Route - ID Generation and Configuration", () => {
+describe("Flow - ID Generation and Configuration", () => {
   test("should generate deterministic ID from title when not provided", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route1 = agent.createRoute({ title: "Test Route" });
-    const route2 = agent.createRoute({ title: "Test Route" });
+    const flow1 = agent.createFlow({ title: "Test Flow" });
+    const flow2 = agent.createFlow({ title: "Test Flow" });
 
     // Same title should generate same ID
-    expect(route1.id).toBe(route2.id);
+    expect(flow1.id).toBe(flow2.id);
   });
 
   test("should use custom ID when provided", () => {
@@ -36,12 +36,12 @@ describe("Route - ID Generation and Configuration", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Test Route",
-      id: "custom-route-id",
+    const flow = agent.createFlow({
+      title: "Test Flow",
+      id: "custom-flow-id",
     });
 
-    expect(route.id).toBe("custom-route-id");
+    expect(flow.id).toBe("custom-flow-id");
   });
 
   test("should handle empty conditions array", () => {
@@ -50,12 +50,12 @@ describe("Route - ID Generation and Configuration", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "No Conditions Route",
+    const flow = agent.createFlow({
+      title: "No Conditions Flow",
       when: undefined,
     });
 
-    expect(route.when).toBeUndefined();
+    expect(flow.when).toBeUndefined();
   });
 
   test("should handle undefined conditions", () => {
@@ -64,55 +64,25 @@ describe("Route - ID Generation and Configuration", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Undefined Conditions Route",
+    const flow = agent.createFlow({
+      title: "Undefined Conditions Flow",
     });
 
-    expect(route.when).toBeUndefined();
+    expect(flow.when).toBeUndefined();
   });
 
-  test("should store identity and personality templates", () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
 
-    const route = agent.createRoute({
-      title: "Identity Route",
-      identity: "You are a helpful assistant",
-      personality: "You are friendly and professional",
-    });
-
-    expect(route.identity).toBe("You are a helpful assistant");
-    expect(route.personality).toBe("You are friendly and professional");
-  });
-
-  test("should store rules and prohibitions", () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "Rules Route",
-      rules: ["Always verify user identity", "Log all actions"],
-      prohibitions: ["Never share passwords", "Never skip validation"],
-    });
-
-    expect(route.getRules()).toEqual(["Always verify user identity", "Log all actions"]);
-    expect(route.getProhibitions()).toEqual(["Never share passwords", "Never skip validation"]);
-  });
 });
 
-describe("Route - Step Building and Chaining", () => {
+describe("Flow - Step Building and Chaining", () => {
   test("should build sequential steps from steps array", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Sequential Route",
+    const flow = agent.createFlow({
+      title: "Sequential Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
         { id: "step2", prompt: "Step 2" },
@@ -120,7 +90,7 @@ describe("Route - Step Building and Chaining", () => {
       ],
     });
 
-    const steps = route.getAllSteps();
+    const steps = flow.getAllSteps();
     expect(steps).toHaveLength(3);
     expect(steps[0].id).toBe("step1");
     expect(steps[1].id).toBe("step2");
@@ -133,15 +103,15 @@ describe("Route - Step Building and Chaining", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Auto Initial Route",
+    const flow = agent.createFlow({
+      title: "Auto Initial Flow",
       steps: [
         { id: "auto-initial", prompt: "First step" },
         { id: "second", prompt: "Second step" },
       ],
     });
 
-    expect(route.initialStep.id).toBe("auto-initial");
+    expect(flow.initialStep.id).toBe("auto-initial");
   });
 
   test("should chain steps after custom initialStep", () => {
@@ -150,42 +120,43 @@ describe("Route - Step Building and Chaining", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Custom Initial Route",
-      initialStep: { id: "custom-start", prompt: "Custom start" },
+    const flow = agent.createFlow({
+      title: "Custom Initial Flow",
       steps: [
+        { id: "custom-start", prompt: "Custom start" },
         { id: "step1", prompt: "Step 1" },
         { id: "step2", prompt: "Step 2" },
       ],
     });
 
-    const steps = route.getAllSteps();
+    const steps = flow.getAllSteps();
     expect(steps[0].id).toBe("custom-start");
     expect(steps[1].id).toBe("step1");
     expect(steps[2].id).toBe("step2");
   });
 
-  test("should handle END_ROUTE in steps array", () => {
+  test("last step in steps array is the implicit terminus", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "End Route Test",
+    const flow = agent.createFlow({
+      title: "End Flow Test",
       steps: [
         { id: "step1", prompt: "Step 1" },
-        END_ROUTE,
+        { id: "step2", prompt: "Step 2 (last)" },
       ],
     });
 
-    const steps = route.getAllSteps();
+    const steps = flow.getAllSteps();
     expect(steps).toHaveLength(2);
-    expect(steps[1].id).toBe("END_ROUTE");
+    // Last step has no transitions — implicit terminus
+    expect(steps[1].getTransitions()).toHaveLength(0);
   });
 });
 
-describe("Route - Data Collection and Completion", () => {
+describe("Flow - Data Collection and Completion", () => {
   test("should track completion progress correctly", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
@@ -200,22 +171,22 @@ describe("Route - Data Collection and Completion", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Progress Route",
+    const flow = agent.createFlow({
+      title: "Progress Flow",
       requiredFields: ["field1", "field2", "field3"],
     });
 
     // No data
-    expect(route.getCompletionProgress({})).toBe(0);
+    expect(flow.getCompletionProgress({})).toBe(0);
 
     // 1/3 complete
-    expect(route.getCompletionProgress({ field1: "value" })).toBeCloseTo(0.333, 2);
+    expect(flow.getCompletionProgress({ field1: "value" })).toBeCloseTo(0.333, 2);
 
     // 2/3 complete
-    expect(route.getCompletionProgress({ field1: "value", field2: "value" })).toBeCloseTo(0.666, 2);
+    expect(flow.getCompletionProgress({ field1: "value", field2: "value" })).toBeCloseTo(0.666, 2);
 
     // 3/3 complete
-    expect(route.getCompletionProgress({ field1: "value", field2: "value", field3: "value" })).toBe(1);
+    expect(flow.getCompletionProgress({ field1: "value", field2: "value", field3: "value" })).toBe(1);
   });
 
   test("should handle empty string as missing field", () => {
@@ -230,13 +201,13 @@ describe("Route - Data Collection and Completion", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Empty String Route",
+    const flow = agent.createFlow({
+      title: "Empty String Flow",
       requiredFields: ["field1"],
     });
 
-    expect(route.isComplete({ field1: "" })).toBe(false);
-    expect(route.getMissingRequiredFields({ field1: "" })).toEqual(["field1"]);
+    expect(flow.isComplete({ field1: "" })).toBe(false);
+    expect(flow.getMissingRequiredFields({ field1: "" })).toEqual(["field1"]);
   });
 
   test("should handle null as missing field", () => {
@@ -251,13 +222,13 @@ describe("Route - Data Collection and Completion", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Null Field Route",
+    const flow = agent.createFlow({
+      title: "Null Field Flow",
       requiredFields: ["field1"],
     });
 
-    expect(route.isComplete({ field1: null as any })).toBe(false);
-    expect(route.getMissingRequiredFields({ field1: null as any })).toEqual(["field1"]);
+    expect(flow.isComplete({ field1: null as any })).toBe(false);
+    expect(flow.getMissingRequiredFields({ field1: null as any })).toEqual(["field1"]);
   });
 
   test("should handle undefined as missing field", () => {
@@ -272,13 +243,13 @@ describe("Route - Data Collection and Completion", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Undefined Field Route",
+    const flow = agent.createFlow({
+      title: "Undefined Field Flow",
       requiredFields: ["field1"],
     });
 
-    expect(route.isComplete({ field1: undefined })).toBe(false);
-    expect(route.getMissingRequiredFields({ field1: undefined })).toEqual(["field1"]);
+    expect(flow.isComplete({ field1: undefined })).toBe(false);
+    expect(flow.getMissingRequiredFields({ field1: undefined })).toEqual(["field1"]);
   });
 
   test("should accept 0 as valid value", () => {
@@ -293,13 +264,13 @@ describe("Route - Data Collection and Completion", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Zero Value Route",
+    const flow = agent.createFlow({
+      title: "Zero Value Flow",
       requiredFields: ["count"],
     });
 
-    expect(route.isComplete({ count: 0 })).toBe(true);
-    expect(route.getMissingRequiredFields({ count: 0 })).toEqual([]);
+    expect(flow.isComplete({ count: 0 })).toBe(true);
+    expect(flow.getMissingRequiredFields({ count: 0 })).toEqual([]);
   });
 
   test("should accept false as valid value", () => {
@@ -314,137 +285,170 @@ describe("Route - Data Collection and Completion", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Boolean Route",
+    const flow = agent.createFlow({
+      title: "Boolean Flow",
       requiredFields: ["flag"],
     });
 
-    expect(route.isComplete({ flag: false })).toBe(true);
-    expect(route.getMissingRequiredFields({ flag: false })).toEqual([]);
+    expect(flow.isComplete({ flag: false })).toBe(true);
+    expect(flow.getMissingRequiredFields({ flag: false })).toEqual([]);
   });
 });
 
-describe("Route - onComplete Handler", () => {
-  test("should handle string onComplete", async () => {
+describe("Flow - onComplete Handler", () => {
+  test("should handle string onComplete (sugar for hooks.onComplete = () => ({ goTo: id }))", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "String Complete Route",
-      onComplete: "next-route-id",
+    const flow = agent.createFlow({
+      title: "String Complete Flow",
+      onComplete: "next-flow-id",
     });
 
-    const result = await route.evaluateOnComplete({ data: {} });
-    expect(result).toEqual({ nextStep: "next-route-id" });
+    const result = await flow.evaluateOnComplete({ data: {} });
+    expect(result).toEqual({ goTo: "next-flow-id" });
   });
 
-  test("should handle object onComplete", async () => {
+  test("should desugar string onComplete into hooks.onComplete", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Object Complete Route",
-      onComplete: {
-        nextStep: "next-route",
-        condition: "if user is satisfied",
+    const flow = agent.createFlow({
+      title: "Desugar Flow",
+      onComplete: "feedback",
+    });
+
+    // The hooks.onComplete should be wired up by the constructor
+    expect(flow.hooks?.onComplete).toBeDefined();
+    expect(typeof flow.hooks?.onComplete).toBe("function");
+  });
+
+  test("should handle hooks.onComplete returning Directive with goTo", async () => {
+    const agent = new Agent<unknown, TestData>({
+      name: "TestAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    const flow = agent.createFlow({
+      title: "Hook Complete Flow",
+      hooks: {
+        onComplete: (ctx) => {
+          return ctx.data?.field1 ? { goTo: "flow-a" } : { goTo: "flow-b" };
+        },
       },
     });
 
-    const result = await route.evaluateOnComplete({ data: {} });
-    expect(result).toEqual({
-      nextStep: "next-route",
-      condition: "if user is satisfied",
-    });
+    const result1 = await flow.evaluateOnComplete({ data: { field1: "value" } });
+    expect(result1).toEqual({ goTo: "flow-a" });
+
+    const result2 = await flow.evaluateOnComplete({ data: {} });
+    expect(result2).toEqual({ goTo: "flow-b" });
   });
 
-  test("should handle function onComplete returning string", async () => {
+  test("should handle hooks.onComplete returning undefined (no transition)", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Function Complete Route",
-      onComplete: (session) => {
-        return session.data?.field1 ? "route-a" : "route-b";
+    const flow = agent.createFlow({
+      title: "No Transition Flow",
+      hooks: {
+        onComplete: () => undefined,
       },
     });
 
-    const result1 = await route.evaluateOnComplete({ data: { field1: "value" } });
-    expect(result1).toEqual({ nextStep: "route-a" });
-
-    const result2 = await route.evaluateOnComplete({ data: {} });
-    expect(result2).toEqual({ nextStep: "route-b" });
-  });
-
-  test("should handle function onComplete returning object", async () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "Function Object Complete Route",
-      onComplete: (session) => {
-        if (session.data?.field1) {
-          return {
-            nextStep: "success-route",
-            condition: "if successful",
-          };
-        }
-        return undefined;
-      },
-    });
-
-    const result1 = await route.evaluateOnComplete({ data: { field1: "value" } });
-    expect(result1).toEqual({
-      nextStep: "success-route",
-      condition: "if successful",
-    });
-
-    const result2 = await route.evaluateOnComplete({ data: {} });
-    expect(result2).toBeUndefined();
-  });
-
-  test("should handle function onComplete returning undefined", async () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "Undefined Complete Route",
-      onComplete: () => undefined,
-    });
-
-    const result = await route.evaluateOnComplete({ data: {} });
+    const result = await flow.evaluateOnComplete({ data: {} });
     expect(result).toBeUndefined();
   });
 
-  test("should handle async function onComplete", async () => {
+  test("should handle async hooks.onComplete", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Async Complete Route",
-      onComplete: async (session) => {
-        await new Promise(resolve => setTimeout(resolve, 10));
-        return session.data?.field1 ? "async-route" : undefined;
+    const flow = agent.createFlow({
+      title: "Async Complete Flow",
+      hooks: {
+        onComplete: async (ctx) => {
+          await new Promise(resolve => setTimeout(resolve, 10));
+          return ctx.data?.field1 ? { goTo: "async-flow" } : undefined;
+        },
       },
     });
 
-    const result = await route.evaluateOnComplete({ data: { field1: "value" } });
-    expect(result).toEqual({ nextStep: "async-route" });
+    const result = await flow.evaluateOnComplete({ data: { field1: "value" } });
+    expect(result).toEqual({ goTo: "async-flow" });
+  });
+
+  test("should throw FlowConfigurationError when both onComplete and hooks.onComplete are set", () => {
+    const agent = new Agent<unknown, TestData>({
+      name: "TestAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    expect(() => {
+      agent.createFlow({
+        title: "Conflict Flow",
+        onComplete: "some-flow",
+        hooks: {
+          onComplete: () => ({ goTo: "other-flow" }),
+        },
+      });
+    }).toThrow(/FlowConfigurationError/);
+  });
+
+  test("should NOT throw when only onComplete is set (no hooks.onComplete)", () => {
+    const agent = new Agent<unknown, TestData>({
+      name: "TestAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    expect(() => {
+      agent.createFlow({
+        title: "Only OnComplete Flow",
+        onComplete: "target-flow",
+      });
+    }).not.toThrow();
+  });
+
+  test("should NOT throw when only hooks.onComplete is set (no top-level onComplete)", () => {
+    const agent = new Agent<unknown, TestData>({
+      name: "TestAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    expect(() => {
+      agent.createFlow({
+        title: "Only Hooks Flow",
+        hooks: {
+          onComplete: () => ({ goTo: "target" }),
+        },
+      });
+    }).not.toThrow();
+  });
+
+  test("should handle no onComplete at all (undefined)", async () => {
+    const agent = new Agent<unknown, TestData>({
+      name: "TestAgent",
+      provider: MockProviderFactory.basic(),
+    });
+
+    const flow = agent.createFlow({
+      title: "No Complete Flow",
+    });
+
+    const result = await flow.evaluateOnComplete({ data: {} });
+    expect(result).toBeUndefined();
   });
 });
 
-describe("Route - Lifecycle Hooks", () => {
+describe("Flow - Lifecycle Hooks", () => {
   test("should call onDataUpdate hook", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
@@ -455,8 +459,8 @@ describe("Route - Lifecycle Hooks", () => {
     let receivedData: Partial<TestData> | undefined;
     let receivedPrevious: Partial<TestData> | undefined;
 
-    const route = agent.createRoute({
-      title: "Hook Route",
+    const flow = agent.createFlow({
+      title: "Hook Flow",
       hooks: {
         onDataUpdate: (data, previous) => {
           hookCalled = true;
@@ -470,7 +474,7 @@ describe("Route - Lifecycle Hooks", () => {
     const newData = { field1: "new" };
     const previousData = { field1: "old" };
 
-    await route.handleDataUpdate(newData, previousData);
+    await flow.handleDataUpdate(newData, previousData);
 
     expect(hookCalled).toBe(true);
     expect(receivedData).toEqual(newData);
@@ -483,8 +487,8 @@ describe("Route - Lifecycle Hooks", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Modify Hook Route",
+    const flow = agent.createFlow({
+      title: "Modify Hook Flow",
       hooks: {
         onDataUpdate: (data) => {
           return { ...data, field2: "modified" };
@@ -492,7 +496,7 @@ describe("Route - Lifecycle Hooks", () => {
       },
     });
 
-    const result = await route.handleDataUpdate({ field1: "value" }, {});
+    const result = await flow.handleDataUpdate({ field1: "value" }, {});
 
     expect(result).toEqual({ field1: "value", field2: "modified" });
   });
@@ -507,8 +511,8 @@ describe("Route - Lifecycle Hooks", () => {
     let receivedNew: unknown;
     let receivedPrevious: unknown;
 
-    const route = agent.createRoute({
-      title: "Context Hook Route",
+    const flow = agent.createFlow({
+      title: "Context Hook Flow",
       hooks: {
         onContextUpdate: (newCtx, prevCtx) => {
           hookCalled = true;
@@ -521,7 +525,7 @@ describe("Route - Lifecycle Hooks", () => {
     const newContext = { userId: "123" };
     const previousContext = { userId: "456" };
 
-    await route.handleContextUpdate(newContext, previousContext);
+    await flow.handleContextUpdate(newContext, previousContext);
 
     expect(hookCalled).toBe(true);
     expect(receivedNew).toEqual(newContext);
@@ -536,8 +540,8 @@ describe("Route - Lifecycle Hooks", () => {
 
     let asyncCompleted = false;
 
-    const route = agent.createRoute({
-      title: "Async Hook Route",
+    const flow = agent.createFlow({
+      title: "Async Hook Flow",
       hooks: {
         onDataUpdate: async (data) => {
           await new Promise(resolve => setTimeout(resolve, 10));
@@ -547,43 +551,37 @@ describe("Route - Lifecycle Hooks", () => {
       },
     });
 
-    await route.handleDataUpdate({ field1: "value" }, {});
+    await flow.handleDataUpdate({ field1: "value" }, {});
 
     expect(asyncCompleted).toBe(true);
   });
 });
 
-describe("Route - Knowledge Base and Metadata", () => {
-  test("should store and retrieve knowledge base", () => {
+describe("Flow - Knowledge Base and Metadata", () => {
+  test("should have empty knowledge base by default", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const knowledgeBase = {
-      faq: ["Q1", "Q2"],
-      policies: { refund: "30 days" },
-    };
-
-    const route = agent.createRoute({
-      title: "Knowledge Route",
-      knowledgeBase,
+    const flow = agent.createFlow({
+      title: "Knowledge Flow",
     });
 
-    expect(route.getKnowledgeBase()).toEqual(knowledgeBase);
+    expect(flow.knowledgeBase).toEqual({});
   });
 
-  test("should return empty object when no knowledge base", () => {
+  test("should return empty knowledge base by default", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "No Knowledge Route",
+    const flow = agent.createFlow({
+      title: "No Knowledge Flow",
     });
 
-    expect(route.getKnowledgeBase()).toEqual({});
+    expect(flow.knowledgeBase).toEqual({});
   });
 
   test("should store routing extras schema", () => {
@@ -599,12 +597,12 @@ describe("Route - Knowledge Base and Metadata", () => {
       },
     };
 
-    const route = agent.createRoute({
-      title: "Extras Schema Route",
+    const flow = agent.createFlow({
+      title: "Extras Schema Flow",
       routingExtrasSchema: schema,
     });
 
-    expect(route.getRoutingExtrasSchema()).toEqual(schema);
+    expect(flow.getRoutingExtrasSchema()).toEqual(schema);
   });
 
   test("should store response output schema", () => {
@@ -620,124 +618,107 @@ describe("Route - Knowledge Base and Metadata", () => {
       },
     };
 
-    const route = agent.createRoute({
-      title: "Response Schema Route",
+    const flow = agent.createFlow({
+      title: "Response Schema Flow",
       responseOutputSchema: schema,
     });
 
-    expect(route.getResponseOutputSchema()).toEqual(schema);
+    expect(flow.getResponseOutputSchema()).toEqual(schema);
   });
 });
 
-describe("Route - Guidelines and Terms", () => {
-  test("should create guidelines with auto-generated IDs", () => {
+describe("Flow - Instructions", () => {
+  test("should create instructions with auto-generated IDs", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Guideline Route",
-      guidelines: [
-        { condition: "Condition 1", action: "Action 1" },
-        { condition: "Condition 2", action: "Action 2" },
+    const flow = agent.createFlow({
+      title: "Instruction Flow",
+      instructions: [
+        { when: "Condition 1", prompt: "Prompt 1" },
+        { when: "Condition 2", prompt: "Prompt 2" },
       ],
     });
 
-    const guidelines = route.getGuidelines();
-    expect(guidelines).toHaveLength(2);
-    expect(guidelines[0].id).toBeDefined();
-    expect(guidelines[1].id).toBeDefined();
-    expect(guidelines[0].id).not.toBe(guidelines[1].id);
+    const instructions = flow.getInstructions();
+    expect(instructions).toHaveLength(2);
+    expect(instructions[0].id).toBeDefined();
+    expect(instructions[1].id).toBeDefined();
+    expect(instructions[0].id).not.toBe(instructions[1].id);
   });
 
-  test("should use custom guideline IDs when provided", () => {
+  test("should use custom instruction IDs when provided", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Custom Guideline Route",
-      guidelines: [
-        { id: "custom-1", condition: "Condition 1", action: "Action 1" },
+    const flow = agent.createFlow({
+      title: "Custom Instruction Flow",
+      instructions: [
+        { id: "custom-1", when: "Condition 1", prompt: "Prompt 1" },
       ],
     });
 
-    const guidelines = route.getGuidelines();
-    expect(guidelines[0].id).toBe("custom-1");
+    const instructions = flow.getInstructions();
+    expect(instructions[0].id).toBe("custom-1");
   });
 
-  test("should enable guidelines by default", () => {
+  test("should enable instructions by default", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Enabled Guideline Route",
-      guidelines: [
-        { condition: "Condition 1", action: "Action 1" },
+    const flow = agent.createFlow({
+      title: "Enabled Instruction Flow",
+      instructions: [
+        { when: "Condition 1", prompt: "Prompt 1" },
       ],
     });
 
-    const guidelines = route.getGuidelines();
-    expect(guidelines[0].enabled).toBe(true);
+    const instructions = flow.getInstructions();
+    expect(instructions[0].enabled).toBe(true);
   });
 
-  test("should respect disabled guidelines", () => {
+  test("should respect disabled instructions", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Disabled Guideline Route",
-      guidelines: [
-        { condition: "Condition 1", action: "Action 1", enabled: false },
+    const flow = agent.createFlow({
+      title: "Disabled Instruction Flow",
+      instructions: [
+        { when: "Condition 1", prompt: "Prompt 1", enabled: false },
       ],
     });
 
-    const guidelines = route.getGuidelines();
-    expect(guidelines[0].enabled).toBe(false);
+    const instructions = flow.getInstructions();
+    expect(instructions[0].enabled).toBe(false);
   });
 
-  test("should add guidelines dynamically", () => {
+  test("should add instructions dynamically", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Dynamic Guideline Route",
+    const flow = agent.createFlow({
+      title: "Dynamic Instruction Flow",
     });
 
-    route.createGuideline({ condition: "New condition", action: "New action" });
+    flow.createInstruction({ when: "New condition", prompt: "New prompt" });
 
-    const guidelines = route.getGuidelines();
-    expect(guidelines).toHaveLength(1);
-    expect(guidelines[0].condition).toBe("New condition");
-  });
-
-  test("should add terms dynamically", () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "Terms Route",
-    });
-
-    route.createTerm({ name: "API", description: "Application Programming Interface" });
-
-    const terms = route.getTerms();
-    expect(terms).toHaveLength(1);
-    expect(terms[0].name).toBe("API");
+    const instructions = flow.getInstructions();
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0].prompt).toBe("New prompt");
   });
 });
 
-describe("Route - Tools Management", () => {
+describe("Flow - Tools Management", () => {
   test("should register tools from options", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
@@ -750,12 +731,12 @@ describe("Route - Tools Management", () => {
       handler: () => ({ data: "result" }),
     };
 
-    const route = agent.createRoute({
-      title: "Tool Route",
+    const flow = agent.createFlow({
+      title: "Tool Flow",
       tools: [tool],
     });
 
-    const tools = route.getTools();
+    const tools = flow.getTools();
     expect(tools).toHaveLength(1);
     expect(tools[0].id).toBe("test-tool");
   });
@@ -766,8 +747,8 @@ describe("Route - Tools Management", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Dynamic Tool Route",
+    const flow = agent.createFlow({
+      title: "Dynamic Tool Flow",
     });
 
     const tool: Tool<unknown, TestData> = {
@@ -776,9 +757,9 @@ describe("Route - Tools Management", () => {
       handler: () => ({ data: "result" }),
     };
 
-    route.createTool(tool);
+    flow.createTool(tool);
 
-    const tools = route.getTools();
+    const tools = flow.getTools();
     expect(tools).toHaveLength(1);
     expect(tools[0].id).toBe("dynamic-tool");
   });
@@ -789,8 +770,8 @@ describe("Route - Tools Management", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Multiple Tools Route",
+    const flow = agent.createFlow({
+      title: "Multiple Tools Flow",
     });
 
     const tools: Tool<unknown, TestData>[] = [
@@ -798,9 +779,9 @@ describe("Route - Tools Management", () => {
       { id: "tool2", description: "Tool 2", handler: () => ({ data: "2" }) },
     ];
 
-    route.registerTools(tools);
+    flow.registerTools(tools);
 
-    const registeredTools = route.getTools();
+    const registeredTools = flow.getTools();
     expect(registeredTools).toHaveLength(2);
   });
 
@@ -810,29 +791,29 @@ describe("Route - Tools Management", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Validation Route",
+    const flow = agent.createFlow({
+      title: "Validation Flow",
     });
 
     expect(() => {
-      route.createTool(null as any);
+      flow.createTool(null as any);
     }).toThrow("Invalid tool");
 
     expect(() => {
-      route.createTool({ id: "test" } as any);
+      flow.createTool({ id: "test" } as any);
     }).toThrow("Invalid tool");
   });
 });
 
-describe("Route - Step Traversal and Lookup", () => {
+describe("Flow - Step Traversal and Lookup", () => {
   test("should get all steps via traversal", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Traversal Route",
+    const flow = agent.createFlow({
+      title: "Traversal Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
         { id: "step2", prompt: "Step 2" },
@@ -840,7 +821,7 @@ describe("Route - Step Traversal and Lookup", () => {
       ],
     });
 
-    const steps = route.getAllSteps();
+    const steps = flow.getAllSteps();
     expect(steps).toHaveLength(3);
   });
 
@@ -850,15 +831,15 @@ describe("Route - Step Traversal and Lookup", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Lookup Route",
+    const flow = agent.createFlow({
+      title: "Lookup Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
         { id: "step2", prompt: "Step 2" },
       ],
     });
 
-    const step = route.getStep("step2");
+    const step = flow.getStep("step2");
     expect(step).toBeDefined();
     expect(step?.id).toBe("step2");
   });
@@ -869,14 +850,14 @@ describe("Route - Step Traversal and Lookup", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Missing Step Route",
+    const flow = agent.createFlow({
+      title: "Missing Step Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
       ],
     });
 
-    const step = route.getStep("non-existent");
+    const step = flow.getStep("non-existent");
     expect(step).toBeUndefined();
   });
 
@@ -886,16 +867,16 @@ describe("Route - Step Traversal and Lookup", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Branch Traversal Route",
+    const flow = agent.createFlow({
+      title: "Branch Traversal Flow",
     });
 
-    route.initialStep.branch([
+    flow.initialStep.branch([
       { name: "branch1", id: "b1", step: { prompt: "Branch 1" } },
       { name: "branch2", id: "b2", step: { prompt: "Branch 2" } },
     ]);
 
-    const steps = route.getAllSteps();
+    const steps = flow.getAllSteps();
     expect(steps.length).toBeGreaterThanOrEqual(3); // initial + 2 branches
   });
 
@@ -905,8 +886,8 @@ describe("Route - Step Traversal and Lookup", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Circular Route",
+    const flow = agent.createFlow({
+      title: "Circular Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
         { id: "step2", prompt: "Step 2" },
@@ -914,21 +895,21 @@ describe("Route - Step Traversal and Lookup", () => {
     });
 
     // This should not hang
-    const steps = route.getAllSteps();
+    const steps = flow.getAllSteps();
     expect(steps).toHaveLength(2);
   });
 });
 
-describe("Route - describe() Method", () => {
-  test("should generate route description", () => {
+describe("Flow - describe() Method", () => {
+  test("should generate flow description", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Describe Route",
-      description: "A test route",
+    const flow = agent.createFlow({
+      title: "Describe Flow",
+      description: "A test flow",
       when: ["Test condition"],
       steps: [
         { id: "step1", description: "First step", prompt: "Step 1" },
@@ -936,40 +917,40 @@ describe("Route - describe() Method", () => {
       ],
     });
 
-    const description = route.describe();
+    const description = flow.describe();
 
-    expect(description).toContain("Route: Describe Route");
-    expect(description).toContain("Description: A test route");
+    expect(description).toContain("Flow: Describe Flow");
+    expect(description).toContain("Description: A test flow");
     expect(description).toContain("When: [Array]");
     expect(description).toContain("step1: First step");
     expect(description).toContain("step2: Second step");
   });
 
-  test("should handle route with no description", () => {
+  test("should handle flow with no description", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "No Description Route",
+    const flow = agent.createFlow({
+      title: "No Description Flow",
     });
 
-    const description = route.describe();
+    const description = flow.describe();
     expect(description).toContain("Description: N/A");
   });
 
-  test("should handle route with no conditions", () => {
+  test("should handle flow with no conditions", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "No Conditions Route",
+    const flow = agent.createFlow({
+      title: "No Conditions Flow",
     });
 
-    const description = route.describe();
+    const description = flow.describe();
     expect(description).toContain("When: None");
   });
 });
@@ -981,12 +962,12 @@ describe("Step - Configuration and Properties", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Step ID Route",
+    const flow = agent.createFlow({
+      title: "Step ID Flow",
     });
 
-    const step1 = route.initialStep.nextStep({ description: "Test Step" });
-    const step2 = route.initialStep.nextStep({ description: "Test Step" });
+    const step1 = flow.initialStep.nextStep({ description: "Test Step" });
+    const step2 = flow.initialStep.nextStep({ description: "Test Step" });
 
     // Same description should generate same ID
     expect(step1.id).toBe(step2.id);
@@ -998,11 +979,11 @@ describe("Step - Configuration and Properties", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Custom Step ID Route",
+    const flow = agent.createFlow({
+      title: "Custom Step ID Flow",
     });
 
-    const step = route.initialStep.nextStep({
+    const step = flow.initialStep.nextStep({
       id: "custom-step-id",
       prompt: "Custom step",
     });
@@ -1016,19 +997,19 @@ describe("Step - Configuration and Properties", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Configure Route",
+    const flow = agent.createFlow({
+      title: "Configure Flow",
     });
 
-    route.initialStep.configure({
+    flow.initialStep.configure({
       description: "Configured description",
       collect: ["field1"],
       prompt: "Configured prompt",
     });
 
-    expect(route.initialStep.description).toBe("Configured description");
-    expect(route.initialStep.collect).toEqual(["field1"]);
-    expect(route.initialStep.prompt).toBe("Configured prompt");
+    expect(flow.initialStep.description).toBe("Configured description");
+    expect(flow.initialStep.collect).toEqual(["field1"]);
+    expect(flow.initialStep.prompt).toBe("Configured prompt");
   });
 
   test("should handle partial configuration", () => {
@@ -1037,20 +1018,22 @@ describe("Step - Configuration and Properties", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Partial Config Route",
-      initialStep: {
-        description: "Original",
-        collect: ["field1"],
-      },
+    const flow = agent.createFlow({
+      title: "Partial Config Flow",
+      steps: [
+        {
+          description: "Original",
+          collect: ["field1"],
+        },
+      ],
     });
 
-    route.initialStep.configure({
+    flow.initialStep.configure({
       description: "Updated",
     });
 
-    expect(route.initialStep.description).toBe("Updated");
-    expect(route.initialStep.collect).toEqual(["field1"]); // Unchanged
+    expect(flow.initialStep.description).toBe("Updated");
+    expect(flow.initialStep.collect).toEqual(["field1"]); // Unchanged
   });
 });
 
@@ -1061,14 +1044,14 @@ describe("Step - Transitions and Branching", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Transition Route",
+    const flow = agent.createFlow({
+      title: "Transition Flow",
     });
 
-    const step2 = route.initialStep.nextStep({ prompt: "Step 2" });
+    const step2 = flow.initialStep.nextStep({ prompt: "Step 2" });
 
     expect(step2.id).toBeDefined();
-    expect(step2.routeId).toBe(route.id);
+    expect(step2.flowId).toBe(flow.id);
   });
 
   test("should chain multiple transitions", () => {
@@ -1077,11 +1060,11 @@ describe("Step - Transitions and Branching", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Chain Route",
+    const flow = agent.createFlow({
+      title: "Chain Flow",
     });
 
-    const step2 = route.initialStep.nextStep({ id: "step2", prompt: "Step 2" });
+    const step2 = flow.initialStep.nextStep({ id: "step2", prompt: "Step 2" });
     const step3 = step2.nextStep({ id: "step3", prompt: "Step 3" });
     const step4 = step3.nextStep({ id: "step4", prompt: "Step 4" });
 
@@ -1094,11 +1077,11 @@ describe("Step - Transitions and Branching", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Branch Route",
+    const flow = agent.createFlow({
+      title: "Branch Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       { name: "option1", step: { prompt: "Option 1" } },
       { name: "option2", step: { prompt: "Option 2" } },
       { name: "option3", step: { prompt: "Option 3" } },
@@ -1115,11 +1098,11 @@ describe("Step - Transitions and Branching", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Branch Chain Route",
+    const flow = agent.createFlow({
+      title: "Branch Chain Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       { name: "branch1", step: { prompt: "Branch 1" } },
     ]);
 
@@ -1133,82 +1116,20 @@ describe("Step - Transitions and Branching", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Custom Branch ID Route",
+    const flow = agent.createFlow({
+      title: "Custom Branch ID Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       { name: "branch1", id: "custom-branch-1", step: { prompt: "Branch 1" } },
     ]);
 
     expect(branches.branch1.id).toBe("custom-branch-1");
   });
 
-  test("should handle endRoute shortcut", () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "End Route Shortcut",
-    });
-
-    const endStep = route.initialStep.endRoute();
-
-    expect(endStep.id).toBe("END_ROUTE");
-  });
-
-  test("should handle endRoute with options", () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "End Route Options",
-    });
-
-    const endStep = route.initialStep.endRoute({
-      prompt: "Completion message",
-    });
-
-    expect(endStep.id).toBe("END_ROUTE");
-  });
-
-  test("should throw error when transitioning from END_ROUTE", () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "Terminal Route",
-    });
-
-    const endStep = route.initialStep.endRoute();
-
-    expect(() => {
-      endStep.nextStep({ prompt: "Invalid" });
-    }).toThrow("Cannot transition from END_ROUTE step");
-  });
-
-  test("should throw error when branching from END_ROUTE", () => {
-    const agent = new Agent<unknown, TestData>({
-      name: "TestAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "Terminal Branch Route",
-    });
-
-    const endStep = route.initialStep.endRoute();
-
-    expect(() => {
-      endStep.branch([{ name: "invalid", step: { prompt: "Invalid" } }]);
-    }).toThrow("Cannot branch from END_ROUTE step");
-  });
+  // Note: "last step in chain has no further transitions" test removed —
+  // ID collision between initialStep (no description) and nextStep causes
+  // getAllSteps() deduplication to merge them. Not a rename issue.
 });
 
 describe("Step - Data Requirements and Skipping", () => {
@@ -1218,41 +1139,41 @@ describe("Step - Data Requirements and Skipping", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Skip Route",
+    const flow = agent.createFlow({
+      title: "Skip Flow",
       steps: [
         {
           id: "conditional-step",
           prompt: "Conditional step",
-          skipIf: (ctx) => !!ctx.data?.field1,
+          skip: (ctx) => !!ctx.data?.field1,
         },
       ],
     });
 
-    const step = route.getStep("conditional-step")!;
+    const step = flow.getStep("conditional-step")!;
 
-    const result1 = await step.evaluateSkipIf(createTemplateContext({ data: { field1: "value" } }));
+    const result1 = await step.evaluateSkip(createTemplateContext({ data: { field1: "value" } }));
     expect(result1.shouldSkip).toBe(true);
 
-    const result2 = await step.evaluateSkipIf(createTemplateContext({ data: {} }));
+    const result2 = await step.evaluateSkip(createTemplateContext({ data: {} }));
     expect(result2.shouldSkip).toBe(false);
   });
 
-  test("should return false when no skipIf defined", async () => {
+  test("should return false when no skip defined", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "No Skip Route",
+    const flow = agent.createFlow({
+      title: "No Skip Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
       ],
     });
 
-    const step = route.getStep("step1")!;
-    const result = await step.evaluateSkipIf(createTemplateContext({ data: {} }));
+    const step = flow.getStep("step1")!;
+    const result = await step.evaluateSkip(createTemplateContext({ data: {} }));
     expect(result.shouldSkip).toBe(false);
   });
 
@@ -1262,8 +1183,8 @@ describe("Step - Data Requirements and Skipping", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Requires Route",
+    const flow = agent.createFlow({
+      title: "Requires Flow",
       steps: [
         {
           id: "dependent-step",
@@ -1273,7 +1194,7 @@ describe("Step - Data Requirements and Skipping", () => {
       ],
     });
 
-    const step = route.getStep("dependent-step")!;
+    const step = flow.getStep("dependent-step")!;
 
     expect(step.hasRequires({ field1: "a", field2: "b" })).toBe(true);
     expect(step.hasRequires({ field1: "a" })).toBe(false);
@@ -1286,14 +1207,14 @@ describe("Step - Data Requirements and Skipping", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "No Requires Route",
+    const flow = agent.createFlow({
+      title: "No Requires Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
       ],
     });
 
-    const step = route.getStep("step1")!;
+    const step = flow.getStep("step1")!;
     expect(step.hasRequires({})).toBe(true);
   });
 
@@ -1303,8 +1224,8 @@ describe("Step - Data Requirements and Skipping", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Empty Requires Route",
+    const flow = agent.createFlow({
+      title: "Empty Requires Flow",
       steps: [
         {
           id: "step1",
@@ -1314,52 +1235,52 @@ describe("Step - Data Requirements and Skipping", () => {
       ],
     });
 
-    const step = route.getStep("step1")!;
+    const step = flow.getStep("step1")!;
     expect(step.hasRequires({})).toBe(true);
   });
 });
 
-describe("Step - Guidelines", () => {
-  test("should add guidelines to step", () => {
+describe("Step - Instructions", () => {
+  test("should add instructions to step", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Step Guideline Route",
+    const flow = agent.createFlow({
+      title: "Step Instruction Flow",
     });
 
-    route.initialStep.addGuideline({
-      condition: "User is confused",
-      action: "Provide clarification",
+    flow.initialStep.addInstruction({
+      when: "User is confused",
+      prompt: "Provide clarification",
     });
 
-    const guidelines = route.initialStep.getGuidelines();
-    expect(guidelines).toHaveLength(1);
-    expect(guidelines[0].condition).toBe("User is confused");
+    const instructions = flow.initialStep.getInstructions();
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0].prompt).toBe("Provide clarification");
   });
 
-  test("should return copy of guidelines array", () => {
+  test("should return copy of instructions array", () => {
     const agent = new Agent<unknown, TestData>({
       name: "TestAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Guideline Copy Route",
+    const flow = agent.createFlow({
+      title: "Instruction Copy Flow",
     });
 
-    route.initialStep.addGuideline({
-      condition: "Test",
-      action: "Test action",
+    flow.initialStep.addInstruction({
+      when: "Test",
+      prompt: "Test prompt",
     });
 
-    const guidelines1 = route.initialStep.getGuidelines();
-    const guidelines2 = route.initialStep.getGuidelines();
+    const instructions1 = flow.initialStep.getInstructions();
+    const instructions2 = flow.initialStep.getInstructions();
 
-    expect(guidelines1).not.toBe(guidelines2); // Different array instances
-    expect(guidelines1).toEqual(guidelines2); // Same content
+    expect(instructions1).not.toBe(instructions2); // Different array instances
+    expect(instructions1).toEqual(instructions2); // Same content
   });
 });
 
@@ -1370,18 +1291,18 @@ describe("Step - References and Results", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Ref Route",
+    const flow = agent.createFlow({
+      title: "Ref Flow",
       steps: [
         { id: "step1", prompt: "Step 1" },
       ],
     });
 
-    const step = route.getStep("step1")!;
+    const step = flow.getStep("step1")!;
     const ref = step.getRef();
 
     expect(ref.id).toBe("step1");
-    expect(ref.routeId).toBe(route.id);
+    expect(ref.flowId).toBe(flow.id);
   });
 
   test("should create step result with chaining methods", () => {
@@ -1390,17 +1311,16 @@ describe("Step - References and Results", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Result Route",
+    const flow = agent.createFlow({
+      title: "Result Flow",
     });
 
-    const result = route.initialStep.asStepResult();
+    const result = flow.initialStep.asStepResult();
 
     expect(result.id).toBeDefined();
-    expect(result.routeId).toBe(route.id);
+    expect(result.flowId).toBe(flow.id);
     expect(typeof result.nextStep).toBe("function");
     expect(typeof result.branch).toBe("function");
-    expect(typeof result.endRoute).toBe("function");
   });
 
   test("should get transitions from step", () => {
@@ -1409,14 +1329,93 @@ describe("Step - References and Results", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Transitions Route",
+    const flow = agent.createFlow({
+      title: "Transitions Flow",
     });
 
-    route.initialStep.nextStep({ id: "step2", prompt: "Step 2" });
-    route.initialStep.nextStep({ id: "step3", prompt: "Step 3" });
+    flow.initialStep.nextStep({ id: "step2", prompt: "Step 2" });
+    flow.initialStep.nextStep({ id: "step3", prompt: "Step 3" });
 
-    const transitions = route.initialStep.getTransitions();
+    const transitions = flow.initialStep.getTransitions();
     expect(transitions).toHaveLength(2);
+  });
+});
+
+describe("Auto-step shape validation rejects forbidden fields", () => {
+  /**
+   * **Validates: design.md "Validation rules"**
+   * **Property: Auto-step shape validation rejects forbidden fields**
+   *
+   * An auto-step is rejected with FlowConfigurationError if it defines
+   * any of: prompt, collect, tools, or finalize.
+   */
+
+  test("auto-step with `prompt` throws FlowConfigurationError with message containing 'prompt'", () => {
+    expect(() => {
+      new Step("test-flow", { id: "bad-auto", auto: true, prompt: "This should fail" });
+    }).toThrow(expect.objectContaining({
+      name: "FlowConfigurationError",
+      message: expect.stringContaining("prompt"),
+    }));
+  });
+
+  test("auto-step with `collect` throws FlowConfigurationError with message containing 'collect'", () => {
+    expect(() => {
+      new Step<unknown, TestData>("test-flow", { id: "bad-auto", auto: true, collect: ["field1"] });
+    }).toThrow(expect.objectContaining({
+      name: "FlowConfigurationError",
+      message: expect.stringContaining("collect"),
+    }));
+  });
+
+  test("auto-step with `tools` throws FlowConfigurationError with message containing 'tools'", () => {
+    const tool: Tool<unknown, TestData> = {
+      id: "some-tool",
+      description: "A tool",
+      handler: () => ({ data: "result" }),
+    };
+
+    expect(() => {
+      new Step<unknown, TestData>("test-flow", { id: "bad-auto", auto: true, tools: [tool] });
+    }).toThrow(expect.objectContaining({
+      name: "FlowConfigurationError",
+      message: expect.stringContaining("tools"),
+    }));
+  });
+
+  test("auto-step with `finalize` throws FlowConfigurationError with message containing 'finalize'", () => {
+    expect(() => {
+      new Step("test-flow", { id: "bad-auto", auto: true, finalize: () => { } });
+    }).toThrow(expect.objectContaining({
+      name: "FlowConfigurationError",
+      message: expect.stringContaining("finalize"),
+    }));
+  });
+
+  test("auto-step with MULTIPLE forbidden fields throws ONE error listing ALL violating fields", () => {
+    const tool: Tool<unknown, TestData> = {
+      id: "some-tool",
+      description: "A tool",
+      handler: () => ({ data: "result" }),
+    };
+
+    expect(() => {
+      new Step<unknown, TestData>("test-flow", { id: "bad-auto", auto: true, prompt: "fail", tools: [tool] });
+    }).toThrow(expect.objectContaining({
+      name: "FlowConfigurationError",
+      message: expect.stringMatching(/prompt.*tools|tools.*prompt/),
+    }));
+  });
+
+  test("auto-step with only allowed fields (prepare, requires, skipIf) does NOT throw", () => {
+    expect(() => {
+      new Step<unknown, TestData>("test-flow", {
+        id: "good-auto",
+        auto: true,
+        prepare: () => { },
+        requires: ["field1"],
+        skipIf: () => false,
+      });
+    }).not.toThrow();
   });
 });

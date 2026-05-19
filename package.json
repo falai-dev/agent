@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "1.2.8",
+  "version": "2.0.0",
   "description": "Standalone, strongly-typed AI Agent framework with route DSL and AI provider strategy",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -44,6 +44,7 @@
     "fix:cjs": "echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
+    "typecheck:examples": "tsc --noEmit --project examples/tsconfig.json",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",

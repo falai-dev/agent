@@ -38,7 +38,6 @@ import { OpenRouterProvider } from "../src/providers/OpenRouterProvider";
 // testable subclasses that expose the private methods.
 
 class TestableAnthropicProvider extends AnthropicProvider {
-    // @ts-expect-error - accessing private method for testing
     public testBuildMessages(history: HistoryItem[]) {
         // @ts-expect-error - accessing private method for testing
         return this.buildAnthropicMessages(history);
@@ -46,7 +45,6 @@ class TestableAnthropicProvider extends AnthropicProvider {
 }
 
 class TestableOpenAIProvider extends OpenAIProvider {
-    // @ts-expect-error - accessing private method for testing
     public testBuildMessages(history: HistoryItem[]) {
         // @ts-expect-error - accessing private method for testing
         return this.buildOpenAIMessages(history);
@@ -54,7 +52,6 @@ class TestableOpenAIProvider extends OpenAIProvider {
 }
 
 class TestableGeminiProvider extends GeminiProvider {
-    // @ts-expect-error - accessing private method for testing
     public testBuildContents(history: HistoryItem[]) {
         // @ts-expect-error - accessing private method for testing
         return this.buildGeminiContents(history);
@@ -62,7 +59,6 @@ class TestableGeminiProvider extends GeminiProvider {
 }
 
 class TestableOpenRouterProvider extends OpenRouterProvider {
-    // @ts-expect-error - accessing private method for testing
     public testBuildMessages(history: HistoryItem[]) {
         // @ts-expect-error - accessing private method for testing
         return this.buildOpenRouterMessages(history);

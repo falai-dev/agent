@@ -5,19 +5,27 @@
 import type {
   StepRef,
   StepOptions,
-  StepResult,
-  BranchSpec,
-  BranchResult,
-  Guideline,
-  GuidelineMatch,
+  BranchMap,
+  Instruction,
   Tool,
-  SessionState,
-  Event,
+  PrepareResult,
 } from "../types";
-import { ToolScope, Template, ConditionTemplate, TemplateContext } from "../types";
-import { createConditionEvaluator, generateStepId, logger } from "../utils";
+import type { SessionState } from "../types/session";
+import type { StepResult, BranchSpec, BranchResult } from "../types/flow";
+import { ToolScope, Template, TemplateContext } from "../types";
+import type { ConditionWhen, ConditionIf } from "../types/flow";
+import { generateStepId, logger } from "../utils";
 import { Agent } from './Agent'
-import { END_ROUTE, END_ROUTE_ID } from "../constants";
+
+/**
+ * Error thrown when a step's configuration violates auto-step constraints.
+ */
+export class FlowConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FlowConfigurationError";
+  }
+}
 
 /**
  * Represents a step within a route
@@ -25,50 +33,124 @@ import { END_ROUTE, END_ROUTE_ID } from "../constants";
 export class Step<TContext = unknown, TData = unknown> {
   public readonly id: string;
   private nextSteps: Step<TContext, TData>[] = [];
-  private guidelines: Guideline<TContext, TData>[] = [];
-  public readonly routeId: string;
+  private _instructions: Instruction<TContext, TData>[] = [];
+  public readonly flowId: string;
   public collect?: (keyof TData)[];
   public description?: string;
-  public when?: ConditionTemplate<TContext, TData>;
-  public skipIf?: ConditionTemplate<TContext, TData>;
+  public when?: ConditionWhen;
+  public if?: ConditionIf<TContext, TData>;
+  public skip?: ConditionIf<TContext, TData>;
   public requires?: (keyof TData)[];
   public prompt?: Template<TContext, TData>;
+  public reply?: Template<TContext, TData>;
   public prepare?:
     | string
     | Tool<TContext, TData>
-    | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
+    | ((context: TContext, data?: Partial<TData>) => void | PrepareResult | Promise<void | PrepareResult>);
   public finalize?:
     | string
     | Tool<TContext, TData>
-    | ((context: TContext, data?: Partial<TData>) => void | Promise<void>);
+    | ((context: TContext, data?: Partial<TData>) => void | PrepareResult | Promise<void | PrepareResult>);
   public tools?: (string | Tool<TContext, TData>)[];
 
+  private readonly _auto: boolean;
+  private readonly _branches?: BranchMap<TContext, TData>;
+
+  /** Whether this step runs without an LLM call (computational only). */
+  get auto(): boolean {
+    return this._auto;
+  }
+
+  /** Explicit source-local fork entries, if declared. */
+  get branches(): BranchMap<TContext, TData> | undefined {
+    return this._branches;
+  }
+
   // Reference to parent agent for ToolManager access
-  private parentAgent?: Agent<TContext, TData>; 
+  private parentAgent?: Agent<TContext, TData>;
 
   constructor(
     routeId: string,
     options: StepOptions<TContext, TData> = {},
-    parentAgent?: Agent<TContext, TData> 
+    parentAgent?: Agent<TContext, TData>
   ) {
     // Use provided ID or generate a deterministic one
     this.id = options.id || generateStepId(routeId, options.description);
-    this.routeId = routeId;
+    this.flowId = routeId;
     this.description = options.description;
 
+    this._auto = options.auto ?? false;
+    this._branches = options.branches;
     this.collect = options.collect;
-    this.skipIf = options.skipIf;
+    this.skip = options.skip;
     this.requires = options.requires;
     this.prompt = options.prompt;
+    this.reply = options.reply;
     this.when = options.when;
+    this.if = options.if;
     this.prepare = options.prepare;
     this.finalize = options.finalize;
     this.tools = options.tools;
 
-    // Initialize guidelines from options
-    if (options.guidelines) {
-      options.guidelines.forEach((guideline) => {
-        this.addGuideline(guideline);
+    // Validate when/if split: functions belong on `if`, not `when`
+    if (this.when !== undefined) {
+      const whenValue = this.when;
+      if (typeof whenValue === 'function') {
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Step "${this.id}" has a function on "when": functions belong on "if" only. Move the function to the "if" field.`
+        );
+      }
+      if (Array.isArray(whenValue)) {
+        for (let i = 0; i < whenValue.length; i++) {
+          if (typeof whenValue[i] === 'function') {
+            throw new FlowConfigurationError(
+              `[FlowConfigurationError] Step "${this.id}" has a function at "when[${i}]": functions belong on "if" only. Move the function to the "if" field.`
+            );
+          }
+        }
+      }
+    }
+
+    // Validate auto-step shape: auto-steps cannot define prompt, collect, tools, or finalize
+    if (this._auto) {
+      const violatingFields: string[] = [];
+      if (this.prompt != null) violatingFields.push('prompt');
+      if (this.collect != null && this.collect.length > 0) violatingFields.push('collect');
+      if (this.tools != null && this.tools.length > 0) violatingFields.push('tools');
+      if (this.finalize != null) violatingFields.push('finalize');
+
+      if (violatingFields.length > 0) {
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Auto-step "${this.id}" cannot define: ${violatingFields.join(', ')}. Auto-steps run without an LLM call and must not declare prompt, collect, tools, or finalize. Remove these fields or set auto: false.`
+        );
+      }
+    }
+
+    // Validate reply-step shape: reply steps cannot define prompt, collect, tools, finalize, or auto: true
+    if (this.reply != null) {
+      const conflictingFields: string[] = [];
+      if (this.prompt != null) conflictingFields.push('prompt');
+      if (this.collect != null && this.collect.length > 0) conflictingFields.push('collect');
+      if (this.tools != null && this.tools.length > 0) conflictingFields.push('tools');
+      if (this.finalize != null) conflictingFields.push('finalize');
+      if (this._auto) conflictingFields.push('auto: true');
+
+      if (conflictingFields.length > 0) {
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Step "${this.id}" sets "reply" together with conflicting fields: ${conflictingFields.join(', ')}. A reply step skips the LLM call and cannot define prompt, collect, tools, finalize, or auto: true.`
+        );
+      }
+    }
+
+    // Validate branches shape
+    if (this._branches !== undefined) {
+      this.validateBranches(this._branches);
+    }
+
+    // Initialize instructions from options
+    if (options.instructions) {
+      options.instructions.forEach((instruction) => {
+        this.addInstruction(instruction);
       });
     }
 
@@ -83,7 +165,7 @@ export class Step<TContext = unknown, TData = unknown> {
   configure(config: {
     description?: string;
     collect?: (keyof TData)[];
-    skipIf?: ConditionTemplate<TContext, TData>;
+    skip?: ConditionIf<TContext, TData>;
     requires?: (keyof TData)[];
     prompt?: Template<TContext, TData>;
     prepare?:
@@ -104,8 +186,8 @@ export class Step<TContext = unknown, TData = unknown> {
       this.collect = config.collect;
     }
 
-    if (config.skipIf !== undefined) {
-      this.skipIf = config.skipIf;
+    if (config.skip !== undefined) {
+      this.skip = config.skip;
     }
 
     if (config.requires !== undefined) {
@@ -128,46 +210,14 @@ export class Step<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Shortcut to end the current route
-   *
-   * @param options - Optional step options for the end step
-   * @returns Terminal step result
-   */
-  endRoute(
-    options: Omit<StepOptions<TContext, TData>, "step"> = {}
-  ): StepResult<TContext, TData> {
-    return this.nextStep({
-      ...options,
-      step: END_ROUTE,
-    });
-  }
-
-  /**
    * Create a transition from this step to another
    *
    * @param spec - Transition specification (prompt, tool, or direct step)
    * @returns StepResult that supports chaining
    */
   nextStep(spec: StepOptions<TContext, TData>): StepResult<TContext, TData> {
-    // Handle END_ROUTE
-    if (spec.step && typeof spec.step === "symbol" && spec.step === END_ROUTE) {
-      const endStep = new Step<TContext, TData>(this.routeId, {
-        ...spec,
-        id: END_ROUTE_ID,
-      }, this.parentAgent);
-      this.nextSteps.push(endStep);
-      return this.createTerminalRef();
-    }
-
-    // Handle direct step reference
-    if (spec.step && typeof spec.step !== "symbol") {
-      // This is a bit tricky. We need to find the actual Step instance.
-      // For now, let's assume the user will provide a Step instance directly.
-      // This part might need to be revisited.
-    }
-
     // Create new target step for prompt or tool
-    const targetStep = new Step<TContext, TData>(this.routeId, spec, this.parentAgent);
+    const targetStep = new Step<TContext, TData>(this.flowId, spec, this.parentAgent);
     this.nextSteps.push(targetStep);
 
     return this.createStepRefWithTransition(targetStep.getRef(), targetStep);
@@ -191,7 +241,7 @@ export class Step<TContext = unknown, TData = unknown> {
         : branchSpec.step;
 
       // Create a new step for this branch
-      const branchStep = new Step<TContext, TData>(this.routeId, stepOptions, this.parentAgent);
+      const branchStep = new Step<TContext, TData>(this.flowId, stepOptions, this.parentAgent);
       // Add it to our transitions
       this.nextSteps.push(branchStep);
       // Create a step result for chaining
@@ -206,66 +256,22 @@ export class Step<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Add a guideline specific to this step
+   * Add an instruction to this step.
    */
-  addGuideline(guideline: Guideline<TContext, TData>): void {
-    this.guidelines.push(guideline);
+  addInstruction(instruction: Instruction<TContext, TData>): void {
+    this._instructions.push({
+      ...instruction,
+      kind: instruction.kind || 'should' as const,
+      id: instruction.id || `instruction_${this.id}_${this._instructions.length}`,
+      enabled: instruction.enabled !== false, // Default to true
+    });
   }
 
   /**
-   * Get guidelines for this step
+   * Get instructions for this step
    */
-  getGuidelines(): Guideline<TContext, TData>[] {
-    return [...this.guidelines];
-  }
-
-  /**
-   * Evaluate and match active guidelines based on their conditions
-   * Returns guidelines that should be active given the current context
-   */
-  async evaluateGuidelines(
-    context?: TContext,
-    session?: SessionState<TData>,
-    history?: Event[]
-  ): Promise<GuidelineMatch<TContext, TData>[]> {
-    const templateContext = { context, session, history, data: session?.data || {} };
-    const evaluator = createConditionEvaluator(templateContext);
-    const matches: GuidelineMatch<TContext, TData>[] = [];
-
-    for (const guideline of this.guidelines) {
-      // Skip disabled guidelines
-      if (guideline.enabled === false) {
-        continue;
-      }
-
-      if (guideline.condition) {
-        const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
-        
-        // Include guideline if:
-        // 1. No programmatic conditions (only strings) - always active
-        // 2. Programmatic conditions evaluate to true
-        if (!evaluation.hasProgrammaticConditions || evaluation.programmaticResult) {
-          const rationale = evaluation.aiContextStrings.length > 0
-            ? `Condition met: ${evaluation.aiContextStrings.join(" AND ")}`
-            : evaluation.hasProgrammaticConditions
-              ? "Programmatic condition evaluated to true"
-              : "Always active (no conditions)";
-          
-          matches.push({
-            guideline,
-            rationale
-          });
-        }
-      } else {
-        // No condition means always active
-        matches.push({
-          guideline,
-          rationale: "Always active (no conditions)"
-        });
-      }
-    }
-
-    return matches;
+  getInstructions(): Instruction<TContext, TData>[] {
+    return [...this._instructions];
   }
 
   /**
@@ -356,7 +362,7 @@ export class Step<TContext = unknown, TData = unknown> {
     if (!this.parentAgent?.tool) {
       // Fallback to local resolution if no ToolManager available
       const resolved = this.resolveTools();
-      return resolved.find(tool => tool.id === toolId || tool.name === toolId);
+      return resolved.find(tool => tool.id === toolId || tool.id === toolId);
     }
 
     // Use ToolManager to find the tool with proper scope resolution
@@ -419,7 +425,7 @@ export class Step<TContext = unknown, TData = unknown> {
       const resolvedIds = resolved.map(tool => tool.id);
       const missing = toolIds.filter(id => !resolvedIds.includes(id));
       const found = toolIds.filter(id => resolvedIds.includes(id));
-      
+
       return {
         valid: missing.length === 0,
         missing,
@@ -440,58 +446,123 @@ export class Step<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Evaluate when condition using ConditionEvaluator
+   * Evaluate when/if conditions using the v2 split logic.
+   * `if` (code predicate) evaluates first (free); `when` (AI) evaluates only when `if` passes.
+   * Both are combined with AND semantics.
    */
   async evaluateWhen(
     templateContext: TemplateContext<TContext, TData>
-  ): Promise<{ 
-    shouldActivate: boolean; 
+  ): Promise<{
+    shouldActivate: boolean;
     aiContextStrings: string[];
     hasProgrammaticConditions: boolean;
   }> {
-    if (!this.when) {
-      return { 
-        shouldActivate: true, 
-        aiContextStrings: [], 
-        hasProgrammaticConditions: false 
+    // If neither `when` nor `if` is set, step is always eligible
+    if (!this.when && !this.if) {
+      return {
+        shouldActivate: true,
+        aiContextStrings: [],
+        hasProgrammaticConditions: false
       };
     }
 
-    const evaluator = createConditionEvaluator(templateContext);
-    const result = await evaluator.evaluateCondition(this.when, 'AND');
-    
+    // Evaluate `if` first (free, code-only)
+    if (this.if) {
+      const predicates = Array.isArray(this.if) ? this.if : [this.if];
+      for (const predicate of predicates) {
+        try {
+          const result = await predicate({
+            data: templateContext.data,
+            context: templateContext.context as TContext,
+            session: templateContext.session as SessionState<TData>,
+            history: templateContext.history || [],
+          });
+          if (!result) {
+            // `if` failed — short-circuit, don't bother with `when`
+            return {
+              shouldActivate: false,
+              aiContextStrings: [],
+              hasProgrammaticConditions: true
+            };
+          }
+        } catch (error) {
+          logger.warn(`[Step] "if" predicate failed for step "${this.id}":`, error);
+          return {
+            shouldActivate: false,
+            aiContextStrings: [],
+            hasProgrammaticConditions: true
+          };
+        }
+      }
+    }
+
+    // `if` passed (or was absent) — now evaluate `when` (AI-evaluated strings)
+    if (this.when) {
+      const whenStrings = Array.isArray(this.when) ? this.when : [this.when];
+      // `when` strings are handed to the AI — return them as aiContextStrings
+      // The programmatic result is true (strings don't fail programmatically;
+      // they're scored by the AI at routing time)
+      return {
+        shouldActivate: true,
+        aiContextStrings: whenStrings,
+        hasProgrammaticConditions: !!this.if
+      };
+    }
+
+    // Only `if` was set and it passed
     return {
-      shouldActivate: result.programmaticResult,
-      aiContextStrings: result.aiContextStrings,
-      hasProgrammaticConditions: result.hasProgrammaticConditions
+      shouldActivate: true,
+      aiContextStrings: [],
+      hasProgrammaticConditions: true
     };
   }
 
   /**
-   * Evaluate skipIf condition using ConditionEvaluator
+   * Evaluate the skip condition (if-only shape — code predicates, OR semantics).
+   * Returns true if the step should be skipped.
    */
-  async evaluateSkipIf(
+  async evaluateSkip(
     templateContext: TemplateContext<TContext, TData>
-  ): Promise<{ 
-    shouldSkip: boolean; 
+  ): Promise<{
+    shouldSkip: boolean;
     aiContextStrings: string[];
     hasProgrammaticConditions: boolean;
   }> {
-    if (!this.skipIf) {
-      return { 
-        shouldSkip: false, 
-        aiContextStrings: [], 
-        hasProgrammaticConditions: false 
+    if (!this.skip) {
+      return {
+        shouldSkip: false,
+        aiContextStrings: [],
+        hasProgrammaticConditions: false
       };
     }
 
-    const evaluator = createConditionEvaluator(templateContext);
-    const result = await evaluator.evaluateCondition(this.skipIf, 'OR');
-    
+    const predicates = Array.isArray(this.skip) ? this.skip : [this.skip];
+    // OR semantics: if ANY predicate returns true, skip
+    for (const predicate of predicates) {
+      try {
+        const result = await predicate({
+          data: templateContext.data,
+          context: templateContext.context as TContext,
+          session: templateContext.session as SessionState<TData>,
+          history: templateContext.history || [],
+        });
+        if (result) {
+          return {
+            shouldSkip: true,
+            aiContextStrings: [],
+            hasProgrammaticConditions: true
+          };
+        }
+      } catch (error) {
+        logger.warn(`[Step] "skip" predicate failed for step "${this.id}":`, error);
+        // On error, default to not skipping (safe fallback)
+      }
+    }
+
     return {
-      shouldSkip: result.programmaticResult,
-      aiContextStrings: result.aiContextStrings,
-      hasProgrammaticConditions: result.hasProgrammaticConditions
+      shouldSkip: false,
+      aiContextStrings: [],
+      hasProgrammaticConditions: true
     };
   }
 
@@ -511,7 +582,7 @@ export class Step<TContext = unknown, TData = unknown> {
   getRef(): StepRef {
     return {
       id: this.id,
-      routeId: this.routeId,
+      flowId: this.flowId,
     };
   }
 
@@ -530,30 +601,6 @@ export class Step<TContext = unknown, TData = unknown> {
         stepInstance.nextStep(spec),
       branch: (branches: BranchSpec<TContext, TData>[]) =>
         stepInstance.branch(branches),
-      endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) =>
-        stepInstance.endRoute(options),
-    };
-  }
-
-  /**
-   * Create a terminal step reference (for END_ROUTE)
-   */
-  private createTerminalRef(): StepResult<TContext, TData> {
-    const terminalRef: StepRef = {
-      id: END_ROUTE_ID,
-      routeId: this.routeId,
-    };
-
-    return {
-      ...terminalRef,
-      nextStep: () => {
-        throw new Error("Cannot transition from END_ROUTE step");
-      },
-      branch: () => {
-        throw new Error("Cannot branch from END_ROUTE step");
-      },
-      endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) =>
-        this.endRoute(options),
     };
   }
 
@@ -566,8 +613,6 @@ export class Step<TContext = unknown, TData = unknown> {
       nextStep: (spec: StepOptions<TContext, TData>) => this.nextStep(spec),
       branch: (branches: BranchSpec<TContext, TData>[]) =>
         this.branch(branches),
-      endRoute: (options?: Omit<StepOptions<TContext, TData>, "step">) =>
-        this.endRoute(options),
     };
   }
 
@@ -579,15 +624,73 @@ export class Step<TContext = unknown, TData = unknown> {
     return {
       id: this.id,
       description: this.description,
+      auto: this._auto,
+      branches: this._branches,
       prompt: this.prompt,
+      reply: this.reply,
       tools: this.tools,
       prepare: this.prepare,
       finalize: this.finalize,
       collect: this.collect,
-      skipIf: this.skipIf,
+      skip: this.skip,
       requires: this.requires,
       when: this.when,
-      guidelines: this.getGuidelines(),
+      if: this.if,
+      instructions: this.getInstructions(),
     };
+  }
+
+  /**
+   * Validate the branches array at construction time.
+   * Checks:
+   * - Non-empty array
+   * - Unconditional entries (no `when` and no `if`) only legal as the last entry
+   * - Directive `then` values: at most one position field, no empty `goTo: {}`
+   */
+  private validateBranches(branches: BranchMap<TContext, TData>): void {
+    if (branches.length === 0) {
+      throw new FlowConfigurationError(
+        `[FlowConfigurationError] Empty branches array on step "${this.id}": branches must contain at least one entry. Add branch entries or remove the branches field.`
+      );
+    }
+
+    const POSITION_FIELDS = ['goTo', 'goToStep', 'complete', 'abort', 'reset'] as const;
+
+    for (let i = 0; i < branches.length; i++) {
+      const entry = branches[i];
+      const isLast = i === branches.length - 1;
+
+      // Non-last entry without `when` or `if` is dead code — later entries are unreachable
+      if (!isLast && !entry.when && !entry.if) {
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Dead-code branch at index ${i}: branches[${i}] has neither "when" nor "if" and is not the last entry. Entries after index ${i} are unreachable. Move the unconditional entry to the end or add a condition.`
+        );
+      }
+
+      // Validate Directive `then` values
+      if (entry.then && typeof entry.then === 'object') {
+        const directive = entry.then;
+
+        // Check for multiple position fields
+        const setPositionFields = POSITION_FIELDS.filter(
+          (field) => directive[field] !== undefined
+        );
+        if (setPositionFields.length > 1) {
+          throw new FlowConfigurationError(
+            `[FlowConfigurationError] Multiple position fields in branches[${i}].then: Directive sets ${setPositionFields.join(', ')}. At most one position field is allowed per Directive. Remove all but one.`
+          );
+        }
+
+        // Check for empty goTo: {}
+        if (directive.goTo !== undefined && typeof directive.goTo === 'object' && directive.goTo !== null) {
+          const goToObj = directive.goTo as Record<string, unknown>;
+          if (Object.keys(goToObj).length === 0) {
+            throw new FlowConfigurationError(
+              `[FlowConfigurationError] Empty goTo in branches[${i}].then: Directive has "goTo: {}" with no flow target. Provide at least a flow id or title.`
+            );
+          }
+        }
+      }
+    }
   }
 }

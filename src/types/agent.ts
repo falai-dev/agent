@@ -4,12 +4,42 @@
 
 import type { AgentStructuredResponse, AiProvider } from "./ai";
 import type { Tool } from "./tool";
-import type { RouteOptions, StepRef, StoppedReason } from "./route";
+import type { Directive, FlowOptions, StepRef, StoppedReason } from "./flow";
 import type { PersistenceConfig } from "./persistence";
 import type { SessionState } from "./session";
+import type { Signal, SignalFiring } from "./signals";
 import type { StructuredSchema } from "./schema";
-import { Template, ConditionTemplate } from "./template";
+import type { Event } from "./history";
+import type { Template } from "./template";
+import type { ConditionWhen, ConditionIf } from "./flow";
 import type { PromptCacheConfig } from "../core/PromptSectionCache";
+
+/**
+ * Context passed to every lifecycle hook (flow and step).
+ * Carries the current state and a `dispatch` method for emitting directives
+ * onto the per-turn directive bus.
+ */
+export interface HookContext<TContext = unknown, TData = unknown> {
+  /** Agent-level context. */
+  context: TContext;
+  /** Collected data (partial — fields may be undefined). */
+  data: Partial<TData>;
+  /** Full session state. */
+  session: SessionState<TData>;
+  /** Conversation history as events. */
+  history: Event[];
+  /**
+   * Emit a directive onto the per-turn directive bus.
+   * Multiple `dispatch()` calls are allowed; they merge via Algorithm 4
+   * along with any directive returned from the hook itself.
+   */
+  dispatch(directive: Directive<TContext, TData>): void;
+}
+
+/**
+ * Reason why a flow was exited, passed to `hooks.onExit`.
+ */
+export type ExitReason = 'completed' | 'goto_flow' | 'goto_step' | 'aborted';
 
 /**
  * Agent-level compaction configuration.
@@ -49,12 +79,6 @@ export interface AgentCompactionConfig {
 export enum CompositionMode {
   /** Fluid, natural conversation without strict structure */
   FLUID = "fluid",
-  /** Canned responses with fluid fallback */
-  CANNED_FLUID = "canned_fluid",
-  /** Composited canned responses */
-  CANNED_COMPOSITED = "composited_canned",
-  /** Strict canned responses only */
-  CANNED_STRICT = "strict_canned",
 }
 
 /**
@@ -103,14 +127,13 @@ export type ContextProvider<TContext = unknown> = () =>
 export interface AgentOptions<TContext = unknown, TData = unknown> {
   /** Display name of the agent */
   name: string;
-  /** Detailed description of the agent's purpose and personality */
-  description?: string;
   /** The agent's primary goal or objective */
   goal?: string;
-  /** Optional personality/tone prompt used in prompts */
-  personality?: Template<TContext>;
-  /** Optional identity prompt defining the agent's self-concept and role */
-  identity?: Template<TContext>;
+  /**
+   * Agent persona — covers role, tone, self-concept, and communication style.
+   * Rendered into the system prompt as "who you are and how you communicate."
+   */
+  persona?: Template<TContext>;
   /** Enable debug logging */
   debug?: boolean;
   /** Default context data available to the agent */
@@ -125,46 +148,53 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
   hooks?: ContextLifecycleHooks<TContext, TData>;
   /** AI provider strategy for generating responses */
   provider: AiProvider;
-  /** Composition mode for response generation */
-  compositionMode?: CompositionMode;
   /** Initial terms for domain glossary */
   terms?: Term<TContext, TData>[];
-  /** Initial guidelines for agent behavior */
-  guidelines?: Guideline<TContext, TData>[];
-  /** Global tools available to all routes */
+  /**
+   * Instructions for agent behavior — unified primitive.
+   * Each instruction has a `kind`: `'must'` (rule), `'never'` (prohibition), or `'should'` (default, nudge).
+   */
+  instructions?: Instruction<TContext, TData>[];
+  /** Global tools available to all flows */
   tools?: Tool<TContext, TData, unknown>[];
-  /** Initial routes (will be instantiated as Route objects) */
-  routes?: RouteOptions<TContext, TData>[];
+  /** Initial flows (will be instantiated as Flow objects) */
+  flows?: FlowOptions<TContext, TData>[];
   /** Optional persistence configuration for auto-saving sessions and messages */
   persistence?: PersistenceConfig<TData>;
   /** Knowledge base containing any JSON structure the AI should know */
   knowledgeBase?: Record<string, unknown>;
-  /** Absolute rules the agent must follow across all routes */
-  rules?: Template<TContext, TData>[];
-  /** Absolute prohibitions the agent must never do across all routes */
-  prohibitions?: Template<TContext, TData>[];
   /** Agent-level data schema defining the complete data structure for collection */
   schema?: StructuredSchema;
   /** Initial data to pre-populate when creating the agent */
   initialData?: Partial<TData>;
   /**
-   * Margin (0-100) the best alternative route must exceed the current route's score
+   * Margin (0-100) the best alternative flow must exceed the current flow's score
    * by before the agent switches. Higher values make the agent "stickier" to the
-   * current route. Set to 0 to switch whenever any route scores higher.
+   * current flow. Set to 0 to switch whenever any flow scores higher.
    * @default 15
    */
-  routeSwitchMargin?: number;
+  flowSwitchMargin?: number;
   /**
-   * Maximum number of steps to execute in a single batch.
-   * Controls how many consecutive steps can run together in one LLM call.
+  /**
+   * Maximum number of consecutive auto-steps (`auto: true`) that may execute
+   * within a single turn before the pipeline throws `FlowConfigurationError`.
+   * Guards against infinite loops in auto-step chains.
    *
-   * - `1` (default): Steps execute one at a time (classic behavior)
-   * - `Infinity`: No limit — all eligible steps batch together
-   * - Any positive integer: Cap the batch to that many steps
+   * The default (10) is applied at Agent construction time, not on this type.
    *
-   * @default 1
+   * @default 10
    */
-  maxStepsPerBatch?: number;
+  maxAutoStepsPerTurn?: number;
+  /**
+   * Maximum number of chained directives allowed within a single turn before
+   * the pipeline throws `FlowConfigurationError`. Guards against infinite
+   * redirection loops (e.g., goTo → onEnter emits goTo → onComplete emits goTo → …).
+   *
+   * Chain breakers (`abort` mid-chain) stop counting and apply immediately.
+   *
+   * @default 10
+   */
+  maxDirectiveChain?: number;
   /**
    * Optional compaction configuration for managing conversation history size.
    * When provided, the agent will validate the options and make them available
@@ -177,6 +207,32 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
    * @default { enabled: true }
    */
   promptCache?: PromptCacheConfig;
+  /**
+   * Reserved for future router strategies. v2.0: only `'ai'` is implemented.
+   * Future v2.x widens to `'embedding' | 'rules'` etc.
+   *
+   * Setting any non-`'ai'` value in v2.0 throws `NotImplementedError` at
+   * `Agent` construction time. This is intentional — it surfaces forward-compat
+   * misconfiguration loudly. Future v2.x widens the accepted union without
+   * breaking the throw site (the new value just stops throwing).
+   *
+   * @default 'ai'
+   */
+  routerMode?: 'ai';
+
+  /**
+   * Signals: typed event detectors that run around the LLM turn.
+   * Empty array or undefined → signal phases are no-ops, zero cost.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  signals?: Signal<TContext, TData, any>[];
+
+  /**
+   * Maximum signals per batched classifier call. Default 10.
+   * If more signals are eligible after gating, they are split into
+   * parallel batches of this size.
+   */
+  signalBatchSize?: number;
 }
 
 /**
@@ -192,42 +248,104 @@ export interface Term<TContext = unknown, TData = unknown> {
 }
 
 /**
- * A behavioral guideline for the agent
+ * Instruction — unified behavioral primitive.
+ * Collapses v1's `Guideline` (scoped nudge), `Rule` (absolute must-do),
+ * and `Prohibition` (absolute must-not) into a single type with a `kind` discriminator.
+ *
+ * @example
+ * // A "should" (default) — same as a v1 Guideline
+ * { prompt: "Prefer short answers", when: "User asks a simple question" }
+ *
+ * // A "must" — same as a v1 Rule
+ * { kind: 'must', prompt: "Always validate email format before proceeding" }
+ *
+ * // A "never" — same as a v1 Prohibition
+ * { kind: 'never', prompt: "Promise delivery dates you cannot guarantee" }
  */
-export interface Guideline<TContext = unknown, TData = unknown> {
-  /** Unique identifier */
+export interface Instruction<TContext = unknown, TData = unknown> {
+  /** Unique identifier (auto-generated if omitted). */
   id?: string;
-  /** Condition that triggers this guideline (optional for always-active guidelines) */
-  condition?: ConditionTemplate<TContext, TData>;
-  /** Action the agent should take when the condition is met */
-  action: Template<TContext, TData>;
-  /** Whether this guideline is currently enabled */
+  /**
+   * Instruction severity.
+   * - `'must'`  — absolute rule the agent must always follow.
+   * - `'never'` — absolute prohibition the agent must never do.
+   * - `'should'`— behavioral nudge, active when conditions match.
+   *
+   * @default 'should'
+   */
+  kind?: 'must' | 'never' | 'should';
+  /**
+   * AI-evaluated activation condition. String or array of strings (AND semantics).
+   * Undefined = always active. Functions are NOT allowed here — use `if`.
+   */
+  when?: ConditionWhen;
+  /**
+   * Code-evaluated activation condition. Function or array of functions (AND semantics).
+   * Free to evaluate. When both `when` and `if` are set, `if` runs first;
+   * `when` is only evaluated when `if` passes.
+   */
+  if?: ConditionIf<TContext, TData>;
+  /** Behavioral instruction text rendered into the prompt. */
+  prompt: Template<TContext, TData>;
+  /** Whether this instruction is currently enabled. @default true */
   enabled?: boolean;
-  /** Tags for organizing and filtering guidelines */
+  /** Tags for organizing and filtering instructions. */
   tags?: string[];
-  /** Additional metadata */
+  /** Additional metadata. */
   metadata?: Record<string, unknown>;
 }
 
 /**
- * Guideline match with rationale
+ * Carries the three scope buckets through the prompt pipeline so the composer
+ * can render scope captions correctly.
  */
-export interface GuidelineMatch<TContext = unknown, TData = unknown> {
-  /** The matched guideline */
-  guideline: Guideline<TContext, TData>;
-  /** Explanation of why this guideline was matched */
-  rationale?: string;
+export interface ScopedInstructions<TContext = unknown, TData = unknown> {
+  /** Agent-level — rendered with caption `[Always]`. */
+  global: Instruction<TContext, TData>[];
+  /**
+   * Flow-level — rendered with caption `[In: <FlowTitle>]`.
+   * `flowTitle` is captured here so the composer doesn't need a Flow reference.
+   */
+  flow?: { flowTitle: string; items: Instruction<TContext, TData>[] };
+  /**
+   * Step-level — rendered with caption `[Step: <stepId>]`.
+   * `stepId` is captured here for the same reason.
+   */
+  step?: { stepId: string; items: Instruction<TContext, TData>[] };
+}
+
+/**
+ * Observability record for an instruction that was active and rendered into a turn's prompt.
+ * Deterministic — derived from rendering, not from LLM self-report.
+ */
+export interface AppliedInstruction {
+  /** The instruction's id */
+  id: string;
+  /** Which scope the instruction originated from */
+  scope: 'global' | 'flow' | 'step';
+  /** FlowTitle for `scope === 'flow'`, stepId for `scope === 'step'`, undefined for `scope === 'global'`. */
+  scopeRef?: string;
 }
 
 export interface AgentResponse<TData = Record<string, unknown>> {
   message: string;
   session?: SessionState<TData>;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-  isRouteComplete?: boolean;
+  isFlowComplete?: boolean;
   /** Steps executed in this response (for multi-step execution) */
   executedSteps?: StepRef[];
   /** Why execution stopped (for multi-step execution) */
   stoppedReason?: StoppedReason;
+  /**
+   * Instructions whose conditions passed and were rendered into this turn's prompt.
+   * Deterministic — derived from rendering, not from LLM self-report.
+   */
+  appliedInstructions?: AppliedInstruction[];
+  /**
+   * Signals that fired during this turn (both pre- and post-phases), in fire order.
+   * Mirrors the observability framing of `executedSteps` and `appliedInstructions`.
+   */
+  triggeredSignals?: SignalFiring<unknown, TData>[];
 }
 
 export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
@@ -236,7 +354,7 @@ export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
   done: boolean;
   session?: SessionState<TData>;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-  isRouteComplete?: boolean;
+  isFlowComplete?: boolean;
   /** Steps executed in this response (for multi-step execution) */
   executedSteps?: StepRef[];
   /** Why execution stopped (for multi-step execution) */
@@ -249,6 +367,17 @@ export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
   };
   structured?: AgentStructuredResponse;
   error?: Error;
+  /**
+   * Instructions whose conditions passed and were rendered into this turn's prompt.
+   * Populated on the final (`done: true`) chunk only.
+   */
+  appliedInstructions?: AppliedInstruction[];
+  /**
+   * Signals that fired during this turn (both pre- and post-phases), in fire order.
+   * Mirrors the observability framing of `executedSteps` and `appliedInstructions`.
+   * Populated on the final (`done: true`) chunk only.
+   */
+  triggeredSignals?: SignalFiring<unknown, TData>[];
 }
 
 /**

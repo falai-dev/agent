@@ -2,7 +2,7 @@
  * PromptSectionCache - Memoizes static prompt sections across turns,
  * recomputing only dynamic sections per-turn.
  *
- * Static sections (agent identity, glossary, knowledge base, route descriptions)
+ * Static sections (agent identity, glossary, knowledge base, flow descriptions)
  * are cached after first computation. Dynamic sections (current step context,
  * directives, available tools) are recomputed on every resolveAll() call.
  */

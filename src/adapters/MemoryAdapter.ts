@@ -171,14 +171,14 @@ class MemorySessionRepository<TData = Record<string, unknown>>
     return Promise.resolve(null);
   }
 
-  async updateRouteStep(
+  async updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
     const session = this.sessions.get(id);
     if (session) {
-      session.currentRoute = route;
+      session.currentFlow = flow;
       session.currentStep = step;
       this.sessions.set(id, cloneDeep(session));
       return Promise.resolve(cloneDeep(session));

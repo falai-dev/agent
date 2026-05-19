@@ -53,7 +53,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
       status: "active",
       collectedData: {
         data: options.initialData || {},
-        routeHistory: [],
+        flowHistory: [],
         metadata: {},
       },
       messageCount: 0,
@@ -125,14 +125,14 @@ export class PersistenceManager<TData = Record<string, unknown>> {
   }
 
   /**
-   * Update current route and step
+   * Update current flow and step
    */
-  async updateRouteStep(
+  async updateFlowStep(
     sessionId: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
-    return await this.sessionRepository.updateRouteStep(sessionId, route, step);
+    return await this.sessionRepository.updateFlowStep(sessionId, flow, step);
   }
 
   /**
@@ -146,7 +146,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
       userId,
       role: options.role,
       content: options.content,
-      route: options.route,
+      flow: options.flow,
       step: options.step,
       toolCalls: options.toolCalls,
       event: options.event,
@@ -263,7 +263,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
       if (existingSession) {
         // Update existing session
         return await this.sessionRepository.update(sessionId, {
-          currentRoute: persistenceData.currentRoute,
+          currentFlow: persistenceData.currentFlow,
           currentStep: persistenceData.currentStep,
           collectedData: persistenceData.collectedData,
           lastMessageAt: new Date(),
@@ -276,7 +276,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
             ? JSON.stringify(persistenceData.collectedData.metadata?.userId)
             : this.config.userId,
           status: "active",
-          currentRoute: persistenceData.currentRoute,
+          currentFlow: persistenceData.currentFlow,
           currentStep: persistenceData.currentStep,
           collectedData: persistenceData.collectedData,
           messageCount: 0,

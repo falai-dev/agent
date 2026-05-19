@@ -5,7 +5,7 @@ import { PromptSectionCache } from "../src/core/PromptSectionCache";
 /**
  * Property 17: Cache Invalidation on State Change
  *
- * After context update, session change, or route switch, affected cached
+ * After context update, session change, or flow switch, affected cached
  * sections are invalidated and recomputed on next resolve.
  *
  * Validates: Requirements 16.1, 16.2, 16.3
@@ -13,13 +13,13 @@ import { PromptSectionCache } from "../src/core/PromptSectionCache";
  * This test simulates the invalidation patterns that Agent.ts will use:
  * - Context update → invalidate context-dependent sections (agentMeta, knowledgeBase)
  * - Session change → invalidateAll()
- * - Route switch → invalidate route-dependent sections (activeRoutes, rules, prohibitions, routeKnowledgeBase)
+ * - Flow switch → invalidate flow-dependent sections (activeFlows, rules, prohibitions, flowKnowledgeBase)
  */
 
 // Section keys matching the design doc's classification
 const CONTEXT_DEPENDENT_KEYS = ["agentMeta", "knowledgeBase"];
-const ROUTE_DEPENDENT_KEYS = ["activeRoutes", "routeRules", "routeProhibitions", "routeKnowledgeBase"];
-const ALL_STATIC_KEYS = [...CONTEXT_DEPENDENT_KEYS, ...ROUTE_DEPENDENT_KEYS, "glossary", "scoringRules"];
+const FLOW_DEPENDENT_KEYS = ["activeFlows", "flowRules", "flowProhibitions", "flowKnowledgeBase"];
+const ALL_STATIC_KEYS = [...CONTEXT_DEPENDENT_KEYS, ...FLOW_DEPENDENT_KEYS, "glossary", "scoringRules"];
 const DYNAMIC_KEYS = ["instruction", "directives", "availableTools", "lastMessage"];
 
 describe("Property 17: Cache Invalidation on State Change", () => {
@@ -65,9 +65,9 @@ describe("Property 17: Cache Invalidation on State Change", () => {
         cache.invalidateAll();
     }
 
-    /** Simulate route switch: invalidate route-dependent sections */
-    function simulateRouteSwitch(cache: PromptSectionCache) {
-        for (const key of ROUTE_DEPENDENT_KEYS) {
+    /** Simulate flow switch: invalidate flow-dependent sections */
+    function simulateFlowSwitch(cache: PromptSectionCache) {
+        for (const key of FLOW_DEPENDENT_KEYS) {
             cache.invalidate(key);
         }
     }
@@ -134,7 +134,7 @@ describe("Property 17: Cache Invalidation on State Change", () => {
         );
     });
 
-    test("route switch invalidates route-dependent sections only", async () => {
+    test("flow switch invalidates flow-dependent sections only", async () => {
         await fc.assert(
             fc.asyncProperty(
                 fc.integer({ min: 1, max: 5 }),
@@ -144,20 +144,20 @@ describe("Property 17: Cache Invalidation on State Change", () => {
                     await cache.resolveAll();
 
                     for (let i = 0; i < switchCount; i++) {
-                        simulateRouteSwitch(cache);
+                        simulateFlowSwitch(cache);
                         await cache.resolveAll();
                     }
 
-                    // Route-dependent static sections should have been recomputed
-                    for (const key of ROUTE_DEPENDENT_KEYS) {
+                    // Flow-dependent static sections should have been recomputed
+                    for (const key of FLOW_DEPENDENT_KEYS) {
                         expect(callCounts.get(key)).toBe(1 + switchCount);
                     }
 
-                    // Non-route static sections should still be cached
-                    const nonRouteStatic = ALL_STATIC_KEYS.filter(
-                        (k) => !ROUTE_DEPENDENT_KEYS.includes(k)
+                    // Non-flow static sections should still be cached
+                    const nonFlowStatic = ALL_STATIC_KEYS.filter(
+                        (k) => !FLOW_DEPENDENT_KEYS.includes(k)
                     );
-                    for (const key of nonRouteStatic) {
+                    for (const key of nonFlowStatic) {
                         expect(callCounts.get(key)).toBe(1);
                     }
                 }
@@ -166,11 +166,11 @@ describe("Property 17: Cache Invalidation on State Change", () => {
         );
     });
 
-    test("mixed state changes: context update + route switch invalidate correct subsets", async () => {
-        type StateChange = "context" | "route" | "session";
+    test("mixed state changes: context update + flow switch invalidate correct subsets", async () => {
+        type StateChange = "context" | "flow" | "session";
         const stateChangeArb: fc.Arbitrary<StateChange> = fc.oneof(
             fc.constant("context" as const),
-            fc.constant("route" as const),
+            fc.constant("flow" as const),
             fc.constant("session" as const)
         );
 
@@ -195,8 +195,8 @@ describe("Property 17: Cache Invalidation on State Change", () => {
                             for (const key of CONTEXT_DEPENDENT_KEYS) {
                                 // Will recompute on next resolve
                             }
-                        } else if (change === "route") {
-                            simulateRouteSwitch(cache);
+                        } else if (change === "flow") {
+                            simulateFlowSwitch(cache);
                         } else {
                             simulateSessionChange(cache);
                         }
@@ -219,8 +219,8 @@ describe("Property 17: Cache Invalidation on State Change", () => {
                             for (const key of CONTEXT_DEPENDENT_KEYS) {
                                 expectedCounts.set(key, (expectedCounts.get(key) ?? 0) + 1);
                             }
-                        } else if (change === "route") {
-                            for (const key of ROUTE_DEPENDENT_KEYS) {
+                        } else if (change === "flow") {
+                            for (const key of FLOW_DEPENDENT_KEYS) {
                                 expectedCounts.set(key, (expectedCounts.get(key) ?? 0) + 1);
                             }
                         }

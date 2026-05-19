@@ -80,13 +80,13 @@ describe("Property 16: History Not In System Prompt", () => {
                         identity: "A test agent",
                         personality: "Friendly",
                     });
-                    await pc.addInstruction("Route: TestRoute — A test route");
+                    await pc.addInstruction("Flow: TestFlow — A test flow");
                     await pc.addDirectives(directives.length > 0 ? directives : undefined);
                     await pc.addKnowledgeBase(
                         Object.keys(knowledgeBase).length > 0 ? knowledgeBase : undefined
                     );
                     await pc.addGlossary([]);
-                    await pc.addGuidelines([]);
+                    await pc.addInstructions({ global: [] });
 
                     const prompt = await pc.build();
 
@@ -166,7 +166,7 @@ describe("Property 16: History Not In System Prompt", () => {
                         rules: ["Be helpful"],
                         prohibitions: ["Never lie"],
                     });
-                    await pc.addInstruction("Route: Main — Primary route");
+                    await pc.addInstruction("Flow: Main — Primary flow");
                     await pc.addInstruction("Rules:\n- Follow instructions");
                     await pc.addDirectives(["Address the user's question"]);
                     await pc.addKnowledgeBase(

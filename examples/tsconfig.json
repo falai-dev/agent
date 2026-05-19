@@ -1,0 +1,30 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "lib": [
+            "ES2022",
+            "DOM"
+        ],
+        "moduleResolution": "bundler",
+        "types": [
+            "@types/bun"
+        ],
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "allowSyntheticDefaultImports": true,
+        "noEmit": true,
+        "paths": {
+            "@falai/agent": [
+                "../src/index.ts"
+            ]
+        },
+        "baseUrl": "."
+    },
+    "include": [
+        "./*.ts"
+    ]
+}

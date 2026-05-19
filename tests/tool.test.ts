@@ -3,7 +3,7 @@
  * Tool Functionality Tests
  *
  * Tests tool creation, execution, parameter validation, context access,
- * and integration with agents and routes.
+ * and integration with agents and flows.
  */
 import { expect, test, describe } from "bun:test";
 import {
@@ -149,6 +149,10 @@ class MockToolContext<TContext = unknown, TData = unknown> implements ToolContex
 
   hasField<K extends keyof TData>(key: K): boolean {
     return key in this.data && this.data[key] !== undefined;
+  }
+
+  dispatch(): void {
+    // No-op for testing
   }
 
   // Test helper methods
@@ -583,7 +587,7 @@ describe("Tool Context Access", () => {
         { role: "user", content: "Hello", timestamp: Date.now() },
         { role: "assistant", content: "Hi there", timestamp: Date.now() }
       ] as any[],
-      { id: "test-step", routeId: "test-route" } as StepRef,
+      { id: "test-step", flowId: "test-flow" } as StepRef,
       { sessionId: "test-123", userId: "user-456" }
     );
 
@@ -960,11 +964,8 @@ describe("Tool Integration with Agents", () => {
     });
 
     expect(enrichmentTool.id).toBe("enrich_profile");
-    expect(enrichmentTool.name).toBe("Data Enrichment: enrich_profile");
     expect(validationTool.id).toBe("validate_order");
-    expect(validationTool.name).toBe("Validation: validate_order");
     expect(apiTool.id).toBe("fetch_inventory");
-    expect(apiTool.name).toBe("API Call: fetch_inventory");
   });
 
   test("should handle tool execution through different methods", async () => {
@@ -1042,7 +1043,7 @@ describe("Tool Integration with Agents", () => {
       }),
     };
 
-    agent.createTool(legacyTool);
+    agent.addTool(legacyTool);
 
     const tools = agent.getTools();
     const addedTool = tools.find(t => t.id === "legacy_tool");
@@ -1051,19 +1052,19 @@ describe("Tool Integration with Agents", () => {
   });
 });
 
-describe("Tool Integration with Routes", () => {
-  test("should add tools to route steps", () => {
+describe("Tool Integration with Flows", () => {
+  test("should add tools to flow steps", () => {
     const agent = createToolTestAgent();
 
     const stepTool: Tool = {
       id: "step_tool",
-      description: "Tool for route steps",
+      description: "Tool for flow steps",
       parameters: { type: "object", properties: {} },
       handler: () => ({ data: "Step tool executed" }),
     };
 
-    const route = agent.createRoute({
-      title: "Tool Route",
+    const flow = agent.createFlow({
+      title: "Tool Flow",
       steps: [
         {
           id: "tool_step",
@@ -1073,22 +1074,22 @@ describe("Tool Integration with Routes", () => {
       ],
     });
 
-    expect(route.getSteps()[0].tools).toContain(stepTool);
+    expect(flow.getSteps()[0].tools).toContain(stepTool);
   });
 
-  test("should add tools to entire route", () => {
+  test("should add tools to entire flow", () => {
     const agent = createToolTestAgent();
 
-    const routeTool: Tool = {
-      id: "route_tool",
-      description: "Available throughout route",
+    const flowTool: Tool = {
+      id: "flow_tool",
+      description: "Available throughout flow",
       parameters: { type: "object", properties: {} },
-      handler: () => ({ data: "Route tool executed" }),
+      handler: () => ({ data: "Flow tool executed" }),
     };
 
-    const route = agent.createRoute({
-      title: "Route Tool Test",
-      tools: [routeTool],
+    const flow = agent.createFlow({
+      title: "Flow Tool Test",
+      tools: [flowTool],
       steps: [
         {
           id: "step1",
@@ -1109,25 +1110,25 @@ describe("Tool Integration with Routes", () => {
       ],
     });
 
-    expect(route.getTools()).toContain(routeTool);
-    expect(route.getSteps()[1].tools).toHaveLength(1);
+    expect(flow.getTools()).toContain(flowTool);
+    expect(flow.getSteps()[1].tools).toHaveLength(1);
   });
 
-  test("should handle tool execution in route finalization", () => {
+  test("should handle tool execution in flow finalization", () => {
     const agent = createToolTestAgent();
 
     const finalizeTool: Tool = {
       id: "finalize_tool",
-      description: "Finalizes the route",
+      description: "Finalizes the flow",
       parameters: { type: "object", properties: {} },
       handler: () => ({
-        data: "Route finalized successfully",
+        data: "Flow finalized successfully",
         dataUpdate: { completed: true },
       }),
     };
 
-    const route = agent.createRoute({
-      title: "Finalization Route",
+    const flow = agent.createFlow({
+      title: "Finalization Flow",
       steps: [
         {
           id: "final_step",
@@ -1137,7 +1138,7 @@ describe("Tool Integration with Routes", () => {
       ],
     });
 
-    expect(route.getSteps()[0].finalize).toBe(finalizeTool);
+    expect(flow.getSteps()[0].finalize).toBe(finalizeTool);
   });
 });
 
@@ -1214,7 +1215,6 @@ describe("ToolManager Integration Tests", () => {
     });
 
     expect(enrichmentTool.id).toBe("enrich_profile");
-    expect(enrichmentTool.name).toBe("Data Enrichment: enrich_profile");
 
     // Test validation tool
     const validationTool = agent.tool.createValidation({
@@ -1228,7 +1228,6 @@ describe("ToolManager Integration Tests", () => {
     });
 
     expect(validationTool.id).toBe("validate_email");
-    expect(validationTool.name).toBe("Validation: validate_email");
 
     // Test computation tool
     const computeTool = agent.tool.createComputation({
@@ -1241,7 +1240,6 @@ describe("ToolManager Integration Tests", () => {
     });
 
     expect(computeTool.id).toBe("compute_score");
-    expect(computeTool.name).toBe("Computation: compute_score");
   });
 
   test("should find tools across scopes", () => {

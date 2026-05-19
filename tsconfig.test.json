@@ -1,8 +1,20 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["tests/**/*"],
-  "exclude": ["node_modules", "dist"],
+  "include": [
+    "tests/**/*",
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ],
   "compilerOptions": {
-    "types": ["@types/bun"]
+    "types": [
+      "@types/bun"
+    ],
+    "rootDir": ".",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noEmit": true
   }
 }

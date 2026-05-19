@@ -21,7 +21,7 @@ export interface TemplateContext<TContext = unknown, TData = unknown> {
   history?: Event[];
 
   /**
-   * The data collected in the current route.
+   * The data collected in the current flow.
    * A convenience alias for `session.data`.
    */
   data: Partial<TData>;
@@ -29,7 +29,7 @@ export interface TemplateContext<TContext = unknown, TData = unknown> {
   /**
    * Helper methods for working with history and context.
    */
-  helpers: {
+  helpers?: {
     /**
      * Get the last message from history, optionally filtered by role.
      * @param role - Optional role to filter by (user, assistant, etc.)
@@ -74,15 +74,7 @@ export type Template<TContext = unknown, TData = unknown> =
   | string
   | ((params: TemplateContext<TContext, TData>) => string | Promise<string>);
 
-/**
- * Represents a condition that can be used for routing decisions.
- * Supports strings (AI context only), boolean functions (programmatic evaluation),
- * and arrays of either for complex condition logic.
- */
-export type ConditionTemplate<TContext = unknown, TData = unknown> =
-  | string  // AI context only - not evaluated programmatically
-  | ((params: TemplateContext<TContext, TData>) => boolean | Promise<boolean>) // Programmatic evaluation
-  | ConditionTemplate<TContext, TData>[]; // Array of either
+
 
 /**
  * Result of condition evaluation containing both programmatic results

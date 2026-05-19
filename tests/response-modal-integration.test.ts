@@ -62,8 +62,8 @@ function createTestAgent(provider?: MockProvider): Agent<TestContext, TestData> 
 function createComplexAgent(): Agent<TestContext, TestData> {
   const agent = createTestAgent();
   
-  // Add multiple routes to test complex scenarios
-  agent.createRoute({
+  // Add multiple flows to test complex scenarios
+  agent.createFlow({
     title: "Support Request",
     description: "Handle customer support requests",
     when: ["User needs help", "User has an issue"],
@@ -90,7 +90,7 @@ function createComplexAgent(): Agent<TestContext, TestData> {
     ],
   });
 
-  agent.createRoute({
+  agent.createFlow({
     title: "Information Request",
     description: "Handle information requests",
     when: ["User wants information"],
@@ -234,12 +234,12 @@ describe("ResponseModal Type Compatibility Integration", () => {
     // Verify response maintains type safety
     expect(response.message).toBeDefined();
     expect(response.session).toBeDefined();
-    expect(response.isRouteComplete).toBeDefined();
+    expect(response.isFlowComplete).toBeDefined();
     
     // Verify the response has the expected structure
     expect(typeof response.message).toBe("string");
     expect(response.session).toBeDefined();
-    expect(typeof response.isRouteComplete).toBe("boolean");
+    expect(typeof response.isFlowComplete).toBe("boolean");
   });
 
   test("should handle history conversion in internal processing", async () => {
@@ -383,7 +383,7 @@ describe("ResponseModal Streaming Integration with Type Fixes", () => {
   });
 });
 
-describe("ResponseModal Route Integration with Type Fixes", () => {
+describe("ResponseModal Flow Integration with Type Fixes", () => {
   let agent: Agent<TestContext, TestData>;
   let responseModal: ResponseModal<TestContext, TestData>;
 
@@ -392,13 +392,13 @@ describe("ResponseModal Route Integration with Type Fixes", () => {
     responseModal = new ResponseModal(agent);
   });
 
-  test("should handle route-based responses with type compatibility", async () => {
-    const session = createSession<TestData>("route-type-test");
+  test("should handle flow-based responses with type compatibility", async () => {
+    const session = createSession<TestData>("flow-type-test");
     
-    // Start a support request route
+    // Start a support request flow
     const response1 = await responseModal.generate("I need help with an urgent issue", {
       contextOverride: {
-        userId: "route-test-user",
+        userId: "flow-test-user",
         sessionCount: 1,
         environment: "test",
       },
@@ -408,13 +408,13 @@ describe("ResponseModal Route Integration with Type Fixes", () => {
     expect(response1.message).toBeDefined();
     expect(response1.session).toBeDefined();
 
-    // Continue the route with collected data
+    // Continue the flow with collected data
     await agent.updateCollectedData({ issue: "Login problems" });
     
     const response2 = await responseModal.generate("The issue is with login", {
       contextOverride: {
         environment: "test",
-        userId: "route-test-user",
+        userId: "flow-test-user",
         sessionCount: 2,
       },
     });
@@ -427,8 +427,8 @@ describe("ResponseModal Route Integration with Type Fixes", () => {
     expect(collectedData.issue).toBe("Login problems");
   });
 
-  test("should handle route completion with streaming", async () => {
-    // Set up complete data for route completion
+  test("should handle flow completion with streaming", async () => {
+    // Set up complete data for flow completion
     await agent.updateCollectedData({
       issue: "Email delivery problems",
       priority: "high" as const,
@@ -440,12 +440,12 @@ describe("ResponseModal Route Integration with Type Fixes", () => {
     for await (const chunk of responseModal.stream("That's all the information I have")) {
       chunks.push(chunk);
       
-      // Verify type compatibility during route completion
+      // Verify type compatibility during flow completion
       expect(chunk.session).toBeDefined();
       expect(typeof chunk.done).toBe("boolean");
       
       if (chunk.done) {
-        // Check that route completion maintains type safety
+        // Check that flow completion maintains type safety
         expect(chunk.session?.data).toBeDefined();
         break;
       }
@@ -460,13 +460,13 @@ describe("ResponseModal Route Integration with Type Fixes", () => {
     expect(finalData.category).toBe("technical");
   });
 
-  test("should handle multiple routes with type safety", async () => {
-    const session = createSession<TestData>("multi-route-test");
+  test("should handle multiple flows with type safety", async () => {
+    const session = createSession<TestData>("multi-flow-test");
     
-    // Test information request route
+    // Test information request flow
     const infoResponse = await responseModal.generate("I'd like to get some information", {
       contextOverride: {
-        userId: "multi-route-user",
+        userId: "multi-flow-user",
         sessionCount: 1,
         environment: "test",
       },
@@ -475,10 +475,10 @@ describe("ResponseModal Route Integration with Type Fixes", () => {
     expect(infoResponse).toBeDefined();
     expect(infoResponse.message).toBeDefined();
 
-    // Switch to support request route
+    // Switch to support request flow
     const supportResponse = await responseModal.generate("Actually, I have a technical issue", {
       contextOverride: {
-        userId: "multi-route-user",
+        userId: "multi-flow-user",
         sessionCount: 2,
         environment: "test",
       },
@@ -487,7 +487,7 @@ describe("ResponseModal Route Integration with Type Fixes", () => {
     expect(supportResponse).toBeDefined();
     expect(supportResponse.message).toBeDefined();
     
-    // Verify session maintains type integrity across route switches
+    // Verify session maintains type integrity across flow switches
     const history = agent.session.getHistory();
     expect(history.length).toBeGreaterThan(0);
     

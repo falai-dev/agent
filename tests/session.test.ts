@@ -114,9 +114,9 @@ describe("SessionManager Creation and Configuration", () => {
     expect(session.data).toEqual({});
     expect(session.metadata?.createdAt).toBeInstanceOf(Date);
     expect(session.metadata?.lastUpdatedAt).toBeInstanceOf(Date);
-    expect(session.currentRoute).toBeUndefined();
+    expect(session.currentFlow).toBeUndefined();
     expect(session.currentStep).toBeUndefined();
-    expect(session.routeHistory).toEqual([]);
+    expect(session.flowHistory).toEqual([]);
     expect(session.history).toEqual([]);
   });
 
@@ -276,16 +276,16 @@ describe("SessionManager Data Collection and Management", () => {
 });
 
 describe("SessionManager State Management", () => {
-  test("should track current route and step", async () => {
+  test("should track current flow and step", async () => {
     const sessionManager = new SessionManager<SupportTicketData>();
     const session = await sessionManager.getOrCreate();
 
-    expect(session.currentRoute).toBeUndefined();
+    expect(session.currentFlow).toBeUndefined();
     expect(session.currentStep).toBeUndefined();
 
-    // Simulate route activation
-    session.currentRoute = {
-      id: "support_route",
+    // Simulate flow activation
+    session.currentFlow = {
+      id: "support_flow",
       title: "Customer Support",
       enteredAt: new Date(),
     };
@@ -296,18 +296,18 @@ describe("SessionManager State Management", () => {
       enteredAt: new Date(),
     };
 
-    expect(session.currentRoute?.id).toBe("support_route");
+    expect(session.currentFlow?.id).toBe("support_flow");
     expect(session.currentStep?.id).toBe("gather_info");
   });
 
-  test("should handle route progression", async () => {
+  test("should handle flow progression", async () => {
     const agent = createSessionTestAgent();
     const sessionManager = new SessionManager<SupportTicketData>();
     const session = await sessionManager.getOrCreate();
 
-    // Create a simple route
-    const route = agent.createRoute({
-      title: "Simple Route",
+    // Create a simple flow
+    const flow = agent.createFlow({
+      title: "Simple Flow",
       steps: [
         {
           id: "step1",
@@ -325,9 +325,9 @@ describe("SessionManager State Management", () => {
     });
 
     // Simulate progression through steps
-    session.currentRoute = {
-      id: route.id,
-      title: route.title,
+    session.currentFlow = {
+      id: flow.id,
+      title: flow.title,
       enteredAt: new Date(),
     };
 
@@ -356,13 +356,13 @@ describe("SessionManager State Management", () => {
     expect(session.currentStep?.id).toBe("step3");
   });
 
-  test("should handle route completion", async () => {
+  test("should handle flow completion", async () => {
     const sessionManager = new SessionManager<SupportTicketData>();
     const session = await createSupportSession(sessionManager);
 
-    // Start with active route
-    session.currentRoute = {
-      id: "support_route",
+    // Start with active flow
+    session.currentFlow = {
+      id: "support_flow",
       title: "Support",
       enteredAt: new Date(),
     };
@@ -372,11 +372,11 @@ describe("SessionManager State Management", () => {
       enteredAt: new Date(),
     };
 
-    // Complete the route
-    session.currentRoute = undefined;
+    // Complete the flow
+    session.currentFlow = undefined;
     session.currentStep = undefined;
 
-    expect(session.currentRoute).toBeUndefined();
+    expect(session.currentFlow).toBeUndefined();
     expect(session.currentStep).toBeUndefined();
   });
 });
@@ -426,8 +426,8 @@ describe("SessionManager Persistence", () => {
     await sessionManager.addMessage("user", "I want to buy something");
     await sessionManager.addMessage("assistant", "I can help you with that!");
 
-    session.currentRoute = {
-      id: "checkout_route",
+    session.currentFlow = {
+      id: "checkout_flow",
       title: "Checkout",
       enteredAt: new Date(),
     };
@@ -440,7 +440,7 @@ describe("SessionManager Persistence", () => {
 
     expect(restoredSession.data?.items).toHaveLength(1);
     expect(restoredSession.data?.total).toBe(10.99);
-    expect(restoredSession.currentRoute?.id).toBe("checkout_route");
+    expect(restoredSession.currentFlow?.id).toBe("checkout_flow");
     expect(restoredSession.history).toHaveLength(2);
     expect(restoredSession.history?.[0]?.content).toBe("I want to buy something");
     expect(restoredSession.history?.[1]?.content).toBe("I can help you with that!");
@@ -716,12 +716,12 @@ describe("SessionManager Integration with Agent Responses", () => {
     expect(response2.session?.id).toBe(session.id);
   });
 
-  test("should handle route completion in sessions", async () => {
+  test("should handle flow completion in sessions", async () => {
     const agent = createSessionTestAgent();
 
-    // Create a simple route
-    agent.createRoute({
-      title: "Quick Route",
+    // Create a simple flow
+    agent.createFlow({
+      title: "Quick Flow",
       steps: [
         {
           id: "only_step",
@@ -730,21 +730,21 @@ describe("SessionManager Integration with Agent Responses", () => {
       ],
     });
 
-    const session = await agent.session.getOrCreate("route-completion-test");
+    const session = await agent.session.getOrCreate("flow-completion-test");
     const response = await agent.respond({
       history: [
         {
           role: "user" as const,
-          content: "Start route",
+          content: "Start flow",
           name: "TestUser",
         },
       ],
       session,
     });
 
-    // Check if route completed
-    if (response.isRouteComplete) {
-      expect(response.session?.currentRoute).toBeNull();
+    // Check if flow completed
+    if (response.isFlowComplete) {
+      expect(response.session?.currentFlow).toBeNull();
       expect(response.session?.currentStep).toBeNull();
     }
   });
@@ -986,11 +986,11 @@ describe("SessionManager Integration with Agent", () => {
     expect(sessionHistory[0].content).toBe("Normal message");
   });
 
-  test("should handle cross-route data sharing in sessions", async () => {
+  test("should handle cross-flow data sharing in sessions", async () => {
     const agent = createSessionTestAgent();
 
-    // Create routes that share agent-level data
-    const infoRoute = agent.createRoute({
+    // Create flows that share agent-level data
+    const infoFlow = agent.createFlow({
       title: "Customer Info",
       requiredFields: ["customerName", "email"],
       steps: [
@@ -1001,7 +1001,7 @@ describe("SessionManager Integration with Agent", () => {
       ],
     });
 
-    const ticketRoute = agent.createRoute({
+    const ticketFlow = agent.createFlow({
       title: "Support Ticket",
       requiredFields: ["issue", "category"],
       steps: [
@@ -1012,10 +1012,10 @@ describe("SessionManager Integration with Agent", () => {
       ],
     });
 
-    // Simulate data collection across routes
+    // Simulate data collection across flows
     const session = await agent.session.getOrCreate();
 
-    // Update agent-level data that both routes can use
+    // Update agent-level data that both flows can use
     await agent.updateCollectedData({
       customerName: "John Doe",
       email: "john@example.com",
@@ -1023,10 +1023,10 @@ describe("SessionManager Integration with Agent", () => {
       category: "technical",
     });
 
-    // Both routes should be able to evaluate completion based on shared data
+    // Both flows should be able to evaluate completion based on shared data
     const agentData = agent.getCollectedData();
-    expect(infoRoute.isComplete(agentData)).toBe(true);
-    expect(ticketRoute.isComplete(agentData)).toBe(true);
+    expect(infoFlow.isComplete(agentData)).toBe(true);
+    expect(ticketFlow.isComplete(agentData)).toBe(true);
   });
 });
 

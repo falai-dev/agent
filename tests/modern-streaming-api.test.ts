@@ -66,11 +66,11 @@ function createStreamingTestAgent(provider?: MockProvider): Agent<TestContext, T
   });
 }
 
-function createStreamingAgentWithRoute(provider?: MockProvider): Agent<TestContext, TestData> {
+function createStreamingAgentWithFlow(provider?: MockProvider): Agent<TestContext, TestData> {
   const agent = createStreamingTestAgent(provider);
   
-  // Add a test route for streaming
-  agent.createRoute({
+  // Add a test flow for streaming
+  agent.createFlow({
     title: "Streaming Support",
     description: "Handle support requests with streaming",
     when: ["User needs streaming help"],
@@ -475,9 +475,9 @@ describe("Modern Streaming API - Error Handling", () => {
   });
 });
 
-describe("Modern Streaming API - Integration with Routes", () => {
-  test("should work with route-based agents", async () => {
-    const agent = createStreamingAgentWithRoute();
+describe("Modern Streaming API - Integration with Flows", () => {
+  test("should work with flow-based agents", async () => {
+    const agent = createStreamingAgentWithFlow();
 
     const chunks: AgentResponseStreamChunk<TestData>[] = [];
     let finalChunk: AgentResponseStreamChunk<TestData> | undefined;
@@ -496,7 +496,7 @@ describe("Modern Streaming API - Integration with Routes", () => {
   });
 
   test("should handle data collection during streaming", async () => {
-    const agent = createStreamingAgentWithRoute();
+    const agent = createStreamingAgentWithFlow();
 
     // Set some initial data
     await agent.updateCollectedData({ issue: "Streaming problem" });
@@ -516,26 +516,26 @@ describe("Modern Streaming API - Integration with Routes", () => {
     expect(collectedData.issue).toBe("Streaming problem");
   });
 
-  test("should handle route completion in streaming", async () => {
-    const agent = createStreamingAgentWithRoute();
+  test("should handle flow completion in streaming", async () => {
+    const agent = createStreamingAgentWithFlow();
 
-    // Complete the route by providing all required data
+    // Complete the flow by providing all required data
     await agent.updateCollectedData({ 
       issue: "Streaming issue",
       category: "technical",
       priority: "high" as const,
     });
 
-    let routeCompleted = false;
+    let flowCompleted = false;
 
     for await (const chunk of agent.stream("That's all the information")) {
       if (chunk.done) {
-        // Check if route was completed (this depends on the route logic)
-        routeCompleted = true;
+        // Check if flow was completed (this depends on the flow logic)
+        flowCompleted = true;
       }
     }
 
-    expect(routeCompleted).toBe(true);
+    expect(flowCompleted).toBe(true);
   });
 });
 

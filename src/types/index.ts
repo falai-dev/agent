@@ -7,14 +7,17 @@ export type {
   AgentOptions,
   AgentCompactionConfig,
   Term,
-  Guideline,
-  GuidelineMatch,
+  Instruction,
+  ScopedInstructions,
+  AppliedInstruction,
   AgentResponseStreamChunk,
   AgentResponse,
   ContextLifecycleHooks,
   ContextProvider,
   ValidationError,
   ValidationResult,
+  HookContext,
+  ExitReason,
 } from "./agent";
 export { CompositionMode } from "./agent";
 
@@ -40,23 +43,42 @@ export type {
 export { EventKind, MessageRole } from "./history";
 export * from "./history";
 
-// Route types
+// Flow types
 export type {
-  RouteOptions,
-  RouteRef,
+  FlowOptions,
+  FlowRef,
   StepRef,
   StepOptions,
-  BranchSpec,
-  StepResult,
-  BranchResult,
-  RouteCompletionHandler,
-  RouteTransitionConfig,
-  RouteLifecycleHooks,
-} from "./route";
-export * from "./route";
+  FlowLifecycleHooks,
+  StepLifecycleHooks,
+  Directive,
+  PreDirective,
+  BranchEntry,
+  BranchMap,
+  BranchPredicate,
+  BranchPredicateContext,
+  ConditionPredicate,
+  ConditionIf,
+  ConditionWhen,
+  StoppedReason,
+  PrepareResult,
+} from "./flow";
 
 // Session types
-export type { SessionState, PendingTransition } from "./session";
+export type { SessionState } from "./session";
+
+// Signals types (canonical source)
+export type {
+  Signal,
+  SignalContext,
+  SignalDirective,
+  SignalPredicate,
+  SignalPredicateContext,
+  SignalFiring,
+  SignalSchema,
+  SignalsState,
+  SignalTriggerState,
+} from "./signals";
 
 // Tool types
 export type {
@@ -65,7 +87,6 @@ export type {
   ToolResult,
   ToolHandler,
   ToolExecutionResult,
-  EnhancedTool,
   ToolValidationResult,
   ToolPermissionResult,
   ToolCallRequest,
@@ -129,9 +150,15 @@ export * from "./persistence";
 export type {
   Template,
   TemplateContext,
-  ConditionTemplate,
   ConditionEvaluationResult
 } from "./template";
+
+// Error types
+export { NotImplementedError } from "./errors";
+
+// Internal — ConditionTemplate is NOT exported from the public surface in v2.
+// It remains internally for the condition evaluator utility.
+
 export {
   ConditionEvaluator,
   createConditionEvaluator,

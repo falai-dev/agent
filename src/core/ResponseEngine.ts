@@ -3,11 +3,12 @@ import type {
   StructuredSchema,
   SessionState,
   AgentOptions,
-  Guideline,
   Term,
   Template,
+  ScopedInstructions,
+  AppliedInstruction,
 } from "../types";
-import type { Route } from "./Route";
+import type { Flow } from "./Flow";
 import type { Step } from "./Step";
 import { PromptComposer } from "./PromptComposer";
 import { PromptSectionCache } from "./PromptSectionCache";
@@ -17,35 +18,46 @@ export interface BuildResponsePromptParams<
   TContext = unknown,
   TData = unknown
 > {
-  route: Route<TContext, TData>;
+  flow: Flow<TContext, TData>;
   currentStep: Step<TContext, TData>;
   rules: Template<TContext, TData>[];
   prohibitions: Template<TContext, TData>[];
   directives: string[] | undefined;
   history: Event[];
   agentOptions?: AgentOptions<TContext, TData>;
-  // Combined properties from agent and route
-  combinedGuidelines?: Guideline<TContext, TData>[];
+  // Scoped instructions (agent, flow, step)
+  instructions?: ScopedInstructions<TContext, TData>;
   combinedTerms?: Term<TContext, TData>[];
   context?: TContext;
   session?: SessionState<TData>;
   // NEW: Agent-level schema for data validation
   agentSchema?: StructuredSchema;
+  /**
+   * Per-turn transient appendage from merged PreDirective.appendPrompt arrays.
+   * Appended to the system prompt after all other sections.
+   * Fresh every turn, never cached, never persisted.
+   */
+  transientAppendage?: string[];
 }
 
 export interface BuildFallbackPromptParams<TContext = unknown, TData = unknown> {
   agentOptions: AgentOptions<TContext, TData>;
   terms: Term<TContext, TData>[];
-  guidelines: Guideline<TContext, TData>[];
+  instructions?: ScopedInstructions<TContext, TData>;
   context?: TContext;
   session?: SessionState<TData>;
+}
+
+export interface PromptBuilderResult {
+  prompt: string;
+  appliedInstructions: AppliedInstruction[];
 }
 
 export class ResponseEngine<TContext = unknown, TData = unknown> {
   constructor(private readonly promptSectionCache?: PromptSectionCache) { }
 
-  responseSchemaForRoute(
-    route: Route<TContext, TData>,
+  responseSchemaForFlow(
+    flow: Flow<TContext, TData>,
     currentStep?: Step<TContext, TData>,
     agentSchema?: StructuredSchema
   ): StructuredSchema {
@@ -58,9 +70,9 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
       additionalProperties: false,
     };
 
-    // Add data field only if route has responseOutputSchema
-    if (route.responseOutputSchema) {
-      base.properties!.data = route.responseOutputSchema;
+    // Add data field only if flow has responseOutputSchema
+    if (flow.responseOutputSchema) {
+      base.properties!.data = flow.responseOutputSchema;
     }
 
     // Add collect fields from current step
@@ -89,40 +101,33 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
 
   async buildResponsePrompt(
     params: BuildResponsePromptParams<TContext, TData>
-  ): Promise<string> {
+  ): Promise<PromptBuilderResult> {
     const {
-      route,
+      flow,
       currentStep,
       rules,
       prohibitions,
       directives,
       history,
       agentOptions,
-      combinedGuidelines,
+      instructions,
       combinedTerms,
       context,
       session,
       agentSchema,
+      transientAppendage,
     } = params;
     const templateContext = createTemplateContext({ context, session, history });
     const pc = new PromptComposer(templateContext, this.promptSectionCache);
 
-    // Create combined agent options with route overrides
-    let effectiveAgentOptions = agentOptions;
-    if (agentOptions && (route.identity || route.personality)) {
-      // Route identity and personality override agent versions
-      effectiveAgentOptions = {
-        ...agentOptions,
-        ...(route.identity && { identity: route.identity }),
-        ...(route.personality && { personality: route.personality }),
-      };
-    }
+    // Create combined agent options — flow no longer overrides persona
+    const effectiveAgentOptions = agentOptions;
 
     if (effectiveAgentOptions) {
       await pc.addAgentMeta(effectiveAgentOptions);
     }
     await pc.addInstruction(
-      `Route: ${route.title}${route.description ? ` — ${route.description}` : ""
+      `Flow: ${flow.title}${flow.description ? ` — ${flow.description}` : ""
       }`
     );
     if (currentStep.prompt) {
@@ -140,38 +145,38 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
     await pc.addDirectives(directives);
     await pc.addKnowledgeBase(
       agentOptions?.knowledgeBase,
-      route.getKnowledgeBase()
+      flow.knowledgeBase
     );
 
-    // Add combined guidelines (agent + route)
-    if (combinedGuidelines && combinedGuidelines.length > 0) {
-      await pc.addGuidelines(combinedGuidelines);
+    // Add scoped instructions (agent + flow + step)
+    if (instructions) {
+      await pc.addInstructions(instructions);
     }
 
-    // Add combined terms (agent + route)
+    // Add combined terms (agent + flow)
     if (combinedTerms && combinedTerms.length > 0) {
       await pc.addGlossary(combinedTerms);
     }
 
-    // Add data collection instructions - include ALL route fields, not just current step
-    // Collect all fields from route's required and optional fields
-    const allRouteFields = new Set<string>();
+    // Add data collection instructions - include ALL flow fields, not just current step
+    // Collect all fields from flow's required and optional fields
+    const allFlowFields = new Set<string>();
 
-    if (route.requiredFields) {
-      route.requiredFields.forEach(field => allRouteFields.add(String(field)));
+    if (flow.requiredFields) {
+      flow.requiredFields.forEach(field => allFlowFields.add(String(field)));
     }
-    if (route.optionalFields) {
-      route.optionalFields.forEach(field => allRouteFields.add(String(field)));
+    if (flow.optionalFields) {
+      flow.optionalFields.forEach(field => allFlowFields.add(String(field)));
     }
     if (currentStep?.collect) {
-      currentStep.collect.forEach(field => allRouteFields.add(String(field)));
+      currentStep.collect.forEach(field => allFlowFields.add(String(field)));
     }
 
-    if (allRouteFields.size > 0) {
+    if (allFlowFields.size > 0) {
       const stepCollectFields = new Set(currentStep?.collect?.map(f => String(f)) || []);
       const fieldDescriptions: string[] = [];
 
-      for (const field of allRouteFields) {
+      for (const field of allFlowFields) {
         if (agentSchema?.properties) {
           const fieldSchema = agentSchema.properties[field];
           if (fieldSchema) {
@@ -237,7 +242,7 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
     // Generate example JSON based on actual schema fields
     const exampleFields: string[] = ['  "message": "your response to the user"'];
 
-    for (const field of allRouteFields) {
+    for (const field of allFlowFields) {
       if (agentSchema?.properties) {
         const fieldSchema = agentSchema.properties[field];
         if (fieldSchema) {
@@ -285,21 +290,31 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
       ].join('\n')
     );
 
-    return pc.build();
+    const prompt = await pc.build({ transientAppendage });
+    return {
+      prompt,
+      appliedInstructions: pc.lastAppliedInstructions ?? [],
+    };
   }
 
   async buildFallbackPrompt(
     params: BuildFallbackPromptParams<TContext, TData>
-  ): Promise<string> {
-    const { agentOptions, terms, guidelines, context, session } =
+  ): Promise<PromptBuilderResult> {
+    const { agentOptions, terms, instructions, context, session } =
       params;
     const templateContext = createTemplateContext({ context, session });
     const pc = new PromptComposer(templateContext, this.promptSectionCache);
 
     await pc.addAgentMeta(agentOptions);
     await pc.addGlossary(terms);
-    await pc.addGuidelines(guidelines);
+    if (instructions) {
+      await pc.addInstructions(instructions);
+    }
     await pc.addKnowledgeBase(agentOptions.knowledgeBase);
-    return pc.build();
+    const prompt = await pc.build();
+    return {
+      prompt,
+      appliedInstructions: pc.lastAppliedInstructions ?? [],
+    };
   }
 }

@@ -69,9 +69,9 @@ export interface GenerateMessageInput<TContext = unknown> {
 export interface AgentStructuredResponse extends Record<string, unknown> {
   /** The actual message to send to the user */
   message: string;
-  /** Route chosen by the agent (route title or null if no route) */
-  route?: string | null;
-  /** Current step within the route (step description or null) */
+  /** Flow chosen by the agent (flow title or null if no flow) */
+  flow?: string | null;
+  /** Current step within the flow (step description or null) */
   step?: string | null;
   /** Tool calls the agent wants to execute */
   toolCalls?: Array<{

@@ -87,7 +87,7 @@ describe("RespondParams Type Compatibility", () => {
             ],
             step: {
                 id: "test-step",
-                routeId: "test-route",
+                flowId: "test-flow",
             },
             session: {
                 id: "test-session-full",
@@ -155,7 +155,7 @@ describe("AgentStructuredResponse Type Compatibility", () => {
     test("should be compatible with Record<string, unknown>", () => {
         const response: AgentStructuredResponse = {
             message: "Hello! How can I help you today?",
-            route: "support",
+            flow: "support",
             step: "collect_issue",
             toolCalls: [
                 {
@@ -171,7 +171,7 @@ describe("AgentStructuredResponse Type Compatibility", () => {
 
         expect(asRecord).toBeDefined();
         expect(asRecord.message).toBe("Hello! How can I help you today?");
-        expect(asRecord.route).toBe("support");
+        expect(asRecord.flow).toBe("support");
         expect(asRecord.step).toBe("collect_issue");
         expect(asRecord.toolCalls).toBeDefined();
         expect(asRecord.reasoning).toBe("User needs help, routing to support flow");
@@ -210,7 +210,7 @@ describe("AgentStructuredResponse Type Compatibility", () => {
 
         expect(asRecord).toBeDefined();
         expect(asRecord.message).toBe("Minimal response");
-        expect(asRecord.route).toBeUndefined();
+        expect(asRecord.flow).toBeUndefined();
         expect(asRecord.step).toBeUndefined();
         expect(asRecord.toolCalls).toBeUndefined();
         expect(asRecord.reasoning).toBeUndefined();
@@ -219,7 +219,7 @@ describe("AgentStructuredResponse Type Compatibility", () => {
     test("should work with null values for optional properties", () => {
         const responseWithNulls: AgentStructuredResponse = {
             message: "Response with nulls",
-            route: null,
+            flow: null,
             step: null,
             toolCalls: undefined,
             reasoning: undefined,
@@ -229,7 +229,7 @@ describe("AgentStructuredResponse Type Compatibility", () => {
 
         expect(asRecord).toBeDefined();
         expect(asRecord.message).toBe("Response with nulls");
-        expect(asRecord.route).toBe(null);
+        expect(asRecord.flow).toBe(null);
         expect(asRecord.step).toBe(null);
         expect(asRecord.toolCalls).toBeUndefined();
         expect(asRecord.reasoning).toBeUndefined();
@@ -238,7 +238,7 @@ describe("AgentStructuredResponse Type Compatibility", () => {
     test("should handle complex tool calls structure", () => {
         const responseWithComplexTools: AgentStructuredResponse = {
             message: "I'll execute multiple tools for you",
-            route: "data_processing",
+            flow: "data_processing",
             step: "execute_tools",
             toolCalls: [
                 {
@@ -288,7 +288,7 @@ describe("AgentStructuredResponse Type Compatibility", () => {
 
         const response: AgentStructuredResponse = {
             message: "Generic test response",
-            route: "test_route",
+            flow: "test_flow",
             customProperty: "should work",
         };
 
@@ -296,14 +296,14 @@ describe("AgentStructuredResponse Type Compatibility", () => {
 
         expect(processed).toEqual(response);
         expect(processed.message).toBe("Generic test response");
-        expect(processed.route).toBe("test_route");
+        expect(processed.flow).toBe("test_flow");
         expect(processed.customProperty).toBe("should work");
     });
 
     test("should maintain type safety while being compatible", () => {
         const response: AgentStructuredResponse = {
             message: "Type safety test",
-            route: "safety_route",
+            flow: "safety_flow",
             step: "safety_step",
         };
 
@@ -313,12 +313,12 @@ describe("AgentStructuredResponse Type Compatibility", () => {
 
         // Should still maintain AgentStructuredResponse type properties
         expect(response.message).toBe("Type safety test");
-        expect(response.route).toBe("safety_route");
+        expect(response.flow).toBe("safety_flow");
         expect(response.step).toBe("safety_step");
 
         // TypeScript should enforce required properties
         // This would cause a compile error if uncommented:
-        // const invalidResponse: AgentStructuredResponse = { route: "test" }; // Missing required 'message'
+        // const invalidResponse: AgentStructuredResponse = { flow: "test" }; // Missing required 'message'
     });
 });
 
@@ -351,7 +351,7 @@ describe("Type Compatibility in Error Handling", () => {
     test("should handle AgentStructuredResponse in error contexts", () => {
         const response: AgentStructuredResponse = {
             message: "Error response test",
-            route: "error_route",
+            flow: "error_flow",
         };
 
         // Simulate error handling that expects Record<string, unknown>
@@ -367,7 +367,7 @@ describe("Type Compatibility in Error Handling", () => {
         expect(logResult.logged).toBe(true);
         expect(logResult.data).toBeDefined();
         expect((logResult.data as any).message).toBe("Error response test");
-        expect((logResult.data as any).route).toBe("error_route");
+        expect((logResult.data as any).flow).toBe("error_flow");
     });
 });
 

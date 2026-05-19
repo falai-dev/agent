@@ -8,25 +8,52 @@ import type {
   SessionState,
   AgentStructuredResponse,
   Tool,
-  RouteTransitionConfig,
+  Directive,
+  PreDirective,
 } from "../types";
+import type { SignalFiring } from "../types/signals";
+import type { SignalProcessor } from "./SignalProcessor";
 import type { HistoryItem } from "../types/history";
 import {
   createSession,
-  enterRoute,
   enterStep,
   mergeCollected,
+  completeCurrentFlow,
   logger,
-  render,
   historyToEvents,
   serializeToolResult,
 } from "../utils";
+import { enterFlow } from "../utils/session";
 import { createTemplateContext } from "../utils/template";
-import { Route } from "../core/Route";
-import { Step } from "../core/Step";
-import { RoutingEngine } from "../core/RoutingEngine";
+import { Flow } from "./Flow";
+import { Step, FlowConfigurationError } from "../core/Step";
+import { FlowRouter } from "./FlowRouter";
 import type { ToolManager } from "../core/ToolManager";
-import { END_ROUTE_ID } from "../constants";
+import { evaluateBranches, createAiConditionEvaluator } from "./BranchEvaluator";
+import { DirectiveChainTracker } from "./DirectiveChainTracker";
+import { DirectiveBus } from "./DirectiveBus";
+
+/**
+ * Position fields on a Directive that represent a navigation decision.
+ * When any of these is set, the directive "wins" the turn's position decision
+ * and downstream resolution (branches, linear, AI) must not run.
+ */
+const DIRECTIVE_POSITION_FIELDS = ['goTo', 'goToStep', 'complete', 'abort', 'reset'] as const;
+
+/**
+ * Returns `true` if the given directive has at least one position field set.
+ * Used as the guard at the directive-bus / branch-evaluation seam:
+ * if the bus produced a winner with a position field, `evaluateStepBranches`
+ * (and linear/AI selection) must not run.
+ */
+export function hasDirectivePositionField<TContext = unknown, TData = unknown>(
+  directive: Directive<TContext, TData> | undefined | null,
+): boolean {
+  if (!directive) return false;
+  return DIRECTIVE_POSITION_FIELDS.some(
+    (field) => (directive as Record<string, unknown>)[field] !== undefined,
+  );
+}
 
 export interface ResponsePreparationResult<TContext, TData = unknown> {
   effectiveContext: TContext;
@@ -34,12 +61,12 @@ export interface ResponsePreparationResult<TContext, TData = unknown> {
 }
 
 export interface RoutingResult<TContext, TData = unknown> {
-  selectedRoute: Route<TContext, TData> | undefined;
+  selectedFlow: Flow<TContext, TData> | undefined;
   selectedStep: Step<TContext, TData> | undefined;
   responseDirectives: string[] | undefined;
   session: SessionState<TData>;
-  isRouteComplete: boolean;
-  completedRoutes?: Route<TContext, TData>[];
+  isFlowComplete: boolean;
+  completedFlows?: Flow<TContext, TData>[];
 }
 
 export interface ToolExecutionResult<TData = unknown> {
@@ -60,11 +87,18 @@ export interface DataCollectionResult<TData = unknown> {
  * Shared response processing logic between respond() and respondStream() methods
  */
 export class ResponsePipeline<TContext = unknown, TData = unknown> {
+  /**
+   * Per-turn directive chain tracker. Created fresh at the start of each turn
+   * via `createChainTracker()`. Used by directive application points to detect
+   * infinite redirection loops.
+   */
+  private _chainTracker: DirectiveChainTracker | undefined;
+
   constructor(
     private readonly options: AgentOptions<TContext, TData>,
-    private readonly getRoutes: () => Route<TContext, TData>[],
+    private readonly getFlows: () => Flow<TContext, TData>[],
     private readonly tools: Tool<TContext, TData>[],
-    private readonly routingEngine: RoutingEngine<TContext, TData>,
+    private readonly flowRouter: FlowRouter<TContext, TData>,
     private readonly updateContext: (
       updates: Partial<TContext>
     ) => Promise<void>,
@@ -75,8 +109,107 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     private readonly updateCollectedData?: (
       updates: Partial<TData>
     ) => Promise<void>,
-    private readonly toolManager?: ToolManager<TContext, TData>
+    private readonly toolManager?: ToolManager<TContext, TData>,
+    private readonly signalProcessor?: SignalProcessor<TContext, TData>
   ) { }
+
+  /**
+   * Create a fresh chain tracker for the current turn.
+   * Call at the start of each turn; the tracker is discarded at turn end.
+   */
+  createChainTracker(): DirectiveChainTracker {
+    const maxChain = this.options.maxDirectiveChain ?? 10;
+    this._chainTracker = new DirectiveChainTracker(maxChain);
+    return this._chainTracker;
+  }
+
+  /**
+   * Get the current turn's chain tracker (creates one if none exists).
+   */
+  get chainTracker(): DirectiveChainTracker {
+    if (!this._chainTracker) {
+      return this.createChainTracker();
+    }
+    return this._chainTracker;
+  }
+
+  /**
+   * Create a fresh DirectiveBus for a new turn.
+   * The bus collects directives from hooks, tools, and branches during the turn
+   * and merges them at phase boundaries via Algorithm 4.
+   */
+  createDirectiveBus(): DirectiveBus<TContext, TData> {
+    return new DirectiveBus<TContext, TData>();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Signal pipeline phases
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * PRE-SIGNAL PHASE — Evaluates pre/both signals in parallel with routing.
+   *
+   * Delegates to `signalProcessor.runPreSignalPhase(...)` when configured.
+   * When no signal processor is present (zero-cost path), returns a stable
+   * empty shape so callers don't need to branch.
+   *
+   * @requirements 2.1, 2.3, 8.6, 13.3
+   */
+  async runPreSignalPhase(
+    session: SessionState<TData>,
+    context: TContext,
+    history: Event[],
+  ): Promise<{
+    firings: SignalFiring<TContext, TData>[];
+    updatedSession: SessionState<TData>;
+    mergedDirective: PreDirective<TContext, TData> | undefined;
+  }> {
+    if (!this.signalProcessor) {
+      return { firings: [], updatedSession: session, mergedDirective: undefined };
+    }
+    const result = await this.signalProcessor.runPreSignalPhase({ session, history, context });
+    return {
+      firings: result.firings,
+      updatedSession: result.updatedSession,
+      mergedDirective: result.mergedDirective,
+    };
+  }
+
+  /**
+   * POST-SIGNAL PHASE — Evaluates post/both signals after finalize/onComplete.
+   *
+   * Delegates to `signalProcessor.runPostSignalPhase(...)` when configured.
+   * When no signal processor is present, returns a stable empty shape.
+   *
+   * Post-phase signals see the complete turn result: assistant message in history,
+   * collected data, tool results. Position directives from this phase set
+   * `session.pendingDirective` (no mid-turn re-entry per D6 decision).
+   *
+   * Pre-LLM-only fields (`appendPrompt`, `injectTools`, `halt`) are already
+   * dropped inside `runPostSignalPhase` per Phase 4.5 — this seam does NOT
+   * re-introduce them.
+   *
+   * @requirements 9.1, 9.2, 9.3, 9.4
+   */
+  async runPostSignalPhase(
+    session: SessionState<TData>,
+    context: TContext,
+    history: Event[],
+  ): Promise<{
+    firings: SignalFiring<TContext, TData>[];
+    updatedSession: SessionState<TData>;
+    mergedDirective: Directive<TContext, TData> | undefined;
+  }> {
+    if (!this.signalProcessor) {
+      return { firings: [], updatedSession: session, mergedDirective: undefined };
+    }
+    const result = await this.signalProcessor.runPostSignalPhase({ session, history, context });
+    return {
+      firings: result.firings,
+      updatedSession: result.updatedSession,
+      mergedDirective: result.mergedDirective,
+    };
+  }
 
   /**
    * Prepare context and session for response generation
@@ -123,63 +256,169 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }): Promise<RoutingResult<TContext, TData>> {
     const { session, history, context, signal } = params;
 
-    // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use (combined)
-    let selectedRoute: Route<TContext, TData> | undefined;
+    // PHASE 2: ROUTING + STEP SELECTION - Determine which flow and step to use (combined)
+    let selectedFlow: Flow<TContext, TData> | undefined;
     let responseDirectives: string[] | undefined;
     let selectedStep: Step<TContext, TData> | undefined;
-    let isRouteComplete = false;
-    let completedRoutes: Route<TContext, TData>[] = [];
+    let isFlowComplete = false;
+    let completedFlows: Flow<TContext, TData>[] = [];
     let targetSession = session;
 
-    // Get routes early since we need them for pending transitions
-    const routes = this.getRoutes();
+    // Get flows early since we need them for pending directives
+    const flows = this.getFlows();
 
-    // Check for pending transition from previous route completion
-    if (targetSession.pendingTransition) {
-      const targetRoute = routes.find(
-        (r) => r.id === targetSession.pendingTransition?.targetRouteId
+    // Check for pending directive from previous flow completion or external dispatch
+    if (targetSession.pendingDirective) {
+      const directive = targetSession.pendingDirective;
+      logger.debug(
+        `[ResponseHandler] Applying pending directive at start of turn`
       );
 
-      if (targetRoute) {
-        logger.debug(
-          `[ResponseHandler] Auto-transitioning from pending transition to route: ${targetRoute.title}`
-        );
-        // Clear pending transition and enter new route
-        targetSession = {
-          ...targetSession,
-          pendingTransition: undefined,
-        };
-        targetSession = enterRoute(
-          targetSession,
-          targetRoute.id,
-          targetRoute.title
-        );
+      // Track directive chain depth (Requirement 22.1)
+      const tracker = this.chainTracker;
+      tracker.record(directive, "pending");
+      // If abort (chain breaker), the tracker stops counting; apply normally below
 
-        // Merge initial data if available
-        if (targetRoute.initialData) {
-          targetSession = mergeCollected(
-            targetSession,
-            targetRoute.initialData
-          );
-        }
-
-        selectedRoute = targetRoute;
-      } else {
-        logger.warn(
-          `[ResponseHandler] Pending transition target route not found: ${targetSession.pendingTransition.targetRouteId}`
-        );
-        // Clear invalid transition
-        targetSession = {
-          ...targetSession,
-          pendingTransition: undefined,
-        };
+      // Clear pendingDirective before application (unless complete.next chains another)
+      let nextDirective: typeof targetSession.pendingDirective | undefined = undefined;
+      if (
+        directive.complete &&
+        typeof directive.complete === 'object' &&
+        directive.complete.next
+      ) {
+        nextDirective = directive.complete.next;
       }
+
+      targetSession = {
+        ...targetSession,
+        pendingDirective: nextDirective,
+      };
+
+      // Apply the directive: resolve position field to a flow/step
+      if (directive.goTo) {
+        const flowTarget = typeof directive.goTo === 'string'
+          ? directive.goTo
+          : directive.goTo.flow;
+
+        if (flowTarget) {
+          const targetFlow = flows.find(
+            (r) => r.id === flowTarget || r.title === flowTarget
+          );
+
+          if (targetFlow) {
+            logger.debug(
+              `[ResponseHandler] Pending directive goTo → flow: ${targetFlow.title}`
+            );
+            targetSession = enterFlow(
+              targetSession,
+              targetFlow.id,
+              targetFlow.title
+            );
+
+            // Merge initial data if available
+            if (targetFlow.initialData) {
+              targetSession = mergeCollected(
+                targetSession,
+                targetFlow.initialData
+              );
+            }
+
+            // Merge directive-carried data if present
+            if (typeof directive.goTo === 'object' && directive.goTo.data) {
+              targetSession = mergeCollected(
+                targetSession,
+                directive.goTo.data
+              );
+            }
+
+            selectedFlow = targetFlow;
+
+            // If goTo specifies a step, enter it
+            if (typeof directive.goTo === 'object' && directive.goTo.step) {
+              const stepTarget = directive.goTo.step;
+              const targetStep = targetFlow.getStep(stepTarget);
+              if (targetStep) {
+                targetSession = enterStep(targetSession, targetStep.id, targetStep.description);
+                selectedStep = targetStep;
+              }
+            }
+          } else {
+            logger.warn(
+              `[FlowConfigurationError] Pending directive goTo target not found: flow "${flowTarget}" does not exist. Falling back to normal routing. Fix the goTo reference or remove the pending directive.`
+            );
+          }
+        }
+      } else if (directive.goToStep) {
+        const stepTarget = typeof directive.goToStep === 'string'
+          ? directive.goToStep
+          : directive.goToStep.step;
+        const flowTarget = typeof directive.goToStep === 'object'
+          ? directive.goToStep.flow
+          : undefined;
+
+        if (flowTarget) {
+          const targetFlow = flows.find(
+            (r) => r.id === flowTarget || r.title === flowTarget
+          );
+          if (targetFlow) {
+            targetSession = enterFlow(targetSession, targetFlow.id, targetFlow.title);
+            selectedFlow = targetFlow;
+            const targetStep = targetFlow.getStep(stepTarget);
+            if (targetStep) {
+              targetSession = enterStep(targetSession, targetStep.id, targetStep.description);
+              selectedStep = targetStep;
+            }
+          }
+        } else if (targetSession.currentFlow) {
+          // Step within current flow
+          const currentFlow = flows.find(r => r.id === targetSession.currentFlow?.id);
+          if (currentFlow) {
+            selectedFlow = currentFlow;
+            const targetStep = currentFlow.getStep(stepTarget);
+            if (targetStep) {
+              targetSession = enterStep(targetSession, targetStep.id, targetStep.description);
+              selectedStep = targetStep;
+            }
+          }
+        }
+      } else if (directive.reset) {
+        // Reset current flow
+        if (targetSession.currentFlow) {
+          const currentFlow = flows.find(r => r.id === targetSession.currentFlow?.id);
+          if (currentFlow) {
+            const resetStep = typeof directive.reset === 'object' && directive.reset.step
+              ? directive.reset.step
+              : undefined;
+            selectedFlow = currentFlow;
+            if (resetStep) {
+              const targetStep = currentFlow.getStep(resetStep);
+              if (targetStep) {
+                targetSession = enterStep(targetSession, targetStep.id, targetStep.description);
+                selectedStep = targetStep;
+              }
+            } else {
+              // Reset to initial step
+              const initialStep = currentFlow.initialStep;
+              targetSession = enterStep(targetSession, initialStep.id, initialStep.description);
+              selectedStep = initialStep;
+            }
+          }
+        }
+      }
+      // For complete/abort, selectedFlow stays undefined → handled downstream
+
+      // Apply state writes from the directive
+      if (directive.dataUpdate) {
+        targetSession = mergeCollected(targetSession, directive.dataUpdate);
+      }
+
+      // Skip FlowRouter.decideFlowAndStep — the directive resolved the position
     }
 
     // If no pending transition or transition handled, do normal routing
-    if (routes.length > 0 && !selectedRoute) {
-      const orchestration = await this.routingEngine.decideRouteAndStep({
-        routes: routes,
+    if (flows.length > 0 && !selectedFlow) {
+      const orchestration = await this.flowRouter.decideFlowAndStep({
+        flows: flows,
         session: targetSession,
         history,
         agentOptions: this.options,
@@ -188,28 +427,28 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         signal,
       });
 
-      selectedRoute = orchestration.selectedRoute;
+      selectedFlow = orchestration.selectedFlow;
       selectedStep = orchestration.selectedStep;
       responseDirectives = orchestration.responseDirectives;
       targetSession = orchestration.session;
-      isRouteComplete = orchestration.isRouteComplete || false;
-      completedRoutes = orchestration.completedRoutes || [];
+      isFlowComplete = orchestration.isFlowComplete || false;
+      completedFlows = orchestration.completedFlows || [];
 
-      // Log if route is complete
-      if (isRouteComplete) {
+      // Log if flow is complete
+      if (isFlowComplete) {
         logger.debug(
-          `[ResponseHandler] Route complete: all required data collected, END_ROUTE reached`
+          `[ResponseHandler] Flow complete: all required data collected or last step reached`
         );
       }
     }
 
     return {
-      selectedRoute,
+      selectedFlow,
       selectedStep,
       responseDirectives,
       session: targetSession,
-      isRouteComplete,
-      completedRoutes,
+      isFlowComplete,
+      completedFlows,
     };
   }
 
@@ -217,14 +456,52 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
    * Determine next step and update session
    */
   async determineNextStep(params: {
-    selectedRoute: Route<TContext, TData> | undefined;
+    selectedFlow: Flow<TContext, TData> | undefined;
     selectedStep: Step<TContext, TData> | undefined;
     session: SessionState<TData>;
-    isRouteComplete: boolean;
-  }): Promise<{ nextStep: Step<TContext, TData> | undefined; session: SessionState<TData> }> {
-    const { selectedRoute, selectedStep, session, isRouteComplete } = params;
+    isFlowComplete: boolean;
+    /** Merged directive from the directive bus (pre-LLM + post-LLM phases). */
+    busDirective?: Directive<TContext, TData>;
+  }): Promise<{ nextStep: Step<TContext, TData> | undefined; session: SessionState<TData>; flowChanged?: Flow<TContext, TData> }> {
+    const { selectedFlow, selectedStep, session, isFlowComplete, busDirective } = params;
 
-    if (!selectedRoute || isRouteComplete) {
+    if (!selectedFlow) {
+      return { nextStep: undefined, session };
+    }
+
+    // ─── GUARD: directive bus winner with a position field preempts branches ───
+    // Resolution precedence (design.md): bus > branches > linear > AI.
+    // If the bus produced a directive with a position field (goTo, goToStep,
+    // complete, abort, reset), that decision wins the turn. Do NOT evaluate
+    // branches or linear/AI selection — the caller applies the bus directive.
+    if (hasDirectivePositionField(busDirective)) {
+      logger.debug(
+        `[ResponseHandler] Directive bus winner has position field — skipping branch evaluation and linear/AI selection`,
+      );
+      return { nextStep: undefined, session };
+    }
+
+    // STEP 1 (Algorithm 1): branches win over linear chain AND flow completion.
+    // Evaluate branches before checking isFlowComplete — a branch can redirect
+    // even from the "last" step (which getCandidateStepsWithConditions marks as complete).
+    if (!selectedStep) {
+      const currentStep = session.currentFlow?.id === selectedFlow.id && session.currentStep
+        ? selectedFlow.getStep(session.currentStep.id)
+        : undefined;
+
+      if (currentStep?.branches && currentStep.branches.length > 0) {
+        const contextToUse = this.getStoredContext();
+        const branchResult = await this.evaluateStepBranches(
+          currentStep, selectedFlow, session, contextToUse as TContext
+        );
+        if (branchResult) {
+          return branchResult;
+        }
+        // undefined → fall through to linear/AI selection or flow completion
+      }
+    }
+
+    if (isFlowComplete) {
       return { nextStep: undefined, session };
     }
 
@@ -234,15 +511,16 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     if (selectedStep) {
       nextStep = selectedStep;
     } else {
-      // Determine current step from session if we're already in this route
-      const currentStep = session.currentRoute?.id === selectedRoute.id && session.currentStep
-        ? selectedRoute.getStep(session.currentStep.id)
+      // Determine current step from session if we're already in this flow
+      const currentStep = session.currentFlow?.id === selectedFlow.id && session.currentStep
+        ? selectedFlow.getStep(session.currentStep.id)
         : undefined;
 
       const contextToUse = this.getStoredContext();
-      // Get candidate steps based on current position in the route
-      const candidates = await this.routingEngine.getCandidateStepsWithConditions(
-        selectedRoute,
+
+      // Get candidate steps based on current position in the flow
+      const candidates = await this.flowRouter.getCandidateStepsWithConditions(
+        selectedFlow,
         currentStep, // Pass current step instead of undefined to maintain progression
         createTemplateContext({ data: session.data, session, context: contextToUse })
       );
@@ -250,13 +528,13 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       if (candidates.length > 0) {
         nextStep = candidates[0].step;
         logger.debug(
-          `[ResponseHandler] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`
+          `[ResponseHandler] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`
         );
       } else {
         // Fallback to initial step even if it should be skipped
-        nextStep = selectedRoute.initialStep;
+        nextStep = selectedFlow.initialStep;
         logger.warn(
-          `[ResponseHandler] No valid steps found, using initial step: ${nextStep.id}`
+          `[FlowConfigurationError] No valid steps found in flow "${selectedFlow.title}": all candidates were skipped. Falling back to initial step "${nextStep.id}". Review step skip conditions.`
         );
       }
     }
@@ -273,8 +551,8 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         );
         // Stay at current step - don't enter the next one
         const currentStepId = session.currentStep?.id;
-        if (currentStepId && selectedRoute) {
-          const currentStepInstance = selectedRoute.getStep(currentStepId);
+        if (currentStepId && selectedFlow) {
+          const currentStepInstance = selectedFlow.getStep(currentStepId);
           if (currentStepInstance) {
             nextStep = currentStepInstance;
           }
@@ -295,11 +573,206 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
+   * Evaluate branches on a step and resolve the `then` value.
+   *
+   * Resolution rules (Algorithm 1, STEP 1 + then resolution):
+   * - String `then` → look up in current flow's step registry first (local step wins).
+   * - Not a local step → look up in agent's flow registry; if found, treat as goTo directive.
+   * - Neither → throw FlowConfigurationError.
+   * - Directive `then` → apply directly (bypass directive bus merge).
+   *
+   * Returns the resolved { nextStep, session, flowChanged? } or undefined if no branch matched.
+   */
+  async evaluateStepBranches(
+    currentStep: Step<TContext, TData>,
+    selectedFlow: Flow<TContext, TData>,
+    session: SessionState<TData>,
+    context: TContext,
+  ): Promise<{ nextStep: Step<TContext, TData> | undefined; session: SessionState<TData>; flowChanged?: Flow<TContext, TData> } | undefined> {
+    const history = session.history ? historyToEvents(session.history) : [];
+
+    // Build the BranchPredicateContext
+    const branchCtx = {
+      data: session.data,
+      context,
+      session,
+      history,
+    };
+
+    // Create the AI condition evaluator
+    const aiEvaluator = createAiConditionEvaluator(
+      this.options.provider,
+      history,
+      context,
+    );
+
+    const result = await evaluateBranches(
+      currentStep.branches!,
+      branchCtx,
+      aiEvaluator,
+    );
+
+    if (result === undefined) {
+      return undefined; // No branch matched → fall through to linear/AI selection
+    }
+
+    // Task 4.3: Directive `then` value — apply directly
+    if (typeof result === 'object' && result !== null) {
+      const directive = result;
+      return this.applyBranchDirective(directive, selectedFlow, session);
+    }
+
+    // Task 4.2: String `then` resolution
+    // 1. Look up in current flow's step registry first (local step wins)
+    const localStep = selectedFlow.getStep(result);
+    if (localStep) {
+      const updatedSession = enterStep(session, localStep.id, localStep.description);
+      logger.debug(`[ResponseHandler] Branch resolved to local step: ${localStep.id}`);
+      return { nextStep: localStep, session: updatedSession };
+    }
+
+    // 2. Look up in agent's flow registry
+    const flows = this.getFlows();
+    const targetFlow = flows.find(f => f.id === result || f.title === result);
+    if (targetFlow) {
+      // Treat as applyDirective({ goTo: result }) — enter the target flow
+      logger.debug(`[ResponseHandler] Branch resolved to flow: ${targetFlow.title}`);
+      const updatedSession = enterFlow(session, targetFlow.id, targetFlow.title);
+      return { nextStep: undefined, session: updatedSession, flowChanged: targetFlow };
+    }
+
+    // 3. Neither → throw FlowConfigurationError
+    throw new FlowConfigurationError(
+      `[FlowConfigurationError] Unresolved branch target: "${result}" does not match any step in flow "${selectedFlow.id}" or any flow in the agent. ` +
+      `Source: ${selectedFlow.id}.${currentStep.id}. Fix the branch "then" value to reference a valid step id or flow id/title.`
+    );
+  }
+
+  /**
+   * Apply a Directive returned by a branch entry's `then` value.
+   * Branches bypass the directive bus — the Directive is the position decision.
+   */
+  private applyBranchDirective(
+    directive: Directive<TContext, TData>,
+    selectedFlow: Flow<TContext, TData>,
+    session: SessionState<TData>,
+  ): { nextStep: Step<TContext, TData> | undefined; session: SessionState<TData>; flowChanged?: Flow<TContext, TData> } {
+    // Track directive chain depth (Requirement 22.1)
+    const tracker = this.chainTracker;
+    tracker.record(directive, `branch:${selectedFlow.id}`);
+
+    let updatedSession = session;
+
+    // Apply state writes first
+    if (directive.dataUpdate) {
+      updatedSession = mergeCollected(updatedSession, directive.dataUpdate);
+    }
+
+    // Handle position fields
+    if (directive.goToStep) {
+      const stepTarget = typeof directive.goToStep === 'string'
+        ? directive.goToStep
+        : directive.goToStep.step;
+      const flowTarget = typeof directive.goToStep === 'object'
+        ? directive.goToStep.flow
+        : undefined;
+
+      if (flowTarget) {
+        // Cross-flow step reference — enter the target flow first
+        const flows = this.getFlows();
+        const targetFlow = flows.find(f => f.id === flowTarget || f.title === flowTarget);
+        if (targetFlow) {
+          updatedSession = enterFlow(updatedSession, targetFlow.id, targetFlow.title);
+          updatedSession = enterStep(updatedSession, stepTarget);
+          // Try to resolve the target step instance for the caller
+          const targetStepInstance = targetFlow.getStep(stepTarget);
+          logger.debug(`[ResponseHandler] Branch directive goToStep → ${flowTarget}.${stepTarget}`);
+          return { nextStep: targetStepInstance || undefined, session: updatedSession, flowChanged: targetFlow };
+        }
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Branch directive goToStep targets unknown flow: "${flowTarget}" does not match any flow id or title. ` +
+          `Fix the goToStep.flow value or use goTo to target a known flow.`
+        );
+      }
+
+      // Local step reference
+      const targetStep = selectedFlow.getStep(stepTarget);
+      if (targetStep) {
+        updatedSession = enterStep(updatedSession, targetStep.id, targetStep.description);
+        logger.debug(`[ResponseHandler] Branch directive goToStep → ${targetStep.id}`);
+        return { nextStep: targetStep, session: updatedSession };
+      }
+      throw new FlowConfigurationError(
+        `[FlowConfigurationError] Branch directive goToStep targets unknown step: "${stepTarget}" does not exist in flow "${selectedFlow.id}". ` +
+        `Fix the goToStep value to reference a valid step id in the current flow.`
+      );
+    }
+
+    if (directive.goTo) {
+      const flowTarget = typeof directive.goTo === 'string'
+        ? directive.goTo
+        : directive.goTo.flow ?? directive.goTo.step;
+
+      if (flowTarget) {
+        const flows = this.getFlows();
+        const targetFlow = flows.find(f => f.id === flowTarget || f.title === flowTarget);
+        if (targetFlow) {
+          updatedSession = enterFlow(updatedSession, targetFlow.id, targetFlow.title);
+
+          // If goTo is an object with a step field, enter that step too
+          if (typeof directive.goTo === 'object' && directive.goTo.step) {
+            updatedSession = enterStep(updatedSession, directive.goTo.step);
+          }
+
+          logger.debug(`[ResponseHandler] Branch directive goTo → ${targetFlow.title}`);
+          return { nextStep: undefined, session: updatedSession, flowChanged: targetFlow };
+        }
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Branch directive goTo targets unknown flow: "${flowTarget}" does not match any flow id or title. ` +
+          `Fix the goTo value to reference a valid flow.`
+        );
+      }
+    }
+
+    if (directive.complete) {
+      logger.debug(`[ResponseHandler] Branch directive complete`);
+      return { nextStep: undefined, session: updatedSession };
+    }
+
+    if (directive.abort) {
+      logger.debug(`[ResponseHandler] Branch directive abort`);
+      return { nextStep: undefined, session: updatedSession };
+    }
+
+    if (directive.reset) {
+      const resetStep = typeof directive.reset === 'object' && directive.reset.step
+        ? directive.reset.step
+        : undefined;
+      if (resetStep) {
+        const targetStep = selectedFlow.getStep(resetStep);
+        if (targetStep) {
+          updatedSession = enterStep(updatedSession, targetStep.id, targetStep.description);
+          return { nextStep: targetStep, session: updatedSession };
+        }
+      }
+      // Reset to initial step
+      const initialStep = selectedFlow.initialStep;
+      updatedSession = enterStep(updatedSession, initialStep.id, initialStep.description);
+      logger.debug(`[ResponseHandler] Branch directive reset → ${initialStep.id}`);
+      return { nextStep: initialStep, session: updatedSession };
+    }
+
+    // Directive with only non-position fields (e.g., just dataUpdate/contextUpdate/reply)
+    // No position change — fall through to linear selection
+    return { nextStep: undefined, session: updatedSession };
+  }
+
+  /**
    * Execute tool calls and handle results
    */
   async executeToolCalls(params: {
     toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-    selectedRoute?: Route<TContext, TData>;
+    selectedFlow?: Flow<TContext, TData>;
     context: TContext;
     session: SessionState<TData>;
     history: Event[];
@@ -307,7 +780,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }): Promise<ToolExecutionResult<TData>> {
     const {
       toolCalls,
-      selectedRoute,
+      selectedFlow,
       context,
       session,
       history,
@@ -331,9 +804,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     const toolResults = new Map<string, string>();
 
     for (const toolCall of toolCalls) {
-      const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
+      const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
       if (!tool) {
-        logger.warn(`[ResponseHandler] Tool not found: ${toolCall.toolName}`);
+        logger.warn(`[ToolExecutionError] Tool not found: "${toolCall.toolName}" is not registered in any scope (transient, step, flow, or agent). Skipping this tool call. Register the tool or check the tool name.`);
         continue;
       }
 
@@ -377,7 +850,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       }
 
       logger.debug(
-        `[ResponseHandler] Executed ${isStreaming ? "streaming " : ""}tool: ${String(tool.id || tool.name || 'unknown')
+        `[ResponseHandler] Executed ${isStreaming ? "streaming " : ""}tool: ${String(tool.id || tool.id || 'unknown')
         } (success: ${result.success})`
       );
     }
@@ -396,7 +869,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     initialToolCalls:
     | Array<{ toolName: string; arguments: Record<string, unknown> }>
     | undefined;
-    selectedRoute?: Route<TContext, TData>;
+    selectedFlow?: Flow<TContext, TData>;
     nextStep: Step<TContext, TData>;
     responsePrompt: string;
     history: HistoryItem[];
@@ -407,7 +880,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }): Promise<ToolExecutionResult<TData>> {
     const {
       initialToolCalls,
-      selectedRoute,
+      selectedFlow,
       nextStep,
       responsePrompt,
       history,
@@ -435,7 +908,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       // Add tool execution results to history so AI knows what happened
       const toolResultItems: HistoryItem[] = [];
       for (const toolCall of currentToolCalls || []) {
-        const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
+        const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
         if (tool) {
           toolResultItems.push({
             role: "assistant" as const,
@@ -463,7 +936,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         prompt: responsePrompt,
         history: updatedHistory,
         context,
-        tools: this.collectAvailableTools(selectedRoute, nextStep),
+        tools: this.collectAvailableTools(selectedFlow, nextStep),
         parameters: {
           jsonSchema: responseSchema,
           schemaName: isStreaming ? "tool_followup_streaming" : "tool_followup",
@@ -483,7 +956,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         // Execute the follow-up tool calls
         const toolResult = await this.executeToolCalls({
           toolCalls: followUpToolCalls!,
-          selectedRoute,
+          selectedFlow,
           context,
           session: currentSession,
           history: historyToEvents(updatedHistory),
@@ -506,8 +979,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
     if (toolLoopCount >= MAX_TOOL_LOOPS) {
       logger.warn(
-        `[ResponseHandler] ${isStreaming ? "Streaming " : ""
-        }Tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`
+        `[ResponseGenerationError] ${isStreaming ? "Streaming t" : "T"}ool loop limit reached: ${toolLoopCount} iterations hit the cap (${MAX_TOOL_LOOPS}). Stopping tool execution. Increase MAX_TOOL_LOOPS or reduce recursive tool calls.`
       );
     }
 
@@ -580,66 +1052,74 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Handle route completion logic
+   * Handle flow completion: pure state transition.
+   *
+   * Releases the session to idle (`currentFlow`/`currentStep` cleared),
+   * marks the active `flowHistory` entry completed, and (when `onComplete`
+   * is set) wires `pendingDirective` for the next turn. The framework
+   * emits no message of its own at the completion boundary; callers that
+   * need closing copy should add a final interactive step.
    */
-  async handleRouteCompletion(params: {
-    selectedRoute: Route<TContext, TData>;
+  async handleFlowCompletion(params: {
+    selectedFlow: Flow<TContext, TData>;
     session: SessionState<TData>;
     context: TContext;
     history: Event[];
   }): Promise<{ session: SessionState<TData>; hasTransition: boolean }> {
-    const { selectedRoute, session, context, history } = params;
+    const { selectedFlow, session, context } = params;
 
     // Check for onComplete transition
-    const transitionConfig = await selectedRoute.evaluateOnComplete(
+    const transitionConfig = await selectedFlow.evaluateOnComplete(
       { data: session.data },
       context
     );
 
+    // Release to idle. When the flow is reentrant, scrub its owned
+    // fields so a future re-selection doesn't short-circuit on stale data.
+    const ownedFields = selectedFlow.reentrant
+      ? [
+        ...(selectedFlow.requiredFields ?? []),
+        ...(selectedFlow.optionalFields ?? []),
+      ]
+      : undefined;
+    let updatedSession = completeCurrentFlow(session, {
+      clearOwnedFields: ownedFields,
+    });
+
     if (transitionConfig) {
-      // Find target route by ID or title
-      const targetRoute = this.getRoutes().find(
+      // Extract target from directive's goTo field
+      const goToTarget = typeof transitionConfig.goTo === 'string'
+        ? transitionConfig.goTo
+        : transitionConfig.goTo?.flow;
+
+      // Find target flow by ID or title
+      const targetFlow = goToTarget ? this.getFlows().find(
         (r) =>
-          r.id === transitionConfig.nextStep ||
-          r.title === transitionConfig.nextStep
-      );
+          r.id === goToTarget ||
+          r.title === goToTarget
+      ) : undefined;
 
-      if (targetRoute) {
-        const templateContext = createTemplateContext({
-          context,
-          session,
-          history,
-        });
-        const renderedCondition: string =
-          (await render(transitionConfig.condition, templateContext)) ||
-          (typeof transitionConfig.condition === "string"
-            ? transitionConfig.condition
-            : "");
-
-        // Set pending transition in session
-        const updatedSession = {
-          ...session,
-          pendingTransition: {
-            targetRouteId: targetRoute.id,
-            condition: renderedCondition,
-            reason: "route_complete" as const,
+      if (targetFlow) {
+        updatedSession = {
+          ...updatedSession,
+          pendingDirective: {
+            goTo: targetFlow.id,
           },
         };
         logger.debug(
-          `[ResponseHandler] Route ${selectedRoute.title} completed with pending transition to: ${targetRoute.title}`
+          `[ResponseHandler] Flow ${selectedFlow.title} completed with pending directive to: ${targetFlow.title}`
         );
         return { session: updatedSession, hasTransition: true };
-      } else {
+      } else if (goToTarget) {
         logger.warn(
-          `[ResponseHandler] Route ${selectedRoute.title} completed but target route not found: ${transitionConfig.nextStep}`
+          `[FlowConfigurationError] onComplete target not found: flow "${selectedFlow.title}" completed but onComplete target "${goToTarget}" does not match any flow. ` +
+          `Fix the onComplete value to reference an existing flow id/title, or remove onComplete to release the session to idle.`
         );
       }
     }
 
-    // Set step to END_ROUTE marker
-    const updatedSession = enterStep(session, END_ROUTE_ID, "Route completed");
     logger.debug(
-      `[ResponseHandler] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`
+      `[ResponseHandler] Flow ${selectedFlow.title} completed; session released to idle.`
     );
 
     return { session: updatedSession, hasTransition: false };
@@ -647,46 +1127,46 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
 
   /**
-   * Find an available tool by name for the given route using ToolManager
+   * Find an available tool by name for the given flow using ToolManager
    * Delegates to ToolManager for unified tool resolution
    */
   private findAvailableTool(
     toolName: string,
-    route?: Route<TContext, TData>
+    flow?: Flow<TContext, TData>
   ): Tool<TContext, TData> | undefined {
     // Use ToolManager for unified tool resolution if available
     if (this.toolManager) {
-      return this.toolManager.find(toolName, undefined, undefined, route);
+      return this.toolManager.find(toolName, undefined, undefined, flow);
     }
 
     // Fallback to legacy resolution if ToolManager not available
     logger.warn(`[ResponsePipeline] ToolManager not available, using legacy tool resolution for: ${toolName}`);
 
-    // Check route-level tools first (if route provided)
-    if (route) {
-      const routeTool = route
+    // Check flow-level tools first (if flow provided)
+    if (flow) {
+      const flowTool = flow
         .getTools()
-        .find((tool) => tool.id === toolName || tool.name === toolName);
-      if (routeTool) return routeTool;
+        .find((tool) => tool.id === toolName || tool.id === toolName);
+      if (flowTool) return flowTool;
     }
 
     // Fall back to agent-level tools
     return this.tools.find(
-      (tool) => tool.id === toolName || tool.name === toolName
+      (tool) => tool.id === toolName || tool.id === toolName
     );
   }
 
   /**
-   * Collect all available tools for the given route and step context using ToolManager
+   * Collect all available tools for the given flow and step context using ToolManager
    * Delegates to ToolManager for unified tool resolution and deduplication
    */
   private collectAvailableTools(
-    route?: Route<TContext, TData>,
+    flow?: Flow<TContext, TData>,
     step?: Step<TContext, TData>
   ): Array<{ id: string; description?: string; parameters?: unknown }> {
     // Use ToolManager for unified tool collection if available
     if (this.toolManager) {
-      const availableTools = this.toolManager.getAvailable(undefined, step, route);
+      const availableTools = this.toolManager.getAvailable(undefined, step, flow);
       return availableTools.map((tool) => ({
         id: tool.id,
         description: tool.description,
@@ -707,9 +1187,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       availableTools.set(tool.id, tool);
     });
 
-    // Add route-level tools (these take precedence)
-    if (route) {
-      route.getTools().forEach((tool) => {
+    // Add flow-level tools (these take precedence)
+    if (flow) {
+      flow.getTools().forEach((tool) => {
         availableTools.set(tool.id, tool);
       });
     }
@@ -798,63 +1278,63 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Handle cross-route completion evaluation and notifications
-   * This method evaluates all routes for completion and can trigger completion handlers
+   * Handle cross-flow completion evaluation and notifications
+   * This method evaluates all flows for completion and can trigger completion handlers
    */
-  async handleCrossRouteCompletion(params: {
-    routes: Route<TContext, TData>[];
+  async handleCrossFlowCompletion(params: {
+    flows: Flow<TContext, TData>[];
     session: SessionState<TData>;
     context: TContext;
     history: Event[];
   }): Promise<{
     session: SessionState<TData>;
-    completedRoutes: Route<TContext, TData>[];
+    completedFlows: Flow<TContext, TData>[];
     pendingTransitions: Array<{
-      route: Route<TContext, TData>;
-      transitionConfig: RouteTransitionConfig<TContext, TData>;
+      flow: Flow<TContext, TData>;
+      transitionConfig: Directive<TContext, TData>;
     }>;
   }> {
-    const { routes, session, context } = params;
+    const { flows, session, context } = params;
 
-    // Evaluate all routes for completion
-    const completedRoutes: Route<TContext, TData>[] = [];
+    // Evaluate all flows for completion
+    const completedFlows: Flow<TContext, TData>[] = [];
     const pendingTransitions: Array<{
-      route: Route<TContext, TData>;
-      transitionConfig: RouteTransitionConfig<TContext, TData>;
+      flow: Flow<TContext, TData>;
+      transitionConfig: Directive<TContext, TData>;
     }> = [];
 
-    for (const route of routes) {
-      if (route.isComplete(session.data || {})) {
-        completedRoutes.push(route);
+    for (const flow of flows) {
+      if (flow.isComplete(session.data || {})) {
+        completedFlows.push(flow);
 
         // Check for onComplete transitions
-        const transitionConfig = await route.evaluateOnComplete(
+        const transitionConfig = await flow.evaluateOnComplete(
           { data: session.data },
           context
         );
 
         if (transitionConfig) {
-          pendingTransitions.push({ route, transitionConfig });
+          pendingTransitions.push({ flow, transitionConfig });
         }
 
         logger.debug(
-          `[ResponsePipeline] Route completed: ${route.title} ` +
-          `(${Math.round(route.getCompletionProgress(session.data || {}) * 100)}%)`
+          `[ResponsePipeline] Flow completed: ${flow.title} ` +
+          `(${Math.round(flow.getCompletionProgress(session.data || {}) * 100)}%)`
         );
       }
     }
 
-    // Log completion status for all routes
-    if (completedRoutes.length > 0) {
+    // Log completion status for all flows
+    if (completedFlows.length > 0) {
       logger.debug(
-        `[ResponsePipeline] Cross-route completion evaluation: ` +
-        `${completedRoutes.length}/${routes.length} routes complete`
+        `[ResponsePipeline] Cross-flow completion evaluation: ` +
+        `${completedFlows.length}/${flows.length} flows complete`
       );
     }
 
     return {
       session,
-      completedRoutes,
+      completedFlows,
       pendingTransitions,
     };
   }
@@ -866,9 +1346,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   async updateDataFlow(params: {
     session: SessionState<TData>;
     dataUpdate: Partial<TData>;
-    routes: Route<TContext, TData>[];
+    flows: Flow<TContext, TData>[];
   }): Promise<SessionState<TData>> {
-    const { session, dataUpdate, routes } = params;
+    const { session, dataUpdate, flows } = params;
 
     // Update session data
     const updatedSession = await this.updateData(session, dataUpdate);
@@ -878,18 +1358,18 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       await this.updateCollectedData(dataUpdate);
     }
 
-    // Evaluate route completions after data update
-    const completionResults = await this.handleCrossRouteCompletion({
-      routes,
+    // Evaluate flow completions after data update
+    const completionResults = await this.handleCrossFlowCompletion({
+      flows,
       session: updatedSession,
       context: this.context!,
       history: [],
     });
 
-    // Log any newly completed routes
-    if (completionResults.completedRoutes.length > 0) {
+    // Log any newly completed flows
+    if (completionResults.completedFlows.length > 0) {
       logger.debug(
-        `[ResponsePipeline] Data update resulted in ${completionResults.completedRoutes.length} completed routes`
+        `[ResponsePipeline] Data update resulted in ${completionResults.completedFlows.length} completed flows`
       );
     }
 

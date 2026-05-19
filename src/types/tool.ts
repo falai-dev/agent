@@ -4,6 +4,7 @@
  */
 
 import type { Event, StepRef, ValidationResult } from "./index";
+import type { Directive } from "./flow";
 
 /**
  * Context provided to tool handlers
@@ -15,7 +16,7 @@ export interface ToolContext<TContext = any, TData = any> {
   data: Partial<TData>;
   /** Interaction history */
   history: Event[];
-  /** Current step reference (if in a route) */
+  /** Current step reference (if in a flow) */
   step?: StepRef;
   /** Additional metadata */
   metadata?: Record<string, unknown>;
@@ -30,6 +31,16 @@ export interface ToolContext<TContext = any, TData = any> {
   setField<K extends keyof TData>(key: K, value: TData[K]): Promise<void>;
   /** Check if a field exists in collected data */
   hasField<K extends keyof TData>(key: K): boolean;
+
+  /**
+   * Emit a directive into the per-turn bus. Identical effect to returning
+   * `{ directive }` from the tool handler, but usable mid-handler (e.g.,
+   * after an early-exit branch decides the rest of the turn is moot).
+   *
+   * Multiple `dispatch()` calls in one handler are allowed; they are merged
+   * by Algorithm 4 along with directives from other tools/hooks this turn.
+   */
+  dispatch(directive: Directive<TContext, TData>): void;
 }
 
 /**
@@ -52,6 +63,8 @@ export interface ToolResult<
   error?: string;
   /** Optional metadata about the execution */
   meta?: Record<string, unknown>;
+  /** Emit a directive declaratively (alternative to ctx.dispatch). */
+  directive?: Directive<TContext, TData>;
 }
 
 /**
@@ -70,7 +83,11 @@ export type ToolHandler<
     | ToolResult<TResult, TContext, TData>;
 
 /**
- * Tool definition - plain object interface
+ * Tool definition - single unified type (v2).
+ *
+ * In v1 there were two tool types: `Tool` (basic) and `EnhancedTool`
+ * (with metadata). v2 merges these into a single `Tool` type with all
+ * metadata fields optional. `EnhancedTool` is removed from the public surface.
  */
 export interface Tool<
   TContext = any,
@@ -79,14 +96,38 @@ export interface Tool<
 > {
   /** Tool identifier */
   id: string;
-  /** Tool display name (shown to AI models) */
-  name?: string;
   /** Tool handler function */
   handler: ToolHandler<TContext, TData, TResult>;
   /** Description of what the tool does (for AI discovery) */
   description?: string;
   /** Parameter schema or description */
   parameters?: unknown;
+
+  // ── Optional metadata (merged from EnhancedTool in v2) ──
+
+  /** Whether this tool is safe to run concurrently with other concurrent-safe tools */
+  isConcurrencySafe?(input?: Record<string, unknown>): boolean;
+  /** Whether this tool only reads data without side effects */
+  isReadOnly?(input?: Record<string, unknown>): boolean;
+  /** Whether this tool performs destructive/irreversible operations */
+  isDestructive?(input?: Record<string, unknown>): boolean;
+
+  /** How the tool responds to abort signals: 'cancel' = immediate abort, 'block' = allow completion */
+  interruptBehavior?(): 'cancel' | 'block';
+  /** Maximum characters for the tool result before truncation */
+  maxResultSizeChars?: number;
+
+  /** Validate input before execution */
+  validateInput?(
+    input: Record<string, unknown>,
+    context: ToolContext<TContext, TData>
+  ): Promise<ToolValidationResult> | ToolValidationResult;
+
+  /** Check permissions before execution — when denied, handler is NOT invoked */
+  checkPermissions?(
+    input: Record<string, unknown>,
+    context: ToolContext<TContext, TData>
+  ): Promise<ToolPermissionResult> | ToolPermissionResult;
 }
 
 
@@ -101,6 +142,8 @@ export interface ToolExecutionResult {
   contextUpdate?: Record<string, unknown>;
   dataUpdate?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  /** Directives collected during tool execution (from ctx.dispatch and/or result.directive). */
+  directives?: Directive[];
 }
 
 /**
@@ -108,7 +151,7 @@ export interface ToolExecutionResult {
  */
 export enum ToolScope {
   AGENT = 'agent',
-  ROUTE = 'route',
+  FLOW = 'flow',
   STEP = 'step',
   REGISTERED = 'registered',
   ALL = 'all'
@@ -116,7 +159,7 @@ export enum ToolScope {
 
 
 
-// --- EnhancedTool and supporting types ---
+// --- EnhancedTool (deprecated internal alias — use Tool directly) ---
 
 /**
  * Result of input validation on a tool call
@@ -177,7 +220,7 @@ export type ToolStatus = 'queued' | 'executing' | 'completed' | 'yielded';
 export interface TrackedTool<TContext = unknown, TData = unknown> {
   id: string;
   toolCall: ToolCallRequest;
-  tool: EnhancedTool<TContext, TData>;
+  tool: Tool<TContext, TData>;
   status: ToolStatus;
   isConcurrencySafe: boolean;
   promise?: Promise<void>;
@@ -185,42 +228,7 @@ export interface TrackedTool<TContext = unknown, TData = unknown> {
   pendingProgress: string[];
 }
 
-/**
- * Extended tool interface with rich metadata for concurrency control,
- * permission gating, input validation, and result size management.
- *
- * All additional methods/properties are optional — plain `Tool` objects
- * remain fully compatible.
- */
-export interface EnhancedTool<
-  TContext = any,
-  TData = any,
-  TResult = any
-> extends Tool<TContext, TData, TResult> {
-  /** Whether this tool is safe to run concurrently with other concurrent-safe tools */
-  isConcurrencySafe?(input?: Record<string, unknown>): boolean;
-  /** Whether this tool only reads data without side effects */
-  isReadOnly?(input?: Record<string, unknown>): boolean;
-  /** Whether this tool performs destructive/irreversible operations */
-  isDestructive?(input?: Record<string, unknown>): boolean;
 
-  /** How the tool responds to abort signals: 'cancel' = immediate abort, 'block' = allow completion */
-  interruptBehavior?(): 'cancel' | 'block';
-  /** Maximum characters for the tool result before truncation */
-  maxResultSizeChars?: number;
-
-  /** Validate input before execution */
-  validateInput?(
-    input: Record<string, unknown>,
-    context: ToolContext<TContext, TData>
-  ): Promise<ToolValidationResult> | ToolValidationResult;
-
-  /** Check permissions before execution */
-  checkPermissions?(
-    input: Record<string, unknown>,
-    context: ToolContext<TContext, TData>
-  ): Promise<ToolPermissionResult> | ToolPermissionResult;
-}
 
 // --- Existing tool configuration types ---
 

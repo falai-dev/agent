@@ -1,6 +1,23 @@
 /**
  * SQLite adapter for persistence
  * Lightweight, file-based database perfect for local development
+ *
+ * ## v2 Migration
+ *
+ * If upgrading from v1, run the following migration on your sessions table:
+ *
+ * ```sql
+ * -- SQLite 3.35.0+ supports DROP COLUMN:
+ * ALTER TABLE agent_sessions DROP COLUMN pending_transition;
+ * -- For older versions, recreate the table without pending_transition.
+ *
+ * ALTER TABLE agent_sessions ADD COLUMN pending_directive TEXT;
+ * ALTER TABLE agent_sessions ADD COLUMN signals TEXT;
+ * ```
+ *
+ * `pending_directive` stores the JSON-serialized `Directive` that the pipeline
+ * applies at the start of the next turn. `signals` is a reserved TEXT (JSON)
+ * column for the v2.x Signals feature — pass-through only in v2.0.
  */
 
 import type {
@@ -100,9 +117,11 @@ export class SQLiteAdapter<TData = Record<string, unknown>> implements Persisten
         user_id TEXT,
         agent_name TEXT,
         status TEXT DEFAULT 'active',
-        current_route TEXT,
+        current_flow TEXT,
         current_step TEXT,
         collected_data TEXT,
+        pending_directive TEXT,
+        signals TEXT,
         message_count INTEGER DEFAULT 0,
         last_message_at TEXT,
         completed_at TEXT,
@@ -125,7 +144,7 @@ export class SQLiteAdapter<TData = Record<string, unknown>> implements Persisten
         user_id TEXT,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
-        route TEXT,
+        flow TEXT,
         step TEXT,
         tool_calls TEXT,
         event TEXT,
@@ -233,9 +252,9 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       fields.push("collected_data = ?");
       values.push(JSON.stringify(data.collectedData));
     }
-    if (data.currentRoute !== undefined) {
-      fields.push("current_route = ?");
-      values.push(data.currentRoute);
+    if (data.currentFlow !== undefined) {
+      fields.push("current_flow = ?");
+      values.push(data.currentFlow);
     }
     if (data.currentStep !== undefined) {
       fields.push("current_step = ?");
@@ -286,13 +305,13 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
     return await this.update(id, { collectedData });
   }
 
-  async updateRouteStep(
+  async updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
     return await this.update(id, {
-      currentRoute: route,
+      currentFlow: flow,
       currentStep: step,
     });
   }
@@ -325,7 +344,7 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       userId: (row.user_id as string) || undefined,
       agentName: (row.agent_name as string) || undefined,
       status: row.status as SessionStatus,
-      currentRoute: (row.current_route as string) || undefined,
+      currentFlow: (row.current_flow as string) || undefined,
       currentStep: (row.current_step as string) || undefined,
       collectedData: row.collected_data
         ? (JSON.parse(
@@ -363,7 +382,7 @@ class SQLiteMessageRepository implements MessageRepository {
 
     const stmt = this.db.prepare(`
       INSERT INTO ${this.tableName}
-      (id, session_id, user_id, role, content, route, step, tool_calls, event, created_at)
+      (id, session_id, user_id, role, content, flow, step, tool_calls, event, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
@@ -373,7 +392,7 @@ class SQLiteMessageRepository implements MessageRepository {
       data.userId || null,
       data.role,
       data.content,
-      data.route || null,
+      data.flow || null,
       data.step || null,
       JSON.stringify(data.toolCalls || null),
       JSON.stringify(data.event || null),
@@ -442,7 +461,7 @@ class SQLiteMessageRepository implements MessageRepository {
       userId: (row.user_id as string) || undefined,
       role: row.role as MessageData["role"],
       content: row.content as string,
-      route: (row.route as string) || undefined,
+      flow: (row.flow as string) || undefined,
       step: (row.step as string) || undefined,
       toolCalls: row.tool_calls
         ? (JSON.parse(row.tool_calls as string) as MessageData["toolCalls"])

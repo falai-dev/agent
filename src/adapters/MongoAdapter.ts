@@ -213,13 +213,13 @@ class MongoSessionRepository<TData = Record<string, unknown>>
     return await this.update(id, { collectedData });
   }
 
-  async updateRouteStep(
+  async updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
     return await this.update(id, {
-      currentRoute: route,
+      currentFlow: flow,
       currentStep: step,
     });
   }

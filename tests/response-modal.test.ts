@@ -14,6 +14,7 @@ import { expect, test, describe, beforeEach } from "bun:test";
 
 import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index";
 import { ResponseModal, type RespondParams, type StreamOptions, type GenerateOptions, ResponseGenerationError } from "../src/core/ResponseModal";
+import type { AiProvider, AgentStructuredResponse, GenerateMessageInput, GenerateMessageOutput, GenerateMessageStreamChunk } from "../src/types/ai";
 import {
   MockProvider,
   MockProviderFactory,
@@ -58,11 +59,11 @@ function createTestAgent(provider?: MockProvider): Agent<TestContext, TestData> 
   });
 }
 
-function createTestAgentWithRoute(provider?: MockProvider): Agent<TestContext, TestData> {
+function createTestAgentWithFlow(provider?: MockProvider): Agent<TestContext, TestData> {
   const agent = createTestAgent(provider);
 
-  // Add a test route
-  agent.createRoute({
+  // Add a test flow
+  agent.createFlow({
     title: "Support Request",
     description: "Handle customer support requests",
     when: ["User needs help"],
@@ -139,7 +140,7 @@ describe("ResponseModal.respond() Method", () => {
     expect(response).toBeDefined();
     expect(response.message).toBe(MOCK_RESPONSES.GREETING);
     expect(response.session).toBeDefined();
-    expect(response.isRouteComplete).toBe(false);
+    expect(response.isFlowComplete).toBe(false);
     expect(response.toolCalls).toBeUndefined();
   });
 
@@ -170,9 +171,9 @@ describe("ResponseModal.respond() Method", () => {
     expect(response.session).toBeDefined();
   });
 
-  test("should handle route-based responses", async () => {
-    const agentWithRoute = createTestAgentWithRoute();
-    const responseModalWithRoute = new ResponseModal(agentWithRoute);
+  test("should handle flow-based responses", async () => {
+    const agentWithFlow = createTestAgentWithFlow();
+    const responseModalWithFlow = new ResponseModal(agentWithFlow);
 
     const session = createSession<TestData>();
     const history = [
@@ -188,7 +189,7 @@ describe("ResponseModal.respond() Method", () => {
       session,
     };
 
-    const response = await responseModalWithRoute.respond(params);
+    const response = await responseModalWithFlow.respond(params);
 
     expect(response).toBeDefined();
     expect(response.message).toBe(MOCK_RESPONSES.GREETING);
@@ -676,7 +677,7 @@ describe("ResponseModal Configuration Options", () => {
 
 describe("ResponseModal Integration with Agent Features", () => {
   test("should work with agent-level data collection", async () => {
-    const agent = createTestAgentWithRoute();
+    const agent = createTestAgentWithFlow();
     const responseModal = new ResponseModal(agent);
 
     // Set some initial data
@@ -692,11 +693,11 @@ describe("ResponseModal Integration with Agent Features", () => {
     expect(collectedData.issue).toBe("Login problem");
   });
 
-  test("should handle route completion", async () => {
-    const agent = createTestAgentWithRoute();
+  test("should handle flow completion", async () => {
+    const agent = createTestAgentWithFlow();
     const responseModal = new ResponseModal(agent);
 
-    // Complete the route by providing all required data
+    // Complete the flow by providing all required data
     await agent.updateCollectedData({
       issue: "Login problem",
       priority: "high" as const,
@@ -729,35 +730,35 @@ describe("ResponseModal Integration with Agent Features", () => {
 describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
   /**
    * Stateful mock provider that simulates the bug scenario:
-   * - Route selection: returns routing scores
+   * - Flow selection: returns routing scores
    * - Step selection: returns first step
    * - Pre-extraction: returns empty (no data to extract)
    * - Response generation: returns tool calls with a "Let me check..." message
    * - Tool follow-up: returns EMPTY message (the bug trigger)
    * - Retry (from fix): returns proper text response
    */
-  class ToolLoopEmptyMessageProvider implements import("../src/types/ai").AiProvider {
+  class ToolLoopEmptyMessageProvider implements AiProvider {
     readonly name = "ToolLoopEmptyMessageProvider";
     private responseCallCount = 0;
 
-    async generateMessage<TContext = unknown, TStructured = import("../src/types/ai").AgentStructuredResponse>(
-      input: import("../src/types/ai").GenerateMessageInput<TContext>
-    ): Promise<import("../src/types/ai").GenerateMessageOutput<TStructured>> {
+    async generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>(
+      input: GenerateMessageInput<TContext>
+    ): Promise<GenerateMessageOutput<TStructured>> {
       await new Promise((resolve) => setTimeout(resolve, 5));
 
       const schemaName = input.parameters?.schemaName || "";
       const schema = input.parameters?.jsonSchema as any;
 
-      // Route selection call - return routing scores
-      if (schema?.properties?.routes?.properties) {
-        const routeIds = Object.keys(schema.properties.routes.properties);
-        const routes: Record<string, number> = {};
-        routeIds.forEach((routeId, index) => {
-          routes[routeId] = 90 - index * 10;
+      // Flow selection call - return routing scores
+      if (schema?.properties?.flows?.properties) {
+        const flowIds = Object.keys(schema.properties.flows.properties);
+        const flows: Record<string, number> = {};
+        flowIds.forEach((flowId, index) => {
+          flows[flowId] = 90 - index * 10;
         });
         return {
           message: "",
-          structured: { context: "User needs tool help", routes, responseDirectives: [] } as any,
+          structured: { context: "User needs tool help", flows, responseDirectives: [] } as any,
         };
       }
 
@@ -827,9 +828,9 @@ describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
       };
     }
 
-    async *generateMessageStream<TContext = unknown, TStructured = import("../src/types/ai").AgentStructuredResponse>(
-      _input: import("../src/types/ai").GenerateMessageInput<TContext>
-    ): AsyncGenerator<import("../src/types/ai").GenerateMessageStreamChunk<TStructured>> {
+    async *generateMessageStream<TContext = unknown, TStructured = AgentStructuredResponse>(
+      _input: GenerateMessageInput<TContext>
+    ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
       yield { delta: "stream", accumulated: "stream", done: true };
     }
   }
@@ -854,10 +855,10 @@ describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
       },
     });
 
-    // Add a route with a tool so the tool loop path is exercised
-    agent.createRoute({
-      title: "Lookup Route",
-      description: "Route that uses tools",
+    // Add a flow with a tool so the tool loop path is exercised
+    agent.createFlow({
+      title: "Lookup Flow",
+      description: "Flow that uses tools",
       when: ["User asks to look something up"],
       requiredFields: ["issue"],
       steps: [

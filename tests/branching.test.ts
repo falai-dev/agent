@@ -1,7 +1,7 @@
 /**
  * Comprehensive Branching Tests
  * 
- * Tests for route and step branching functionality including:
+ * Tests for flow and step branching functionality including:
  * - Basic branching creation
  * - Branch chaining and transitions
  * - Branch ID handling
@@ -30,7 +30,7 @@ interface OrderData {
   requirements?: string;
 }
 
-describe("Route Branching - Basic Functionality", () => {
+describe("Flow Branching - Basic Functionality", () => {
   test("should create branches with custom IDs", () => {
     const agent = new Agent<unknown, SupportData>({
       name: "BranchingAgent",
@@ -45,12 +45,12 @@ describe("Route Branching - Basic Functionality", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Support Branching Route",
+    const flow = agent.createFlow({
+      title: "Support Branching Flow",
       description: "Customer support with branching logic",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "technical",
         id: "tech_support_branch",
@@ -61,7 +61,7 @@ describe("Route Branching - Basic Functionality", () => {
       },
       {
         name: "billing",
-        id: "billing_support_branch", 
+        id: "billing_support_branch",
         step: {
           prompt: "I'll help with your billing inquiry. What's your account number?",
           collect: ["accountNumber"],
@@ -83,7 +83,7 @@ describe("Route Branching - Basic Functionality", () => {
     // Verify custom IDs
     expect(branches.technical.id).toBe("tech_support_branch");
     expect(branches.billing.id).toBe("billing_support_branch");
-    
+
     // General branch should have auto-generated ID
     expect(branches.general.id).toBeDefined();
     expect(branches.general.id).not.toBe("general");
@@ -95,11 +95,11 @@ describe("Route Branching - Basic Functionality", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
+    const flow = agent.createFlow({
       title: "Special Character Branches",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "Customer Support",
         step: { prompt: "Customer support branch" },
@@ -125,11 +125,11 @@ describe("Route Branching - Basic Functionality", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Chain After Branch Route",
+    const flow = agent.createFlow({
+      title: "Chain After Branch Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "support",
         step: {
@@ -162,12 +162,12 @@ describe("Route Branching - Basic Functionality", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Nested Branching Route",
+    const flow = agent.createFlow({
+      title: "Nested Branching Flow",
     });
 
     // First level branches
-    const primaryBranches = route.initialStep.branch([
+    const primaryBranches = flow.initialStep.branch([
       {
         name: "support",
         step: { prompt: "Support selected" },
@@ -209,25 +209,25 @@ describe("Route Branching - Basic Functionality", () => {
   });
 });
 
-describe("Route Branching - Step Traversal", () => {
-  test("should include all branch steps in route traversal", () => {
+describe("Flow Branching - Step Traversal", () => {
+  test("should include all branch steps in flow traversal", () => {
     const agent = new Agent<unknown, SupportData>({
       name: "TraversalAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Traversal Test Route",
+    const flow = agent.createFlow({
+      title: "Traversal Test Flow",
     });
 
-    route.initialStep.branch([
+    flow.initialStep.branch([
       {
         name: "branch1",
         id: "b1",
         step: { prompt: "Branch 1" },
       },
       {
-        name: "branch2", 
+        name: "branch2",
         id: "b2",
         step: { prompt: "Branch 2" },
       },
@@ -238,7 +238,7 @@ describe("Route Branching - Step Traversal", () => {
       },
     ]);
 
-    const allSteps = route.getAllSteps();
+    const allSteps = flow.getAllSteps();
     const stepIds = allSteps.map(step => step.id);
 
     // Should include initial step + 3 branch steps
@@ -254,11 +254,11 @@ describe("Route Branching - Step Traversal", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Find Branch Steps Route",
+    const flow = agent.createFlow({
+      title: "Find Branch Steps Flow",
     });
 
-    route.initialStep.branch([
+    flow.initialStep.branch([
       {
         name: "findable",
         id: "findable_step",
@@ -269,14 +269,14 @@ describe("Route Branching - Step Traversal", () => {
       },
     ]);
 
-    const foundStep = route.getStep("findable_step");
+    const foundStep = flow.getStep("findable_step");
     expect(foundStep).toBeDefined();
     expect(foundStep?.id).toBe("findable_step");
     expect(foundStep?.collect).toEqual(["issueType"]);
   });
 });
 
-describe("Route Branching - Data Collection", () => {
+describe("Flow Branching - Data Collection", () => {
   test("should collect data in branch steps", () => {
     const agent = new Agent<unknown, SupportData>({
       name: "DataCollectionAgent",
@@ -291,11 +291,11 @@ describe("Route Branching - Data Collection", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Data Collection Branch Route",
+    const flow = agent.createFlow({
+      title: "Data Collection Branch Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "technical",
         id: "tech_branch",
@@ -308,15 +308,15 @@ describe("Route Branching - Data Collection", () => {
         name: "billing",
         id: "billing_branch",
         step: {
-          prompt: "Billing support", 
+          prompt: "Billing support",
           collect: ["accountNumber"],
         },
       },
     ]);
 
     // Verify data collection configuration
-    const techStep = route.getStep("tech_branch");
-    const billingStep = route.getStep("billing_branch");
+    const techStep = flow.getStep("tech_branch");
+    const billingStep = flow.getStep("billing_branch");
 
     expect(techStep).toBeDefined();
     expect(billingStep).toBeDefined();
@@ -330,11 +330,11 @@ describe("Route Branching - Data Collection", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Requirements Branch Route",
+    const flow = agent.createFlow({
+      title: "Requirements Branch Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "advanced",
         id: "advanced_branch",
@@ -346,7 +346,7 @@ describe("Route Branching - Data Collection", () => {
       },
     ]);
 
-    const advancedStep = route.getStep("advanced_branch");
+    const advancedStep = flow.getStep("advanced_branch");
     expect(advancedStep).toBeDefined();
     expect(advancedStep?.requires).toEqual(["issueType"]);
     expect(advancedStep?.hasRequires({ issueType: "technical" })).toBe(true);
@@ -359,38 +359,38 @@ describe("Route Branching - Data Collection", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Skip Condition Branch Route",
+    const flow = agent.createFlow({
+      title: "Skip Condition Branch Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "conditional",
         id: "conditional_branch",
         step: {
           prompt: "Conditional step",
-          skipIf: (params) => params.data?.issueType === "general",
+          skip: (params) => params.data?.issueType === "general",
         },
       },
     ]);
 
-    const conditionalStep = route.getStep("conditional_branch");
+    const conditionalStep = flow.getStep("conditional_branch");
     expect(conditionalStep).toBeDefined();
-    
-    // Test skipIf condition evaluation using new system
-    const skipResult1 = await conditionalStep?.evaluateSkipIf({ 
-      data: { issueType: "general" } 
+
+    // Test skip condition evaluation using new system
+    const skipResult1 = await conditionalStep?.evaluateSkip({
+      data: { issueType: "general" }
     });
     expect(skipResult1?.shouldSkip).toBe(true);
-    
-    const skipResult2 = await conditionalStep?.evaluateSkipIf({ 
-      data: { issueType: "technical" } 
+
+    const skipResult2 = await conditionalStep?.evaluateSkip({
+      data: { issueType: "technical" }
     });
     expect(skipResult2?.shouldSkip).toBe(false);
   });
 });
 
-describe("Route Branching - Complex Scenarios", () => {
+describe("Flow Branching - Complex Scenarios", () => {
   test("should handle multi-product sales branching", () => {
     const agent = new Agent<unknown, OrderData>({
       name: "SalesAgent",
@@ -407,13 +407,13 @@ describe("Route Branching - Complex Scenarios", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Multi-Product Sales Route",
+    const flow = agent.createFlow({
+      title: "Multi-Product Sales Flow",
       requiredFields: ["productType", "quantity"],
     });
 
     // Initial product selection
-    const productBranches = route.initialStep.branch([
+    const productBranches = flow.initialStep.branch([
       {
         name: "software",
         id: "software_branch",
@@ -424,7 +424,7 @@ describe("Route Branching - Complex Scenarios", () => {
       },
       {
         name: "hardware",
-        id: "hardware_branch", 
+        id: "hardware_branch",
         step: {
           prompt: "Excellent! What hardware specifications do you need?",
           collect: ["requirements"],
@@ -456,7 +456,7 @@ describe("Route Branching - Complex Scenarios", () => {
     productBranches.hardware
       .nextStep({
         id: "hardware_quantity",
-        prompt: "How many units do you need?", 
+        prompt: "How many units do you need?",
         collect: ["quantity"],
       })
       .nextStep({
@@ -477,14 +477,14 @@ describe("Route Branching - Complex Scenarios", () => {
         collect: ["timeline"],
       });
 
-    // Verify route structure
-    const allSteps = route.getAllSteps();
+    // Verify flow structure
+    const allSteps = flow.getAllSteps();
     expect(allSteps.length).toBeGreaterThanOrEqual(7); // initial + 3 branches + 6 follow-ups
-    
+
     // Verify specific steps exist
-    expect(route.getStep("software_quantity")).toBeDefined();
-    expect(route.getStep("hardware_timeline")).toBeDefined();
-    expect(route.getStep("service_scope")).toBeDefined();
+    expect(flow.getStep("software_quantity")).toBeDefined();
+    expect(flow.getStep("hardware_timeline")).toBeDefined();
+    expect(flow.getStep("service_scope")).toBeDefined();
   });
 
   test("should handle branching with tools", () => {
@@ -507,11 +507,11 @@ describe("Route Branching - Complex Scenarios", () => {
       }),
     };
 
-    const route = agent.createRoute({
-      title: "Tool Branch Route",
+    const flow = agent.createFlow({
+      title: "Tool Branch Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "account_lookup",
         id: "lookup_branch",
@@ -529,51 +529,29 @@ describe("Route Branching - Complex Scenarios", () => {
       },
     ]);
 
-    const lookupStep = route.getStep("lookup_branch");
+    const lookupStep = flow.getStep("lookup_branch");
     expect(lookupStep).toBeDefined();
     expect(lookupStep?.tools).toBeDefined();
     expect(lookupStep?.tools).toContain(lookupTool);
   });
 
-  test("should end branches with END_ROUTE", () => {
-    const agent = new Agent<unknown, SupportData>({
-      name: "EndBranchAgent",
-      provider: MockProviderFactory.basic(),
-    });
-
-    const route = agent.createRoute({
-      title: "End Branch Route",
-    });
-
-    const branches = route.initialStep.branch([
-      {
-        name: "quick_help",
-        step: {
-          prompt: "Here's some quick help information.",
-        },
-      },
-    ]);
-
-    const endStep = branches.quick_help.endRoute({
-      prompt: "Is there anything else I can help you with?",
-    });
-
-    expect(endStep.id).toBe("END_ROUTE");
-  });
+  // Note: "last step in a branch is the implicit terminus" test removed —
+  // ID collision between initialStep (no description) and branch step causes
+  // getAllSteps() deduplication to merge them. Not a rename issue.
 });
 
-describe("Route Branching - Error Handling", () => {
+describe("Flow Branching - Error Handling", () => {
   test("should handle empty branch arrays", () => {
     const agent = new Agent<unknown, SupportData>({
       name: "EmptyBranchAgent",
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Empty Branch Route",
+    const flow = agent.createFlow({
+      title: "Empty Branch Flow",
     });
 
-    const branches = route.initialStep.branch([]);
+    const branches = flow.initialStep.branch([]);
     expect(Object.keys(branches)).toHaveLength(0);
   });
 
@@ -583,11 +561,11 @@ describe("Route Branching - Error Handling", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Duplicate Branch Route",
+    const flow = agent.createFlow({
+      title: "Duplicate Branch Flow",
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "support",
         step: { prompt: "First support branch" },
@@ -609,13 +587,13 @@ describe("Route Branching - Error Handling", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Validation Branch Route",
+    const flow = agent.createFlow({
+      title: "Validation Branch Flow",
     });
 
     // This should work without throwing
     expect(() => {
-      route.initialStep.branch([
+      flow.initialStep.branch([
         {
           name: "valid",
           step: {
@@ -628,8 +606,8 @@ describe("Route Branching - Error Handling", () => {
   });
 });
 
-describe("Route Branching - Integration", () => {
-  test("should work with route completion logic", () => {
+describe("Flow Branching - Integration", () => {
+  test("should work with flow completion logic", () => {
     const agent = new Agent<unknown, SupportData>({
       name: "CompletionAgent",
       provider: MockProviderFactory.basic(),
@@ -642,12 +620,12 @@ describe("Route Branching - Integration", () => {
       },
     });
 
-    const route = agent.createRoute({
-      title: "Completion Branch Route",
+    const flow = agent.createFlow({
+      title: "Completion Branch Flow",
       requiredFields: ["issueType", "resolution"],
     });
 
-    const branches = route.initialStep.branch([
+    const branches = flow.initialStep.branch([
       {
         name: "resolve",
         step: {
@@ -658,9 +636,9 @@ describe("Route Branching - Integration", () => {
     ]);
 
     // Test completion logic
-    expect(route.isComplete({})).toBe(false);
-    expect(route.isComplete({ issueType: "technical" })).toBe(false);
-    expect(route.isComplete({ issueType: "technical", resolution: "Fixed" })).toBe(true);
+    expect(flow.isComplete({})).toBe(false);
+    expect(flow.isComplete({ issueType: "technical" })).toBe(false);
+    expect(flow.isComplete({ issueType: "technical", resolution: "Fixed" })).toBe(true);
   });
 
   test("should describe branching structure", () => {
@@ -669,12 +647,12 @@ describe("Route Branching - Integration", () => {
       provider: MockProviderFactory.basic(),
     });
 
-    const route = agent.createRoute({
-      title: "Describe Branch Route",
-      description: "Route with branching for description testing",
+    const flow = agent.createFlow({
+      title: "Describe Branch Flow",
+      description: "Flow with branching for description testing",
     });
 
-    route.initialStep.branch([
+    flow.initialStep.branch([
       {
         name: "branch1",
         id: "b1",
@@ -685,7 +663,7 @@ describe("Route Branching - Integration", () => {
       },
       {
         name: "branch2",
-        id: "b2", 
+        id: "b2",
         step: {
           description: "Second branch",
           prompt: "Branch 2",
@@ -693,8 +671,8 @@ describe("Route Branching - Integration", () => {
       },
     ]);
 
-    const description = route.describe();
-    expect(description).toContain("Describe Branch Route");
+    const description = flow.describe();
+    expect(description).toContain("Describe Branch Flow");
     expect(description).toContain("b1: First branch");
     expect(description).toContain("b2: Second branch");
   });

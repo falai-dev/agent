@@ -232,12 +232,12 @@ class RedisSessionRepository<TData = Record<string, unknown>>
     return this.update(id, { collectedData });
   }
 
-  async updateRouteStep(
+  async updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
-    return this.update(id, { currentRoute: route, currentStep: step });
+    return this.update(id, { currentFlow: flow, currentStep: step });
   }
 
   async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {

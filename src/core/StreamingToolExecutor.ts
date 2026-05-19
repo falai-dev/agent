@@ -16,7 +16,7 @@ import type {
     ToolExecutionUpdate,
     ToolExecutionResult,
     ToolContext,
-    EnhancedTool,
+    Tool,
     TrackedTool,
 } from "../types/tool";
 
@@ -116,7 +116,7 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
      */
     addTool(
         toolCall: ToolCallRequest,
-        tool: EnhancedTool<TContext, TData>
+        tool: Tool<TContext, TData>
     ): void {
         if (this.discarded) {
             log.warn(`[StreamingToolExecutor] Executor discarded, ignoring tool: ${toolCall.toolName}`);
@@ -312,7 +312,7 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
      */
     private normalizeResult(
         result: unknown,
-        tool: EnhancedTool<TContext, TData>
+        tool: Tool<TContext, TData>
     ): ToolExecutionResult {
         if (
             result &&
@@ -346,7 +346,7 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
      */
     private applyResultTruncation(
         result: ToolExecutionResult,
-        tool: EnhancedTool<TContext, TData>
+        tool: Tool<TContext, TData>
     ): ToolExecutionResult {
         const maxChars = tool.maxResultSizeChars;
         if (maxChars == null || maxChars <= 0 || result.data == null) {

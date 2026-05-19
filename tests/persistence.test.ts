@@ -132,7 +132,7 @@ function createTestSession(id?: string): SessionState<TestSessionData> {
         version: 1,
       },
     },
-    routeHistory: [],
+    flowHistory: [],
   };
 }
 
@@ -147,12 +147,12 @@ function sessionStateToAdapterData(
     status: "active",
     collectedData: {
       data: session.data!,
-      routeHistory: session.routeHistory,
-      currentRouteTitle: session.currentRoute?.title,
+      flowHistory: session.flowHistory,
+      currentFlowTitle: session.currentFlow?.title,
       currentStepDescription: session.currentStep?.description,
       metadata: session.metadata!,
     },
-    currentRoute: session.currentRoute?.id,
+    currentFlow: session.currentFlow?.id,
     currentStep: session.currentStep?.id,
   };
 }
@@ -401,13 +401,13 @@ describe("Session State Persistence", () => {
     adapter = new MemoryAdapter<TestSessionData>();
   });
 
-  test("should persist route and step state", async () => {
-    const session = createTestSession("route-state-session");
+  test("should persist flow and step state", async () => {
+    const session = createTestSession("flow-state-session");
 
-    // Set route and step state
-    session.currentRoute = {
-      id: "test_route",
-      title: "Test Route",
+    // Set flow and step state
+    session.currentFlow = {
+      id: "test_flow",
+      title: "Test Flow",
       enteredAt: new Date(),
     };
 
@@ -423,7 +423,7 @@ describe("Session State Persistence", () => {
     const savedSession = await adapter.sessionRepository.create(adapterData);
     const loaded = await adapter.sessionRepository.findById(savedSession.id);
 
-    expect(loaded?.currentRoute).toBe("test_route");
+    expect(loaded?.currentFlow).toBe("test_flow");
     expect(loaded?.currentStep).toBe("step_2");
     expect(loaded?.collectedData?.data?.step).toBe(2);
   });
@@ -639,7 +639,7 @@ describe("Persistence Error Handling", () => {
     expect(
       (loaded?.collectedData?.metadata as TestSessionData["metadata"])?.source
     ).toBeUndefined();
-    expect(loaded?.currentRoute).toBeUndefined();
+    expect(loaded?.currentFlow).toBeUndefined();
     expect(loaded?.currentStep).toBeUndefined();
   });
 

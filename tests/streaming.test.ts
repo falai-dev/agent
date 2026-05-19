@@ -271,18 +271,18 @@ describe("Streaming Session Management", () => {
     ).toBe("test");
   });
 
-  test("should handle route progression in streaming", async () => {
-    const routeProvider = MockProviderFactory.forRoute(
-      "test-route",
+  test("should handle flow progression in streaming", async () => {
+    const flowProvider = MockProviderFactory.forFlow(
+      "test-flow",
       "test-step"
     );
-    const agent = createStreamingTestAgent(routeProvider);
+    const agent = createStreamingTestAgent(flowProvider);
     const session = createSession();
 
     const history = [
       {
         role: "user" as const,
-        content: "Route test",
+        content: "Flow test",
         name: "TestUser",
       },
     ];
@@ -295,10 +295,10 @@ describe("Streaming Session Management", () => {
       }
     }
 
-    // The mock provider returns route data in structured response,
-    // but without actual routes defined on the agent, no routing occurs
-    expect(finalChunk.structured?.route).toBe("test-route");
-    expect(finalChunk.structured?.step).toBe("test-step");
+    // The mock provider returns flow data in structured response,
+    // but without actual flows defined on the agent, no routing occurs
+    expect(finalChunk!.structured?.flow).toBe("test-flow");
+    expect(finalChunk!.structured?.step).toBe("test-step");
   });
 });
 
@@ -371,7 +371,7 @@ describe("Streaming Chunk Processing", () => {
   test("should handle structured data in final chunk", async () => {
     const structuredResponse = {
       message: "Structured response",
-      route: "test-route",
+      flow: "test-flow",
       step: "test-step",
       toolCalls: [
         {
@@ -409,7 +409,7 @@ describe("Streaming Chunk Processing", () => {
 
     expect(finalChunk!.structured).toBeDefined();
     expect(finalChunk!.structured!.message).toBe("Structured response");
-    expect(finalChunk!.structured!.route).toBe("test-route");
+    expect(finalChunk!.structured!.flow).toBe("test-flow");
     expect(finalChunk!.structured!.toolCalls).toHaveLength(1);
   });
 });
@@ -662,13 +662,13 @@ describe("Streaming Integration with Agent Features", () => {
     );
   });
 
-  test("should handle route completion in streaming", async () => {
+  test("should handle flow completion in streaming", async () => {
     const agent = createStreamingTestAgent();
 
-    // Create a simple route
-    agent.createRoute({
-      title: "Streaming Route",
-      description: "Route for streaming test",
+    // Create a simple flow
+    agent.createFlow({
+      title: "Streaming Flow",
+      description: "Flow for streaming test",
       steps: [
         {
           id: "streaming_step",
@@ -681,7 +681,7 @@ describe("Streaming Integration with Agent Features", () => {
     const history = [
       {
         role: "user" as const,
-        content: "Route completion test",
+        content: "Flow completion test",
         name: "TestUser",
       },
     ];
@@ -694,7 +694,7 @@ describe("Streaming Integration with Agent Features", () => {
       }
     }
 
-    // Check if route completed (this depends on the mock provider behavior)
+    // Check if flow completed (this depends on the mock provider behavior)
     expect(finalChunk!.session).toBeDefined();
   });
 

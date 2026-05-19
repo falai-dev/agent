@@ -24,6 +24,7 @@ function makeToolContext<TContext = Record<string, unknown>, TData = Record<stri
         getField: () => undefined,
         setField: async () => { },
         hasField: () => false,
+        dispatch: () => { },
     };
 }
 
@@ -68,8 +69,8 @@ function makeCall(id: string, toolName?: string): ToolCallRequest {
 }
 
 /** Collect all results from getRemainingResults */
-async function collectAll<TData = unknown>(
-    executor: StreamingToolExecutor<unknown, TData>
+async function collectAll<TContext = unknown, TData = unknown>(
+    executor: StreamingToolExecutor<TContext, TData>
 ): Promise<ToolExecutionUpdate<TData>[]> {
     const results: ToolExecutionUpdate<TData>[] = [];
     for await (const update of executor.getRemainingResults()) {

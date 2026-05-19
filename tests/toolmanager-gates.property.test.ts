@@ -223,6 +223,7 @@ function makeToolContext(): ToolContext<Ctx, Data> {
         getField: () => undefined,
         setField: async () => { },
         hasField: () => false,
+        dispatch: () => { },
     };
 }
 

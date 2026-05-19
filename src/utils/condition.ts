@@ -1,6 +1,15 @@
-import type { TemplateContext, ConditionTemplate, ConditionEvaluationResult } from "../types/template";
+import type { TemplateContext, ConditionEvaluationResult } from "../types/template";
 import { createTemplateContext } from "./template";
 import { logger } from './logger'
+
+/**
+ * Condition template — kept as a private type for internal use by the evaluator.
+ * Removed from the public surface in v2.
+ */
+type ConditionTemplate<TContext = unknown, TData = unknown> =
+  | string
+  | ((params: TemplateContext<TContext, TData>) => boolean | Promise<boolean>)
+  | ConditionTemplate<TContext, TData>[];
 
 /**
  * Utility class for evaluating ConditionTemplate instances.
@@ -8,7 +17,7 @@ import { logger } from './logger'
  * evaluation from AI context collection.
  */
 export class ConditionEvaluator<TContext = unknown, TData = unknown> {
-  constructor(private templateContext: TemplateContext<TContext, TData>) {}
+  constructor(private templateContext: TemplateContext<TContext, TData>) { }
 
   /**
    * Evaluates a condition template and returns both programmatic results
@@ -102,10 +111,10 @@ export class ConditionEvaluator<TContext = unknown, TData = unknown> {
 
     for (const condition of conditions) {
       const conditionResult = await this.evaluateCondition(condition, logic);
-      
+
       // Collect AI context strings
       result.aiContextStrings.push(...conditionResult.aiContextStrings);
-      
+
       // Track if we have programmatic conditions
       if (conditionResult.hasProgrammaticConditions) {
         result.hasProgrammaticConditions = true;

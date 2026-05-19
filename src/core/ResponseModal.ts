@@ -13,22 +13,23 @@ import type {
     Tool,
     Event,
     AgentStructuredResponse,
-    Term,
     StoppedReason,
     ToolCallRequest,
+    ScopedInstructions,
+    AppliedInstruction,
+    PrepareResult,
+    PreDirective,
 } from "../types";
+import type { SignalFiring } from "../types/signals";
 import type { Agent } from "./Agent";
-import type { Route } from "./Route";
+import type { Flow } from "./Flow";
 import { Step } from "./Step";
 import { ResponseEngine } from "./ResponseEngine";
-import { ResponsePipeline } from "./ResponsePipeline";
-import { BatchExecutor, type HookFunction } from "./BatchExecutor";
-import { BatchPromptBuilder } from "./BatchPromptBuilder";
-import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, render, logger, historyToEvents, eventsToHistory, serializeToolResult } from "../utils";
+import { ResponsePipeline, hasDirectivePositionField } from "./ResponsePipeline";
+import { AutoChainExecutor, type AutoChainResult } from "./AutoChainExecutor";
+import { cloneDeep, mergeCollected, enterStep, enterFlow, getLastMessageFromHistory, logger, historyToEvents, eventsToHistory, serializeToolResult, completeCurrentFlow, render } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
-import { END_ROUTE_ID } from "../constants";
-import type { StepOptions } from "../types/route";
 
 /**
  * Configuration options for ResponseModal
@@ -109,7 +110,8 @@ export class ResponseGenerationError extends Error {
     ): ResponseGenerationError {
         const message = error instanceof Error ? error.message : String(error);
         return new ResponseGenerationError(
-            `Response generation failed in ${phase}: ${message}`,
+            `[ResponseGenerationError] Response generation failed in ${phase}: ${message}. ` +
+            `Check provider configuration and the ${phase} phase handler.`,
             { originalError: error, params, phase, context }
         );
     }
@@ -129,18 +131,20 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
     effectiveContext: TContext;
     session: SessionState<TData>;
     history: HistoryItem[]; // Keep as HistoryItem[] for external API compatibility
-    selectedRoute?: Route<TContext, TData>;
+    selectedFlow?: Flow<TContext, TData>;
     selectedStep?: Step<TContext, TData>;
     responseDirectives?: string[];
-    isRouteComplete: boolean;
-    /** Batch of steps to execute (for multi-step execution) */
-    batchSteps?: StepOptions<TContext, TData>[];
-    /** Reason why batch determination stopped */
-    batchStoppedReason?: StoppedReason;
-    /** Step that caused batch to stop (if applicable) */
-    batchStoppedAtStep?: StepOptions<TContext, TData>;
+    isFlowComplete: boolean;
     /** AbortSignal for cancellation propagation */
     signal?: AbortSignal;
+    /** Signal firings accumulated across both phases (pre + post) for the response surface. */
+    signalFirings?: SignalFiring<TContext, TData>[];
+    /** Pre-phase merged directive from signals (non-position fields like appendPrompt, injectTools). */
+    signalPreDirective?: PreDirective<TContext, TData>;
+    /** Whether the pre-signal phase emitted a halt directive. */
+    signalHalted?: boolean;
+    /** Reply from a halt directive. */
+    signalHaltReply?: string;
 }
 
 /**
@@ -150,8 +154,6 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
 export class ResponseModal<TContext = unknown, TData = unknown> {
     private readonly responseEngine: ResponseEngine<TContext, TData>;
     private readonly responsePipeline: ResponsePipeline<TContext, TData>;
-    private readonly batchExecutor: BatchExecutor<TContext, TData>;
-    private readonly batchPromptBuilder: BatchPromptBuilder<TContext, TData>;
 
     constructor(
         private readonly agent: Agent<TContext, TData>,
@@ -163,20 +165,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // Initialize response pipeline with agent dependencies
         this.responsePipeline = new ResponsePipeline<TContext, TData>(
             this.agent.getAgentOptions(),
-            () => this.agent.getRoutes(), // Pass a function to get routes dynamically
+            () => this.agent.getFlows(), // Pass a function to get flows dynamically
             this.agent.getTools(),
-            this.agent.getRoutingEngine(),
+            this.agent.getFlowRouter(),
             this.agent.updateContext.bind(this.agent),
             this.agent.getUpdateDataMethod(),
             this.agent.updateCollectedData.bind(this.agent),
-            this.getToolManager()
+            this.getToolManager(),
+            this.agent.signalProcessor
         );
-
-        // Initialize batch executor for multi-step execution
-        this.batchExecutor = new BatchExecutor<TContext, TData>();
-
-        // Initialize batch prompt builder for combined prompts
-        this.batchPromptBuilder = new BatchPromptBuilder<TContext, TData>(this.agent.promptSectionCache);
     }
 
     /**
@@ -196,7 +193,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
         } catch (error) {
             throw new ResponseGenerationError(
-                `Failed to generate response: ${error instanceof Error ? error.message : String(error)}`,
+                `[ResponseGenerationError] Response generation failed: ${error instanceof Error ? error.message : String(error)}. ` +
+                `Check provider configuration and network connectivity.`,
                 { originalError: error, params, phase: 'response_generation' }
             );
         }
@@ -379,6 +377,21 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         return undefined;
     }
 
+    /**
+     * Collect scoped instructions from agent, flow, and step into a ScopedInstructions value.
+     * @private
+     */
+    private collectScopedInstructions(
+        flow?: Flow<TContext, TData>,
+        step?: Step<TContext, TData>,
+    ): ScopedInstructions<TContext, TData> {
+        return {
+            global: this.agent.instructions,
+            flow: flow ? { flowTitle: flow.title, items: flow.instructions } : undefined,
+            step: step ? { stepId: step.id, items: step.getInstructions() } : undefined,
+        };
+    }
+
     // UNIFIED RESPONSE LOGIC - Consolidates common logic between streaming and non-streaming
     // ============================================================================
 
@@ -393,7 +406,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             // Validate input parameters
             if (!simpleHistory) {
-                throw new ResponseGenerationError('History is required for response generation', { params, phase: 'validation' });
+                throw new ResponseGenerationError(
+                    '[ResponseGenerationError] Missing history: history is required for response generation. ' +
+                    'Pass a valid history array to the respond/stream method.',
+                    { params, phase: 'validation' }
+                );
             }
 
             // Convert HistoryItem[] to Event[] for internal processing
@@ -410,7 +427,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             try {
                 // Set current context and session in pipeline for consistency
                 this.responsePipeline.setContext(await this.agent.getContext());
-                this.responsePipeline.setCurrentSession(this.agent.getCurrentSession());
+                this.responsePipeline.setCurrentSession(this.agent.currentSession);
 
                 responseContext = await this.responsePipeline.prepareResponseContext({
                     contextOverride,
@@ -451,17 +468,18 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 throw ResponseGenerationError.fromError(error, 'step_preparation', params, { session, effectiveContext });
             }
 
-            // PHASE 2: ROUTING + STEP SELECTION - Determine which route and step to use
-            // Also performs pre-extraction and batch determination
+            // PHASE 2: ROUTING + STEP SELECTION - Determine which flow and step to use
+            // Performs pre-extraction and step selection
             let routingResult: {
-                selectedRoute?: Route<TContext, TData>;
+                selectedFlow?: Flow<TContext, TData>;
                 selectedStep?: Step<TContext, TData>;
                 responseDirectives?: string[];
                 session: SessionState<TData>;
-                isRouteComplete: boolean;
-                batchSteps?: StepOptions<TContext, TData>[];
-                batchStoppedReason?: StoppedReason;
-                batchStoppedAtStep?: StepOptions<TContext, TData>;
+                isFlowComplete: boolean;
+                signalFirings?: SignalFiring<TContext, TData>[];
+                signalPreDirective?: PreDirective<TContext, TData>;
+                signalHalted?: boolean;
+                signalHaltReply?: string;
             };
             try {
                 routingResult = await this.handleUnifiedRoutingAndStepSelection({
@@ -478,14 +496,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 effectiveContext,
                 session: routingResult.session,
                 history,
-                selectedRoute: routingResult.selectedRoute,
+                selectedFlow: routingResult.selectedFlow,
                 selectedStep: routingResult.selectedStep,
                 responseDirectives: routingResult.responseDirectives,
-                isRouteComplete: routingResult.isRouteComplete,
-                batchSteps: routingResult.batchSteps,
-                batchStoppedReason: routingResult.batchStoppedReason,
-                batchStoppedAtStep: routingResult.batchStoppedAtStep,
+                isFlowComplete: routingResult.isFlowComplete,
                 signal,
+                signalFirings: routingResult.signalFirings,
+                signalPreDirective: routingResult.signalPreDirective,
+                signalHalted: routingResult.signalHalted,
+                signalHaltReply: routingResult.signalHaltReply,
             };
         } catch (error) {
             // Re-throw ResponseGenerationError as-is, wrap others
@@ -506,45 +525,183 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         context: TContext;
         signal?: AbortSignal;
     }): Promise<{
-        selectedRoute?: Route<TContext, TData>;
+        selectedFlow?: Flow<TContext, TData>;
         selectedStep?: Step<TContext, TData>;
         responseDirectives?: string[];
         session: SessionState<TData>;
-        isRouteComplete: boolean;
-        /** Batch of steps to execute (for multi-step execution) */
-        batchSteps?: StepOptions<TContext, TData>[];
-        /** Reason why batch determination stopped */
-        batchStoppedReason?: StoppedReason;
-        /** Step that caused batch to stop (if applicable) */
-        batchStoppedAtStep?: StepOptions<TContext, TData>;
+        isFlowComplete: boolean;
+        /** Signal firings from the pre-phase (threaded through for response surface). */
+        signalFirings?: SignalFiring<TContext, TData>[];
+        /** Non-position signal directive for pre-LLM augmentation (appendPrompt, injectTools, etc). */
+        signalPreDirective?: PreDirective<TContext, TData>;
+        /** Pre-signal phase halted the turn. */
+        signalHalted?: boolean;
+        /** Reply text from the halt directive. */
+        signalHaltReply?: string;
     }> {
         try {
-            // Use the ResponsePipeline for optimized routing and step selection
-            // This avoids duplicate logic and leverages existing optimizations
-            // ResponsePipeline expects Event[] for history
+            // Create a fresh chain tracker for this turn (Requirement 22.1)
+            this.responsePipeline.createChainTracker();
+
+            // ROUTING SKIP OPTIMIZATION (Requirements 20.1, 20.2, 20.3):
+            // When the current step has collect fields AND pre-extraction populates at least
+            // one of those fields, skip FlowRouter.decideFlowAndStep for this turn.
+            const routingSkipResult = await this.attemptRoutingSkipForCollect(params);
+            if (routingSkipResult) {
+                // Even when routing is skipped, run pre-signal phase if processor is present
+                if (this.agent.signalProcessor) {
+                    const signalResult = await this.responsePipeline.runPreSignalPhase(
+                        params.session, params.context, params.history,
+                    );
+                    // If signal halts, override the routing skip result
+                    if (signalResult.mergedDirective?.halt) {
+                        return {
+                            ...routingSkipResult,
+                            session: signalResult.updatedSession,
+                            signalFirings: signalResult.firings,
+                            signalHalted: true,
+                            signalHaltReply: signalResult.mergedDirective.reply,
+                        };
+                    }
+                    // If signal has position fields, override routing skip result
+                    if (hasDirectivePositionField(signalResult.mergedDirective)) {
+                        return this.applySignalPositionDirective(
+                            signalResult, params,
+                        );
+                    }
+                    // Non-position directive: propagate for pre-LLM augmentation
+                    return {
+                        ...routingSkipResult,
+                        session: signalResult.updatedSession,
+                        signalFirings: signalResult.firings,
+                        signalPreDirective: signalResult.mergedDirective || undefined,
+                    };
+                }
+                return routingSkipResult;
+            }
+
+            // ── PARALLEL PRE-SIGNAL PHASE + ROUTING (Algorithm 5) ────────────────
+            // When signalProcessor is present, run pre-signals in parallel with routing.
+            // When absent, call the router directly (zero overhead, preserve current behavior).
+            if (this.agent.signalProcessor) {
+                // Run pre-signal phase in parallel with routing (Requirement 8.1)
+                const [signalResult, routingResult] = await Promise.all([
+                    this.responsePipeline.runPreSignalPhase(
+                        params.session, params.context, params.history,
+                    ),
+                    this.responsePipeline.handleRoutingAndStepSelection({
+                        session: params.session,
+                        history: params.history,
+                        context: params.context,
+                        signal: params.signal,
+                    }),
+                ]);
+
+                // ── Requirement 8.2: halt → discard routing, skip LLM ────────────
+                if (signalResult.mergedDirective?.halt) {
+                    return {
+                        selectedFlow: undefined,
+                        selectedStep: undefined,
+                        session: signalResult.updatedSession,
+                        isFlowComplete: false,
+                        signalFirings: signalResult.firings,
+                        signalHalted: true,
+                        signalHaltReply: signalResult.mergedDirective.reply,
+                    };
+                }
+
+                // ── Requirement 8.3: position directive → discard routing, apply signal position ──
+                if (hasDirectivePositionField(signalResult.mergedDirective)) {
+                    return this.applySignalPositionDirective(
+                        signalResult, params,
+                    );
+                }
+
+                // ── Requirement 8.4: non-position directive → use routing, propagate augmentation ──
+                // ── Requirement 8.5: no directive → use routing as-is ─────────────
+                let updatedSession = signalResult.updatedSession;
+
+                // Apply data/context updates from signal to the routed session
+                if (signalResult.mergedDirective?.dataUpdate) {
+                    updatedSession = mergeCollected(updatedSession, signalResult.mergedDirective.dataUpdate);
+                }
+
+                // Use routing result for flow/step, but carry signal session state
+                // Merge routing session changes on top of signal session
+                const routingSession = routingResult.session;
+                updatedSession = {
+                    ...updatedSession,
+                    currentFlow: routingSession.currentFlow,
+                    currentStep: routingSession.currentStep,
+                    flowHistory: routingSession.flowHistory,
+                    pendingDirective: routingSession.pendingDirective,
+                };
+
+                const isFlowComplete = routingResult.isFlowComplete;
+
+                // PRE-EXTRACTION: same logic as below — extract data from user message
+                if (routingResult.selectedFlow && !isFlowComplete) {
+                    if (this.shouldPreExtractData(routingResult.selectedFlow)) {
+                        logger.debug(
+                            `[ResponseModal] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
+                        );
+                        const extractedData = await this.preExtractFlowData({
+                            route: routingResult.selectedFlow,
+                            history: params.history,
+                            context: params.context,
+                            session: updatedSession,
+                            signal: params.signal,
+                        });
+                        if (extractedData && Object.keys(extractedData).length > 0) {
+                            logger.debug(`[ResponseModal] Pre-extracted data:`, extractedData);
+                            updatedSession = mergeCollected(updatedSession, extractedData);
+                            await this.agent.updateCollectedData(extractedData);
+                        }
+                    }
+                }
+
+                // Determine next step
+                const stepResult = await this.responsePipeline.determineNextStep({
+                    selectedFlow: routingResult.selectedFlow,
+                    selectedStep: routingResult.selectedStep,
+                    session: updatedSession,
+                    isFlowComplete,
+                });
+
+                return {
+                    selectedFlow: stepResult.flowChanged || routingResult.selectedFlow,
+                    selectedStep: stepResult.nextStep,
+                    responseDirectives: routingResult.responseDirectives,
+                    session: stepResult.session,
+                    isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
+                    signalFirings: signalResult.firings,
+                    signalPreDirective: signalResult.mergedDirective || undefined,
+                };
+            }
+
+            // ── No signal processor: existing behavior (zero overhead) ────────────
             const routingResult = await this.responsePipeline.handleRoutingAndStepSelection({
                 session: params.session,
-                history: params.history, // Already Event[]
+                history: params.history,
                 context: params.context,
                 signal: params.signal,
             });
 
             let updatedSession = routingResult.session;
-            const isRouteComplete = routingResult.isRouteComplete;
+            const isFlowComplete = routingResult.isFlowComplete;
 
-            // PRE-EXTRACTION: If entering a route that collects data, extract data from user message first
+            // PRE-EXTRACTION: If entering a flow that collects data, extract data from user message first
             // This allows us to skip steps whose data is already provided
-            // Requirement 3.1: Perform Pre_Extraction before determining the Batch
-            if (routingResult.selectedRoute && !isRouteComplete) {
-                // Always pre-extract when route collects data (not just on new route entry)
-                // This ensures batch determination has the most up-to-date data
-                if (this.shouldPreExtractData(routingResult.selectedRoute)) {
+            if (routingResult.selectedFlow && !isFlowComplete) {
+                // Always pre-extract when flow collects data (not just on new flow entry)
+                // This ensures step selection has the most up-to-date data
+                if (this.shouldPreExtractData(routingResult.selectedFlow)) {
                     logger.debug(
-                        `[ResponseModal] Pre-extracting data for route: ${routingResult.selectedRoute.title}`
+                        `[ResponseModal] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
                     );
 
-                    const extractedData = await this.preExtractRouteData({
-                        route: routingResult.selectedRoute,
+                    const extractedData = await this.preExtractFlowData({
+                        route: routingResult.selectedFlow,
                         history: params.history,
                         context: params.context,
                         session: updatedSession,
@@ -556,7 +713,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             `[ResponseModal] Pre-extracted data:`,
                             extractedData
                         );
-                        // Requirement 3.3: Merge pre-extracted data into session before batch determination
+                        // Merge pre-extracted data into session before step selection
                         updatedSession = mergeCollected(updatedSession, extractedData);
                         // Also update agent's collected data
                         await this.agent.updateCollectedData(extractedData);
@@ -564,51 +721,21 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 }
             }
 
-            // BATCH DETERMINATION: Use BatchExecutor to determine which steps can execute together
-            // Requirement 3.4: Pre-extraction results affect batch determination
-            let batchSteps: StepOptions<TContext, TData>[] | undefined;
-            let batchStoppedReason: StoppedReason | undefined;
-            let batchStoppedAtStep: StepOptions<TContext, TData> | undefined;
-
-            if (routingResult.selectedRoute && !isRouteComplete) {
-                // Determine current step position for batch determination
-                const currentStep = routingResult.selectedStep ||
-                    (updatedSession.currentStep ? routingResult.selectedRoute.getStep(updatedSession.currentStep.id) : undefined);
-
-                logger.debug(`[ResponseModal] Determining batch starting from step: ${currentStep?.id || 'initial'}`);
-
-                const batchResult = await this.batchExecutor.determineBatch({
-                    route: routingResult.selectedRoute,
-                    currentStep,
-                    sessionData: updatedSession.data || {},
-                    context: params.context,
-                    maxSteps: this.agent.getAgentOptions().maxStepsPerBatch,
-                });
-
-                batchSteps = batchResult.steps;
-                batchStoppedReason = batchResult.stoppedReason;
-                batchStoppedAtStep = batchResult.stoppedAtStep;
-
-                logger.debug(`[ResponseModal] Batch determined: ${batchSteps.length} steps, stopped reason: ${batchStoppedReason}`);
-            }
-
             // Determine next step using pipeline method for consistency
             const stepResult = await this.responsePipeline.determineNextStep({
-                selectedRoute: routingResult.selectedRoute,
+                selectedFlow: routingResult.selectedFlow,
                 selectedStep: routingResult.selectedStep,
                 session: updatedSession, // Use updated session with pre-extracted data
-                isRouteComplete, // Use updated completion status
+                isFlowComplete, // Use updated completion status
             });
 
             return {
-                selectedRoute: routingResult.selectedRoute,
+                selectedFlow: stepResult.flowChanged || routingResult.selectedFlow,
                 selectedStep: stepResult.nextStep, // Use the determined next step
                 responseDirectives: routingResult.responseDirectives,
                 session: stepResult.session,
-                isRouteComplete, // Use updated completion status
-                batchSteps,
-                batchStoppedReason,
-                batchStoppedAtStep,
+                // If a branch changed the flow, the original isFlowComplete no longer applies
+                isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
             };
         } catch (error) {
             throw ResponseGenerationError.fromError(error, 'routing_optimization', params);
@@ -616,20 +743,255 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Check if a route should pre-extract data before determining the initial step
+     * Apply a signal's position directive (goTo, goToStep, complete, abort, reset).
+     * Discards routing result and uses the signal's position decision.
+     * @private
+     * @requirements 8.3
+     */
+    private applySignalPositionDirective(
+        signalResult: {
+            firings: SignalFiring<TContext, TData>[];
+            updatedSession: SessionState<TData>;
+            mergedDirective: PreDirective<TContext, TData> | undefined;
+        },
+        _params: { session: SessionState<TData>; history: Event[]; context: TContext },
+    ): {
+        selectedFlow?: Flow<TContext, TData>;
+        selectedStep?: Step<TContext, TData>;
+        responseDirectives?: string[];
+        session: SessionState<TData>;
+        isFlowComplete: boolean;
+        signalFirings?: SignalFiring<TContext, TData>[];
+        signalPreDirective?: PreDirective<TContext, TData>;
+        signalHalted?: boolean;
+        signalHaltReply?: string;
+    } {
+        const directive = signalResult.mergedDirective!;
+        let session = signalResult.updatedSession;
+        const flows = this.agent.getFlows();
+        let selectedFlow: Flow<TContext, TData> | undefined;
+        let selectedStep: Step<TContext, TData> | undefined;
+        let isFlowComplete = false;
+
+        // Apply data updates if present alongside position
+        if (directive.dataUpdate) {
+            session = mergeCollected(session, directive.dataUpdate);
+        }
+
+        if (directive.goTo) {
+            const flowTarget = typeof directive.goTo === 'string'
+                ? directive.goTo
+                : directive.goTo.flow ?? directive.goTo.step;
+
+            if (flowTarget) {
+                const targetFlow = flows.find(f => f.id === flowTarget || f.title === flowTarget);
+                if (targetFlow) {
+                    session = enterFlow(session, targetFlow.id, targetFlow.title);
+                    selectedFlow = targetFlow;
+
+                    if (typeof directive.goTo === 'object' && directive.goTo.step) {
+                        const targetStep = targetFlow.getStep(directive.goTo.step);
+                        if (targetStep) {
+                            session = enterStep(session, targetStep.id, targetStep.description);
+                            selectedStep = targetStep;
+                        }
+                    }
+                } else {
+                    logger.warn(`[Signals] Pre-phase goTo target not found: "${flowTarget}". Falling back to no flow.`);
+                }
+            }
+        } else if (directive.goToStep) {
+            const stepTarget = typeof directive.goToStep === 'string'
+                ? directive.goToStep
+                : directive.goToStep.step;
+            const flowTarget = typeof directive.goToStep === 'object'
+                ? directive.goToStep.flow
+                : undefined;
+
+            if (flowTarget) {
+                const targetFlow = flows.find(f => f.id === flowTarget || f.title === flowTarget);
+                if (targetFlow) {
+                    session = enterFlow(session, targetFlow.id, targetFlow.title);
+                    selectedFlow = targetFlow;
+                    const targetStep = targetFlow.getStep(stepTarget);
+                    if (targetStep) {
+                        session = enterStep(session, targetStep.id, targetStep.description);
+                        selectedStep = targetStep;
+                    }
+                }
+            } else if (session.currentFlow) {
+                const currentFlow = flows.find(f => f.id === session.currentFlow?.id);
+                if (currentFlow) {
+                    selectedFlow = currentFlow;
+                    const targetStep = currentFlow.getStep(stepTarget);
+                    if (targetStep) {
+                        session = enterStep(session, targetStep.id, targetStep.description);
+                        selectedStep = targetStep;
+                    }
+                }
+            }
+        } else if (directive.complete) {
+            isFlowComplete = true;
+        } else if (directive.abort) {
+            // Abort — no flow, session cleared or marked
+            isFlowComplete = true;
+        } else if (directive.reset) {
+            if (session.currentFlow) {
+                const currentFlow = flows.find(f => f.id === session.currentFlow?.id);
+                if (currentFlow) {
+                    selectedFlow = currentFlow;
+                    const resetStep = typeof directive.reset === 'object' && directive.reset.step
+                        ? directive.reset.step
+                        : undefined;
+                    if (resetStep) {
+                        const targetStep = currentFlow.getStep(resetStep);
+                        if (targetStep) {
+                            session = enterStep(session, targetStep.id, targetStep.description);
+                            selectedStep = targetStep;
+                        }
+                    } else {
+                        const initialStep = currentFlow.initialStep;
+                        session = enterStep(session, initialStep.id, initialStep.description);
+                        selectedStep = initialStep;
+                    }
+                }
+            }
+        }
+
+        return {
+            selectedFlow,
+            selectedStep,
+            session,
+            isFlowComplete,
+            signalFirings: signalResult.firings,
+            signalPreDirective: signalResult.mergedDirective || undefined,
+        };
+    }
+
+    /**
+     * Routing skip optimization (Requirements 20.1, 20.2, 20.3):
+     * When the current step declares `collect` fields AND pre-extraction populates
+     * at least one of those fields from the user's message, skip routing for this turn.
+     *
+     * Returns the routing result if the skip applies, or undefined to fall through
+     * to normal routing.
      * @private
      */
-    private shouldPreExtractData(route: Route<TContext, TData>): boolean {
-        // Pre-extract if route has declared required or optional fields
-        if (route.requiredFields && route.requiredFields.length > 0) {
+    private async attemptRoutingSkipForCollect(params: {
+        session: SessionState<TData>;
+        history: Event[];
+        context: TContext;
+        signal?: AbortSignal;
+    }): Promise<{
+        selectedFlow?: Flow<TContext, TData>;
+        selectedStep?: Step<TContext, TData>;
+        responseDirectives?: string[];
+        session: SessionState<TData>;
+        isFlowComplete: boolean;
+    } | undefined> {
+        const { session } = params;
+
+        // Only applies when we already have a current flow and step
+        if (!session.currentFlow || !session.currentStep) {
+            return undefined;
+        }
+
+        // Also skip this optimization if there's a pending directive (it takes priority)
+        if (session.pendingDirective) {
+            return undefined;
+        }
+
+        // Look up the actual Flow and Step objects to access `collect`
+        const currentFlow = this.agent.getFlows().find(
+            (f) => f.id === session.currentFlow?.id
+        );
+        if (!currentFlow) {
+            return undefined;
+        }
+
+        const currentStep = currentFlow.getStep(session.currentStep.id);
+        if (!currentStep || !currentStep.collect || currentStep.collect.length === 0) {
+            return undefined;
+        }
+
+        // We have a step with collect fields. Run pre-extraction to see if the
+        // user's message populates any of them.
+        const collectFields = currentStep.collect;
+
+        // Snapshot current data for comparison
+        const dataBefore = { ...session.data };
+
+        // Run pre-extraction against the current flow
+        const extractedData = await this.preExtractFlowData({
+            route: currentFlow,
+            history: params.history,
+            context: params.context,
+            session,
+            signal: params.signal,
+        });
+
+        if (!extractedData || Object.keys(extractedData).length === 0) {
+            return undefined;
+        }
+
+        // Determine which collect fields were newly populated by pre-extraction
+        const populatedCollectFields: string[] = [];
+        for (const field of collectFields) {
+            const key = field as string;
+            const hadValue = dataBefore[field] !== undefined && dataBefore[field] !== null;
+            const hasNewValue = extractedData[field] !== undefined && extractedData[field] !== null;
+            if (hasNewValue && !hadValue) {
+                populatedCollectFields.push(key);
+            }
+        }
+
+        if (populatedCollectFields.length === 0) {
+            // Pre-extraction didn't populate any declared collect field — no skip
+            return undefined;
+        }
+
+        // ROUTING SKIP: pre-extraction populated collect fields → retain current flow/step
+        logger.debug(
+            `[ResponseModal] Routing skip: pre-extraction populated collect fields [${populatedCollectFields.join(', ')}] for step "${currentStep.id}" — skipping FlowRouter`
+        );
+
+        // Merge extracted data into session
+        const updatedSession = mergeCollected(session, extractedData);
+        await this.agent.updateCollectedData(extractedData);
+
+        // Determine next step using pipeline method for consistency
+        // Pass the current flow/step as the routing result (retained)
+        const stepResult = await this.responsePipeline.determineNextStep({
+            selectedFlow: currentFlow,
+            selectedStep: currentStep,
+            session: updatedSession,
+            isFlowComplete: false,
+        });
+
+        return {
+            selectedFlow: stepResult.flowChanged || currentFlow,
+            selectedStep: stepResult.nextStep,
+            responseDirectives: undefined,
+            session: stepResult.session,
+            isFlowComplete: stepResult.flowChanged ? false : false,
+        };
+    }
+
+    /**
+     * Check if a flow should pre-extract data before determining the initial step
+     * @private
+     */
+    private shouldPreExtractData(flow: Flow<TContext, TData>): boolean {
+        // Pre-extract if flow has declared required or optional fields
+        if (flow.requiredFields && flow.requiredFields.length > 0) {
             return true;
         }
-        if (route.optionalFields && route.optionalFields.length > 0) {
+        if (flow.optionalFields && flow.optionalFields.length > 0) {
             return true;
         }
 
-        // Pre-extract if any step in the route collects data
-        const steps = route.getAllSteps();
+        // Pre-extract if any step in the flow collects data
+        const steps = flow.getAllSteps();
         const hasDataCollectionSteps = steps.some(
             step => step.collect && step.collect.length > 0
         );
@@ -638,21 +1000,21 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Pre-extract data from user message when entering a route
+     * Pre-extract data from user message when entering a flow
      * This allows skipping steps whose data is already provided
      * @private
      */
-    private async preExtractRouteData(params: {
-        route: Route<TContext, TData>;
+    private async preExtractFlowData(params: {
+        route: Flow<TContext, TData>;
         history: Event[];
         context: TContext;
         session: SessionState<TData>;
         signal?: AbortSignal;
     }): Promise<Partial<TData>> {
-        const { route, history, signal } = params;
+        const { route: flow, history, signal } = params;
 
-        // Build a schema for data extraction based on route's fields
-        const extractionSchema = this.agent.getSchema();
+        // Build a schema for data extraction based on flow's fields
+        const extractionSchema = this.agent.schema;
         if (!extractionSchema) {
             logger.warn(`[ResponseModal] No schema available for pre-extraction`);
             return {};
@@ -672,11 +1034,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         ];
 
         // Add field descriptions
-        if (route.requiredFields) {
-            extractionPrompt.push(`Required fields: ${route.requiredFields.join(', ')}`);
+        if (flow.requiredFields) {
+            extractionPrompt.push(`Required fields: ${flow.requiredFields.join(', ')}`);
         }
-        if (route.optionalFields) {
-            extractionPrompt.push(`Optional fields: ${route.optionalFields.join(', ')}`);
+        if (flow.optionalFields) {
+            extractionPrompt.push(`Optional fields: ${flow.optionalFields.join(', ')}`);
         }
 
         extractionPrompt.push(
@@ -722,116 +1084,214 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             effectiveContext,
             session: initialSession,
             history,
-            selectedRoute,
+            selectedFlow,
             selectedStep,
             responseDirectives,
-            isRouteComplete,
-            batchSteps,
-            batchStoppedReason,
+            isFlowComplete,
             signal,
+            signalFirings: preSignalFirings,
+            signalPreDirective,
+            signalHalted,
+            signalHaltReply,
         } = responseContext;
         let session = initialSession;
 
-        // Get last user message (needed for both route and completion handling)
+        // Accumulator for signal firings across both phases (fire order)
+        const signalFirings: SignalFiring<TContext, TData>[] = [...(preSignalFirings || [])];
+
+        // Get last user message (needed for both flow and completion handling)
         // Convert HistoryItem[] to Event[] for internal processing
         const historyEvents = historyToEvents(history);
+
+        // ── SIGNAL HALT (Requirement 8.2) ─────────────────────────────────────
+        // Pre-signal phase emitted halt → skip LLM call entirely.
+        if (signalHalted) {
+            const haltMessage = signalHaltReply || '';
+            // Run post-signal phase even on halt (post-phase sees complete turn context)
+            const postResult = await this.responsePipeline.runPostSignalPhase(
+                session, effectiveContext, historyEvents,
+            );
+            session = postResult.updatedSession;
+            signalFirings.push(...postResult.firings);
+
+            // Apply post-phase position directive as pendingDirective (Requirement 9.3)
+            if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
+                session = { ...session, pendingDirective: postResult.mergedDirective };
+            }
+
+            await this.finalizeSession(session, effectiveContext);
+            return {
+                message: haltMessage,
+                session,
+                toolCalls: undefined,
+                isFlowComplete: false,
+                executedSteps: [],
+                stoppedReason: signalHaltReply ? 'reply' : 'halt',
+                triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+            };
+        }
 
         let message: string;
         let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
         let executedSteps: StepRef[] | undefined;
         let stoppedReason: StoppedReason | undefined;
+        let appliedInstructions: AppliedInstruction[] | undefined;
 
 
 
-        if (selectedRoute && !isRouteComplete) {
-            // Check if we have batch steps to execute
-            if (batchSteps && batchSteps.length > 0) {
-                // BATCH EXECUTION: Execute multiple steps in a single LLM call
-                logger.debug(`[ResponseModal] Executing batch of ${batchSteps.length} steps`);
+        if (selectedFlow && !isFlowComplete) {
+            // AUTO-CHAIN: Walk consecutive auto-steps before any LLM work.
+            // If the current step is auto, the executor advances through it (and any
+            // subsequent auto-steps) until an interactive step or terminal condition.
+            let resolvedStep = selectedStep;
+            const currentStepInstance = session.currentStep
+                ? selectedFlow.getStep(session.currentStep.id)
+                : selectedStep;
 
-                const batchResult = await this.executeBatchResponse({
-                    selectedRoute,
-                    batchSteps,
-                    responseDirectives,
+            if (currentStepInstance?.auto) {
+                const autoChainExecutor = new AutoChainExecutor<TContext, TData>({
+                    maxAutoStepsPerTurn: this.agent.maxAutoStepsPerTurn,
+                });
+                const autoResult: AutoChainResult<TContext, TData> = await autoChainExecutor.run({
                     session,
-                    history,
                     context: effectiveContext,
-                    historyEvents,
+                    flow: selectedFlow,
                 });
 
-                message = batchResult.message;
-                toolCalls = batchResult.toolCalls;
-                session = batchResult.session;
-                executedSteps = batchResult.executedSteps;
-                stoppedReason = batchStoppedReason;
+                session = autoResult.session;
 
-            } else {
-                // SINGLE STEP EXECUTION: Fall back to single-step processing
-                // This happens when batch determination returns empty (first step needs input)
-                const result = await this.processRouteResponse({
-                    selectedRoute,
-                    selectedStep,
-                    responseDirectives,
-                    session,
-                    history,
-                    context: effectiveContext,
-                    historyEvents,
-                    signal,
-                });
+                // Handle halt: emit verbatim reply, persist, return — no LLM call.
+                if (autoResult.stoppedReason === 'halt') {
+                    message = autoResult.mergedDirective?.reply || '';
+                    stoppedReason = 'halt';
+                    executedSteps = [];
 
-                message = result.message;
-                toolCalls = result.toolCalls;
-                session = result.session;
-
-                // Track executed step for single-step execution
-                if (selectedStep) {
-                    executedSteps = [{
-                        id: selectedStep.id,
-                        routeId: selectedRoute.id,
-                    }];
+                    await this.finalizeSession(session, effectiveContext);
+                    return {
+                        message,
+                        session,
+                        toolCalls: undefined,
+                        isFlowComplete: false,
+                        executedSteps,
+                        stoppedReason,
+                    };
                 }
-                stoppedReason = batchStoppedReason || 'needs_input';
+
+                // Handle flow completion or cross-flow redirect from auto-chain.
+                // The auto-chain ended without resolving to an interactive step.
+                // Possible reasons: last_step (no successor), completed (explicit
+                // complete directive), or goto (cross-flow redirect).
+                if (autoResult.stoppedReason === 'last_step' || autoResult.stoppedReason === 'completed' || autoResult.stoppedReason === 'goto') {
+                    logger.debug(`[ResponseModal] Auto-chain ended with ${autoResult.stoppedReason}`);
+                    session = await this.applyFlowCompletion({
+                        selectedFlow,
+                        session,
+                        context: effectiveContext,
+                        history,
+                    });
+
+                    await this.finalizeSession(session, effectiveContext);
+                    return {
+                        message: '',
+                        session,
+                        toolCalls: undefined,
+                        isFlowComplete: true,
+                        executedSteps: [],
+                        stoppedReason: autoResult.stoppedReason,
+                    };
+                }
+
+                // Normal case: auto-chain resolved to an interactive step.
+                resolvedStep = autoResult.resolvedStep;
             }
 
-        } else if (isRouteComplete && selectedRoute) {
-            // Handle route completion
-            logger.debug(`[ResponseModal] Generating completion message for route: ${selectedRoute.title}`);
+            // SINGLE STEP EXECUTION: Process the resolved interactive step.
+            // The auto-chain (if it ran) already walked auto-steps. Only the
+            // interactive step remains for the LLM call.
+            const result = await this.processFlowResponse({
+                selectedFlow,
+                selectedStep: resolvedStep,
+                responseDirectives,
+                session,
+                history,
+                context: effectiveContext,
+                historyEvents,
+                signal,
+                // Propagate signal pre-directive's appendPrompt for this turn's LLM call (Requirement 8.4)
+                transientAppendage: signalPreDirective?.appendPrompt,
+                // Merge signal pre-directive (halt/reply/injectTools) into the pre-LLM bus
+                mergedPreDirective: signalPreDirective,
+            });
 
-            try {
-                message = await this.handleRouteCompletion({
-                    selectedRoute,
-                    session,
-                    context: effectiveContext,
-                    history,
-                    historyEvents,
-                    signal,
-                });
+            message = result.message;
+            toolCalls = result.toolCalls;
+            session = result.session;
+            appliedInstructions = result.appliedInstructions;
 
-                // Set step to END_ROUTE marker
-                session = enterStep(session, END_ROUTE_ID, "Route completed");
-                stoppedReason = 'route_complete';
-                logger.debug(`[ResponseModal] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`);
-            } catch (error) {
-                logger.error(`[ResponseModal] Error generating completion message:`, error);
-                // Fallback to simple completion message
-                message = `Thank you! I've recorded all the information for your ${selectedRoute.title.toLowerCase()}.`;
-                session = enterStep(session, END_ROUTE_ID, "Route completed");
-                stoppedReason = 'route_complete';
+            // Track executed step for single-step execution
+            if (resolvedStep) {
+                executedSteps = [{
+                    id: resolvedStep.id,
+                    flowId: selectedFlow.id,
+                }];
             }
+            // Use stoppedReason from processFlowResponse if set (halt/reply),
+            // otherwise default to 'needs_input' for normal LLM responses.
+            stoppedReason = result.stoppedReason || 'needs_input';
+
+        } else if (isFlowComplete && selectedFlow) {
+            // Flow completion path: pure state transition, no LLM call.
+            // The framework emits no message of its own.
+            // stoppedReason is 'last_step' because this completion was detected by
+            // implicit terminus (no successor or all successors skipped), not by an
+            // explicit `complete` directive.
+            logger.debug(`[ResponseModal] Releasing session to idle for completed flow: ${selectedFlow.title}`);
+
+            session = await this.applyFlowCompletion({
+                selectedFlow,
+                session,
+                context: effectiveContext,
+                history,
+            });
+            message = '';
+            stoppedReason = 'last_step';
+            executedSteps = [];
 
         } else {
-            // Fallback: No routes defined, generate a simple response
+            // Fallback: No flows defined, generate a simple response
 
-            message = await this.generateFallbackResponse({
+            const fallbackResult = await this.generateFallbackResponse({
                 history,
                 context: effectiveContext,
                 session,
             });
 
+            message = fallbackResult.message;
+            appliedInstructions = fallbackResult.appliedInstructions;
+
             // For fallback responses, set empty executedSteps and no stoppedReason
-            // since there's no route/step execution happening
+            // since there's no flow/step execution happening
             executedSteps = [];
             stoppedReason = undefined;
+        }
+
+        // POST-SIGNAL PHASE (Requirement 9.1, 9.2, 9.3, 9.4)
+        // Runs after finalize/onComplete and before session persistence.
+        // Post-phase signals see the complete turn result: assistant message in
+        // history, collected data, tool results.
+        const postResult = await this.responsePipeline.runPostSignalPhase(
+            session, effectiveContext, historyEvents,
+        );
+        session = postResult.updatedSession;
+
+        // Append post-phase firings to the accumulator (preserves fire order)
+        signalFirings.push(...postResult.firings);
+
+        // Requirement 9.3: Post-phase position directive sets session.pendingDirective
+        // (no mid-turn re-entry per D6 decision). Pre-LLM-only fields are already
+        // dropped inside runPostSignalPhase per Phase 4.5.
+        if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
+            session = { ...session, pendingDirective: postResult.mergedDirective };
         }
 
         // Ensure response structure completeness (Requirement 8.1, 8.2, 8.3)
@@ -842,496 +1302,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             message,
             session,
             toolCalls,
-            isRouteComplete,
+            isFlowComplete: isFlowComplete,
             executedSteps: executedSteps || [],
             stoppedReason,
+            appliedInstructions,
+            triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
         };
-    }
-
-    /**
-     * Execute a batch of steps with a single LLM call
-     * 
-     * This method:
-     * 1. Executes all prepare hooks for steps in the batch (in order)
-     * 2. Builds a combined prompt using BatchPromptBuilder
-     * 3. Makes a single LLM call
-     * 4. Collects data from the response for all steps
-     * 5. Executes all finalize hooks for steps in the batch (in order)
-     * 
-     * @private
-     * **Validates: Requirements 1.1, 4.4, 5.1, 5.2**
-     */
-    private async executeBatchResponse(params: {
-        selectedRoute: Route<TContext, TData>;
-        batchSteps: StepOptions<TContext, TData>[];
-        responseDirectives?: string[];
-        session: SessionState<TData>;
-        history: HistoryItem[];
-        context: TContext;
-        historyEvents: Event[];
-        signal?: AbortSignal;
-    }): Promise<{
-        message: string;
-        toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-        session: SessionState<TData>;
-        executedSteps: StepRef[];
-    }> {
-        const { selectedRoute, batchSteps, history, context, historyEvents, signal } = params;
-        let session = params.session;
-
-        logger.debug(`[ResponseModal] Starting batch execution for ${batchSteps.length} steps`);
-
-        // Create hook executor function
-        const executeHook = async (
-            hook: HookFunction<TContext, TData>,
-            hookContext: TContext,
-            data?: Partial<TData>,
-            step?: StepOptions<TContext, TData>
-        ): Promise<void> => {
-            // Find the route for this step
-            const route = selectedRoute;
-            // Convert StepOptions to Step if needed for executePrepareFinalize
-            const stepInstance = step?.id ? route.getStep(step.id) : undefined;
-            await this.executePrepareFinalize(hook, hookContext, data, route, stepInstance);
-        };
-
-        // PHASE 1: Execute all prepare hooks (Requirement 5.1)
-        logger.debug(`[ResponseModal] Executing prepare hooks for batch`);
-        const prepareResult = await this.batchExecutor.executePrepareHooks({
-            steps: batchSteps,
-            context,
-            data: session.data,
-            executeHook,
-        });
-
-        if (!prepareResult.success) {
-            // Prepare hook failed - return error response
-            logger.error(`[ResponseModal] Prepare hook failed:`, prepareResult.error);
-            throw new ResponseGenerationError(
-                `Prepare hook failed: ${prepareResult.error?.message}`,
-                {
-                    phase: 'prepare_hooks',
-                    context: {
-                        stepId: prepareResult.error?.stepId,
-                        executedSteps: prepareResult.executedSteps,
-                    }
-                }
-            );
-        }
-
-        // PHASE 2: Build combined prompt using BatchPromptBuilder (Requirement 4.4)
-        logger.debug(`[ResponseModal] Building batch prompt`);
-        const batchPromptResult = await this.batchPromptBuilder.buildBatchPrompt({
-            steps: batchSteps,
-            route: selectedRoute,
-            history: historyEvents,
-            context,
-            session,
-            agentOptions: this.agent.getAgentOptions(),
-        });
-
-        logger.debug(`[ResponseModal] Batch prompt built with ${batchPromptResult.stepCount} steps, collecting: ${batchPromptResult.collectFields.join(', ')}`);
-
-        // Build response schema for batch (includes all collect fields)
-        const responseSchema = this.buildBatchResponseSchema(batchPromptResult.collectFields);
-
-        // Collect available tools for AI (from all steps in batch)
-        const availableTools = this.collectBatchAvailableTools(selectedRoute, batchSteps);
-
-        // PHASE 3: Make single LLM call (Requirement 4.4)
-        logger.debug(`[ResponseModal] Making LLM call for batch`);
-        const agentOptions = this.agent.getAgentOptions();
-        const result = await agentOptions.provider.generateMessage({
-            prompt: batchPromptResult.prompt,
-            history, // Use HistoryItem[] for AI provider
-            context,
-            tools: availableTools,
-            signal,
-            parameters: responseSchema ? { jsonSchema: responseSchema, schemaName: "batch_response" } : undefined,
-        });
-
-        let message = result.structured?.message || result.message;
-        let toolCalls = result.structured?.toolCalls;
-
-        logger.debug(`[ResponseModal] LLM response received for batch`);
-
-        // Execute tools if any
-        if (toolCalls && toolCalls.length > 0) {
-            const toolResult = await this.executeUnifiedToolLoop({
-                toolCalls,
-                context,
-                session,
-                history,
-                selectedRoute,
-                responsePrompt: batchPromptResult.prompt,
-                availableTools,
-                responseSchema,
-                signal,
-            });
-
-            session = toolResult.session;
-            toolCalls = toolResult.finalToolCalls;
-            if (toolResult.finalMessage) {
-                message = toolResult.finalMessage;
-            }
-        }
-
-        // PHASE 4: Collect data from response for all steps (Requirement 6.1, 6.2, 6.3)
-        logger.debug(`[ResponseModal] Collecting batch data`);
-        const collectResult = this.batchExecutor.collectBatchData({
-            steps: batchSteps,
-            llmResponse: result.structured || {},
-            session,
-            schema: this.agent.getSchema(),
-        });
-
-        session = collectResult.session;
-
-        if (collectResult.collectedData && Object.keys(collectResult.collectedData).length > 0) {
-            // Update agent's collected data
-            await this.agent.updateCollectedData(collectResult.collectedData);
-            logger.debug(`[ResponseModal] Batch collected data:`, collectResult.collectedData);
-        }
-
-        if (collectResult.validationErrors && collectResult.validationErrors.length > 0) {
-            logger.warn(`[ResponseModal] Batch data validation errors:`, collectResult.validationErrors);
-        }
-
-        // Update session to final step position
-        const lastStep = batchSteps[batchSteps.length - 1];
-        if (lastStep?.id) {
-            session = enterStep(session, lastStep.id, lastStep.description);
-            logger.debug(`[ResponseModal] Updated session to final batch step: ${lastStep.id}`);
-        }
-
-        // PHASE 5: Execute all finalize hooks (Requirement 5.2)
-        logger.debug(`[ResponseModal] Executing finalize hooks for batch`);
-        const finalizeResult = await this.batchExecutor.executeFinalizeHooks({
-            steps: batchSteps,
-            context,
-            data: session.data,
-            executeHook,
-        });
-
-        if (finalizeResult.errors && finalizeResult.errors.length > 0) {
-            // Log finalize errors but don't fail (Requirement 5.5)
-            logger.warn(`[ResponseModal] Some finalize hooks failed:`, finalizeResult.errors);
-        }
-
-        // Build executed steps list
-        const executedSteps: StepRef[] = batchSteps
-            .filter(step => step.id)
-            .map(step => ({
-                id: step.id!,
-                routeId: selectedRoute.id,
-            }));
-
-        logger.debug(`[ResponseModal] Batch execution complete. Executed ${executedSteps.length} steps`);
-
-        return {
-            message,
-            toolCalls,
-            session,
-            executedSteps,
-        };
-    }
-
-    /**
-     * Build response schema for batch execution
-     * @private
-     */
-    private buildBatchResponseSchema(collectFields: string[]): Record<string, unknown> {
-        const properties: Record<string, unknown> = {
-            message: {
-                type: "string",
-                description: "Natural, conversational response directed at the user. Must NOT contain field names, raw data, or internal information.",
-            },
-        };
-
-        const agentSchema = this.agent.getSchema();
-
-        // Add collect fields to schema, using agent schema definitions when available
-        for (const field of collectFields) {
-            if (agentSchema?.properties && agentSchema.properties[field]) {
-                properties[field] = agentSchema.properties[field];
-            } else {
-                // Dynamic fallback when no agent schema is defined
-                properties[field] = {
-                    type: "string",
-                    description: `Collected value for ${field}`,
-                };
-            }
-        }
-
-        return {
-            type: "object",
-            properties,
-            required: ["message"],
-            additionalProperties: true,
-        };
-    }
-
-    /**
-     * Collect available tools from all steps in the batch
-     * @private
-     */
-    private collectBatchAvailableTools(
-        route: Route<TContext, TData>,
-        batchSteps: StepOptions<TContext, TData>[]
-    ): Array<{
-        id: string;
-        name: string;
-        description?: string;
-        parameters?: unknown;
-    }> {
-        const availableTools = new Map<string, Tool<TContext, TData>>();
-
-        // Add agent-level tools
-        this.agent.getTools().forEach((tool) => {
-            availableTools.set(tool.id, tool);
-        });
-
-        // Add route-level tools
-        route.getTools().forEach((tool: Tool<TContext, TData>) => {
-            availableTools.set(tool.id, tool);
-        });
-
-        // Add step-level tools from all batch steps
-        for (const step of batchSteps) {
-            if (step.tools) {
-                for (const toolRef of step.tools) {
-                    if (typeof toolRef === "string") {
-                        // Reference to registered tool - already in availableTools
-                    } else if (typeof toolRef === 'object' && 'id' in toolRef && toolRef.id) {
-                        // Inline tool definition
-                        availableTools.set(toolRef.id, toolRef);
-                    }
-                }
-            }
-        }
-
-        // Convert to the format expected by AI providers
-        return Array.from(availableTools.values()).map((tool) => ({
-            id: tool.id,
-            name: tool.name || tool.id,
-            description: tool.description,
-            parameters: tool.parameters,
-        }));
-    }
-
-    /**
-     * Unified streaming response generation
-     * @private
-     */
-    private async *generateUnifiedStreamingResponse(
-        responseContext: ResponseContext<TContext, TData>
-    ): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const {
-            effectiveContext,
-            session: initialSession,
-            history,
-            selectedRoute,
-            selectedStep,
-            responseDirectives,
-            isRouteComplete,
-            batchSteps,
-            batchStoppedReason,
-        } = responseContext;
-        const session = initialSession;
-
-        // Get last user message (needed for both route and completion handling)
-        // Convert HistoryItem[] to Event[] for internal processing
-        const historyEvents = historyToEvents(history);
-
-        if (selectedRoute && !isRouteComplete) {
-            // Check if we have batch steps to execute
-            if (batchSteps && batchSteps.length > 0) {
-                // BATCH EXECUTION: Execute multiple steps with streaming
-                // Note: For streaming, we still use batch execution but stream the response
-                logger.debug(`[ResponseModal] Streaming batch execution for ${batchSteps.length} steps`);
-
-                yield* this.streamBatchResponse({
-                    selectedRoute,
-                    batchSteps,
-                    responseDirectives,
-                    session,
-                    history,
-                    context: effectiveContext,
-                    historyEvents,
-                    batchStoppedReason,
-                });
-            } else {
-                // SINGLE STEP EXECUTION: Fall back to single-step streaming
-                yield* this.processRouteStreamingResponse({
-                    selectedRoute,
-                    selectedStep,
-                    responseDirectives,
-                    session,
-                    history,
-                    context: effectiveContext,
-                    historyEvents,
-                });
-            }
-
-        } else if (isRouteComplete && selectedRoute) {
-            // Handle route completion streaming
-            yield* this.streamRouteCompletion({
-                selectedRoute,
-                session,
-                context: effectiveContext,
-                history,
-                historyEvents,
-            });
-
-        } else {
-            // Fallback: No routes defined, stream a simple response
-            yield* this.streamFallbackResponse({
-                history,
-                context: effectiveContext,
-                session,
-            });
-        }
-    }
-
-    /**
-     * Stream a batch response with multiple steps
-     * 
-     * Similar to executeBatchResponse but streams the LLM response.
-     * 
-     * @private
-     */
-    private async *streamBatchResponse(params: {
-        selectedRoute: Route<TContext, TData>;
-        batchSteps: StepOptions<TContext, TData>[];
-        responseDirectives?: string[];
-        session: SessionState<TData>;
-        history: HistoryItem[];
-        context: TContext;
-        historyEvents: Event[];
-        batchStoppedReason?: StoppedReason;
-        signal?: AbortSignal;
-    }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { selectedRoute, batchSteps, history, context, historyEvents, batchStoppedReason, signal } = params;
-        let session = params.session;
-
-        // Create hook executor function
-        const executeHook = async (
-            hook: HookFunction<TContext, TData>,
-            hookContext: TContext,
-            data?: Partial<TData>,
-            step?: StepOptions<TContext, TData>
-        ): Promise<void> => {
-            const route = selectedRoute;
-            const stepInstance = step?.id ? route.getStep(step.id) : undefined;
-            await this.executePrepareFinalize(hook, hookContext, data, route, stepInstance);
-        };
-
-        // PHASE 1: Execute all prepare hooks
-        const prepareResult = await this.batchExecutor.executePrepareHooks({
-            steps: batchSteps,
-            context,
-            data: session.data,
-            executeHook,
-        });
-
-        if (!prepareResult.success) {
-            // Yield error chunk
-            yield {
-                delta: "",
-                accumulated: "",
-                done: true,
-                session,
-                error: new ResponseGenerationError(
-                    `Prepare hook failed: ${prepareResult.error?.message}`,
-                    { phase: 'prepare_hooks' }
-                ),
-            };
-            return;
-        }
-
-        // PHASE 2: Build combined prompt
-        const batchPromptResult = await this.batchPromptBuilder.buildBatchPrompt({
-            steps: batchSteps,
-            route: selectedRoute,
-            history: historyEvents,
-            context,
-            session,
-            agentOptions: this.agent.getAgentOptions(),
-        });
-
-        const responseSchema = this.buildBatchResponseSchema(batchPromptResult.collectFields);
-        const availableTools = this.collectBatchAvailableTools(selectedRoute, batchSteps);
-
-        // PHASE 3: Stream LLM response
-        const agentOptions = this.agent.getAgentOptions();
-        const stream = agentOptions.provider.generateMessageStream({
-            prompt: batchPromptResult.prompt,
-            history, // Use HistoryItem[] for AI provider
-            context,
-            tools: availableTools,
-            signal,
-            parameters: responseSchema ? { jsonSchema: responseSchema, schemaName: "batch_stream_response" } : undefined,
-        });
-
-        // Build executed steps list
-        const executedSteps: StepRef[] = batchSteps
-            .filter(step => step.id)
-            .map(step => ({
-                id: step.id!,
-                routeId: selectedRoute.id,
-            }));
-
-        // Stream chunks
-        for await (const chunk of stream) {
-            // On final chunk, collect data and execute finalize hooks
-            if (chunk.done) {
-                // Collect data from response
-                if (chunk.structured) {
-                    const collectResult = this.batchExecutor.collectBatchData({
-                        steps: batchSteps,
-                        llmResponse: chunk.structured,
-                        session,
-                        schema: this.agent.getSchema(),
-                    });
-
-                    session = collectResult.session;
-
-                    if (collectResult.collectedData && Object.keys(collectResult.collectedData).length > 0) {
-                        await this.agent.updateCollectedData(collectResult.collectedData);
-                    }
-                }
-
-                // Update session to final step position
-                const lastStep = batchSteps[batchSteps.length - 1];
-                if (lastStep?.id) {
-                    session = enterStep(session, lastStep.id, lastStep.description);
-                }
-
-                // Execute finalize hooks
-                await this.batchExecutor.executeFinalizeHooks({
-                    steps: batchSteps,
-                    context,
-                    data: session.data,
-                    executeHook,
-                });
-
-                // Finalize session
-                await this.finalizeSession(session, context);
-            }
-
-            yield {
-                delta: chunk.delta,
-                accumulated: chunk.accumulated,
-                done: chunk.done,
-                session,
-                toolCalls: chunk.structured?.toolCalls,
-                isRouteComplete: false,
-                executedSteps: chunk.done ? executedSteps : undefined,
-                stoppedReason: chunk.done ? batchStoppedReason : undefined,
-                metadata: chunk.metadata,
-                structured: chunk.structured,
-            };
-        }
     }
 
     /**
@@ -1339,19 +1315,24 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
        * @private
        */
     private async executeStepPrepare(session: SessionState<TData>, context: TContext): Promise<void> {
-        if (session.currentRoute && session.currentStep) {
-            const currentRoute = this.agent.getRoutes().find(
-                (r) => r.id === session.currentRoute?.id
+        if (session.currentFlow && session.currentStep) {
+            const currentFlow = this.agent.getFlows().find(
+                (r) => r.id === session.currentFlow?.id
             );
-            if (currentRoute) {
-                const currentStep = currentRoute.getStep(session.currentStep.id);
+            if (currentFlow) {
+                const currentStep = currentFlow.getStep(session.currentStep.id);
+                // Skip auto-steps — their prepare is handled by AutoChainExecutor
+                if (currentStep?.auto) {
+                    logger.debug(`[ResponseModal] Skipping pre-routing prepare for auto-step: ${currentStep.id}`);
+                    return;
+                }
                 if (currentStep?.prepare) {
                     logger.debug(`[ResponseModal] Executing prepare for step: ${currentStep.id}`);
                     await this.executePrepareFinalize(
                         currentStep.prepare,
                         context,
                         session.data,
-                        currentRoute,
+                        currentFlow,
                         currentStep
                     );
                 }
@@ -1364,12 +1345,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async executeStepFinalize(session: SessionState<TData>, context: TContext): Promise<void> {
-        if (session.currentRoute && session.currentStep) {
-            const currentRoute = this.agent.getRoutes().find(
-                (r) => r.id === session.currentRoute?.id
+        if (session.currentFlow && session.currentStep) {
+            const currentFlow = this.agent.getFlows().find(
+                (r) => r.id === session.currentFlow?.id
             );
-            if (currentRoute) {
-                const currentStep = currentRoute.getStep(session.currentStep.id);
+            if (currentFlow) {
+                const currentStep = currentFlow.getStep(session.currentStep.id);
                 if (currentStep?.finalize) {
                     logger.debug(
                         `[ResponseModal] Executing finalize for step: ${currentStep.id}`
@@ -1378,7 +1359,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         currentStep.finalize,
                         context,
                         session.data,
-                        currentRoute,
+                        currentFlow,
                         currentStep
                     );
                 }
@@ -1387,11 +1368,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Process route response with unified tool execution and data collection
+     * Process flow response with unified tool execution and data collection
      * @private
      */
-    private async processRouteResponse(params: {
-        selectedRoute: Route<TContext, TData>;
+    private async processFlowResponse(params: {
+        selectedFlow: Flow<TContext, TData>;
         selectedStep?: Step<TContext, TData>;
         responseDirectives?: string[];
         session: SessionState<TData>;
@@ -1399,12 +1380,24 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         context: TContext;
         historyEvents: Event[];
         signal?: AbortSignal;
+        /**
+         * Per-turn transient appendage from merged PreDirective.appendPrompt.
+         * Fresh every turn, never cached, never persisted.
+         */
+        transientAppendage?: string[];
+        /**
+         * Merged PreDirective from the directive bus's pre-LLM phase drain.
+         * When `halt: true`, the LLM call is skipped entirely.
+         */
+        mergedPreDirective?: PreDirective<TContext, TData>;
     }): Promise<{
         message: string;
         toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         session: SessionState<TData>;
+        appliedInstructions?: AppliedInstruction[];
+        stoppedReason?: StoppedReason;
     }> {
-        const { selectedRoute, selectedStep, responseDirectives, history, context, historyEvents, signal } = params;
+        const { selectedFlow, selectedStep, responseDirectives, history, context, historyEvents, signal, transientAppendage, mergedPreDirective } = params;
         let session = params.session;
 
         // Determine next step
@@ -1412,31 +1405,50 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (selectedStep) {
             nextStep = selectedStep;
         } else {
-            // Determine current step from session if we're already in this route
-            const isInSameRoute = session.currentRoute?.id === selectedRoute.id;
-            const currentStep = isInSameRoute && session.currentStep
-                ? selectedRoute.getStep(session.currentStep.id)
+            // Determine current step from session if we're already in this flow
+            const isInSameFlow = session.currentFlow?.id === selectedFlow.id;
+            const currentStep = isInSameFlow && session.currentStep
+                ? selectedFlow.getStep(session.currentStep.id)
                 : undefined;
 
-            logger.debug(`[ResponseModal] Step determination: route match=${isInSameRoute}, currentRoute=${session.currentRoute?.id}, selectedRoute=${selectedRoute.id}, currentStep=${currentStep?.id || 'none'}`);
+            logger.debug(`[ResponseModal] Step determination: flow match=${isInSameFlow}, currentFlow=${session.currentFlow?.id}, selectedFlow=${selectedFlow.id}, currentStep=${currentStep?.id || 'none'}`);
 
-            // Get candidate steps based on current position in the route
-            const routingEngine = this.agent.getRoutingEngine();
-            const candidates = await routingEngine.getCandidateStepsWithConditions(
-                selectedRoute,
-                currentStep, // Pass current step instead of undefined to maintain progression
-                createTemplateContext({ data: session.data, session, context })
-            );
+            // STEP 1 (Algorithm 1): branches win over linear chain
+            if (currentStep?.branches && currentStep.branches.length > 0) {
+                const branchResult = await this.responsePipeline.evaluateStepBranches(
+                    currentStep, selectedFlow, session, context
+                );
+                if (branchResult) {
+                    if (branchResult.nextStep) {
+                        nextStep = branchResult.nextStep;
+                        session = branchResult.session;
+                    } else {
+                        // Flow transition or completion — no local step to render
+                        // Return empty message with updated session; caller handles flow transition
+                        return { message: '', session: branchResult.session };
+                    }
+                }
+            }
 
-            logger.debug(`[ResponseModal] Found ${candidates.length} candidate steps${currentStep ? ' from current step ' + currentStep.id : ' (new route entry)'}`);
+            if (!nextStep!) {
+                // Get candidate steps based on current position in the flow
+                const flowRouter = this.agent.getFlowRouter();
+                const candidates = await flowRouter.getCandidateStepsWithConditions(
+                    selectedFlow,
+                    currentStep, // Pass current step instead of undefined to maintain progression
+                    createTemplateContext({ data: session.data, session, context })
+                );
 
-            if (candidates.length > 0) {
-                nextStep = candidates[0].step;
-                logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`);
-            } else {
-                // Fallback to initial step even if it should be skipped
-                nextStep = selectedRoute.initialStep;
-                logger.warn(`[ResponseModal] No valid steps found, using initial step: ${nextStep.id}`);
+                logger.debug(`[ResponseModal] Found ${candidates.length} candidate steps${currentStep ? ' from current step ' + currentStep.id : ' (new flow entry)'}`);
+
+                if (candidates.length > 0) {
+                    nextStep = candidates[0].step;
+                    logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`);
+                } else {
+                    // Fallback to initial step even if it should be skipped
+                    nextStep = selectedFlow.initialStep;
+                    logger.warn(`[FlowConfigurationError] No valid steps found: all candidates were skipped in flow. Falling back to initial step "${nextStep.id}". Review step skip conditions.`);
+                }
             }
         }
 
@@ -1448,14 +1460,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 field => (sessionData as Record<string, unknown>)[String(field)] === undefined
             );
             if (missingRequires.length > 0) {
-                const warning = `[Agent] Cannot advance to step "${nextStep.description || nextStep.id}": ` +
-                    `missing required fields [${missingRequires.join(', ')}]. Staying at current step.`;
+                const warning = `[FlowConfigurationError] Cannot advance to step "${nextStep.description || nextStep.id}": ` +
+                    `missing required fields [${missingRequires.join(', ')}]. Staying at current step. Ensure preceding steps collect these fields.`;
                 logger.warn(warning);
                 console.warn(warning);
                 // Stay at the current step - don't enter the next one
                 const currentStepId = session.currentStep?.id;
                 if (currentStepId) {
-                    const currentStepInstance = selectedRoute.getStep(currentStepId);
+                    const currentStepInstance = selectedFlow.getStep(currentStepId);
                     if (currentStepInstance) {
                         nextStep = currentStepInstance;
                         logger.debug(`[ResponseModal] Staying at current step: ${nextStep.id} due to missing requires`);
@@ -1470,86 +1482,315 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
         }
 
-        // Build response schema for this route (with collect fields from step)
-        const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, nextStep, this.agent.getSchema());
+        // Build response schema for this flow (with collect fields from step)
+        const responseSchema = this.responseEngine.responseSchemaForFlow(selectedFlow, nextStep, this.agent.schema);
 
-        // Build response prompt
-        const responsePrompt = await this.responseEngine.buildResponsePrompt({
-            route: selectedRoute,
-            currentStep: nextStep,
-            rules: selectedRoute.getRules(),
-            prohibitions: selectedRoute.getProhibitions(),
-            directives: responseDirectives,
-            history: historyEvents,
-            agentOptions: this.agent.getAgentOptions(),
-            combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
-            combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
-            context,
-            session,
-            agentSchema: this.agent.getSchema(),
-        });
-
-        // Collect available tools for AI
-        const availableTools = this.collectAvailableTools(selectedRoute, nextStep);
-
-        // Generate message using AI provider
-        const agentOptions = this.agent.getAgentOptions();
-        const result = await agentOptions.provider.generateMessage({
-            prompt: responsePrompt,
-            history, // Use HistoryItem[] for AI provider
-            context,
-            tools: availableTools,
-            signal,
-            parameters: responseSchema ? { jsonSchema: responseSchema, schemaName: "response_output" } : undefined,
-        });
-
-        let message = result.structured?.message || result.message;
-        let toolCalls = result.structured?.toolCalls;
-
-        // Debug: Log initial AI response
-        logger.debug(`[ResponseModal] Initial AI response:`, {
-            hasMessage: !!message,
-            messageLength: message?.length || 0,
-            hasToolCalls: !!toolCalls,
-            toolCallsCount: toolCalls?.length || 0,
-            toolNames: toolCalls?.map(tc => tc.toolName) || [],
-        });
-
-        // Execute tools with unified loop handling
-        const toolResult = await this.executeUnifiedToolLoop({
-            toolCalls,
-            context,
-            session,
-            history,
-            selectedRoute,
-            responsePrompt,
-            availableTools,
-            responseSchema,
-            signal,
-        });
-
-        session = toolResult.session;
-        toolCalls = toolResult.finalToolCalls;
-        if (toolResult.finalMessage) {
-            message = toolResult.finalMessage;
+        // ── HALT SHORT-CIRCUIT (Requirement 2.5, 2.6, 2.7) ──────────────────────
+        // After pre-LLM emissions are merged, if `halt: true` then skip the LLM
+        // call entirely. The behavior depends on whether `reply` is also set.
+        if (mergedPreDirective?.halt) {
+            if (mergedPreDirective.reply) {
+                // halt + reply: emit the reply as the assistant message
+                logger.debug(`[ResponseModal] Halt with reply — skipping LLM call for step ${nextStep.id}`);
+                return { message: mergedPreDirective.reply, session, stoppedReason: 'reply' };
+            } else {
+                // halt without reply: emit empty assistant content
+                logger.debug(`[ResponseModal] Halt without reply — skipping LLM call for step ${nextStep.id}`);
+                return { message: '', session, stoppedReason: 'halt' };
+            }
         }
 
-        // Collect data from response
-        // Use follow-up structured data from tool loop when available, fall back to original result
-        const dataSource = toolResult.structured
-            ? { structured: toolResult.structured }
-            : result;
-        session = await this.collectDataFromResponse({ result: dataSource, selectedRoute, nextStep, session });
+        // ── STEP.REPLY SHORT-CIRCUIT (Requirement 25.1–25.7, 17.9) ──────────────
+        // A step with `reply` set emits a verbatim template response without LLM.
+        // onEnter and prepare have already fired normally at this point.
+        // If prepare returned a PreDirective with `reply`, that overrides
+        // the step-declared reply (last-emission-wins per Algorithm 4).
+        if (nextStep.reply != null) {
+            // Determine the effective reply: prepare-emitted reply wins over step-declared
+            const effectiveReply = mergedPreDirective?.reply ?? await render(
+                nextStep.reply,
+                createTemplateContext({ data: session.data || {}, context, session })
+            );
+            logger.debug(`[ResponseModal] Step.reply — skipping LLM call for step ${nextStep.id}`);
+            return { message: effectiveReply, session, stoppedReason: 'reply' };
+        }
 
-        return { message, toolCalls, session };
+        // Transient appendage: per-turn slot from PreDirective.appendPrompt.
+        // Fresh each turn, never cached, never persisted.
+        // Wrapped in try/finally to ensure cleanup even on abnormal termination.
+        let turnTransientAppendage: string[] | undefined = transientAppendage;
+        try {
+            // Build response prompt
+            const { prompt: responsePrompt, appliedInstructions } = await this.responseEngine.buildResponsePrompt({
+                flow: selectedFlow,
+                currentStep: nextStep,
+                rules: [],
+                prohibitions: [],
+                directives: responseDirectives,
+                history: historyEvents,
+                agentOptions: this.agent.getAgentOptions(),
+                instructions: this.collectScopedInstructions(selectedFlow, nextStep),
+                combinedTerms: this.agent.getTerms(),
+                context,
+                session,
+                agentSchema: this.agent.schema,
+                transientAppendage: turnTransientAppendage,
+            });
+
+            // Collect available tools for AI
+            const availableTools = this.collectAvailableTools(selectedFlow, nextStep);
+
+            // Generate message using AI provider
+            const agentOptions = this.agent.getAgentOptions();
+            const result = await agentOptions.provider.generateMessage({
+                prompt: responsePrompt,
+                history, // Use HistoryItem[] for AI provider
+                context,
+                tools: availableTools,
+                signal,
+                parameters: responseSchema ? { jsonSchema: responseSchema, schemaName: "response_output" } : undefined,
+            });
+
+            let message = result.structured?.message || result.message;
+            let toolCalls = result.structured?.toolCalls;
+
+            // Debug: Log initial AI response
+            logger.debug(`[ResponseModal] Initial AI response:`, {
+                hasMessage: !!message,
+                messageLength: message?.length || 0,
+                hasToolCalls: !!toolCalls,
+                toolCallsCount: toolCalls?.length || 0,
+                toolNames: toolCalls?.map(tc => tc.toolName) || [],
+            });
+
+            // Execute tools with unified loop handling
+            const toolResult = await this.executeUnifiedToolLoop({
+                toolCalls,
+                context,
+                session,
+                history,
+                selectedFlow,
+                responsePrompt,
+                availableTools,
+                responseSchema,
+                signal,
+            });
+
+            session = toolResult.session;
+            toolCalls = toolResult.finalToolCalls;
+            if (toolResult.finalMessage) {
+                message = toolResult.finalMessage;
+            }
+
+            // Collect data from response
+            // Use follow-up structured data from tool loop when available, fall back to original result
+            const dataSource = toolResult.structured
+                ? { structured: toolResult.structured }
+                : result;
+            session = await this.collectDataFromResponse({ result: dataSource, selectedFlow, nextStep, session });
+
+            return { message, toolCalls, session, appliedInstructions };
+        } finally {
+            // Drain the transient appendage at end of turn.
+            // This ensures PreDirective.appendPrompt does not leak to subsequent
+            // turns even when the turn terminates abnormally (error, abort, reject).
+            turnTransientAppendage = undefined;
+        }
     }
 
     /**
-     * Process route streaming response with unified tool execution and data collection
+     * Unified streaming response generation
      * @private
      */
-    private async *processRouteStreamingResponse(params: {
-        selectedRoute: Route<TContext, TData>;
+    private async *generateUnifiedStreamingResponse(
+        responseContext: ResponseContext<TContext, TData>
+    ): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+        const {
+            effectiveContext,
+            session: initialSession,
+            history,
+            selectedFlow,
+            selectedStep,
+            responseDirectives,
+            isFlowComplete,
+            signal,
+            signalFirings: preSignalFirings,
+            signalPreDirective,
+            signalHalted,
+            signalHaltReply,
+        } = responseContext;
+        let session = initialSession;
+
+        // Accumulator for signal firings across both phases (fire order)
+        const signalFirings: SignalFiring<TContext, TData>[] = [...(preSignalFirings || [])];
+
+        // Convert HistoryItem[] to Event[] for internal processing
+        const historyEvents = historyToEvents(history);
+
+        // ── SIGNAL HALT (Requirement 8.2) ─────────────────────────────────────
+        if (signalHalted) {
+            const haltMessage = signalHaltReply || '';
+            // Run post-signal phase even on halt
+            const postResult = await this.responsePipeline.runPostSignalPhase(
+                session, effectiveContext, historyEvents,
+            );
+            session = postResult.updatedSession;
+            signalFirings.push(...postResult.firings);
+
+            if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
+                session = { ...session, pendingDirective: postResult.mergedDirective };
+            }
+
+            await this.finalizeSession(session, effectiveContext);
+            yield {
+                delta: haltMessage,
+                accumulated: haltMessage,
+                done: true,
+                session,
+                stoppedReason: haltMessage ? 'reply' : 'halt',
+                executedSteps: [],
+                triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+            } as AgentResponseStreamChunk<TData>;
+            return;
+        }
+
+        // ── Determine the inner stream generator based on flow state ────────
+        let innerStream: AsyncGenerator<AgentResponseStreamChunk<TData>>;
+
+        if (selectedFlow && !isFlowComplete) {
+            // AUTO-CHAIN: Walk consecutive auto-steps before any LLM work (streaming path).
+            let resolvedStep = selectedStep;
+            const currentStepInstance = session.currentStep
+                ? selectedFlow.getStep(session.currentStep.id)
+                : selectedStep;
+
+            if (currentStepInstance?.auto) {
+                const autoChainExecutor = new AutoChainExecutor<TContext, TData>({
+                    maxAutoStepsPerTurn: this.agent.maxAutoStepsPerTurn,
+                });
+                const autoResult: AutoChainResult<TContext, TData> = await autoChainExecutor.run({
+                    session,
+                    context: effectiveContext,
+                    flow: selectedFlow,
+                });
+
+                session = autoResult.session;
+
+                // Handle halt: emit verbatim reply as a single chunk, done.
+                if (autoResult.stoppedReason === 'halt') {
+                    const reply = autoResult.mergedDirective?.reply || '';
+                    await this.finalizeSession(session, effectiveContext);
+                    yield {
+                        delta: reply,
+                        accumulated: reply,
+                        done: true,
+                        session,
+                        stoppedReason: 'halt',
+                        executedSteps: [],
+                        triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+                    } as AgentResponseStreamChunk<TData>;
+                    return;
+                }
+
+                // Handle flow completion or cross-flow redirect from auto-chain.
+                if (autoResult.stoppedReason === 'last_step' || autoResult.stoppedReason === 'completed' || autoResult.stoppedReason === 'goto') {
+                    innerStream = this.streamFlowCompletion({
+                        selectedFlow,
+                        session,
+                        context: effectiveContext,
+                        history,
+                        historyEvents,
+                        stoppedReason: autoResult.stoppedReason,
+                    });
+                } else {
+                    // Normal case: resolved to an interactive step.
+                    resolvedStep = autoResult.resolvedStep;
+                    innerStream = this.processFlowStreamingResponse({
+                        selectedFlow,
+                        selectedStep: resolvedStep,
+                        responseDirectives,
+                        session,
+                        history,
+                        context: effectiveContext,
+                        historyEvents,
+                        signal,
+                        transientAppendage: signalPreDirective?.appendPrompt,
+                        mergedPreDirective: signalPreDirective,
+                    });
+                }
+            } else {
+                // No auto-step: directly stream the interactive step.
+                innerStream = this.processFlowStreamingResponse({
+                    selectedFlow,
+                    selectedStep: resolvedStep,
+                    responseDirectives,
+                    session,
+                    history,
+                    context: effectiveContext,
+                    historyEvents,
+                    signal,
+                    // Propagate signal pre-directive's appendPrompt for this turn's LLM call
+                    transientAppendage: signalPreDirective?.appendPrompt,
+                    mergedPreDirective: signalPreDirective,
+                });
+            }
+
+        } else if (isFlowComplete && selectedFlow) {
+            // Handle flow completion streaming — implicit terminus (no successor
+            // or all successors skipped), so the reason is 'last_step'.
+            innerStream = this.streamFlowCompletion({
+                selectedFlow,
+                session,
+                context: effectiveContext,
+                history,
+                historyEvents,
+                stoppedReason: 'last_step',
+            });
+
+        } else {
+            // Fallback: No flows defined, stream a simple response
+            innerStream = this.streamFallbackResponse({
+                history,
+                context: effectiveContext,
+                session,
+            });
+        }
+
+        // ── Intercept the inner stream to run post-signal phase on the final chunk ──
+        // This mirrors the non-streaming path: post-phase runs after finalize/onComplete
+        // and before session persistence, attaching triggeredSignals to the final chunk
+        // (Requirement 11.2).
+        for await (const chunk of innerStream!) {
+            if (chunk.done) {
+                // Run post-signal phase on final chunk (Requirement 9.1, 9.2)
+                const postResult = await this.responsePipeline.runPostSignalPhase(
+                    chunk.session || session, effectiveContext, historyEvents,
+                );
+                let finalSession = postResult.updatedSession;
+                signalFirings.push(...postResult.firings);
+
+                // Requirement 9.3: Post-phase position directive sets session.pendingDirective
+                if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
+                    finalSession = { ...finalSession, pendingDirective: postResult.mergedDirective };
+                }
+
+                yield {
+                    ...chunk,
+                    session: finalSession,
+                    triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+                } as AgentResponseStreamChunk<TData>;
+            } else {
+                yield chunk;
+            }
+        }
+    }
+
+    /**
+     * Process flow streaming response with unified tool execution and data collection
+     * @private
+     */
+    private async *processFlowStreamingResponse(params: {
+        selectedFlow: Flow<TContext, TData>;
         selectedStep?: Step<TContext, TData>;
         responseDirectives?: string[];
         session: SessionState<TData>;
@@ -1557,8 +1798,18 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         context: TContext;
         historyEvents: Event[];
         signal?: AbortSignal;
+        /**
+         * Per-turn transient appendage from merged PreDirective.appendPrompt.
+         * Fresh every turn, never cached, never persisted.
+         */
+        transientAppendage?: string[];
+        /**
+         * Merged PreDirective from the directive bus's pre-LLM phase drain.
+         * When `halt: true`, the LLM call is skipped entirely.
+         */
+        mergedPreDirective?: PreDirective<TContext, TData>;
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { selectedRoute, selectedStep, responseDirectives, history, context, historyEvents, signal } = params;
+        const { selectedFlow, selectedStep, responseDirectives, history, context, historyEvents, signal, transientAppendage, mergedPreDirective } = params;
         let session = params.session;
 
         // Determine next step (same logic as non-streaming)
@@ -1566,25 +1817,50 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (selectedStep) {
             nextStep = selectedStep;
         } else {
-            // Determine current step from session if we're already in this route
-            const currentStep = session.currentRoute?.id === selectedRoute.id && session.currentStep
-                ? selectedRoute.getStep(session.currentStep.id)
+            // Determine current step from session if we're already in this flow
+            const currentStep = session.currentFlow?.id === selectedFlow.id && session.currentStep
+                ? selectedFlow.getStep(session.currentStep.id)
                 : undefined;
 
-            // Get candidate steps based on current position in the route
-            const routingEngine = this.agent.getRoutingEngine();
-            const candidates = await routingEngine.getCandidateStepsWithConditions(
-                selectedRoute,
-                currentStep, // Pass current step instead of undefined to maintain progression
-                createTemplateContext({ data: session.data, session, context })
-            );
+            // STEP 1 (Algorithm 1): branches win over linear chain
+            if (currentStep?.branches && currentStep.branches.length > 0) {
+                const branchResult = await this.responsePipeline.evaluateStepBranches(
+                    currentStep, selectedFlow, session, context
+                );
+                if (branchResult) {
+                    // Branch resolved — yield a final chunk with the updated session and return
+                    if (branchResult.nextStep) {
+                        session = branchResult.session;
+                        nextStep = branchResult.nextStep;
+                    } else {
+                        // Flow transition or completion — no step to render
+                        yield {
+                            delta: '',
+                            accumulated: '',
+                            done: true,
+                            session: branchResult.session,
+                        } as AgentResponseStreamChunk<TData>;
+                        return;
+                    }
+                }
+            }
 
-            if (candidates.length > 0) {
-                nextStep = candidates[0].step;
-                logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new route'}`);
-            } else {
-                nextStep = selectedRoute.initialStep;
-                logger.warn(`[ResponseModal] No valid steps found, using initial step: ${nextStep.id}`);
+            if (!nextStep!) {
+                // Get candidate steps based on current position in the flow
+                const flowRouter = this.agent.getFlowRouter();
+                const candidates = await flowRouter.getCandidateStepsWithConditions(
+                    selectedFlow,
+                    currentStep, // Pass current step instead of undefined to maintain progression
+                    createTemplateContext({ data: session.data, session, context })
+                );
+
+                if (candidates.length > 0) {
+                    nextStep = candidates[0].step;
+                    logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`);
+                } else {
+                    nextStep = selectedFlow.initialStep;
+                    logger.warn(`[FlowConfigurationError] No valid steps found: all candidates were skipped in flow. Falling back to initial step "${nextStep.id}". Review step skip conditions.`);
+                }
             }
         }
 
@@ -1596,13 +1872,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 field => (sessionData as Record<string, unknown>)[String(field)] === undefined
             );
             if (missingRequires.length > 0) {
-                const warning = `[Agent] Cannot advance to step "${nextStep.description || nextStep.id}": ` +
-                    `missing required fields [${missingRequires.join(', ')}]. Staying at current step.`;
+                const warning = `[FlowConfigurationError] Cannot advance to step "${nextStep.description || nextStep.id}": ` +
+                    `missing required fields [${missingRequires.join(', ')}]. Staying at current step. Ensure preceding steps collect these fields.`;
                 logger.warn(warning);
                 console.warn(warning);
                 const currentStepId = session.currentStep?.id;
                 if (currentStepId) {
-                    const currentStepInstance = selectedRoute.getStep(currentStepId);
+                    const currentStepInstance = selectedFlow.getStep(currentStepId);
                     if (currentStepInstance) {
                         nextStep = currentStepInstance;
                         logger.debug(`[ResponseModal] Staying at current step: ${nextStep.id} due to missing requires`);
@@ -1618,152 +1894,207 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         }
 
         // Build response schema and prompt (same as non-streaming)
-        const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, nextStep, this.agent.getSchema());
-        const responsePrompt = await this.responseEngine.buildResponsePrompt({
-            route: selectedRoute,
-            currentStep: nextStep,
-            rules: selectedRoute.getRules(),
-            prohibitions: selectedRoute.getProhibitions(),
-            directives: responseDirectives,
-            history: historyEvents,
-            agentOptions: this.agent.getAgentOptions(),
-            combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
-            combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
-            context,
-            session,
-            agentSchema: this.agent.getSchema(),
-        });
+        const responseSchema = this.responseEngine.responseSchemaForFlow(selectedFlow, nextStep, this.agent.schema);
 
-        // Collect available tools for AI
-        const availableTools = this.collectAvailableTools(selectedRoute, nextStep);
+        // ── HALT SHORT-CIRCUIT (Requirement 2.5, 2.6, 2.7) ──────────────────────
+        // After pre-LLM emissions are merged, if `halt: true` then skip the LLM
+        // call entirely. Emit a single done chunk with the appropriate content.
+        if (mergedPreDirective?.halt) {
+            const reply = mergedPreDirective.reply || '';
+            const reason: StoppedReason = mergedPreDirective.reply ? 'reply' : 'halt';
+            logger.debug(`[ResponseModal] Halt (streaming) — skipping LLM call for step ${nextStep.id}, stoppedReason: ${reason}`);
+            await this.finalizeSession(session, context);
+            yield {
+                delta: reply,
+                accumulated: reply,
+                done: true,
+                session,
+                stoppedReason: reason,
+                executedSteps: [{ id: nextStep.id, flowId: selectedFlow.id }],
+            } as AgentResponseStreamChunk<TData>;
+            return;
+        }
 
-        // Generate message stream using AI provider
-        const agentOptions = this.agent.getAgentOptions();
-        const stream = agentOptions.provider.generateMessageStream({
-            prompt: responsePrompt,
-            history, // Use HistoryItem[] for AI provider
-            context,
-            tools: availableTools,
-            signal,
-            parameters: { jsonSchema: responseSchema, schemaName: "response_stream_output" },
-        });
+        // ── STEP.REPLY SHORT-CIRCUIT (Requirement 25.1–25.7, 17.9) ──────────────
+        // A step with `reply` set emits a verbatim template response without LLM.
+        // onEnter and prepare have already fired normally. If prepare returned
+        // a PreDirective with `reply`, that overrides the step-declared reply.
+        if (nextStep.reply != null) {
+            const effectiveReply = mergedPreDirective?.reply ?? await render(
+                nextStep.reply,
+                createTemplateContext({ data: session.data || {}, context, session })
+            );
+            logger.debug(`[ResponseModal] Step.reply (streaming) — skipping LLM call for step ${nextStep.id}`);
+            await this.finalizeSession(session, context);
+            yield {
+                delta: effectiveReply,
+                accumulated: effectiveReply,
+                done: true,
+                session,
+                stoppedReason: 'reply' as StoppedReason,
+                executedSteps: [{ id: nextStep.id, flowId: selectedFlow.id }],
+            } as AgentResponseStreamChunk<TData>;
+            return;
+        }
 
-        // Stream chunks with unified tool handling
-        for await (const chunk of stream) {
-            let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
+        // Transient appendage: per-turn slot from PreDirective.appendPrompt.
+        // Fresh each turn, never cached, never persisted.
+        // Wrapped in try/finally to ensure cleanup even on abnormal termination.
+        let turnTransientAppendage: string[] | undefined = transientAppendage;
+        try {
+            const { prompt: responsePrompt, appliedInstructions } = await this.responseEngine.buildResponsePrompt({
+                flow: selectedFlow,
+                currentStep: nextStep,
+                rules: [],
+                prohibitions: [],
+                directives: responseDirectives,
+                history: historyEvents,
+                agentOptions: this.agent.getAgentOptions(),
+                instructions: this.collectScopedInstructions(selectedFlow, nextStep),
+                combinedTerms: this.agent.getTerms(),
+                context,
+                session,
+                agentSchema: this.agent.schema,
+                transientAppendage: turnTransientAppendage,
+            });
 
-            // Extract tool calls from AI response on final chunk
-            if (chunk.done && chunk.structured?.toolCalls) {
-                toolCalls = chunk.structured.toolCalls;
+            // Collect available tools for AI
+            const availableTools = this.collectAvailableTools(selectedFlow, nextStep);
 
-                const toolManager = this.getToolManager();
+            // Generate message stream using AI provider
+            const agentOptions = this.agent.getAgentOptions();
+            const stream = agentOptions.provider.generateMessageStream({
+                prompt: responsePrompt,
+                history, // Use HistoryItem[] for AI provider
+                context,
+                tools: availableTools,
+                signal,
+                parameters: { jsonSchema: responseSchema, schemaName: "response_stream_output" },
+            });
 
-                // Use concurrent execution for the initial batch of tool calls
-                if (toolManager && typeof toolManager.executeWithConcurrency === 'function') {
-                    const toolCallRequests: ToolCallRequest[] = toolCalls.map((tc, i) => ({
-                        id: `${tc.toolName}-${i}-${Date.now()}`,
-                        toolName: tc.toolName,
-                        arguments: tc.arguments,
-                    }));
+            // Stream chunks with unified tool handling
+            for await (const chunk of stream) {
+                let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
 
-                    const historyEvents = historyToEvents(history);
+                // Extract tool calls from AI response on final chunk
+                if (chunk.done && chunk.structured?.toolCalls) {
+                    toolCalls = chunk.structured.toolCalls;
 
-                    try {
-                        for await (const update of toolManager.executeWithConcurrency({
-                            toolCalls: toolCallRequests,
-                            context,
-                            data: session.data,
-                            history: historyEvents,
-                            signal,
-                            route: selectedRoute,
-                            step: nextStep,
-                        })) {
-                            // Apply context updates
-                            if (update.contextUpdate) {
-                                try {
-                                    await this.agent.updateContext(update.contextUpdate as Partial<TContext>);
-                                } catch (error) {
-                                    logger.error(`[ResponseModal] Failed to update context from concurrent tool:`, error);
+                    const toolManager = this.getToolManager();
+
+                    // Use concurrent execution for the initial batch of tool calls
+                    if (toolManager && typeof toolManager.executeWithConcurrency === 'function') {
+                        const toolCallRequests: ToolCallRequest[] = toolCalls.map((tc, i) => ({
+                            id: `${tc.toolName}-${i}-${Date.now()}`,
+                            toolName: tc.toolName,
+                            arguments: tc.arguments,
+                        }));
+
+                        const historyEvents = historyToEvents(history);
+
+                        try {
+                            for await (const update of toolManager.executeWithConcurrency({
+                                toolCalls: toolCallRequests,
+                                context,
+                                data: session.data,
+                                history: historyEvents,
+                                signal,
+                                flow: selectedFlow,
+                                step: nextStep,
+                            })) {
+                                // Apply context updates
+                                if (update.contextUpdate) {
+                                    try {
+                                        await this.agent.updateContext(update.contextUpdate as Partial<TContext>);
+                                    } catch (error) {
+                                        logger.error(`[ResponseModal] Failed to update context from concurrent tool:`, error);
+                                    }
+                                }
+
+                                // Apply data updates
+                                if (update.dataUpdate) {
+                                    try {
+                                        const updateDataMethod = this.agent.getUpdateDataMethod();
+                                        session = await updateDataMethod(session, update.dataUpdate);
+                                    } catch (error) {
+                                        logger.error(`[ResponseModal] Failed to update data from concurrent tool:`, error);
+                                    }
+                                }
+
+                                // Yield progress updates immediately
+                                if (update.progress) {
+                                    yield {
+                                        delta: '',
+                                        accumulated: chunk.accumulated,
+                                        done: false,
+                                        session,
+                                        toolCalls: undefined,
+                                        isFlowComplete: false,
+                                        metadata: { toolProgress: update.progress, toolCallId: update.toolCallId },
+                                    };
                                 }
                             }
 
-                            // Apply data updates
-                            if (update.dataUpdate) {
-                                try {
-                                    const updateDataMethod = this.agent.getUpdateDataMethod();
-                                    session = await updateDataMethod(session, update.dataUpdate);
-                                } catch (error) {
-                                    logger.error(`[ResponseModal] Failed to update data from concurrent tool:`, error);
-                                }
-                            }
-
-                            // Yield progress updates immediately
-                            if (update.progress) {
-                                yield {
-                                    delta: '',
-                                    accumulated: chunk.accumulated,
-                                    done: false,
-                                    session,
-                                    toolCalls: undefined,
-                                    isRouteComplete: false,
-                                    metadata: { toolProgress: update.progress, toolCallId: update.toolCallId },
-                                };
-                            }
+                            logger.debug(`[ResponseModal] Concurrent tool execution completed for ${toolCallRequests.length} tools`);
+                        } catch (error) {
+                            logger.error(`[ResponseModal] Concurrent tool execution failed, falling back to sequential:`, error);
+                            // Fall back to the unified tool loop on failure
+                            const toolResult = await this.executeUnifiedToolLoop({
+                                toolCalls, context, session, history, selectedFlow,
+                                responsePrompt, availableTools, responseSchema, signal,
+                            });
+                            session = toolResult.session;
+                            toolCalls = toolResult.finalToolCalls;
                         }
-
-                        logger.debug(`[ResponseModal] Concurrent tool execution completed for ${toolCallRequests.length} tools`);
-                    } catch (error) {
-                        logger.error(`[ResponseModal] Concurrent tool execution failed, falling back to sequential:`, error);
-                        // Fall back to the unified tool loop on failure
+                    } else {
+                        // Fallback: no ToolManager or no executeWithConcurrency, use unified tool loop
                         const toolResult = await this.executeUnifiedToolLoop({
-                            toolCalls, context, session, history, selectedRoute,
+                            toolCalls, context, session, history, selectedFlow,
                             responsePrompt, availableTools, responseSchema, signal,
                         });
                         session = toolResult.session;
                         toolCalls = toolResult.finalToolCalls;
                     }
-                } else {
-                    // Fallback: no ToolManager or no executeWithConcurrency, use unified tool loop
-                    const toolResult = await this.executeUnifiedToolLoop({
-                        toolCalls, context, session, history, selectedRoute,
-                        responsePrompt, availableTools, responseSchema, signal,
-                    });
-                    session = toolResult.session;
-                    toolCalls = toolResult.finalToolCalls;
                 }
-            }
 
-            // Extract collected data on final chunk
-            if (chunk.done && chunk.structured && nextStep.collect) {
-                session = await this.collectDataFromResponse({
-                    result: { structured: chunk.structured },
-                    selectedRoute,
-                    nextStep,
+                // Extract collected data on final chunk
+                if (chunk.done && chunk.structured && nextStep.collect) {
+                    session = await this.collectDataFromResponse({
+                        result: { structured: chunk.structured },
+                        selectedFlow,
+                        nextStep,
+                        session,
+                    });
+                }
+
+                // Handle session finalization on final chunk
+                if (chunk.done) {
+                    await this.finalizeSession(session, context);
+                }
+
+                // Response structure completeness (Requirement 8.1, 8.2, 8.3)
+                // - executedSteps: single step executed in this response
+                // - stoppedReason: 'needs_input' for single-step execution (waiting for user input)
+                // - session.currentStep: reflects the executed step
+                yield {
+                    delta: chunk.delta,
+                    accumulated: chunk.accumulated,
+                    done: chunk.done,
                     session,
-                });
+                    toolCalls,
+                    isFlowComplete: false,
+                    executedSteps: chunk.done ? [{ id: nextStep.id, flowId: selectedFlow.id }] : undefined,
+                    stoppedReason: chunk.done ? 'needs_input' : undefined,
+                    metadata: chunk.metadata,
+                    structured: chunk.structured,
+                    appliedInstructions: chunk.done ? appliedInstructions : undefined,
+                };
             }
-
-            // Handle session finalization on final chunk
-            if (chunk.done) {
-                await this.finalizeSession(session, context);
-            }
-
-            // Response structure completeness (Requirement 8.1, 8.2, 8.3)
-            // - executedSteps: single step executed in this response
-            // - stoppedReason: 'needs_input' for single-step execution (waiting for user input)
-            // - session.currentStep: reflects the executed step
-            yield {
-                delta: chunk.delta,
-                accumulated: chunk.accumulated,
-                done: chunk.done,
-                session,
-                toolCalls,
-                isRouteComplete: false,
-                executedSteps: chunk.done ? [{ id: nextStep.id, routeId: selectedRoute.id }] : undefined,
-                stoppedReason: chunk.done ? 'needs_input' : undefined,
-                metadata: chunk.metadata,
-                structured: chunk.structured,
-            };
+        } finally {
+            // Drain the transient appendage at end of turn.
+            // This ensures PreDirective.appendPrompt does not leak to subsequent
+            // turns even when the turn terminates abnormally (error, abort, reject).
+            turnTransientAppendage = undefined;
         }
     }
 
@@ -1777,7 +2108,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         context: TContext;
         session: SessionState<TData>;
         history: HistoryItem[];
-        selectedRoute?: Route<TContext, TData>;
+        selectedFlow?: Flow<TContext, TData>;
         responsePrompt: string;
         availableTools: Array<{
             id: string;
@@ -1794,7 +2125,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         structured?: AgentStructuredResponse;
     }> {
         try {
-            const { context, history, selectedRoute, responsePrompt, availableTools, responseSchema, signal } = params;
+            const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal } = params;
             let { toolCalls, session } = params;
 
             // Convert HistoryItem[] to Event[] for internal processing
@@ -1810,9 +2141,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 logger.debug(`[ResponseModal] Executing ${toolCalls.length} dynamic tool calls:`, toolCalls.map(tc => tc.toolName));
 
                 for (const toolCall of toolCalls) {
-                    const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
+                    const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
                     if (!tool) {
-                        logger.warn(`[ResponseModal] Tool not found: ${toolCall.toolName}`);
+                        logger.warn(`[ToolExecutionError] Tool not found: "${toolCall.toolName}" is not registered in any scope. Skipping this tool call. Register the tool or check the tool name.`);
                         continue;
                     }
 
@@ -1892,7 +2223,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // Create tool result history items
                 const toolResultHistoryItems: HistoryItem[] = [];
                 for (const toolCall of toolCalls || []) {
-                    const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
+                    const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
                     if (tool) {
                         // Create HistoryItem format for tool results
                         // Add assistant message with tool_calls
@@ -1958,9 +2289,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                     // Execute the follow-up tool calls
                     for (const toolCall of followUpToolCalls!) {
-                        const tool = this.findAvailableTool(toolCall.toolName, selectedRoute);
+                        const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
                         if (!tool) {
-                            logger.warn(`[ResponseModal] Tool not found in follow-up: ${toolCall.toolName}`);
+                            logger.warn(`[ToolExecutionError] Tool not found in follow-up: "${toolCall.toolName}" is not registered in any scope. Skipping this tool call. Register the tool or check the tool name.`);
                             continue;
                         }
 
@@ -2033,7 +2364,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             }
 
             if (toolLoopCount >= MAX_TOOL_LOOPS) {
-                logger.warn(`[ResponseModal] Tool loop limit reached (${MAX_TOOL_LOOPS}), stopping`);
+                logger.warn(`[ResponseGenerationError] Tool loop limit reached: ${toolLoopCount} iterations hit the cap (${MAX_TOOL_LOOPS}). Stopping tool execution. Increase MAX_TOOL_LOOPS or reduce recursive tool calls.`);
             }
 
             // If tools were executed but no final text message was produced,
@@ -2122,41 +2453,41 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      */
     private async collectDataFromResponse(params: {
         result: { structured?: AgentStructuredResponse };
-        selectedRoute?: Route<TContext, TData>;
+        selectedFlow?: Flow<TContext, TData>;
         nextStep?: Step<TContext, TData>;
         session: SessionState<TData>;
     }): Promise<SessionState<TData>> {
         try {
-            const { result, selectedRoute, nextStep, session } = params;
+            const { result, selectedFlow, nextStep, session } = params;
             let updatedSession = session;
 
-            // Extract collected data from final response (only for route-based interactions)
-            if (selectedRoute && result.structured) {
+            // Extract collected data from final response (only for flow-based interactions)
+            if (selectedFlow && result.structured) {
                 try {
                     const collectedData: Record<string, unknown> = {};
                     // AgentStructuredResponse extends Record<string, unknown>, so we can safely access properties
                     const structuredData = result.structured;
 
-                    // Collect ALL route fields (required + optional) from structured response
-                    const allRouteFields = new Set<string>();
+                    // Collect ALL flow fields (required + optional) from structured response
+                    const allFlowFields = new Set<string>();
 
-                    // Add route required fields
-                    if (selectedRoute.requiredFields) {
-                        selectedRoute.requiredFields.forEach(field => allRouteFields.add(String(field)));
+                    // Add flow required fields
+                    if (selectedFlow.requiredFields) {
+                        selectedFlow.requiredFields.forEach(field => allFlowFields.add(String(field)));
                     }
 
-                    // Add route optional fields
-                    if (selectedRoute.optionalFields) {
-                        selectedRoute.optionalFields.forEach(field => allRouteFields.add(String(field)));
+                    // Add flow optional fields
+                    if (selectedFlow.optionalFields) {
+                        selectedFlow.optionalFields.forEach(field => allFlowFields.add(String(field)));
                     }
 
-                    // Also include current step's collect fields (in case they're not in route fields)
+                    // Also include current step's collect fields (in case they're not in flow fields)
                     if (nextStep?.collect) {
-                        nextStep.collect.forEach(field => allRouteFields.add(String(field)));
+                        nextStep.collect.forEach(field => allFlowFields.add(String(field)));
                     }
 
                     // Extract all available fields from structured response
-                    for (const field of allRouteFields) {
+                    for (const field of allFlowFields) {
                         const fieldKey = String(field);
                         if (fieldKey in structuredData && structuredData[fieldKey] !== undefined && structuredData[fieldKey] !== null) {
                             collectedData[fieldKey] = structuredData[fieldKey];
@@ -2207,240 +2538,147 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Handle route completion logic
+     * Apply flow completion: release the session to idle state.
+     *
+     * This is a pure state transition. The framework emits **no message of
+     * its own** at the completion boundary — every word delivered to the
+     * user comes from a developer-defined step prompt. If the dev wants a
+     * closing turn, they add a final interactive step with their own
+     * `prompt`; the framework respects that step's natural LLM output.
+     *
+     * Behavior:
+     * - Marks the active `flowHistory` entry as `completed: true` and
+     *   stamps `exitedAt`.
+     * - Evaluates `flow.onComplete` for an explicit follow-up transition.
+     *   When set, populates `session.pendingDirective` (the next turn's
+     *   pipeline applies it). When absent, the session is fully idle.
+     * - Clears `currentFlow` and `currentStep` to `undefined`.
+     * - Clears owned fields when the flow is `reentrant` so subsequent
+     *   re-selections start from a clean state.
+     *
+     * Returns the updated session. Callers compose any reply text from
+     * their own sources (an upstream LLM turn, a directive's `reply`, or
+     * an empty string for silent completion).
+     *
      * @private
      */
-    private async handleRouteCompletion(params: {
-        selectedRoute: Route<TContext, TData>;
+    private async applyFlowCompletion(params: {
+        selectedFlow: Flow<TContext, TData>;
         session: SessionState<TData>;
         context: TContext;
         history: HistoryItem[];
-        historyEvents: Event[];
-        signal?: AbortSignal;
-    }): Promise<string> {
-        const { selectedRoute, session, context, history, historyEvents, signal } = params;
+    }): Promise<SessionState<TData>> {
+        const { selectedFlow, session, context } = params;
 
-        // Get endStep spec from route
-        const endStepSpec = selectedRoute.endStepSpec;
-
-        // Create a temporary step for completion message generation using endStep configuration
-        const completionStep = new Step<TContext, TData>(selectedRoute.id, {
-            description: endStepSpec.description,
-            id: endStepSpec.id || END_ROUTE_ID,
-            collect: endStepSpec.collect,
-            requires: endStepSpec.requires,
-            prompt: endStepSpec.prompt || "Send a brief, natural farewell message thanking the user. Do NOT list or mention any collected data, field names, or internal information.",
-        });
-
-        // Build response schema for completion (message only, no data collection)
-        const completionSchema = {
-            type: "object",
-            properties: {
-                message: {
-                    type: "string",
-                    description: "A natural, warm farewell message for the user. Must NOT contain task names, field names, collected data, or any internal/technical information.",
-                },
-            },
-            required: ["message"],
-            additionalProperties: false,
-        };
-
-        const templateContext = createTemplateContext({ context, session, history: historyEvents });
-
-        // Build completion response prompt using ResponseEngine
-        // Filter out conditional guidelines - only include always-active ones
-        const alwaysActiveGuidelines = [
-            ...this.agent.getGuidelines().filter(g => !g.condition),
-            ...selectedRoute.getGuidelines().filter(g => !g.condition),
-        ];
-        let completitionPrompt = "Send a brief, natural farewell message. Do NOT mention internal data or task details."
-        if (endStepSpec.prompt) {
-            completitionPrompt = await render(endStepSpec.prompt, templateContext)
-        }
-
-        const completionPrompt = await this.responseEngine.buildResponsePrompt({
-            route: selectedRoute,
-            currentStep: completionStep,
-            rules: selectedRoute.getRules(),
-            prohibitions: selectedRoute.getProhibitions(),
-            directives: [
-                "The conversation task has been completed successfully",
-                "Generate a natural, friendly farewell message for the user",
-                "Do NOT mention task names, route names, collected data, field names, or any internal/technical information",
-                "Do NOT list or summarize the data you collected - the user already knows what they told you",
-                "Do NOT use words like 'tarefa', 'dados coletados', 'prospecção', 'concluída' or similar internal terms",
-                "Keep it brief, warm, and conversational - as if ending a natural conversation",
-                "Do NOT ask for more information - the conversation is ending",
-                completitionPrompt,
-            ],
-            history: historyEvents,
-            agentOptions: this.agent.getAgentOptions(),
-            combinedGuidelines: alwaysActiveGuidelines, // Only non-conditional guidelines
-            combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
+        // 1) Evaluate onComplete first — needs the still-active session shape.
+        const transitionConfig = await selectedFlow.evaluateOnComplete(
+            { data: session.data },
             context,
-            session,
-            agentSchema: undefined, // No data collection schema for completion
+        );
+
+        // 2) Release to idle. If the flow is reentrant, scrub its owned
+        //    fields so re-selection on a future turn starts clean. When
+        //    onComplete fires we still go idle here — the next turn's
+        //    pipeline applies the pendingDirective before any routing.
+        const ownedFields = selectedFlow.reentrant
+            ? [
+                ...(selectedFlow.requiredFields ?? []),
+                ...(selectedFlow.optionalFields ?? []),
+            ]
+            : undefined;
+
+        let nextSession = completeCurrentFlow(session, {
+            clearOwnedFields: ownedFields,
         });
 
-        // Generate completion message using AI provider
-        const agentOptions = this.agent.getAgentOptions();
-        logger.debug(`[ResponseModal] Calling AI provider for completion message...`);
-
-        const completionResult = await agentOptions.provider.generateMessage({
-            prompt: completionPrompt,
-            history, // Use HistoryItem[] for AI provider
-            context,
-            signal,
-            parameters: { jsonSchema: completionSchema, schemaName: "completion_message" },
-        });
-
-        logger.debug(`[ResponseModal] AI provider returned completion result`);
-        const message = completionResult.structured?.message || completionResult.message;
-        logger.debug(`[ResponseModal] Generated completion message for route: ${selectedRoute.title}`);
-
-        // Check for onComplete transition
-        const transitionConfig = await selectedRoute.evaluateOnComplete({ data: session.data }, context);
-
+        // 3) Wire pendingDirective when onComplete returned a target.
         if (transitionConfig) {
-            // Find target route by ID or title
-            const targetRoute = this.agent.getRoutes().find(
-                (r) => r.id === transitionConfig.nextStep || r.title === transitionConfig.nextStep
-            );
+            const goToTarget = typeof transitionConfig.goTo === 'string'
+                ? transitionConfig.goTo
+                : transitionConfig.goTo?.flow;
 
-            if (targetRoute) {
-                const renderedCondition = await render(transitionConfig.condition, templateContext);
-                // Set pending transition in session
-                session.pendingTransition = {
-                    targetRouteId: targetRoute.id,
-                    condition: renderedCondition,
-                    reason: "route_complete",
-                };
-                logger.debug(`[ResponseModal] Route ${selectedRoute.title} completed with pending transition to: ${targetRoute.title}`);
-            } else {
-                logger.warn(`[ResponseModal] Route ${selectedRoute.title} completed but target route not found: ${transitionConfig.nextStep}`);
-            }
-        }
+            const targetFlow = goToTarget ? this.agent.getFlows().find(
+                (r) =>
+                    r.id === goToTarget ||
+                    r.title === goToTarget,
+            ) : undefined;
 
-        return message;
-    }
-
-    /**
-     * Stream route completion response
-     * @private
-     */
-    private async *streamRouteCompletion(params: {
-        selectedRoute: Route<TContext, TData>;
-        session: SessionState<TData>;
-        context: TContext;
-        history: HistoryItem[];
-        historyEvents: Event[];
-        signal?: AbortSignal;
-    }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const { selectedRoute, context, history, historyEvents, signal } = params;
-        let session = params.session;
-
-        // Get endStep spec from route
-        const endStepSpec = selectedRoute.endStepSpec;
-
-        // Create a temporary step for completion message generation using endStep configuration
-        const completionStep = new Step<TContext, TData>(selectedRoute.id, {
-            description: endStepSpec.description,
-            id: endStepSpec.id || END_ROUTE_ID,
-            collect: endStepSpec.collect,
-            requires: endStepSpec.requires,
-            prompt: endStepSpec.prompt || "Send a brief, natural farewell message thanking the user. Do NOT list or mention any collected data, field names, or internal information.",
-        });
-
-        // Build response schema for completion
-        const responseSchema = this.responseEngine.responseSchemaForRoute(selectedRoute, completionStep, this.agent.getSchema());
-        const templateContext = createTemplateContext({ context, session, history: historyEvents }); // Use Event[] for template context
-
-        // Build completion response prompt
-        const completionPrompt = await this.responseEngine.buildResponsePrompt({
-            route: selectedRoute,
-            currentStep: completionStep,
-            rules: selectedRoute.getRules(),
-            prohibitions: selectedRoute.getProhibitions(),
-            directives: undefined, // No directives for completion
-            history: historyEvents,
-            agentOptions: this.agent.getAgentOptions(),
-            combinedGuidelines: [...this.agent.getGuidelines(), ...selectedRoute.getGuidelines()],
-            combinedTerms: this.mergeTerms(this.agent.getTerms(), selectedRoute.getTerms()),
-            context,
-            session,
-            agentSchema: this.agent.getSchema(),
-        });
-
-        // Stream completion message using AI provider
-        const agentOptions = this.agent.getAgentOptions();
-        const stream = agentOptions.provider.generateMessageStream({
-            prompt: completionPrompt,
-            history, // Use HistoryItem[] for AI provider
-            context,
-            signal,
-            parameters: { jsonSchema: responseSchema, schemaName: "completion_message_stream" },
-        });
-
-        logger.debug(`[ResponseModal] Streaming completion message for route: ${selectedRoute.title}`);
-
-        // Check for onComplete transition
-        const transitionConfig = await selectedRoute.evaluateOnComplete({ data: session.data }, context);
-
-        if (transitionConfig) {
-            // Find target route by ID or title
-            const targetRoute = this.agent.getRoutes().find(
-                (r) => r.id === transitionConfig.nextStep || r.title === transitionConfig.nextStep
-            );
-
-            if (targetRoute) {
-                const renderedCondition = await render(transitionConfig.condition, templateContext);
-                // Set pending transition in session
-                session = {
-                    ...session,
-                    pendingTransition: {
-                        targetRouteId: targetRoute.id,
-                        condition: renderedCondition,
-                        reason: "route_complete",
+            if (targetFlow) {
+                nextSession = {
+                    ...nextSession,
+                    pendingDirective: {
+                        goTo: targetFlow.id,
                     },
                 };
-                logger.debug(`[ResponseModal] Route ${selectedRoute.title} completed with pending transition to: ${targetRoute.title}`);
-            } else {
-                logger.warn(`[ResponseModal] Route ${selectedRoute.title} completed but target route not found: ${transitionConfig.nextStep}`);
+                logger.debug(
+                    `[ResponseModal] Flow ${selectedFlow.title} completed with pending directive to: ${targetFlow.title}`,
+                );
+            } else if (goToTarget) {
+                logger.warn(
+                    `[FlowConfigurationError] onComplete target not found: flow "${selectedFlow.title}" completed but onComplete target "${goToTarget}" does not match any flow. ` +
+                    `Fix the onComplete value to reference an existing flow id/title, or remove onComplete to release the session to idle.`,
+                );
             }
+        } else {
+            logger.debug(
+                `[ResponseModal] Flow ${selectedFlow.title} completed; session released to idle.`,
+            );
         }
 
-        // Set step to END_ROUTE marker
-        session = enterStep(session, END_ROUTE_ID, "Route completed");
-        logger.debug(`[ResponseModal] Route ${selectedRoute.title} completed. Entered END_ROUTE step.`);
-
-        // Stream completion chunks
-        for await (const chunk of stream) {
-            // Update current session if we have one
-            if (chunk.done) {
-                await this.finalizeSession(session, context);
-            }
-
-            // Response structure completeness (Requirement 8.1, 8.2, 8.3)
-            // - executedSteps: empty for route completion (no new steps executed)
-            // - stoppedReason: 'route_complete' for completed routes
-            // - session.currentStep: set to END_ROUTE
-            yield {
-                delta: chunk.delta,
-                accumulated: chunk.accumulated,
-                done: chunk.done,
-                session,
-                toolCalls: undefined,
-                isRouteComplete: true,
-                executedSteps: chunk.done ? [] : undefined,
-                stoppedReason: chunk.done ? 'route_complete' : undefined,
-                metadata: chunk.metadata,
-                structured: chunk.structured,
-            };
-        }
+        return nextSession;
     }
 
     /**
-     * Generate fallback response when no routes are available
+     * Stream flow completion response
+     * @private
+     */
+    /**
+     * Stream a flow completion as a single terminal chunk.
+     *
+     * No LLM call is made. The framework no longer authors a farewell — the
+     * completion path is a pure state transition. The chunk emits an empty
+     * `delta` and a `done: true` flag with the idle session attached so
+     * downstream consumers can finalize cleanly.
+     *
+     * If the developer wants closing copy in a streaming response, they
+     * should add a final interactive step whose own LLM turn delivers it.
+     *
+     * @private
+     */
+    private async *streamFlowCompletion(params: {
+        selectedFlow: Flow<TContext, TData>;
+        session: SessionState<TData>;
+        context: TContext;
+        history: HistoryItem[];
+        historyEvents: Event[];
+        stoppedReason?: StoppedReason;
+        signal?: AbortSignal;
+    }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+        const { selectedFlow, context, history } = params;
+
+        const session = await this.applyFlowCompletion({
+            selectedFlow,
+            session: params.session,
+            context,
+            history,
+        });
+
+        await this.finalizeSession(session, context);
+
+        yield {
+            delta: '',
+            accumulated: '',
+            done: true,
+            session,
+            toolCalls: undefined,
+            isFlowComplete: true,
+            executedSteps: [],
+            stoppedReason: params.stoppedReason ?? 'completed',
+        };
+    }
+
+    /**
+     * Generate fallback response when no flows are available
      * @private
      */
     private async generateFallbackResponse(params: {
@@ -2448,16 +2686,16 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         context: TContext;
         session: SessionState<TData>;
         signal?: AbortSignal;
-    }): Promise<string> {
+    }): Promise<{ message: string; appliedInstructions?: AppliedInstruction[] }> {
         const { history, context, session, signal } = params;
 
-        logger.debug(`[ResponseModal] No route selected, generating basic response`);
+        logger.debug(`[ResponseModal] No flow selected, generating basic response`);
 
-        // Build basic response prompt without route context
-        const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
+        // Build basic response prompt without flow context
+        const { prompt: fallbackPrompt, appliedInstructions } = await this.responseEngine.buildFallbackPrompt({
             agentOptions: this.agent.getAgentOptions(),
             terms: this.agent.getTerms(),
-            guidelines: this.agent.getGuidelines(),
+            instructions: this.collectScopedInstructions(),
             context,
             session,
         });
@@ -2479,11 +2717,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             },
         });
 
-        return result.structured?.message || result.message;
+        return { message: result.structured?.message || result.message, appliedInstructions };
     }
 
     /**
-     * Stream fallback response when no routes are available
+     * Stream fallback response when no flows are available
      * @private
      */
     private async *streamFallbackResponse(params: {
@@ -2494,10 +2732,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
         const { history, context, session, signal } = params;
 
-        const fallbackPrompt = await this.responseEngine.buildFallbackPrompt({
+        const { prompt: fallbackPrompt, appliedInstructions } = await this.responseEngine.buildFallbackPrompt({
             agentOptions: this.agent.getAgentOptions(),
             terms: this.agent.getTerms(),
-            guidelines: this.agent.getGuidelines(),
+            instructions: this.collectScopedInstructions(),
             context,
             session,
         });
@@ -2526,8 +2764,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             }
 
             // Response structure completeness (Requirement 8.1, 8.2, 8.3)
-            // - executedSteps: empty for fallback (no route/step execution)
-            // - stoppedReason: undefined for fallback (no route context)
+            // - executedSteps: empty for fallback (no flow/step execution)
+            // - stoppedReason: undefined for fallback (no flow context)
             // - session.currentStep: unchanged (no step progression)
             yield {
                 delta: chunk.delta,
@@ -2535,11 +2773,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 done: chunk.done,
                 session,
                 toolCalls: undefined,
-                isRouteComplete: false,
+                isFlowComplete: false,
                 executedSteps: chunk.done ? [] : undefined,
                 stoppedReason: undefined,
                 metadata: chunk.metadata,
                 structured: chunk.structured,
+                appliedInstructions: chunk.done ? appliedInstructions : undefined,
             };
         }
     }
@@ -2565,9 +2804,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         await this.executeStepFinalize(session, context);
 
         // Update current session if we have one
-        const currentSession = this.agent.getCurrentSession();
+        const currentSession = this.agent.currentSession;
         if (currentSession) {
-            this.agent.setCurrentSession(session);
+            this.agent.currentSession = session;
         }
     }
     // ============================================================================
@@ -2576,45 +2815,45 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
 
     /**
-     * Find an available tool by name for the given route using ToolManager
+     * Find an available tool by name for the given flow using ToolManager
      * Delegates to ToolManager for unified tool resolution
      * @private
      */
     private findAvailableTool(
         toolName: string,
-        route?: Route<TContext, TData>
+        flow?: Flow<TContext, TData>
     ): Tool<TContext, TData> | undefined {
         // Use ToolManager for unified tool resolution
         const toolManager = this.getToolManager();
         if (toolManager) {
-            return toolManager.find(toolName, undefined, undefined, route);
+            return toolManager.find(toolName, undefined, undefined, flow);
         }
 
         // Fallback to legacy resolution if ToolManager not available
         logger.warn(`[ResponseModal] ToolManager not available, using legacy tool resolution for: ${toolName}`);
 
-        // Check route-level tools first (if route provided)
-        if (route) {
-            const routeTool = route
+        // Check flow-level tools first (if flow provided)
+        if (flow) {
+            const flowTool = flow
                 .getTools()
-                .find((tool: Tool<TContext, TData>) => tool.id === toolName || tool.name === toolName);
-            if (routeTool) return routeTool;
+                .find((tool: Tool<TContext, TData>) => tool.id === toolName || tool.id === toolName);
+            if (flowTool) return flowTool;
         }
 
         // Fall back to agent-level tools
         const agentTools = this.agent.getTools();
         return agentTools.find(
-            (tool) => tool.id === toolName || tool.name === toolName
+            (tool) => tool.id === toolName || tool.id === toolName
         );
     }
 
     /**
-     * Collect all available tools for the given route and step context using ToolManager
+     * Collect all available tools for the given flow and step context using ToolManager
      * Delegates to ToolManager for unified tool resolution and deduplication
      * @private
      */
     private collectAvailableTools(
-        route?: Route<TContext, TData>,
+        flow?: Flow<TContext, TData>,
         step?: Step<TContext, TData>
     ): Array<{
         id: string;
@@ -2625,10 +2864,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // Use ToolManager for unified tool collection if available
         const toolManager = this.getToolManager();
         if (toolManager) {
-            const availableTools = toolManager.getAvailable(undefined, step, route);
+            const availableTools = toolManager.getAvailable(undefined, step, flow);
             return availableTools.map((tool) => ({
                 id: tool.id,
-                name: tool.name || tool.id,
+                name: tool.id || tool.id,
                 description: tool.description,
                 parameters: tool.parameters,
             }));
@@ -2644,9 +2883,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             availableTools.set(tool.id, tool);
         });
 
-        // Add route-level tools (these take precedence)
-        if (route) {
-            route.getTools().forEach((tool: Tool<TContext, TData>) => {
+        // Add flow-level tools (these take precedence)
+        if (flow) {
+            flow.getTools().forEach((tool: Tool<TContext, TData>) => {
                 availableTools.set(tool.id, tool);
             });
         }
@@ -2692,7 +2931,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // Convert to the format expected by AI providers
         return Array.from(availableTools.values()).map((tool) => ({
             id: tool.id,
-            name: tool.name || tool.id,
+            name: tool.id || tool.id,
             description: tool.description,
             parameters: tool.parameters,
         }));
@@ -2706,11 +2945,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         prepareOrFinalize:
             | string
             | Tool<TContext, TData>
-            | ((context: TContext, data?: Partial<TData>) => void | Promise<void>)
+            | ((context: TContext, data?: Partial<TData>) => void | PrepareResult | Promise<void | PrepareResult>)
             | undefined,
         context: TContext,
         data?: Partial<TData>,
-        route?: Route<TContext, TData>,
+        flow?: Flow<TContext, TData>,
         step?: Step<TContext, TData>
     ): Promise<void> {
         if (!prepareOrFinalize) return;
@@ -2726,7 +2965,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // Tool ID - use ToolManager for unified resolution
                 const toolManager = this.getToolManager();
                 if (toolManager) {
-                    tool = toolManager.find(prepareOrFinalize, undefined, step, route);
+                    tool = toolManager.find(prepareOrFinalize, undefined, step, flow);
                 } else {
                     // Fallback to legacy resolution if ToolManager not available
                     logger.warn(`[ResponseModal] ToolManager not available, using legacy tool resolution for prepare/finalize: ${prepareOrFinalize}`);
@@ -2738,9 +2977,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         availableTools.set(t.id, t);
                     });
 
-                    // Add route-level tools
-                    if (route) {
-                        route.getTools().forEach((t: Tool<TContext, TData>) => {
+                    // Add flow-level tools
+                    if (flow) {
+                        flow.getTools().forEach((t: Tool<TContext, TData>) => {
                             availableTools.set(t.id, t);
                         });
                     }
@@ -2799,30 +3038,4 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         }
     }
 
-    /**
-     * Merge terms with route-specific taking precedence on conflicts
-     * @private
-     */
-    private mergeTerms(
-        agentTerms: Term<TContext, TData>[],
-        routeTerms: Term<TContext, TData>[]
-    ): Term<TContext, TData>[] {
-        const merged = new Map<string, Term<TContext, TData>>();
-
-        // Add agent terms first
-        agentTerms.forEach((term) => {
-            const name =
-                typeof term.name === "string" ? term.name : term.name.toString();
-            merged.set(name, term);
-        });
-
-        // Add route terms (these take precedence)
-        routeTerms.forEach((term) => {
-            const name =
-                typeof term.name === "string" ? term.name : term.name.toString();
-            merged.set(name, term);
-        });
-
-        return Array.from(merged.values());
-    }
 }

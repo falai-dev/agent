@@ -25,32 +25,32 @@ function sanitize(str: string): string {
 }
 
 /**
- * Generate a deterministic route ID
- * Format: route_{sanitized_title}_{hash}
+ * Generate a deterministic flow ID
+ * Format: flow_{sanitized_title}_{hash}
  */
-export function generateRouteId(title: string): string {
+export function generateFlowId(title: string): string {
   const sanitized = sanitize(title);
   const hash = simpleHash(title);
-  return `route_${sanitized}_${hash}`;
+  return `flow_${sanitized}_${hash}`;
 }
 
 /**
  * Generate a deterministic step ID
- * Format: step_{sanitized_description}_{hash} or step_{routeId}_{index}
+ * Format: step_{sanitized_description}_{hash} or step_{flowId}_{index}
  */
 export function generateStepId(
-  routeId: string,
+  flowId: string,
   description?: string,
   index?: number
 ): string {
   if (description) {
     const sanitized = sanitize(description);
-    const hash = simpleHash(`${routeId}_${description}`);
+    const hash = simpleHash(`${flowId}_${description}`);
     return `step_${sanitized}_${hash}`;
   }
   // Fallback for steps without descriptions
-  const suffix = index !== undefined ? index : simpleHash(routeId);
-  return `step_${routeId}_${suffix}`;
+  const suffix = index !== undefined ? index : simpleHash(flowId);
+  return `step_${flowId}_${suffix}`;
 }
 
 /**
@@ -70,4 +70,22 @@ export function generateToolId(name: string): string {
 export function generateInlineToolId(stepId: string): string {
   const hash = simpleHash(`${stepId}_inline_tool`);
   return `tool_inline_${stepId}_${hash}`;
+}
+
+/**
+ * Generate a deterministic signal ID.
+ * Format: signal_{sanitized}_{hash}
+ *
+ * Uses a combination of the signal's title/description/index to produce
+ * a stable id that is deterministic within a session (same inputs → same id).
+ */
+export function generateSignalId(
+  title?: string,
+  description?: string,
+  index?: number
+): string {
+  const seed = title || description || `signal_${index ?? 0}`;
+  const sanitized = sanitize(seed);
+  const hash = simpleHash(`signal_${seed}_${index ?? 0}`);
+  return `signal_${sanitized}_${hash}`;
 }

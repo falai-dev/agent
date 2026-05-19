@@ -5,11 +5,9 @@
 import type {
   AgentOptions,
   Term,
-  Guideline,
-  GuidelineMatch,
+  Instruction,
   Tool,
-  Event,
-  RouteOptions,
+  FlowOptions,
   SessionState,
   Template,
   AgentResponseStreamChunk,
@@ -19,23 +17,28 @@ import type {
   ValidationResult,
   AiProvider,
   CompactionOptions,
+  Directive,
 } from "../types";
-import { CompositionMode } from "../types";
+import type { Signal } from "../types/signals";
+import { NotImplementedError } from "../types/errors";
+import { SignalProcessor } from "./SignalProcessor";
+import { SignalEvaluator } from "./SignalEvaluator";
 import type { StreamOptions, GenerateOptions, RespondParams } from "./ResponseModal";
 import {
   mergeCollected,
+  enterFlow,
+  enterStep,
+  completeCurrentFlow,
   logger,
   LoggerLevel,
-  render,
-  createTemplateContext,
-  createConditionEvaluator,
+  generateSignalId,
 } from "../utils";
 
-import { Route } from "./Route";
-import { Step } from "./Step";
+import { Flow } from "./Flow";
+import { Step, FlowConfigurationError as StepFlowConfigurationError } from "./Step";
 import { PersistenceManager } from "./PersistenceManager";
 import { SessionManager } from "./SessionManager";
-import { RoutingEngine } from "./RoutingEngine";
+import { FlowRouter } from "./FlowRouter";
 import { PromptSectionCache } from "./PromptSectionCache";
 
 import { ResponseModal } from "./ResponseModal";
@@ -53,12 +56,12 @@ class DataValidationError extends Error {
 }
 
 /**
- * Error thrown when route configuration is invalid
+ * Error thrown when flow configuration is invalid
  */
-class RouteConfigurationError extends Error {
-  constructor(public routeTitle: string, public invalidFields: string[], message?: string) {
-    super(message || `Route configuration error in '${routeTitle}'`);
-    this.name = "RouteConfigurationError";
+class FlowConfigurationError extends Error {
+  constructor(public flowTitle: string, public invalidFields: string[], message?: string) {
+    super(message || `Flow configuration error in '${flowTitle}'`);
+    this.name = "FlowConfigurationError";
   }
 }
 
@@ -68,14 +71,12 @@ class RouteConfigurationError extends Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class Agent<TContext = any, TData = any> {
   private _terms: Term<TContext, TData>[] = [];
-  private _guidelines: Guideline<TContext, TData>[] = [];
+  private _instructions: Instruction<TContext, TData>[] = [];
   private _tools: Tool<TContext, TData>[] = [];
-  private _routes: Route<TContext, TData>[] = [];
-  private _rules: Template<TContext, TData>[] = [];
-  private _prohibitions: Template<TContext, TData>[] = [];
+  private _flows: Flow<TContext, TData>[] = [];
   private _context: TContext | undefined;
   private _persistenceManager: PersistenceManager<TData> | undefined;
-  private _routingEngine: RoutingEngine<TContext, TData>;
+  private _routingEngine: FlowRouter<TContext, TData>;
   private _responseModal: ResponseModal<TContext, TData>;
   private _currentSession?: SessionState<TData>;
   private _knowledgeBase: Record<string, unknown> = {};
@@ -84,6 +85,22 @@ export class Agent<TContext = any, TData = any> {
   private _compactionOptions?: CompactionOptions;
   private _promptSectionCache: PromptSectionCache;
 
+  /** Signals: typed event detectors that run around the LLM turn. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _signals: Signal<TContext, TData, any>[];
+
+  /**
+   * Signal processor instance. Undefined when no signals are configured.
+   * Constructed only when `options.signals` is non-empty (Requirement 2.3).
+   */
+  public signalProcessor: SignalProcessor<TContext, TData> | undefined;
+
+  /** Maximum consecutive auto-steps allowed in a single turn before throwing. */
+  public readonly maxAutoStepsPerTurn: number;
+
+  /** Maximum chained directives allowed in a single turn before throwing. */
+  public readonly maxDirectiveChain: number;
+
   /** Public session manager for easy session management */
   public session: SessionManager<TData>;
 
@@ -91,6 +108,98 @@ export class Agent<TContext = any, TData = any> {
   public tool: ToolManager<TContext, TData>;
 
   constructor(private options: AgentOptions<TContext, TData>) {
+    this.maxAutoStepsPerTurn = options.maxAutoStepsPerTurn ?? 10;
+    this.maxDirectiveChain = options.maxDirectiveChain ?? 10;
+
+    // Validate routerMode reservation — only 'ai' is supported in v2.0
+    if (options.routerMode !== undefined && options.routerMode !== 'ai') {
+      throw new NotImplementedError(
+        `[NotImplementedError] routerMode "${String(options.routerMode)}" is not implemented: only "ai" is supported in v2.0. ` +
+        `Set routerMode to "ai" or omit the option.`
+      );
+    }
+
+    // ─── Signal construction-time validation (Requirements 1.4, 1.5, 1.6, 1.9, 2.3) ───
+    const rawSignals = options.signals ?? [];
+
+    // Auto-generate stable ids for entries without `id`
+    for (let i = 0; i < rawSignals.length; i++) {
+      if (!rawSignals[i].id) {
+        rawSignals[i] = {
+          ...rawSignals[i],
+          id: generateSignalId(rawSignals[i].title, rawSignals[i].description, i),
+        };
+      }
+    }
+
+    // Validate unique ids (Requirement 1.4)
+    const idCounts = new Map<string, number>();
+    for (const signal of rawSignals) {
+      const id = signal.id!;
+      idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
+    }
+    const duplicateIds = [...idCounts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([id]) => id);
+    if (duplicateIds.length > 0) {
+      throw new StepFlowConfigurationError(
+        `[FlowConfigurationError] Duplicate signal ids: ${duplicateIds.join(', ')}. ` +
+        `Each signal must have a unique id.`
+      );
+    }
+
+    // Validate signalBatchSize (positive integer when set)
+    if (options.signalBatchSize !== undefined) {
+      if (
+        !Number.isInteger(options.signalBatchSize) ||
+        options.signalBatchSize <= 0
+      ) {
+        throw new StepFlowConfigurationError(
+          `[FlowConfigurationError] signalBatchSize must be a positive integer, got: ${options.signalBatchSize}.`
+        );
+      }
+    }
+
+    // Validate each signal's configuration
+    for (const signal of rawSignals) {
+      // Requirement 1.5: cooldown without cooldownMs → debug warning, treat as 'always'
+      if (signal.behavior === 'cooldown' && signal.cooldownMs == null) {
+        logger.debug(
+          `[Agent] Signal "${signal.id}" has behavior 'cooldown' but no cooldownMs. Treating as 'always'.`
+        );
+        (signal as { behavior?: string }).behavior = 'always';
+      }
+
+      // Requirement 1.9: validate extract schema is a JSON Schema object
+      if (signal.extract !== undefined) {
+        if (
+          signal.extract === null ||
+          typeof signal.extract !== 'object' ||
+          Array.isArray(signal.extract)
+        ) {
+          throw new StepFlowConfigurationError(
+            `[FlowConfigurationError] Signal "${signal.id}" has an invalid extract schema. ` +
+            `Expected a JSON Schema object, got: ${typeof signal.extract}.`
+          );
+        }
+      }
+    }
+
+    this._signals = rawSignals;
+
+    // Requirement 2.3: Only instantiate SignalProcessor when signals are present
+    if (rawSignals.length > 0) {
+      const evaluator = new SignalEvaluator<TContext, TData>(options.provider);
+      this.signalProcessor = new SignalProcessor<TContext, TData>(
+        rawSignals,
+        options.provider,
+        evaluator,
+        { batchSize: options.signalBatchSize ?? 10 },
+      );
+    } else {
+      this.signalProcessor = undefined;
+    }
+
     // Set log level based on debug option
     if (options.debug) {
       logger.setLevel(LoggerLevel.DEBUG);
@@ -133,10 +242,10 @@ export class Agent<TContext = any, TData = any> {
     // Initialize prompt section cache
     this._promptSectionCache = new PromptSectionCache(options.promptCache);
 
-    // Initialize routing engine
-    this._routingEngine = new RoutingEngine<TContext, TData>({
-      routeSwitchMargin: options.routeSwitchMargin,
-      onRouteSwitch: () => this.invalidateRouteSections(),
+    // Initialize flow router
+    this._routingEngine = new FlowRouter<TContext, TData>({
+      flowSwitchMargin: options.flowSwitchMargin,
+      onFlowSwitch: () => this.invalidateFlowSections(),
       promptSectionCache: this._promptSectionCache,
     });
 
@@ -184,31 +293,28 @@ export class Agent<TContext = any, TData = any> {
       });
     }
 
-    if (options.guidelines) {
-      options.guidelines.forEach((guideline) => {
-        this.createGuideline(guideline);
+    // Initialize instructions (new unified form)
+    if (options.instructions) {
+      options.instructions.forEach((instruction) => {
+        this.createInstruction(instruction);
       });
     }
 
     if (options.tools) {
       options.tools.forEach((tool) => {
-        this.createTool(tool);
+        this.addTool(tool);
       });
     }
 
-    // Initialize agent-level rules and prohibitions
-    if (options.rules) {
-      this._rules = [...options.rules];
-    }
-    if (options.prohibitions) {
-      this._prohibitions = [...options.prohibitions];
-    }
-
-    if (options.routes) {
-      options.routes.forEach((routeOptions) => {
-        this.createRoute(routeOptions);
+    if (options.flows) {
+      options.flows.forEach((flowOptions) => {
+        this.createFlow(flowOptions);
       });
     }
+
+    // Validate deferred branch `then` string references against the flow registry.
+    // This catches strings that don't match a local step id AND don't match any flow id/title.
+    this.validateBranchReferences();
 
     // Initialize knowledge base
     if (options.knowledgeBase) {
@@ -278,6 +384,81 @@ export class Agent<TContext = any, TData = any> {
     }
 
     logger.debug("[Agent] Schema validation passed");
+  }
+
+  /**
+   * Walk every flow's steps and resolve deferred string `then` values in branches
+   * against the agent's flow registry. Strings that match neither a local step id
+   * nor any flow id/title throw FlowConfigurationError.
+   * @private
+   */
+  private validateBranchReferences(): void {
+    for (const flow of this._flows) {
+      this.validateFlowBranchReferences(flow);
+    }
+  }
+
+  /**
+   * Validate branch `then` string references for a single flow against the agent's
+   * flow registry. Throws FlowConfigurationError for unresolved references.
+   * @private
+   */
+  private validateFlowBranchReferences(flow: Flow<TContext, TData>): void {
+    const steps = flow.getAllSteps();
+    const localStepIds = new Set(steps.map(s => s.id));
+
+    for (const step of steps) {
+      if (!step.branches) continue;
+
+      for (const entry of step.branches) {
+        if (typeof entry.then !== 'string') continue;
+
+        // Already matches a local step id — no deferred resolution needed
+        if (localStepIds.has(entry.then)) continue;
+
+        // Check against the agent's flow registry (id or title)
+        const matchesFlow = this._flows.some(
+          f => f.id === entry.then || f.title === entry.then
+        );
+
+        if (!matchesFlow) {
+          throw new StepFlowConfigurationError(
+            `[FlowConfigurationError] Unresolved branch target: "${entry.then}" in ${flow.id}.${step.id} does not match any step in the flow or any flow in the agent. ` +
+            `Fix the branch "then" value to reference a valid step id or flow id/title.`
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Validate that every step's `collect` fields in a flow reference valid keys
+   * from the agent-level schema. Throws FlowConfigurationError at construction
+   * time if any collect field is not a valid schema key.
+   *
+   * This enforces Requirement 14.5: generic inference is preserved AND every
+   * `collect` field reference is a valid key of the inferred TData.
+   * @private
+   */
+  private validateFlowCollectFields(flow: Flow<TContext, TData>): void {
+    const schemaKeys = Object.keys(this._schema!.properties!);
+    const schemaKeySet = new Set(schemaKeys);
+    const steps = flow.getAllSteps();
+
+    for (const step of steps) {
+      if (!step.collect || step.collect.length === 0) continue;
+
+      const invalidFields = step.collect.filter(
+        field => !schemaKeySet.has(String(field))
+      );
+
+      if (invalidFields.length > 0) {
+        throw new StepFlowConfigurationError(
+          `[FlowConfigurationError] Step "${step.id}" in flow "${flow.title}" references invalid collect fields: ${invalidFields.map(f => String(f)).join(', ')}. ` +
+          `Must be valid keys from agent schema. Available fields: ${schemaKeys.join(', ')}.`
+        );
+      }
+    }
   }
 
   /**
@@ -358,7 +539,7 @@ export class Agent<TContext = any, TData = any> {
     const validation = this.validateData(updates);
     if (!validation.valid) {
       const errorMessages = validation.errors.map(e => e.message).join(', ');
-      throw new DataValidationError(validation.errors, `Data validation failed: ${errorMessages}`);
+      throw new DataValidationError(validation.errors, `[DataValidationError] Data validation failed: fields [${errorMessages}] did not pass schema validation. Fix the offending values to match the declared schema.`);
     }
 
     // Log warnings if any
@@ -416,17 +597,17 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get agent description
+   * Get agent persona
    */
-  get description(): string | undefined {
-    return this.options.description;
+  get persona(): Template<TContext> | undefined {
+    return this.options.persona;
   }
 
   /**
-   * Set agent description
+   * Set agent persona
    */
-  set description(value: string | undefined) {
-    this.options.description = value;
+  set persona(value: Template<TContext> | undefined) {
+    this.options.persona = value;
   }
 
   /**
@@ -441,34 +622,6 @@ export class Agent<TContext = any, TData = any> {
    */
   set goal(value: string | undefined) {
     this.options.goal = value;
-  }
-
-  /**
-   * Get agent identity
-   */
-  get identity(): Template<TContext> | undefined {
-    return this.options.identity;
-  }
-
-  /**
-   * Set agent identity
-   */
-  set identity(value: Template<TContext> | undefined) {
-    this.options.identity = value;
-  }
-
-  /**
-   * Get agent personality
-   */
-  get personality(): Template<TContext> | undefined {
-    return this.options.personality;
-  }
-
-  /**
-   * Set agent personality
-   */
-  set personality(value: Template<TContext> | undefined) {
-    this.options.personality = value;
   }
 
   /**
@@ -501,32 +654,18 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get the composition mode
-   */
-  get compositionMode(): CompositionMode {
-    return this.options.compositionMode ?? CompositionMode.FLUID;
-  }
-
-  /**
-   * Set the composition mode
-   */
-  set compositionMode(value: CompositionMode) {
-    this.options.compositionMode = value;
-  }
-
-  /**
-   * Get the route switch margin
+   * Get the flow switch margin
    * @default 15
    */
-  get routeSwitchMargin(): number {
-    return this.options.routeSwitchMargin ?? 15;
+  get flowSwitchMargin(): number {
+    return this.options.flowSwitchMargin ?? 15;
   }
 
   /**
-   * Set the route switch margin
+   * Set the flow switch margin
    */
-  set routeSwitchMargin(value: number) {
-    this.options.routeSwitchMargin = value;
+  set flowSwitchMargin(value: number) {
+    this.options.flowSwitchMargin = value;
   }
 
   /**
@@ -537,21 +676,6 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get the maximum steps per batch
-   * @default 1
-   */
-  get maxStepsPerBatch(): number {
-    return this.options.maxStepsPerBatch ?? 1;
-  }
-
-  /**
-   * Set the maximum steps per batch
-   */
-  set maxStepsPerBatch(value: number) {
-    this.options.maxStepsPerBatch = value;
-  }
-
-  /**
    * Get all terms
    */
   get terms(): Term<TContext, TData>[] {
@@ -559,10 +683,10 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get all guidelines
+   * Get all instructions
    */
-  get guidelines(): Guideline<TContext, TData>[] {
-    return [...this._guidelines];
+  get instructions(): Instruction<TContext, TData>[] {
+    return [...this._instructions];
   }
 
   /**
@@ -573,38 +697,10 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get all routes
+   * Get all flows
    */
-  get routes(): Route<TContext, TData>[] {
-    return [...this._routes];
-  }
-
-  /**
-   * Get agent-level rules
-   */
-  get rules(): Template<TContext, TData>[] {
-    return [...this._rules];
-  }
-
-  /**
-   * Set agent-level rules
-   */
-  set rules(value: Template<TContext, TData>[]) {
-    this._rules = [...value];
-  }
-
-  /**
-   * Get agent-level prohibitions
-   */
-  get prohibitions(): Template<TContext, TData>[] {
-    return [...this._prohibitions];
-  }
-
-  /**
-   * Set agent-level prohibitions
-   */
-  set prohibitions(value: Template<TContext, TData>[]) {
-    this._prohibitions = [...value];
+  get flows(): Flow<TContext, TData>[] {
+    return [...this._flows];
   }
 
   /**
@@ -622,6 +718,14 @@ export class Agent<TContext = any, TData = any> {
       this.validateSchema(value);
     }
     this._schema = value;
+  }
+
+  /**
+   * Get the configured signals.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  get signals(): Signal<TContext, TData, any>[] {
+    return this._signals;
   }
 
   /**
@@ -654,13 +758,15 @@ export class Agent<TContext = any, TData = any> {
     this._promptSectionCache.invalidateAll();
   }
 
-  // ---------------------------------------------------------------------------
-  // Deprecated method-based accessors (for backward compatibility)
-  // ---------------------------------------------------------------------------
+  /**
+   * Get all flows
+   */
+  getFlows(): Flow<TContext, TData>[] {
+    return this.flows;
+  }
 
   /**
    * Get all terms
-   * @deprecated Use `agent.terms` instead
    */
   getTerms(): Term<TContext, TData>[] {
     return this.terms;
@@ -668,96 +774,26 @@ export class Agent<TContext = any, TData = any> {
 
   /**
    * Get all tools
-   * @deprecated Use `agent.tools` instead
    */
   getTools(): Tool<TContext, TData>[] {
     return this.tools;
   }
 
   /**
-   * Get all guidelines
-   * @deprecated Use `agent.guidelines` instead
+   * Get all instructions
    */
-  getGuidelines(): Guideline<TContext, TData>[] {
-    return this.guidelines;
+  getInstructions(): Instruction<TContext, TData>[] {
+    return this.instructions;
   }
 
   /**
-   * Get all routes
-   * @deprecated Use `agent.routes` instead
+   * Invalidate flow-dependent prompt cache sections.
+   * Called automatically when the active flow changes.
    */
-  getRoutes(): Route<TContext, TData>[] {
-    return this.routes;
-  }
-
-  /**
-   * Get agent-level rules
-   * @deprecated Use `agent.rules` instead
-   */
-  getRules(): Template<TContext, TData>[] {
-    return this.rules;
-  }
-
-  /**
-   * Get agent-level prohibitions
-   * @deprecated Use `agent.prohibitions` instead
-   */
-  getProhibitions(): Template<TContext, TData>[] {
-    return this.prohibitions;
-  }
-
-  /**
-   * Get current schema
-   * @deprecated Use `agent.schema` instead
-   */
-  getSchema(): StructuredSchema | undefined {
-    return this.schema;
-  }
-
-  /**
-   * Get the agent's knowledge base
-   * @deprecated Use `agent.knowledgeBase` instead
-   */
-  getKnowledgeBase(): Record<string, unknown> {
-    return this.knowledgeBase;
-  }
-
-  /**
-   * Get the current session (if set)
-   * @deprecated Use `agent.currentSession` instead
-   */
-  getCurrentSession(): SessionState | undefined {
-    return this.currentSession;
-  }
-
-  /**
-   * Set the current session for convenience methods
-   * @deprecated Use `agent.currentSession = session` instead
-   * @param session - Session step to use for subsequent calls
-   */
-  setCurrentSession(session: SessionState): void {
-    this.currentSession = session;
-    this._promptSectionCache.invalidateAll();
-  }
-
-  /**
-   * Clear the current session
-   * @deprecated Use `agent.currentSession = undefined` instead
-   */
-  clearCurrentSession(): void {
-    this._currentSession = undefined;
-    this._promptSectionCache.invalidateAll();
-  }
-
-  /**
-   * Invalidate route-dependent prompt cache sections.
-   * Called automatically when the active route changes.
-   */
-  invalidateRouteSections(): void {
-    this._promptSectionCache.invalidate('activeRoutes');
-    this._promptSectionCache.invalidate('routeRules');
-    this._promptSectionCache.invalidate('routeProhibitions');
-    this._promptSectionCache.invalidate('routeKnowledgeBase');
+  invalidateFlowSections(): void {
+    this._promptSectionCache.invalidate('activeFlows');
+    this._promptSectionCache.invalidate('flowKnowledgeBase');
+    this._promptSectionCache.invalidate('instructionsFlow');
   }
 
   /**
@@ -786,22 +822,22 @@ export class Agent<TContext = any, TData = any> {
   // ---------------------------------------------------------------------------
 
   /**
-   * Create a new route (journey) using agent-level data type
+   * Create a new flow (journey) using agent-level data type
    */
-  createRoute(
-    options: RouteOptions<TContext, TData>
-  ): Route<TContext, TData> {
+  createFlow(
+    options: FlowOptions<TContext, TData>
+  ): Flow<TContext, TData> {
     // Validate that requiredFields exist in agent schema
     if (options.requiredFields && this._schema?.properties) {
       const invalidRequiredFields = options.requiredFields.filter(
         field => !(String(field) in this._schema!.properties!)
       );
       if (invalidRequiredFields.length > 0) {
-        throw new RouteConfigurationError(
+        throw new FlowConfigurationError(
           options.title,
           invalidRequiredFields.map(f => String(f)),
-          `Invalid required fields in route '${options.title}': ${invalidRequiredFields.join(', ')}. ` +
-          `Must be valid keys from agent schema. Available fields: ${Object.keys(this._schema.properties).join(', ')}.`
+          `[FlowConfigurationError] Invalid required fields in flow "${options.title}": [${invalidRequiredFields.join(', ')}] are not declared in the agent schema. ` +
+          `Use valid schema keys. Available fields: ${Object.keys(this._schema.properties).join(', ')}.`
         );
       }
     }
@@ -812,18 +848,24 @@ export class Agent<TContext = any, TData = any> {
         field => !(String(field) in this._schema!.properties!)
       );
       if (invalidOptionalFields.length > 0) {
-        throw new RouteConfigurationError(
+        throw new FlowConfigurationError(
           options.title,
           invalidOptionalFields.map(f => String(f)),
-          `Invalid optional fields in route '${options.title}': ${invalidOptionalFields.join(', ')}. ` +
-          `Must be valid keys from agent schema. Available fields: ${Object.keys(this._schema.properties).join(', ')}.`
+          `[FlowConfigurationError] Invalid optional fields in flow "${options.title}": [${invalidOptionalFields.join(', ')}] are not declared in the agent schema. ` +
+          `Use valid schema keys. Available fields: ${Object.keys(this._schema.properties).join(', ')}.`
         );
       }
     }
 
-    const route = new Route<TContext, TData>(options, this);
-    this._routes.push(route);
-    return route;
+    const flow = new Flow<TContext, TData>(options, this);
+
+    // Validate that step collect fields reference valid schema keys
+    if (this._schema?.properties) {
+      this.validateFlowCollectFields(flow);
+    }
+
+    this._flows.push(flow);
+    return flow;
   }
 
   /**
@@ -835,21 +877,23 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Create a behavioral guideline
+   * Create an instruction (unified behavioral primitive).
    */
-  createGuideline(guideline: Guideline<TContext, TData>): this {
-    const guidelineWithId = {
-      ...guideline,
-      id: guideline.id || `guideline_${this._guidelines.length}`,
-      enabled: guideline.enabled !== false, // Default to true
+  createInstruction(instruction: Instruction<TContext, TData>): this {
+    const instructionWithId = {
+      ...instruction,
+      kind: instruction.kind || 'should' as const,
+      id: instruction.id || `instruction_${this._instructions.length}`,
+      enabled: instruction.enabled !== false, // Default to true
     };
-    this._guidelines.push(guidelineWithId);
+    this._instructions.push(instructionWithId);
+    this._promptSectionCache.invalidate('instructionsGlobal');
     return this;
   }
 
   /**
    * Add a tool to the agent using the unified Tool interface
-   * Creates and adds the tool to agent scope in one operation (BREAKING CHANGE: replaces createTool)
+   * Creates and adds the tool to agent scope in one operation
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   addTool<TResult = any>(
@@ -863,22 +907,6 @@ export class Agent<TContext = any, TData = any> {
     // Add directly to agent's tools array, preserving the TResult type
     this._tools.push(tool);
     logger.debug(`[Agent] Added tool to agent scope: ${tool.id}`);
-    return this;
-  }
-
-  /**
-   * Register a tool at the agent level (legacy method for backward compatibility)
-   * @deprecated Use addTool() with Tool interface instead
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  createTool<TResult = any>(tool: Tool<TContext, TData, TResult>): this {
-    // Validate tool before adding
-    if (!tool || !tool.id || !tool.handler) {
-      throw new Error('Invalid tool: must have id and handler properties');
-    }
-
-    this._tools.push(tool);
-    logger.debug(`[Agent] Created tool (legacy): ${tool.id}`);
     return this;
   }
 
@@ -900,7 +928,7 @@ export class Agent<TContext = any, TData = any> {
 
   /**
    * Update the agent's context
-   * Triggers both agent-level and route-specific onContextUpdate lifecycle hooks if configured
+   * Triggers both agent-level and flow-specific onContextUpdate lifecycle hooks if configured
    */
   async updateContext(updates: Partial<TContext>): Promise<void> {
     const previousContext = this._context;
@@ -911,16 +939,16 @@ export class Agent<TContext = any, TData = any> {
       ...(updates as Record<string, unknown>),
     } as TContext;
 
-    // Trigger route-specific lifecycle hook if configured and session has current route
-    if (this._currentSession?.currentRoute) {
-      const currentRoute = this._routes.find(
-        (r) => r.id === this._currentSession!.currentRoute?.id
+    // Trigger flow-specific lifecycle hook if configured and session has current flow
+    if (this._currentSession?.currentFlow) {
+      const currentFlow = this._flows.find(
+        (r) => r.id === this._currentSession!.currentFlow?.id
       );
       if (
-        currentRoute?.hooks?.onContextUpdate &&
+        currentFlow?.hooks?.onContextUpdate &&
         previousContext !== undefined
       ) {
-        await currentRoute.handleContextUpdate(this._context, previousContext);
+        await currentFlow.handleContextUpdate(this._context, previousContext);
       }
     }
 
@@ -932,11 +960,12 @@ export class Agent<TContext = any, TData = any> {
     // Invalidate context-dependent prompt cache sections
     this._promptSectionCache.invalidate('agentMeta');
     this._promptSectionCache.invalidate('knowledgeBase');
+    this._promptSectionCache.invalidate('instructionsGlobal');
   }
 
   /**
    * Update collected data in session with lifecycle hook support
-   * Triggers both agent-level and route-specific onDataUpdate lifecycle hooks if configured
+   * Triggers both agent-level and flow-specific onDataUpdate lifecycle hooks if configured
    * @internal
    */
   private async updateData(
@@ -951,13 +980,13 @@ export class Agent<TContext = any, TData = any> {
       ...dataUpdate,
     };
 
-    // Trigger route-specific lifecycle hook if configured and session has a current route
-    if (session.currentRoute) {
-      const currentRoute = this._routes.find(
-        (r) => r.id === session.currentRoute?.id
+    // Trigger flow-specific lifecycle hook if configured and session has a current flow
+    if (session.currentFlow) {
+      const currentFlow = this._flows.find(
+        (r) => r.id === session.currentFlow?.id
       );
-      if (currentRoute?.hooks?.onDataUpdate) {
-        newCollected = await currentRoute.handleDataUpdate(
+      if (currentFlow?.hooks?.onDataUpdate) {
+        newCollected = await currentFlow.handleDataUpdate(
           newCollected,
           previousCollected
         );
@@ -1017,10 +1046,10 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get routing engine
+   * Get flow router
    * @internal Used by ResponseModal
    */
-  getRoutingEngine(): RoutingEngine<TContext, TData> {
+  getFlowRouter(): FlowRouter<TContext, TData> {
     return this._routingEngine;
   }
 
@@ -1030,55 +1059,6 @@ export class Agent<TContext = any, TData = any> {
    */
   getUpdateDataMethod(): (session: SessionState<TData>, dataUpdate: Partial<TData>) => Promise<SessionState<TData>> {
     return this.updateData.bind(this);
-  }
-
-  /**
-   * Evaluate and match active guidelines based on their conditions
-   * Returns guidelines that should be active given the current context
-   */
-  async evaluateGuidelines(
-    context?: TContext,
-    session?: SessionState<TData>,
-    history?: Event[]
-  ): Promise<GuidelineMatch<TContext, TData>[]> {
-    const templateContext = { context, session, history, data: session?.data };
-    const evaluator = createConditionEvaluator(templateContext);
-    const matches: GuidelineMatch<TContext, TData>[] = [];
-
-    for (const guideline of this._guidelines) {
-      // Skip disabled guidelines
-      if (guideline.enabled === false) {
-        continue;
-      }
-
-      if (guideline.condition) {
-        const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
-
-        // Include guideline if:
-        // 1. No programmatic conditions (only strings) - always active
-        // 2. Programmatic conditions evaluate to true
-        if (!evaluation.hasProgrammaticConditions || evaluation.programmaticResult) {
-          const rationale = evaluation.aiContextStrings.length > 0
-            ? `Condition met: ${evaluation.aiContextStrings.join(" AND ")}`
-            : evaluation.hasProgrammaticConditions
-              ? "Programmatic condition evaluated to true"
-              : "Always active (no conditions)";
-
-          matches.push({
-            guideline,
-            rationale
-          });
-        }
-      } else {
-        // No condition means always active
-        matches.push({
-          guideline,
-          rationale: "Always active (no conditions)"
-        });
-      }
-    }
-
-    return matches;
   }
 
   /**
@@ -1093,7 +1073,7 @@ export class Agent<TContext = any, TData = any> {
       | undefined,
     context: TContext,
     data?: Partial<TData>,
-    route?: Route<TContext, TData>,
+    flow?: Flow<TContext, TData>,
     step?: Step<TContext, TData>
   ): Promise<void> {
     if (!prepareOrFinalize) return;
@@ -1107,7 +1087,7 @@ export class Agent<TContext = any, TData = any> {
 
       if (typeof prepareOrFinalize === "string") {
         // Tool ID - use ToolManager to find it across all scopes
-        tool = this.tool.find(prepareOrFinalize, undefined, step, route);
+        tool = this.tool.find(prepareOrFinalize, undefined, step, flow);
       } else {
         // Tool object - validate it has required properties
         if (prepareOrFinalize.id && typeof prepareOrFinalize.handler === 'function') {
@@ -1160,7 +1140,6 @@ export class Agent<TContext = any, TData = any> {
 
   /**
    * Get collected data from current session or agent-level collected data
-   * @param routeId - Optional route ID to get data for (uses current route if not provided)
    * @returns The collected data from the current session or agent-level data
    */
   getData(): Partial<TData> {
@@ -1169,8 +1148,8 @@ export class Agent<TContext = any, TData = any> {
 
     // If we have a current session, use session data
     if (this._currentSession) {
-      // With agent-level data, all routes share the same data structure
-      // No need for route-specific data access
+      // With agent-level data, all flows share the same data structure
+      // No need for flow-specific data access
       return (this._currentSession.data) || {};
     }
 
@@ -1179,75 +1158,307 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Manually transition to a different route
-   * Sets a pending transition that will be executed on the next respond() call
+   * Dispatch a directive (or a flow shorthand) into a session.
+   * Sets `pendingDirective` on the session without triggering a `respond()` call.
+   * The directive will be applied at the start of the next turn.
    *
-   * @param routeIdOrTitle - Route ID or title to transition to
-   * @param session - Session step to update (uses current session if not provided)
-   * @param condition - Optional AI-evaluated condition for the transition
-   * @returns Updated session with pending transition
+   * String form desugars to `{ goTo: target }`.
+   *
+   * @param target - Flow ID/title string (desugars to `{ goTo: target }`) or a full Directive
+   * @param session - Session to update (uses current session if not provided)
+   * @returns Updated session with `pendingDirective` set
+   *
+   * @throws FlowConfigurationError if the string target doesn't match any flow
+   * @throws FlowConfigurationError if the directive fails validation
    *
    * @example
-   * // After route completes
-   * if (response.isRouteComplete && response.session) {
-   *   const updatedSession = agent.nextStepRoute("feedback-collection", response.session);
-   *   // Next respond() call will automatically transition to feedback route
-   *   const nextResponse = await agent.respond({ history, session: updatedSession });
-   * }
+   * // String shorthand — desugars to { goTo: 'Feedback' }
+   * const updated = await agent.dispatch('Feedback', session);
+   *
+   * @example
+   * // Full directive
+   * const updated = await agent.dispatch({ goTo: 'Billing', reply: 'Transferring you now.' }, session);
    */
-  async nextStepRoute(
-    routeIdOrTitle: string,
-    session?: SessionState<TData>,
-    condition?: Template<TContext, TData>,
-    history?: Event[]
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async dispatch(
+    target: string | Directive<TContext, TData>,
+    session?: SessionState<TData>
   ): Promise<SessionState<TData>> {
     const targetSession = session || this._currentSession;
 
     if (!targetSession) {
       throw new Error(
-        "No session provided and no current session available. Please provide a session to transition."
+        "No session provided and no current session available. Please provide a session to dispatch into."
       );
     }
 
-    // Find target route by ID or title
-    const targetRoute = this._routes.find(
-      (r) => r.id === routeIdOrTitle || r.title === routeIdOrTitle
-    );
+    // Desugar string form to { goTo: target }
+    const directive: Directive<TContext, TData> = typeof target === 'string'
+      ? { goTo: target }
+      : target;
 
-    if (!targetRoute) {
-      throw new Error(
-        `Route not found: ${routeIdOrTitle}. Available routes: ${this._routes
-          .map((r) => r.title)
-          .join(", ")}`
+    // Validate the directive: check for multiple position fields, empty goTo, etc.
+    this.validateDirective(directive);
+
+    // If goTo is a string, validate it references a known flow
+    if (typeof directive.goTo === 'string') {
+      const flowTarget = directive.goTo;
+      const matchesFlow = this._flows.some(
+        f => f.id === flowTarget || f.title === flowTarget
       );
+      if (!matchesFlow) {
+        throw new StepFlowConfigurationError(
+          `[FlowConfigurationError] Unknown flow: "${flowTarget}" does not match any flow id or title. ` +
+          `Available flows: ${this._flows.map(f => f.title).join(', ')}.`
+        );
+      }
+    } else if (directive.goTo && typeof directive.goTo === 'object' && directive.goTo.flow) {
+      const flowTarget = directive.goTo.flow;
+      const matchesFlow = this._flows.some(
+        f => f.id === flowTarget || f.title === flowTarget
+      );
+      if (!matchesFlow) {
+        throw new StepFlowConfigurationError(
+          `[FlowConfigurationError] Unknown flow: "${flowTarget}" does not match any flow id or title. ` +
+          `Available flows: ${this._flows.map(f => f.title).join(', ')}.`
+        );
+      }
     }
-    const templateContext = createTemplateContext({
-      context: this._context,
-      session,
-      history,
-      data: this._currentSession?.data,
-    });
-    const renderedCondition = await render(condition, templateContext);
 
+    // Strip PreDirective-only fields before storing
+    const stripped = this.stripPreDirectiveFields(directive);
+
+    // Set pendingDirective on the session without applying it
     const updatedSession: SessionState<TData> = {
       ...targetSession,
-      pendingTransition: {
-        targetRouteId: targetRoute.id,
-        condition: renderedCondition,
-        reason: "route_complete",
+      pendingDirective: stripped as Directive<unknown, TData>,
+      metadata: {
+        ...targetSession.metadata,
+        lastUpdatedAt: new Date(),
       },
     };
 
-    // Update current session if using it
+    // Update current session in place if no explicit session was passed
     if (!session && this._currentSession) {
       this._currentSession = updatedSession;
     }
 
     logger.debug(
-      `[Agent] Set pending transition to route: ${targetRoute.title}`
+      `[Agent] Dispatched directive: pendingDirective set on session ${updatedSession.id}`
     );
 
     return updatedSession;
+  }
+
+  /**
+   * Apply a directive synchronously to a session without invoking `respond()`.
+   * Performs in-place application: updates flow/step position, merges state writes.
+   *
+   * This is the synchronous counterpart to `dispatch` — it applies immediately
+   * rather than deferring to the next turn.
+   *
+   * @param directive - The directive to apply
+   * @param session - The session to apply the directive to
+   * @returns The updated session with the directive applied
+   */
+  applyDirective(
+    directive: Directive<TContext, TData>,
+    session: SessionState<TData>
+  ): SessionState<TData> {
+    // Validate the directive
+    this.validateDirective(directive);
+
+    let updatedSession = { ...session };
+    const now = new Date();
+
+    // Apply state writes
+    if (directive.contextUpdate) {
+      // Context updates are applied to the agent, not the session
+      this._context = {
+        ...(this._context as Record<string, unknown>),
+        ...(directive.contextUpdate as Record<string, unknown>),
+      } as TContext;
+    }
+
+    if (directive.dataUpdate) {
+      updatedSession = {
+        ...updatedSession,
+        data: {
+          ...updatedSession.data,
+          ...directive.dataUpdate,
+        },
+      };
+    }
+
+    // Apply position control
+    if (directive.goTo) {
+      const flowTarget = typeof directive.goTo === 'string'
+        ? directive.goTo
+        : directive.goTo.flow;
+
+      if (flowTarget) {
+        const targetFlow = this._flows.find(
+          f => f.id === flowTarget || f.title === flowTarget
+        );
+        if (targetFlow) {
+          // Merge goTo.data if present
+          if (typeof directive.goTo === 'object' && directive.goTo.data) {
+            updatedSession = {
+              ...updatedSession,
+              data: {
+                ...updatedSession.data,
+                ...directive.goTo.data,
+              },
+            };
+          }
+
+          updatedSession = enterFlow(updatedSession, targetFlow.id, targetFlow.title);
+
+          // If a specific step is targeted
+          if (typeof directive.goTo === 'object' && directive.goTo.step) {
+            updatedSession = enterStep(updatedSession, directive.goTo.step);
+          }
+        }
+      }
+    } else if (directive.goToStep) {
+      const stepTarget = typeof directive.goToStep === 'string'
+        ? directive.goToStep
+        : directive.goToStep.step;
+
+      // Merge goToStep.data if present
+      if (typeof directive.goToStep === 'object' && directive.goToStep.data) {
+        updatedSession = {
+          ...updatedSession,
+          data: {
+            ...updatedSession.data,
+            ...directive.goToStep.data,
+          },
+        };
+      }
+
+      updatedSession = enterStep(updatedSession, stepTarget);
+    } else if (directive.complete) {
+      updatedSession = completeCurrentFlow(updatedSession);
+
+      // If complete carries a chained directive, set it as pendingDirective
+      if (typeof directive.complete === 'object' && directive.complete.next) {
+        updatedSession = {
+          ...updatedSession,
+          pendingDirective: directive.complete.next as Directive<unknown, TData>,
+        };
+      }
+    } else if (directive.abort) {
+      const clearSession = typeof directive.abort === 'object'
+        ? directive.abort.clearSession !== false
+        : true;
+
+      if (clearSession) {
+        updatedSession = {
+          ...updatedSession,
+          currentFlow: undefined,
+          currentStep: undefined,
+          data: {} as Partial<TData>,
+        };
+      } else {
+        updatedSession = {
+          ...updatedSession,
+          currentFlow: undefined,
+          currentStep: undefined,
+        };
+      }
+    } else if (directive.reset) {
+      const currentFlowId = updatedSession.currentFlow?.id;
+      const currentFlowTitle = updatedSession.currentFlow?.title;
+
+      if (currentFlowId && currentFlowTitle) {
+        // Clear data if requested
+        if (typeof directive.reset === 'object' && directive.reset.clearData) {
+          const currentFlow = this._flows.find(f => f.id === currentFlowId);
+          if (currentFlow) {
+            const ownedFields = [
+              ...(currentFlow.requiredFields || []),
+              ...(currentFlow.optionalFields || []),
+            ];
+            updatedSession = completeCurrentFlow(updatedSession, { clearOwnedFields: ownedFields });
+            // Re-enter the same flow
+            updatedSession = enterFlow(updatedSession, currentFlowId, currentFlowTitle);
+          }
+        } else {
+          // Re-enter the flow from the beginning (or specified step)
+          updatedSession = enterFlow(updatedSession, currentFlowId, currentFlowTitle);
+        }
+
+        // If a specific step is targeted for reset
+        if (typeof directive.reset === 'object' && directive.reset.step) {
+          updatedSession = enterStep(updatedSession, directive.reset.step);
+        }
+      }
+    }
+
+    // Update metadata
+    updatedSession = {
+      ...updatedSession,
+      metadata: {
+        ...updatedSession.metadata,
+        lastUpdatedAt: now,
+      },
+    };
+
+    return updatedSession;
+  }
+
+  /**
+   * Validate a directive for structural correctness.
+   * Throws FlowConfigurationError for invalid combinations.
+   * @private
+   */
+  private validateDirective(directive: Directive<TContext, TData>): void {
+    // Check for multiple position fields
+    const positionFields = ['goTo', 'goToStep', 'complete', 'abort', 'reset'] as const;
+    const setPositionFields = positionFields.filter(
+      field => directive[field] !== undefined
+    );
+
+    if (setPositionFields.length > 1) {
+      throw new StepFlowConfigurationError(
+        `[FlowConfigurationError] Multiple position fields: a Directive may set at most one position field. ` +
+        `Found: ${setPositionFields.join(', ')}. Remove all but one.`
+      );
+    }
+
+    // Check for empty goTo object
+    if (directive.goTo && typeof directive.goTo === 'object') {
+      const goToObj = directive.goTo;
+      if (!goToObj.flow && !goToObj.step) {
+        throw new StepFlowConfigurationError(
+          `[FlowConfigurationError] Empty goTo: "goTo" requires at least a "flow" field. ` +
+          `Provide { goTo: { flow: '<id>' } } or use the string shorthand { goTo: '<id>' }.`
+        );
+      }
+    }
+  }
+
+  /**
+   * Strip PreDirective-only fields (appendPrompt, injectTools, halt) from a directive.
+   * These fields are transient (one-turn lifetime) and must not be persisted.
+   * @private
+   */
+  private stripPreDirectiveFields(directive: Directive<TContext, TData>): Directive<TContext, TData> {
+    const raw = directive as Record<string, unknown>;
+    if (!raw.appendPrompt && !raw.injectTools && raw.halt === undefined) {
+      return directive;
+    }
+
+    const { appendPrompt, injectTools, halt, ...rest } = raw;
+
+    if (appendPrompt || injectTools || halt !== undefined) {
+      logger.debug(
+        `[Agent] Stripped PreDirective-only fields before storing pendingDirective: ` +
+        `${[appendPrompt && 'appendPrompt', injectTools && 'injectTools', halt !== undefined && 'halt'].filter(Boolean).join(', ')}`
+      );
+    }
+
+    return rest as Directive<TContext, TData>;
   }
 
   /**

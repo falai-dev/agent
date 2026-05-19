@@ -9,12 +9,14 @@
  * - Context management
  */
 
-import { Agent, type Guideline, type Term } from "../src/index";
+import { Agent, type Instruction, type Term } from "../src/index";
 import {
   MockProvider,
   MockProviderFactory,
   MOCK_RESPONSES,
 } from "./mock-provider";
+import { generateFlowId } from "../src/utils/id";
+import { describe, test, expect } from "bun:test";
 
 // Test context types
 interface TestContext {
@@ -85,9 +87,9 @@ function createSupportAgent(): Agent<TestContext, SupportTicketData> {
   });
 
   // Add guidelines
-  agent.createGuideline({
-    condition: "User asks for help",
-    action: "Provide helpful assistance",
+  agent.createInstruction({
+    when: "User asks for help",
+    prompt: "Provide helpful assistance",
     enabled: true,
   });
 
@@ -97,8 +99,8 @@ function createSupportAgent(): Agent<TestContext, SupportTicketData> {
     description: "A request for technical assistance",
   });
 
-  // Add a support route with required fields
-  agent.createRoute({
+  // Add a support flow with required fields
+  agent.createFlow({
     title: "Support Request",
     description: "Handle customer support requests",
     when: ["User needs help", "Technical issue"],
@@ -124,52 +126,6 @@ function createSupportAgent(): Agent<TestContext, SupportTicketData> {
 
   return agent;
 }
-
-// function createSupportAgent(): Agent<TestContext> {
-//   const agent = createTestAgent();
-
-//   // Add guidelines
-//   agent.createGuideline({
-//     condition: "User asks for help",
-//     action: "Provide helpful assistance",
-//     enabled: true,
-//   });
-
-//   // Add terms
-//   agent.createTerm({
-//     name: "Support Ticket",
-//     description: "A request for technical assistance",
-//   });
-
-//   // Add a support route
-//   agent.createRoute<SupportTicketData>({
-//     title: "Support Request",
-//     description: "Handle customer support requests",
-//     when: ["User needs help", "Technical issue"],
-//     schema: {
-//       type: "object",
-//       properties: {
-//         issue: { type: "string" },
-//         priority: { type: "string", enum: ["low", "medium", "high"] },
-//         category: { type: "string" },
-//       },
-//       required: ["issue"],
-//     },
-//     steps: [
-//       {
-//         prompt: "What's the issue you're experiencing?",
-//         collect: ["issue"],
-//       },
-//       {
-//         prompt: "How would you rate the priority?",
-//         collect: ["priority"],
-//         requires: ["issue"],
-//       },
-//     ],
-//   });
-
-//   return agent;
-// }
 
 // Simple test runner functions
 function assert(condition: boolean, message: string) {
@@ -284,10 +240,10 @@ async function testAgentCreationAndConfiguration() {
           description: "A test term",
         },
       ],
-      guidelines: [
+      instructions: [
         {
-          condition: "Test condition",
-          action: "Test action",
+          when: "Test condition",
+          prompt: "Test action",
         },
       ],
     });
@@ -295,7 +251,7 @@ async function testAgentCreationAndConfiguration() {
     // Test that full configuration works
     assert(agent !== undefined, "Agent should be created");
     assert(agent.getTerms().length === 1, "Should have 1 term");
-    assert(agent.getGuidelines().length === 1, "Should have 1 guideline");
+    assert(agent.getInstructions().length === 1, "Should have 1 instruction");
   });
 
   await runTest("should update context dynamically", async () => {
@@ -475,9 +431,9 @@ async function testAgentResponseGeneration() {
     );
     assert(response.session !== undefined, "Session should be defined");
     assertEqual(
-      response.isRouteComplete,
+      response.isFlowComplete,
       false,
-      "Route should not be complete"
+      "Flow should not be complete"
     );
     assert(response.toolCalls === undefined, "Tool calls should be undefined");
   });
@@ -657,8 +613,8 @@ async function testAgentResponseGeneration() {
 
     assert(chunks.length > 0, "Should receive streaming chunks");
     assert(finalChunk !== undefined, "Should have final chunk");
-    assert(finalChunk.done === true, "Final chunk should be marked as done");
-    assertEqual(finalChunk.accumulated, MOCK_RESPONSES.GREETING, "Final message should match mock");
+    assert(finalChunk!.done === true, "Final chunk should be marked as done");
+    assertEqual(finalChunk!.accumulated, MOCK_RESPONSES.GREETING, "Final message should match mock");
   });
 
   await runTest("should support new stream() method", async () => {
@@ -676,8 +632,8 @@ async function testAgentResponseGeneration() {
 
     assert(chunks.length > 0, "Should receive streaming chunks");
     assert(finalChunk !== undefined, "Should have final chunk");
-    assert(finalChunk.done === true, "Final chunk should be marked as done");
-    assertEqual(finalChunk.accumulated, MOCK_RESPONSES.GREETING, "Final message should match mock");
+    assert(finalChunk!.done === true, "Final chunk should be marked as done");
+    assertEqual(finalChunk!.accumulated, MOCK_RESPONSES.GREETING, "Final message should match mock");
 
     // Check that message was added to session history
     const history = agent.session.getHistory();
@@ -690,30 +646,30 @@ async function testAgentResponseGeneration() {
 async function testAgentGuidelinesAndTerms() {
   console.log("=== Agent Guidelines and Terms Tests ===");
 
-  await runTest("should manage guidelines", () => {
+  await runTest("should manage instructions", () => {
     const agent = createTestAgent();
 
     // Initially empty
     assert(
-      agent.getGuidelines().length === 0,
-      "Should start with no guidelines"
+      agent.getInstructions().length === 0,
+      "Should start with no instructions"
     );
 
-    // Add guideline
-    const guideline: Guideline = {
-      condition: "User is confused",
-      action: "Ask clarifying questions",
+    // Add instruction
+    const instruction: Instruction = {
+      when: "User is confused",
+      prompt: "Ask clarifying questions",
       enabled: true,
     };
 
-    agent.createGuideline(guideline);
-    assert(agent.getGuidelines().length === 1, "Should have 1 guideline");
+    agent.createInstruction(instruction);
+    assert(agent.getInstructions().length === 1, "Should have 1 instruction");
 
-    const createdGuideline = agent.getGuidelines()[0];
-    assert(createdGuideline.condition === guideline.condition, "Condition should match");
-    assert(createdGuideline.action === guideline.action, "Action should match");
-    assert(createdGuideline.enabled === guideline.enabled, "Enabled should match");
-    assert(typeof createdGuideline.id === "string", "Should have auto-generated ID");
+    const createdInstruction = agent.getInstructions()[0];
+    assert(createdInstruction.when === instruction.when, "When should match");
+    assert(createdInstruction.prompt === instruction.prompt, "Prompt should match");
+    assert(createdInstruction.enabled === instruction.enabled, "Enabled should match");
+    assert(typeof createdInstruction.id === "string", "Should have auto-generated ID");
   });
 
   await runTest("should manage terms", () => {
@@ -765,33 +721,33 @@ async function testAgentGuidelinesAndTerms() {
   );
 
   await runTest(
-    "should handle dynamic guideline actions with context",
+    "should handle dynamic instruction prompts with context",
     async () => {
       const agent = createTestAgent();
 
-      const dynamicGuideline: Guideline<TestContext> = {
-        condition: "User needs personalized help",
-        action: ({ context }) => `I'll help you, ${context?.userId}`,
+      const dynamicInstruction: Instruction<TestContext> = {
+        when: "User needs personalized help",
+        prompt: ({ context }) => `I'll help you, ${context?.userId}`,
         enabled: true,
       };
 
-      agent.createGuideline(dynamicGuideline);
-      const guidelines = agent.getGuidelines();
-      assert(guidelines.length === 1, "Should have 1 guideline");
+      agent.createInstruction(dynamicInstruction);
+      const instructions = agent.getInstructions();
+      assert(instructions.length === 1, "Should have 1 instruction");
 
-      // Test that the action function works
-      const guideline = guidelines[0];
+      // Test that the prompt function works
+      const instruction = instructions[0];
       assert(
-        typeof guideline.action === "function",
-        "Action should be a function"
+        typeof instruction.prompt === "function",
+        "Prompt should be a function"
       );
       const context = await agent.getContext();
       assertEqual(
-        (guideline.action as (params: { context?: TestContext }) => string)(
+        (instruction.prompt as (params: { context?: TestContext }) => string)(
           { context: context as TestContext }
         ),
         "I'll help you, test-user-123",
-        "Dynamic action should work"
+        "Dynamic prompt should work"
       );
     }
   );
@@ -819,7 +775,7 @@ async function testAgentBackwardCompatibility() {
     assert(typeof response === "object", "Response should be an object");
     assert(typeof response.message === "string", "Response should have message string");
     assert(response.session !== undefined, "Response should have session");
-    assert(typeof response.isRouteComplete === "boolean", "Response should have isRouteComplete boolean");
+    assert(typeof response.isFlowComplete === "boolean", "Response should have isFlowComplete boolean");
     assertEqual(response.message, MOCK_RESPONSES.GREETING, "Response message should match mock");
   });
 
@@ -858,7 +814,7 @@ async function testAgentBackwardCompatibility() {
 
     assert(chunkCount > 0, "Should receive at least one chunk");
     assert(finalChunk !== undefined, "Should have final chunk");
-    assertEqual(finalChunk.accumulated, MOCK_RESPONSES.GREETING, "Final accumulated should match mock");
+    assertEqual(finalChunk!.accumulated, MOCK_RESPONSES.GREETING, "Final accumulated should match mock");
   });
 
   await runTest("should maintain exact method signatures", async () => {
@@ -894,11 +850,11 @@ async function testAgentBackwardCompatibility() {
 async function testAgentLevelDataCollection() {
   console.log("=== Agent-Level Data Collection Tests ===");
 
-  await runTest("should collect data across routes", async () => {
+  await runTest("should collect data across flows", async () => {
     const agent = createSupportAgent();
 
-    // Create multiple routes that work with the same agent data
-    const infoRoute = agent.createRoute({
+    // Create multiple flows that work with the same agent data
+    const infoFlow = agent.createFlow({
       title: "Customer Info",
       requiredFields: ["customerName", "email"],
       steps: [
@@ -914,7 +870,7 @@ async function testAgentLevelDataCollection() {
       ],
     });
 
-    const ticketRoute = agent.createRoute({
+    const ticketFlow = agent.createFlow({
       title: "Ticket Creation",
       requiredFields: ["issue", "category"],
       steps: [
@@ -930,79 +886,79 @@ async function testAgentLevelDataCollection() {
       ],
     });
 
-    // Test that routes can access the same agent-level data
-    assert(!!infoRoute.requiredFields?.includes("customerName"), "Info route should require customerName");
-    assert(!!ticketRoute.requiredFields?.includes("issue"), "Ticket route should require issue");
+    // Test that flows can access the same agent-level data
+    assert(!!infoFlow.requiredFields?.includes("customerName"), "Info flow should require customerName");
+    assert(!!ticketFlow.requiredFields?.includes("issue"), "Ticket flow should require issue");
 
-    // Test route completion logic
+    // Test flow completion logic
     const partialData: Partial<SupportTicketData> = {
       customerName: "John Doe",
       issue: "Login problem",
     };
 
-    assert(infoRoute.isComplete(partialData) === false, "Info route should not be complete without email");
-    assert(ticketRoute.isComplete(partialData) === false, "Ticket route should not be complete without category");
+    assert(infoFlow.isComplete(partialData) === false, "Info flow should not be complete without email");
+    assert(ticketFlow.isComplete(partialData) === false, "Ticket flow should not be complete without category");
 
     const completeInfoData: Partial<SupportTicketData> = {
       ...partialData,
       email: "john@example.com",
     };
 
-    assert(infoRoute.isComplete(completeInfoData) === true, "Info route should be complete with name and email");
+    assert(infoFlow.isComplete(completeInfoData) === true, "Info flow should be complete with name and email");
 
     const completeTicketData: Partial<SupportTicketData> = {
       ...partialData,
       category: "technical",
     };
 
-    assert(ticketRoute.isComplete(completeTicketData) === true, "Ticket route should be complete with issue and category");
+    assert(ticketFlow.isComplete(completeTicketData) === true, "Ticket flow should be complete with issue and category");
   });
 
-  await runTest("should validate route field references against agent schema", () => {
+  await runTest("should validate flow field references against agent schema", () => {
     const agent = createSupportAgent();
 
     // Test valid field references
-    const validRoute = agent.createRoute({
-      title: "Valid Route",
+    const validFlow = agent.createFlow({
+      title: "Valid Flow",
       requiredFields: ["issue", "category"], // These exist in agent schema
       optionalFields: ["priority"], // This exists in agent schema
     });
 
-    assert(validRoute !== undefined, "Route with valid fields should be created");
+    assert(validFlow !== undefined, "Flow with valid fields should be created");
 
     // Test invalid field references should throw error
     try {
-      agent.createRoute({
-        title: "Invalid Route",
+      agent.createFlow({
+        title: "Invalid Flow",
         requiredFields: ["nonExistentField"] as any,
       });
-      throw new Error("Expected route configuration error was not thrown");
+      throw new Error("Expected flow configuration error was not thrown");
     } catch (error) {
       assert(
         error instanceof Error && error.message.includes("Invalid required fields"),
-        "Should throw route configuration error for invalid fields"
+        "Should throw flow configuration error for invalid fields"
       );
     }
   });
 
-  await runTest("should calculate route completion progress", () => {
+  await runTest("should calculate flow completion progress", () => {
     const agent = createSupportAgent();
-    const route = agent.createRoute({
-      title: "Progress Route",
+    const flow = agent.createFlow({
+      title: "Progress Flow",
       requiredFields: ["issue", "category", "priority"],
     });
 
     // Test 0% completion
     const noData: Partial<SupportTicketData> = {};
-    assertEqual(route.getCompletionProgress(noData), 0, "Empty data should be 0% complete");
+    assertEqual(flow.getCompletionProgress(noData), 0, "Empty data should be 0% complete");
 
     // Test 33% completion
     const oneFieldData: Partial<SupportTicketData> = { issue: "Test issue" };
-    assertEqual(Math.round(route.getCompletionProgress(oneFieldData) * 100), 33, "One field should be ~33% complete");
+    assertEqual(Math.round(flow.getCompletionProgress(oneFieldData) * 100), 33, "One field should be ~33% complete");
 
     // Test 67% completion
     const twoFieldData: Partial<SupportTicketData> = { issue: "Test issue", category: "technical" };
-    assertEqual(Math.round(route.getCompletionProgress(twoFieldData) * 100), 67, "Two fields should be ~67% complete");
+    assertEqual(Math.round(flow.getCompletionProgress(twoFieldData) * 100), 67, "Two fields should be ~67% complete");
 
     // Test 100% completion
     const completeData: Partial<SupportTicketData> = {
@@ -1010,13 +966,13 @@ async function testAgentLevelDataCollection() {
       category: "technical",
       priority: "high"
     };
-    assertEqual(route.getCompletionProgress(completeData), 1, "All fields should be 100% complete");
+    assertEqual(flow.getCompletionProgress(completeData), 1, "All fields should be 100% complete");
   });
 
   await runTest("should get missing required fields", () => {
     const agent = createSupportAgent();
-    const route = agent.createRoute({
-      title: "Missing Fields Route",
+    const flow = agent.createFlow({
+      title: "Missing Fields Flow",
       requiredFields: ["issue", "category", "customerName"],
     });
 
@@ -1024,7 +980,7 @@ async function testAgentLevelDataCollection() {
       issue: "Test issue",
     };
 
-    const missingFields = route.getMissingRequiredFields(partialData);
+    const missingFields = flow.getMissingRequiredFields(partialData);
     assert(missingFields.includes("category"), "Should identify missing category field");
     assert(missingFields.includes("customerName"), "Should identify missing customerName field");
     assert(!missingFields.includes("issue"), "Should not include present issue field");
@@ -1051,3 +1007,13 @@ async function runAllAgentTests() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   runAllAgentTests().catch(console.error);
 }
+
+/**
+ * Property 2: Generated Flow IDs use the `flow_` prefix
+ * Validates: Requirements 5.1, 5.2
+ */
+describe("generateFlowId", () => {
+  test("should produce IDs with the flow_ prefix", () => {
+    expect(generateFlowId("Foo")).toMatch(/^flow_/);
+  });
+});

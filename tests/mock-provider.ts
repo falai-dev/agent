@@ -64,7 +64,7 @@ export class MockProvider implements AiProvider {
       errorMessage: "Mock provider error for testing",
       structuredResponse: {
         message: MOCK_RESPONSES.GREETING,
-        route: null,
+        flow: null,
         step: null,
       },
       modelName: "mock-model-v1",
@@ -98,21 +98,21 @@ export class MockProvider implements AiProvider {
     if (input.parameters?.jsonSchema && typeof input.parameters.jsonSchema === 'object') {
       const schema = input.parameters.jsonSchema as any;
       const schemaName = input.parameters.schemaName || '';
-      
-      // Check if this is a routing schema (has routes property with route IDs)
-      if (schema.properties?.routes?.properties) {
-        const routeIds = Object.keys(schema.properties.routes.properties);
-        
+
+      // Check if this is a routing schema (has flows property with flow IDs)
+      if (schema.properties?.flows?.properties) {
+        const flowIds = Object.keys(schema.properties.flows.properties);
+
         // Generate mock routing scores (distribute scores to make tests work)
-        const routes: Record<string, number> = {};
-        routeIds.forEach((routeId, index) => {
-          // Give higher scores to earlier routes to make selection deterministic
-          routes[routeId] = 80 - (index * 10);
+        const flows: Record<string, number> = {};
+        flowIds.forEach((flowId, index) => {
+          // Give higher scores to earlier flows to make selection deterministic
+          flows[flowId] = 80 - (index * 10);
         });
 
         structuredResponse = {
           context: "User message context",
-          routes,
+          flows,
           responseDirectives: [],
         };
       }
@@ -239,7 +239,7 @@ export class MockProvider implements AiProvider {
       errorMessage: "Mock provider error for testing",
       structuredResponse: {
         message: MOCK_RESPONSES.GREETING,
-        route: null,
+        flow: null,
         step: null,
       },
       modelName: "mock-model-v1",
@@ -269,7 +269,7 @@ export const MockProviderFactory = {
       responseMessage: message,
       structuredResponse: structured || {
         message,
-        route: null,
+        flow: null,
         step: null,
       },
     });
@@ -294,14 +294,14 @@ export const MockProviderFactory = {
   },
 
   /**
-   * Create a mock provider for route testing
+   * Create a mock provider for flow testing
    */
-  forRoute(routeName: string, stepName?: string): MockProvider {
+  forFlow(flowName: string, stepName?: string): MockProvider {
     return new MockProvider({
-      responseMessage: `I'll help you with the ${routeName} process.`,
+      responseMessage: `I'll help you with the ${flowName} process.`,
       structuredResponse: {
-        message: `I'll help you with the ${routeName} process.`,
-        route: routeName,
+        message: `I'll help you with the ${flowName} process.`,
+        flow: flowName,
         step: stepName || null,
       },
     });
@@ -315,7 +315,7 @@ export const MockProviderFactory = {
       responseMessage: "I'll execute those tools for you.",
       structuredResponse: {
         message: "I'll execute those tools for you.",
-        route: null,
+        flow: null,
         step: null,
         toolCalls,
       },

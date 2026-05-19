@@ -1,15 +1,19 @@
-import type { Event, Term, Guideline, AgentOptions } from "../types";
-import type { Route } from "./Route";
+import type { Event, Term, Instruction, AgentOptions, ScopedInstructions, AppliedInstruction } from "../types";
+import type { Flow } from "./Flow";
 import { render, renderMany, formatKnowledgeBase, createTemplateContext } from "../utils/template";
 import { TemplateContext } from "../types/template";
-import { extractAIContextStrings, ConditionEvaluator } from "../utils/condition";
+import { ConditionEvaluator } from "../utils/condition";
 import { PromptSectionCache } from "./PromptSectionCache";
+import { logger } from "../utils";
 
 export class PromptComposer<TContext = unknown, TData = unknown> {
   private parts: string[] = [];
   private renderContext: TemplateContext<TContext, TData>;
   private cache: PromptSectionCache | null;
   private instructionCounter = 0;
+
+  /** Per-turn applied instructions, reset on every `addInstructions` invocation. */
+  public lastAppliedInstructions: AppliedInstruction[] = [];
 
   constructor(
     context: TemplateContext<TContext, TData> = createTemplateContext({}),
@@ -21,46 +25,18 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
 
   // Specific, typed sections tailored to the framework
 
-  async addAgentMeta(agent: AgentOptions<TContext, TData>): Promise<this> {
+  async addAgentMeta(agent: Pick<AgentOptions<TContext, TData>, 'name'> & Partial<AgentOptions<TContext, TData>>): Promise<this> {
     const compute = async (): Promise<string | null> => {
       const lines: string[] = [];
       lines.push("## Agent Identity");
       lines.push(
         `You are "${agent.name}". Always refer to yourself by this name.`
       );
-      if (agent.identity) {
-        lines.push(await render(agent.identity, this.renderContext));
-      }
-      if (agent.personality) {
-        lines.push(
-          `Communicate in the following style: ${await render(
-            agent.personality,
-            this.renderContext
-          )}`
-        );
+      if (agent.persona) {
+        lines.push(await render(agent.persona, this.renderContext));
       }
       if (agent.goal) {
         lines.push(`Your primary goal: ${agent.goal}`);
-      }
-      if (agent.description) {
-        lines.push(`About you: ${agent.description}`);
-      }
-      if (agent.rules?.length) {
-        const renderedRules = await renderMany(agent.rules, this.renderContext);
-        lines.push(
-          `You MUST always follow these rules:\n- ${renderedRules.join("\n- ")}`
-        );
-      }
-      if (agent.prohibitions?.length) {
-        const renderedProhibitions = await renderMany(
-          agent.prohibitions,
-          this.renderContext
-        );
-        lines.push(
-          `You MUST NEVER do the following:\n- ${renderedProhibitions.join(
-            "\n- "
-          )}`
-        );
       }
       return lines.join("\n");
     };
@@ -74,8 +50,8 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     return this;
   }
 
-  async addRoutingOverview(routes: Route<TContext, TData>[]): Promise<this> {
-    return this.addActiveRoutes(routes);
+  async addFlowOverview(flows: Flow<TContext, TData>[]): Promise<this> {
+    return this.addActiveFlows(flows);
   }
 
   async addScoringRules(): Promise<this> {
@@ -86,7 +62,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
         "- 50-69: moderate relevance",
         "- 30-49: weak connection or ambiguous",
         "- 0-29: minimal/none",
-        "Return ONLY JSON matching the provided schema. Include scores for ALL routes.",
+        "Return ONLY JSON matching the provided schema. Include scores for ALL flows.",
       ].join("\n")}`;
     };
 
@@ -175,80 +151,176 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     return this;
   }
 
-  async addGuidelines(guidelines: Guideline<TContext, TData>[]): Promise<this> {
-    const enabled = guidelines.filter((g) => g.enabled !== false);
-    if (!enabled.length) return this;
+  async addInstructions(scoped: ScopedInstructions<TContext, TData>): Promise<this> {
+    // Reset the per-turn applied set
+    this.lastAppliedInstructions = [];
 
-    const compute = async (): Promise<string | null> => {
-      const evaluator = new ConditionEvaluator(this.renderContext);
-      const activeGuidelines: Guideline<TContext, TData>[] = [];
-      const allAIContextStrings: string[] = [];
+    const evaluator = new ConditionEvaluator(this.renderContext);
 
-      // Evaluate guideline conditions to determine which are active
-      for (const guideline of enabled) {
-        if (guideline.condition) {
-          const evaluation = await evaluator.evaluateCondition(guideline.condition, 'AND');
-
-          // Collect AI context strings for prompt
-          allAIContextStrings.push(...evaluation.aiContextStrings);
-
-          // Include guideline if:
-          // 1. No programmatic conditions (only strings) - always active
-          // 2. Programmatic conditions evaluate to true
-          if (!evaluation.hasProgrammaticConditions || evaluation.programmaticResult) {
-            activeGuidelines.push(guideline);
-          }
-        } else {
-          // No condition means always active
-          activeGuidelines.push(guideline);
+    /**
+     * Evaluate a single instruction's `if` code predicate(s).
+     * Returns true if all predicates pass (AND semantics).
+     * If `if` is undefined, returns true (always active).
+     */
+    const evaluateIf = async (ifCondition: Instruction<TContext, TData>['if']): Promise<boolean> => {
+      if (ifCondition === undefined) return true;
+      const predicates = Array.isArray(ifCondition) ? ifCondition : [ifCondition];
+      for (const predicate of predicates) {
+        try {
+          const result = await predicate({
+            context: (this.renderContext.context ?? {}) as TContext,
+            data: (this.renderContext.data || {}),
+            session: (this.renderContext.session ?? { id: '', data: {}, history: [], metadata: {} }) as import("../types/session").SessionState<TData>,
+            history: this.renderContext.history || [],
+          });
+          if (!result) return false;
+        } catch {
+          // If a predicate throws, treat it as false (skip the instruction)
+          return false;
         }
       }
+      return true;
+    };
 
-      if (!activeGuidelines.length && !allAIContextStrings.length) return null;
+    /**
+     * Evaluate a single instruction's `when` condition.
+     * Returns true if the instruction should be active.
+     */
+    const evaluateWhen = async (when: Instruction<TContext, TData>['when']): Promise<boolean> => {
+      if (when === undefined) return true;
+      const evaluation = await evaluator.evaluateCondition(when, 'AND');
+      if (!evaluation.hasProgrammaticConditions) return true;
+      return evaluation.programmaticResult;
+    };
 
-      const renderedGuidelines = await Promise.all(
-        activeGuidelines.map(async (g, i) => {
-          const action = await render(g.action, this.renderContext);
-          if (g.condition) {
-            // Use AI context strings if available, otherwise render the condition
-            const conditionStrings = extractAIContextStrings(g.condition);
-            if (conditionStrings.length > 0) {
-              const conditionText = conditionStrings.join(" AND ");
-              return `- Guideline #${i + 1}: When ${conditionText}, then ${action}`;
-            }
-          }
-          return `- Guideline #${i + 1}: ${action}`;
-        })
-      );
+    /**
+     * Resolve the kind prefix for rendering.
+     * Default kind is 'should'.
+     */
+    const kindPrefix = (kind: Instruction<TContext, TData>['kind']): string => {
+      const resolved = kind || 'should';
+      return `[${resolved}]`;
+    };
 
-      // Add any additional AI context from inactive guidelines
-      if (allAIContextStrings.length > 0) {
-        const uniqueContextStrings = Array.from(new Set(allAIContextStrings));
-        const contextSection = `\n\n**Additional Context:** ${uniqueContextStrings.join(", ")}`;
-        return `## Guidelines\n\n${renderedGuidelines.join("\n")}${contextSection}`;
-      } else {
-        return `## Guidelines\n\n${renderedGuidelines.join("\n")}`;
+    /**
+     * Process a scope bucket: filter enabled, evaluate when, collect active lines and applied records.
+     */
+    const processScope = async (
+      items: Instruction<TContext, TData>[],
+      caption: string,
+      scope: AppliedInstruction['scope'],
+      scopeRef?: string
+    ): Promise<string[]> => {
+      const lines: string[] = [];
+      const enabled = items.filter(g => g.enabled !== false);
+
+      for (const g of enabled) {
+        // Evaluate `if` first (free, code-only). Skip `when` if `if` fails.
+        const ifPassed = await evaluateIf(g.if);
+        if (!ifPassed) continue;
+
+        // Evaluate `when` (AI condition) only when `if` passed
+        const active = await evaluateWhen(g.when);
+        if (!active) continue;
+
+        const text = await render(g.prompt, this.renderContext);
+        if (!text) continue;
+
+        lines.push(`- ${kindPrefix(g.kind)} ${caption} ${text}`);
+        this.lastAppliedInstructions.push({
+          id: g.id || '',
+          scope,
+          scopeRef,
+        });
       }
+      return lines;
+    };
+
+    // Compute functions for each scope
+    const computeGlobal = async (): Promise<string | null> => {
+      const lines = await processScope(scoped.global, '[Always]', 'global');
+      return lines.length > 0 ? lines.join('\n') : null;
+    };
+
+    const computeFlow = async (): Promise<string | null> => {
+      if (!scoped.flow) return null;
+      const caption = `[In: ${scoped.flow.flowTitle}]`;
+      const lines = await processScope(scoped.flow.items, caption, 'flow', scoped.flow.flowTitle);
+      return lines.length > 0 ? lines.join('\n') : null;
+    };
+
+    const computeStep = async (): Promise<string | null> => {
+      if (!scoped.step) return null;
+      const caption = `[Step: ${scoped.step.stepId}]`;
+      const lines = await processScope(scoped.step.items, caption, 'step', scoped.step.stepId);
+      return lines.length > 0 ? lines.join('\n') : null;
     };
 
     if (this.cache) {
-      this.cache.register("guidelines", "dynamic", compute);
+      // Granular three-key approach with header coordination
+      // Register header first so it appears before content in resolveAll() output
+      this.cache.register('instructionsHeader', 'static', async () => {
+        const globalResult = await this.cache!.get('instructionsGlobal');
+        const flowResult = scoped.flow ? await this.cache!.get('instructionsFlow') : null;
+        const stepResult = scoped.step ? await this.cache!.get('instructionsStep') : null;
+        if (globalResult || flowResult || stepResult) {
+          return '## Instructions';
+        }
+        return null;
+      });
+
+      this.cache.register('instructionsGlobal', 'static', computeGlobal);
+
+      if (scoped.flow) {
+        this.cache.register('instructionsFlow', 'static', computeFlow);
+      }
+
+      if (scoped.step) {
+        this.cache.register('instructionsStep', 'dynamic', computeStep);
+      }
     } else {
-      const result = await compute();
-      if (result) this.parts.push(result);
+      // No cache: compute inline and push to parts
+      const globalLines = await computeGlobal();
+      const flowLines = await computeFlow();
+      const stepLines = await computeStep();
+
+      const allLines = [globalLines, flowLines, stepLines].filter(Boolean).join('\n');
+      if (allLines) {
+        this.parts.push(`## Instructions\n\n${allLines}`);
+      }
     }
+
+    // Debug logging
+    if (this.lastAppliedInstructions.length > 0) {
+      const globalIds = this.lastAppliedInstructions
+        .filter(g => g.scope === 'global')
+        .map(g => g.id);
+      const flowGroup = this.lastAppliedInstructions.filter(g => g.scope === 'flow');
+      const stepGroup = this.lastAppliedInstructions.filter(g => g.scope === 'step');
+
+      const debugPayload: Record<string, unknown> = { global: globalIds };
+      if (flowGroup.length > 0) {
+        debugPayload.flow = { flowTitle: scoped.flow?.flowTitle, ids: flowGroup.map(g => g.id) };
+      }
+      if (stepGroup.length > 0) {
+        debugPayload.step = { stepId: scoped.step?.stepId, ids: stepGroup.map(g => g.id) };
+      }
+
+      logger.debug('[instructions] applied', debugPayload);
+    }
+
     return this;
   }
 
   async addKnowledgeBase(
     agentKnowledgeBase?: Record<string, unknown>,
-    routeKnowledgeBase?: Record<string, unknown>
+    flowKnowledgeBase?: Record<string, unknown>
   ): Promise<this> {
     const compute = (): string | null => {
-      // Merge agent and route knowledge bases (route takes precedence for conflicts)
+      // Merge agent and flow knowledge bases (flow takes precedence for conflicts)
       const mergedKnowledge = {
         ...(agentKnowledgeBase || {}),
-        ...(routeKnowledgeBase || {}),
+        ...(flowKnowledgeBase || {}),
       };
 
       // Only add section if there's knowledge data
@@ -267,53 +339,34 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     return Promise.resolve(this);
   }
 
-  async addActiveRoutes(routes: Route<TContext, TData>[]): Promise<this> {
-    if (!routes.length) return this;
+  addActiveFlows(flows: Flow<TContext, TData>[]): Promise<this> {
+    if (!flows.length) return Promise.resolve(this);
 
-    const compute = async (): Promise<string | null> => {
-      const renderedRoutes = await Promise.all(
-        routes.map(async (r, i) => {
-          const whenContextStrings = r.when ? extractAIContextStrings(r.when) : [];
-          const conditions =
-            whenContextStrings.length > 0
-              ? `\n\n  **Triggered when:** ${whenContextStrings.join(" OR ")}`
-              : "";
-          const skipIfContextStrings = r.skipIf ? extractAIContextStrings(r.skipIf) : [];
-          const skipConditions =
-            skipIfContextStrings.length > 0
-              ? `\n\n  **Skip when:** ${skipIfContextStrings.join(" OR ")}`
-              : "";
-          const desc = r.description
-            ? `\n\n  **Description:** ${r.description}`
+    const compute = (): string | null => {
+      const renderedFlows = flows.map((r, i) => {
+        // v2: `when` is string | string[] (AI-evaluated). Extract directly.
+        const whenContextStrings: string[] = r.when
+          ? (Array.isArray(r.when) ? r.when : [r.when])
+          : [];
+        const conditions =
+          whenContextStrings.length > 0
+            ? `\n\n  **Triggered when:** ${whenContextStrings.join(" OR ")}`
             : "";
-          const rules = await renderMany(r.getRules(), this.renderContext);
-          const prohibitions = await renderMany(
-            r.getProhibitions(),
-            this.renderContext
-          );
-          const rulesInfo =
-            rules.length > 0
-              ? `\n\n  **Rules:**\n  ${rules.map((x) => `  - ${x}`).join("\n  ")}`
-              : "";
-          const prohibitionsInfo =
-            prohibitions.length > 0
-              ? `\n\n  **Prohibitions:**\n  ${prohibitions
-                .map((x) => `  - ${x}`)
-                .join("\n  ")}`
-              : "";
-          return `### Route ${i + 1}: ${r.title} (ID: ${r.id})${desc}${conditions}${skipConditions}${rulesInfo}${prohibitionsInfo}`;
-        })
-      );
-      return `## Available Routes\n\n${renderedRoutes.join("\n\n")}`;
+        const desc = r.description
+          ? `\n\n  **Description:** ${r.description}`
+          : "";
+        return `### Flow ${i + 1}: ${r.title} (ID: ${r.id})${desc}${conditions}`;
+      });
+      return `## Available Flows\n\n${renderedFlows.join("\n\n")}`;
     };
 
     if (this.cache) {
-      this.cache.register("activeRoutes", "static", compute);
+      this.cache.register("activeFlows", "static", compute);
     } else {
-      const result = await compute();
+      const result = compute();
       if (result) this.parts.push(result);
     }
-    return this;
+    return Promise.resolve(this);
   }
 
   async addDirectives(directives?: string[]): Promise<this> {
@@ -362,16 +415,32 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     return Promise.resolve(this);
   }
 
-  async build(): Promise<string> {
+  /**
+   * Build the final prompt string.
+   *
+   * @param options.transientAppendage - Per-turn sentences from merged
+   *   PreDirective.appendPrompt arrays (outer-to-inner: agent.onEnter →
+   *   flow.onEnter → step.onEnter → step.prepare). Appended after all
+   *   other sections. Fresh every turn, never cached, never persisted.
+   *   **Validates: Requirements 2.2, 2.8, 2.11, 27.1, 27.2, 27.4**
+   */
+  async build(options?: { transientAppendage?: string[] }): Promise<string> {
+    let sections: string[];
+
     if (this.cache) {
-      const sections = await this.cache.resolveAll();
-      const prompt = sections
-        .filter((s): s is string => s != null && s !== "")
-        .join("\n\n")
-        .trim();
-      return prompt;
+      const resolved = await this.cache.resolveAll();
+      sections = resolved.filter((s): s is string => s != null && s !== "");
+    } else {
+      sections = this.parts.filter(Boolean);
     }
-    const prompt = this.parts.filter(Boolean).join("\n\n").trim();
-    return Promise.resolve(prompt);
+
+    // Append transient per-turn sentences (from PreDirective.appendPrompt).
+    // These are never cached — they are a fresh slot built per turn.
+    if (options?.transientAppendage && options.transientAppendage.length > 0) {
+      const appendageBlock = options.transientAppendage.join("\n");
+      sections.push(appendageBlock);
+    }
+
+    return sections.join("\n\n").trim();
   }
 }

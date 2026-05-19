@@ -4,18 +4,22 @@
 
 // ID generation
 export {
-  generateRouteId,
+  generateFlowId,
   generateStepId,
   generateToolId,
   generateInlineToolId,
+  generateSignalId,
 } from "./id";
 
 // Session management
 export {
   createSession,
   createSessionId,
-  enterRoute,
+  createPersistedState,
+  enterFlow,
   enterStep,
+  completeCurrentFlow,
+  isFlowCompletedThisSession,
   mergeCollected,
   sessionStepToData,
   sessionDataToStep,

@@ -248,7 +248,7 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
       userId: unmapped.userId as string | undefined,
       agentName: unmapped.agentName as string | undefined,
       status: unmapped.status as "active" | "completed" | "abandoned",
-      currentRoute: unmapped.currentRoute as string | undefined,
+      currentFlow: unmapped.currentFlow as string | undefined,
       currentStep: unmapped.currentStep as string | undefined,
       collectedData: unmapped.collectedData as CollectedStateData<TData>,
       messageCount: unmapped.messageCount as number | undefined,
@@ -360,16 +360,16 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
     return this.unmapFields(result);
   }
 
-  async updateRouteStep(
+  async updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
     const data: Record<string, unknown> = {
       [this.fieldMap.updatedAt || "updatedAt"]: new Date(),
     };
-    if (route !== undefined) {
-      data[this.fieldMap.currentRoute || "currentRoute"] = route;
+    if (flow !== undefined) {
+      data[this.fieldMap.currentFlow || "currentFlow"] = flow;
     }
     if (step !== undefined) {
       data[this.fieldMap.currentStep || "currentStep"] = step;
@@ -460,7 +460,7 @@ class PrismaMessageRepository implements MessageRepository {
       userId: unmapped.userId as string | undefined,
       role: unmapped.role as MessageRole,
       content: unmapped.content as string,
-      route: unmapped.route as string | undefined,
+      flow: unmapped.flow as string | undefined,
       step: unmapped.step as string | undefined,
       toolCalls: unmapped.toolCalls as
         | Array<{ toolName: string; arguments: Record<string, unknown> }>

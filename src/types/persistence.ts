@@ -19,7 +19,7 @@ export interface SessionData<TData = Record<string, unknown>> {
   userId?: string;
   agentName?: string;
   status: SessionStatus;
-  currentRoute?: string;
+  currentFlow?: string;
   currentStep?: string;
   collectedData?: CollectedStateData<TData>;
   messageCount?: number;
@@ -45,11 +45,15 @@ export type CreateSessionData<TData = Record<string, unknown>> = Omit<
  */
 export interface CollectedStateData<TData = Record<string, unknown>> {
   data: Partial<TData>;
-  routeHistory: SessionState<TData>["routeHistory"];
+  flowHistory: SessionState<TData>["flowHistory"];
   history?: SessionState<TData>["history"];
-  currentRouteTitle?: string;
+  currentFlowTitle?: string;
   currentStepDescription?: string;
   metadata: SessionState<TData>["metadata"];
+  /** Pending directive — included only when a directive is actually present. */
+  pendingDirective?: SessionState<TData>["pendingDirective"];
+  /** Reserved for v2.x Signals. Passed through bit-identical. */
+  signals?: SessionState<TData>["signals"];
 }
 
 /**
@@ -61,7 +65,7 @@ export interface MessageData {
   userId?: string;
   role: MessageRole;
   content: string;
-  route?: string;
+  flow?: string;
   step?: string;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   event?: Event; // Optional: store full event data
@@ -119,11 +123,11 @@ export interface SessionRepository<TData = Record<string, unknown>> {
   ): Promise<SessionData<TData> | null>;
 
   /**
-   * Update current route and step
+   * Update current flow and step
    */
-  updateRouteStep(
+  updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null>;
 
@@ -244,7 +248,7 @@ export interface SaveMessageOptions {
   userId?: string;
   role: MessageRole;
   content: string;
-  route?: string;
+  flow?: string;
   step?: string;
   toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   event?: Event;

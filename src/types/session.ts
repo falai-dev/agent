@@ -3,35 +3,28 @@
  */
 
 import type { History } from "./history";
+import type { Directive } from "./flow";
+import type { SignalsState } from "./signals";
 
-/**
- * Pending route transition information
- */
-export interface PendingTransition {
-  /** Target route ID to transition to */
-  targetRouteId: string;
-  /** Optional AI-evaluated condition for the transition */
-  condition?: string;
-  /** Reason for the transition */
-  reason: "route_complete" | "manual";
-}
+// Re-export for backward compatibility — canonical declarations live in ./signals.ts
+export type { SignalsState, SignalTriggerState } from "./signals";
 
 /**
  * Session state tracks the current position in the conversation flow
- * and data collected at the agent level across all routes
+ * and data collected at the agent level across all flows
  */
 export interface SessionState<TData = unknown> {
   /** Unique session identifier (useful for persistence) */
   id: string;
 
-  /** Current route the conversation is in */
-  currentRoute?: {
+  /** Current flow the conversation is in */
+  currentFlow?: {
     id: string;
     title: string;
     enteredAt?: Date;
   };
 
-  /** Current step within the route */
+  /** Current step within the flow */
   currentStep?: {
     id: string;
     description?: string;
@@ -39,25 +32,35 @@ export interface SessionState<TData = unknown> {
   };
 
   /**
-   * Agent-level data collected across all routes
+   * Agent-level data collected across all flows
    * This is the single source of truth for all collected data
-   * Routes can access and contribute to this shared data structure
+   * Flows can access and contribute to this shared data structure
    */
   data: Partial<TData>;
 
-  /** History of routes visited in this session */
-  routeHistory?: Array<{
-    routeId: string;
+  /** History of flows visited in this session */
+  flowHistory?: Array<{
+    flowId: string;
     enteredAt?: Date;
     exitedAt?: Date;
     completed: boolean;
   }>;
 
   /**
-   * Pending route transition after completion
-   * Set when a route completes with onComplete handler
+   * Pending directive to apply at the start of the next turn.
+   * Replaces the v1 `pendingTransition` field. When set, the turn pipeline
+   * applies this directive and skips `FlowRouter.decideFlowAndStep`.
+   *
+   * Cleared after application unless `complete.next` chains another directive.
    */
-  pendingTransition?: PendingTransition;
+  pendingDirective?: Directive<unknown, TData>;
+
+  /**
+   * Reserved for v2.x Signals feature. v2.0 does not read or mutate this
+   * field at runtime — persistence adapters preserve it bit-identical through
+   * save → load roundtrips. See Decision D-Q6 in design.md.
+   */
+  signals?: SignalsState;
 
   /**
    * Conversation history managed by the session

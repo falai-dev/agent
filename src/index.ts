@@ -1,30 +1,26 @@
 /**
  * @falai/agent - Standalone AI Agent framework
  *
- * A strongly-typed, modular agent framework with route DSL and AI provider strategy
+ * A strongly-typed, modular agent framework with flow DSL and AI provider strategy
  */
 
 // Core
 export { Agent } from "./core/Agent";
-export { Route } from "./core/Route";
-export { Step } from "./core/Step";
-export { ResponseModal } from "./core/ResponseModal";
-export type {
-  ResponseModalOptions,
-  RespondParams,
-  StreamOptions,
-  GenerateOptions
-} from "./core/ResponseModal";
+export { createAgent } from "./core/createAgent";
+export { Flow } from "./core/Flow";
+export { Step, FlowConfigurationError } from "./core/Step";
+export { flow } from "./core/flow-namespace";
+export { DirectiveChainTracker } from "./core/DirectiveChainTracker";
+export type { DirectiveChainEntry } from "./core/DirectiveChainTracker";
+
 export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
 export { SessionManager } from "./core/SessionManager";
 export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager";
-export { BatchExecutor, needsInput, type NeedsInputStep, type DetermineBatchParams } from "./core/BatchExecutor";
-export { BatchPromptBuilder, type BuildBatchPromptParams, type BatchPromptResult } from "./core/BatchPromptBuilder";
-export { CompactionEngine } from "./core/CompactionEngine";
+export { NotImplementedError } from "./types/errors";
+
 export { StreamingToolExecutor } from "./core/StreamingToolExecutor";
-export { PromptSectionCache } from "./core/PromptSectionCache";
-export type { PromptSectionType, PromptCacheConfig, SectionCompute } from "./core/PromptSectionCache";
+
 
 // Providers
 export { GeminiProvider } from "./providers/GeminiProvider";
@@ -71,11 +67,8 @@ export type {
   OpenSearchAdapterOptions,
 } from "./adapters/OpenSearchAdapter";
 
-// Constants
-export { END_ROUTE, END_ROUTE_ID } from "./constants";
-
 // Utils
-export { generateRouteId, generateStepId, generateToolId } from "./utils/id";
+export { generateFlowId, generateStepId, generateToolId } from "./utils/id";
 export { formatKnowledgeBase } from "./utils/template";
 export {
   ConditionEvaluator,
@@ -101,30 +94,40 @@ export type {
   AgentCompactionConfig,
   AgentResponse,
   Term,
-  Guideline,
-  GuidelineMatch,
+  Instruction,
+  ScopedInstructions,
+  AppliedInstruction,
   ContextLifecycleHooks,
   ContextProvider,
+  HookContext,
+  ExitReason,
   Event,
   EmittedEvent,
   MessageEventData,
   ToolEventData,
   StatusEventData,
   Participant,
-  RouteRef,
+  FlowRef,
   StepRef,
-  RouteOptions,
+  FlowOptions,
   StepOptions,
-  RouteTransitionConfig,
-  RouteCompletionHandler,
+  FlowLifecycleHooks,
+  StepLifecycleHooks,
   SessionState,
-  PendingTransition,
+  SignalsState,
+  SignalTriggerState,
+  Signal,
+  SignalContext,
+  SignalDirective,
+  SignalPredicate,
+  SignalPredicateContext,
+  SignalFiring,
+  SignalSchema,
   ToolContext,
   ToolResult,
   ToolHandler,
   Tool,
 
-  EnhancedTool,
   ToolValidationResult,
   ToolPermissionResult,
   ToolCallRequest,
@@ -161,20 +164,23 @@ export type {
   PersistenceAdapter,
   Template,
   TemplateContext,
-  ConditionTemplate,
   ConditionEvaluationResult,
   UserHistoryItem,
   AssistantHistoryItem,
   ToolHistoryItem,
   SystemHistoryItem,
-  // Multi-step execution types
+  // Flow execution types
   StoppedReason,
-  BatchResult,
-  BatchExecutionResult,
-  BatchExecutionEvent,
-  BatchExecutionEventType,
-  BatchExecutionTiming,
-  BatchExecutionError,
+  PrepareResult,
+  Directive,
+  PreDirective,
+  BranchEntry,
+  BranchMap,
+  BranchPredicate,
+  BranchPredicateContext,
+  ConditionPredicate,
+  ConditionIf,
+  ConditionWhen,
 } from "./types";
 export { CompositionMode, EventKind, MessageRole } from "./types";
-export { createSession, createSessionId, enterRoute, enterStep, mergeCollected } from "./utils";
+export { createSession, createSessionId, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils";

@@ -1,6 +1,20 @@
 /**
  * PostgreSQL adapter for persistence
  * Raw SQL adapter for PostgreSQL with custom schemas
+ *
+ * ## v2 Migration
+ *
+ * If upgrading from v1, run the following migration on your sessions table:
+ *
+ * ```sql
+ * ALTER TABLE agent_sessions DROP COLUMN IF EXISTS pending_transition;
+ * ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS pending_directive JSONB;
+ * ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS signals JSONB;
+ * ```
+ *
+ * `pending_directive` stores the serialized `Directive` that the pipeline
+ * applies at the start of the next turn. `signals` is a reserved JSONB column
+ * for the v2.x Signals feature — pass-through only in v2.0.
  */
 
 import type {
@@ -111,9 +125,11 @@ export class PostgreSQLAdapter<TData = Record<string, unknown>> implements Persi
         user_id VARCHAR(255),
         agent_name VARCHAR(255),
         status VARCHAR(50) DEFAULT 'active',
-        current_route VARCHAR(255),
+        current_flow VARCHAR(255),
         current_step VARCHAR(255),
         collected_data JSONB,
+        pending_directive JSONB,
+        signals JSONB,
         message_count INTEGER DEFAULT 0,
         last_message_at TIMESTAMP,
         completed_at TIMESTAMP,
@@ -134,7 +150,7 @@ export class PostgreSQLAdapter<TData = Record<string, unknown>> implements Persi
         user_id VARCHAR(255),
         role VARCHAR(50) NOT NULL,
         content TEXT NOT NULL,
-        route VARCHAR(255),
+        flow VARCHAR(255),
         step VARCHAR(255),
         tool_calls JSONB,
         event JSONB,
@@ -242,9 +258,9 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       fields.push(`collected_data = $${paramIndex++}`);
       values.push(JSON.stringify(data.collectedData));
     }
-    if (data.currentRoute !== undefined) {
-      fields.push(`current_route = $${paramIndex++}`);
-      values.push(data.currentRoute);
+    if (data.currentFlow !== undefined) {
+      fields.push(`current_flow = $${paramIndex++}`);
+      values.push(data.currentFlow);
     }
     if (data.currentStep !== undefined) {
       fields.push(`current_step = $${paramIndex++}`);
@@ -294,13 +310,13 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
     return await this.update(id, { collectedData });
   }
 
-  async updateRouteStep(
+  async updateFlowStep(
     id: string,
-    route?: string,
+    flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
     return await this.update(id, {
-      currentRoute: route,
+      currentFlow: flow,
       currentStep: step,
     });
   }
@@ -342,7 +358,7 @@ class PostgreSQLMessageRepository implements MessageRepository {
 
     const result = await this.client.query<MessageData>(
       `INSERT INTO ${this.tableName}
-       (id, session_id, user_id, role, content, route, step, tool_calls, event, created_at)
+       (id, session_id, user_id, role, content, flow, step, tool_calls, event, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
        RETURNING *`,
       [
@@ -351,7 +367,7 @@ class PostgreSQLMessageRepository implements MessageRepository {
         data.userId || null,
         data.role,
         data.content,
-        data.route || null,
+        data.flow || null,
         data.step || null,
         JSON.stringify(data.toolCalls || null),
         JSON.stringify(data.event || null),
