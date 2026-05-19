@@ -7,9 +7,7 @@
             "DOM"
         ],
         "moduleResolution": "bundler",
-        "types": [
-            "@types/bun"
-        ],
+        "types": [],
         "strict": true,
         "esModuleInterop": true,
         "skipLibCheck": true,

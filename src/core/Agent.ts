@@ -1225,7 +1225,7 @@ export class Agent<TContext = any, TData = any> {
       }
     }
 
-    // Strip PreDirective-only fields before storing
+    // Strip pre-LLM-only fields before storing
     const stripped = this.stripPreDirectiveFields(directive);
 
     // Set pendingDirective on the session without applying it
@@ -1439,7 +1439,7 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Strip PreDirective-only fields (appendPrompt, injectTools, halt) from a directive.
+   * Strip pre-LLM-only fields (appendPrompt, injectTools, halt) from a directive.
    * These fields are transient (one-turn lifetime) and must not be persisted.
    * @private
    */
@@ -1452,8 +1452,8 @@ export class Agent<TContext = any, TData = any> {
     const { appendPrompt, injectTools, halt, ...rest } = raw;
 
     if (appendPrompt || injectTools || halt !== undefined) {
-      logger.debug(
-        `[Agent] Stripped PreDirective-only fields before storing pendingDirective: ` +
+      logger.warn(
+        `[Agent] Ignoring pre-LLM-only fields on pendingDirective (these only take effect in onEnter/prepare hooks): ` +
         `${[appendPrompt && 'appendPrompt', injectTools && 'injectTools', halt !== undefined && 'halt'].filter(Boolean).join(', ')}`
       );
     }

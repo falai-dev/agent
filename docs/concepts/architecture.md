@@ -1,6 +1,6 @@
 ---
 title: "Architecture"
-description: "The seven primitives of @falai/agent and how they fit together to keep language on the AI's side and decisions on the code's side."
+description: "The six primitives of @falai/agent and how they fit together to keep language on the AI's side and decisions on the code's side."
 type: concept
 order: 1
 ---
@@ -9,11 +9,11 @@ order: 1
 
 > the AI understands, the code is in control
 
-Seven types do all the work. Five are about declaration — what the agent looks like in source. Two are about control — what tools and hooks return at runtime to redirect a turn. This page maps the ownership and reference relationships between them, explains the schema-first principle that makes pre-extraction work, and draws the line between what the AI does and what the code does.
+Six types do all the work. Five are about declaration — what the agent looks like in source. One is about control — what tools and hooks return at runtime to redirect a turn. This page maps the ownership and reference relationships between them, explains the schema-first principle that makes pre-extraction work, and draws the line between what the AI does and what the code does.
 
 LLMs are good at language and unreliable at control flow. They paraphrase well; they do not maintain invariants. They infer intent well; they do not enforce completion gates. The framework's job is to keep the AI on the side of language — understanding intent, extracting structured data, generating prose — while keeping the code on the side of decisions: which flow runs, when a flow completes, what a tool actually does, what state survives a turn.
 
-This page explains the shape of that seam. It names the seven primitives, says what each one is for, and shows how they reference each other. It does not teach syntax. Once the mental model is in place, the [reference](../reference/create-agent.md) pages document the contracts and the [tutorial](../start/01-install.md) walks through the code line by line.
+This page explains the shape of that seam. It names the six primitives, says what each one is for, and shows how they reference each other. It does not teach syntax. Once the mental model is in place, the [reference](../reference/create-agent.md) pages document the contracts and the [tutorial](../start/01-install.md) walks through the code line by line.
 
 ## Core vocabulary
 
@@ -32,9 +32,9 @@ Eight terms cover everything below. Every other term in the docs defines itself 
 
 These are the words the rest of the docs use without footnotes. They are also the words the type system uses — every name in the table maps directly to an exported symbol or a generic parameter.
 
-## The seven primitives
+## The six primitives
 
-Seven types do all the work. The first five are about declaration — what the agent looks like in source. The last two are about control — what tools and hooks return at runtime to act on a turn. None of them is novel on its own. The shape of the framework is in how few there are and how cleanly they compose.
+Six types do all the work. The first five are about declaration — what the agent looks like in source. The last one is about control — what tools and hooks return at runtime to act on a turn. None of them is novel on its own. The shape of the framework is in how few there are and how cleanly they compose.
 
 A small illustrative sketch first, just to show the silhouette:
 
@@ -62,7 +62,7 @@ const agent = createAgent({
 });
 ```
 
-Five of the seven primitives appear by name in that block. The remaining two — `Directive` and `PreDirective` — surface only when control flow is on the line, returned from a tool or hook to redirect the conversation.
+Five of the six primitives appear by name in that block. The remaining one — `Directive` — surfaces only when control flow is on the line, returned from a tool or hook to redirect the conversation.
 
 ### Agent
 
@@ -96,19 +96,15 @@ An instruction owns its rendered position in the prompt. The composer renders ea
 
 ### Directive
 
-A `Directive<TContext, TData>` is a flat object literal — not a class, not a builder, not a discriminated union — that any tool, hook, or branch returns to act on the turn. Every field is optional. A directive carries up to four orthogonal payloads: at most **one position field** (`goTo`, `goToStep`, `complete`, `abort`, or `reset`), zero or one **verbatim reply**, optional **state writes** (`dataUpdate` / `contextUpdate`), and optional `reason` strings inside object forms for traceability. The flatness is intentional — earlier drafts modeled directives as a discriminated union, but a flat object composes more naturally when a single decision point needs to write state, change position, and speak verbatim in one return value.
+A `Directive<TContext, TData>` is a flat object literal — not a class, not a builder, not a discriminated union — that any tool, hook, or branch returns to act on the turn. Every field is optional. A directive carries up to four orthogonal payloads: at most **one position field** (`goTo`, `goToStep`, `complete`, `abort`, or `reset`), zero or one **verbatim reply**, optional **state writes** (`dataUpdate` / `contextUpdate`), and optional **pre-LLM augmentation** (`appendPrompt`, `injectTools`, `halt`) plus optional `reason` strings inside object forms for traceability. The flatness is intentional — earlier drafts modeled directives as a discriminated union, but a flat object composes more naturally when a single decision point needs to write state, change position, and speak verbatim in one return value.
 
-The directive is the single language the framework speaks for control flow. A tool that decides "this user is ineligible" returns `{ goTo: "denial", reply: "Sorry — you don't qualify." }`. A finalize hook that finishes a booking returns `{ complete: true, dataUpdate: { bookingId } }`. A signal that detects an off-topic user returns a pre-phase directive with `halt + reply`. All of these merge through one algorithm — position fields by precedence, state writes shallow-merged, `reply` last-wins — implemented as `flow.merge(a, b)` and applied uniformly across the turn pipeline. Multiple emissions in the same turn (a tool dispatching mid-handler, then a finalize hook returning) collapse into a single applied directive at the phase boundary.
+The directive is the single language the framework speaks for control flow. A tool that decides "this user is ineligible" returns `{ goTo: "denial", reply: "Sorry — you don't qualify." }`. A finalize hook that finishes a booking returns `{ complete: true, dataUpdate: { bookingId } }`. A prepare hook that detects a VIP returns `{ appendPrompt: ["This caller is VIP — confirm preferences first."] }`. All of these merge through one algorithm — position fields by precedence, state writes shallow-merged, `reply` last-wins — implemented as `flow.merge(a, b)` and applied uniformly across the turn pipeline.
 
-### PreDirective
-
-A `PreDirective<TContext, TData>` extends `Directive` with three fields that only make sense before the turn's LLM call: `appendPrompt` (sentences added to this turn's system prompt), `injectTools` (tools added to this turn's available list), and `halt` (skip the LLM call entirely). It is the return type of `onEnter` and `prepare` hooks. Lifetime is one turn; PreDirective fields never persist into `session.pendingDirective`.
-
-A pre-directive owns the per-turn shaping slots in the prompt composer and the tool manager. `appendPrompt` flows into a transient appendage slot — never cached, never persisted, recomputed every turn. `injectTools` flows into a transient tool layer that stacks on top of step → flow → agent scopes. `halt` is the kill switch: when set, the engine skips the model, and if `reply` is also set the verbatim string becomes the assistant message. PreDirective is also the parent of the v2.x `SignalDirective` — the signals primitive adds two further fields on top of this exact shape, so signal handlers participate in the same merge algorithm as everything else.
+The three pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) have a one-turn lifetime: they only take effect in pre-LLM hooks (`onEnter`, `prepare`). When emitted from post-LLM hooks or persisted to `session.pendingDirective`, they are ignored with a WARN log. This keeps one type for all emitters while the engine enforces the phase boundary at runtime.
 
 ## Supporting concepts
 
-The seven primitives carry the weight. Four supporting pieces make them ergonomic.
+The six primitives carry the weight. Four supporting pieces make them ergonomic.
 
 ### `flow` namespace
 
@@ -164,7 +160,7 @@ Branches are also the place where the AI/code split is most visible at the call 
 
 ## How the primitives reference each other
 
-The diagram below maps the ownership and reference relationships between the seven primitives and the two state surfaces. Solid arrows are ownership. Dashed lines are scoping or extension. The two state nodes (`Schema` and `Context`) are not primitives — they are the typed surfaces the primitives operate on, drawn at the bottom because everything else references them.
+The diagram below maps the ownership and reference relationships between the six primitives and the two state surfaces. Solid arrows are ownership. Dashed lines are scoping or extension. The two state nodes (`Schema` and `Context`) are not primitives — they are the typed surfaces the primitives operate on, drawn at the bottom because everything else references them.
 
 ```mermaid
 graph TB
@@ -186,26 +182,23 @@ graph TB
   Step -.scoped.- Tool
   Step -.scoped.- Instruction
   Step -->|branches| Step
-  Step -->|onEnter / prepare| PreDirective
+  Step -->|onEnter / prepare| Directive
   Step -->|finalize| Directive
 
   Tool -->|ctx.dispatch| Directive
   Tool -->|ToolResult.directive| Directive
 
-  PreDirective -.extends.-> Directive
-
   Directive -.merged via.-> FlowNS[flow.merge]
-  PreDirective -.validated via.-> FlowNS
 
   classDef primitive fill:#1e293b,stroke:#0ea5e9,color:#fff;
   classDef state fill:#0f172a,stroke:#64748b,color:#cbd5e1;
-  class Agent,Flow,Step,Tool,Instruction,Directive,PreDirective primitive;
+  class Agent,Flow,Step,Tool,Instruction,Directive primitive;
   class Schema,Context state;
 ```
 
-Read it top-down. The agent owns flows, tools, and instructions, and binds them to a single schema and a single context type. A flow owns steps and may scope its own instructions and tools. A step references the schema through `collect` and `requires`, may carry its own scoped instructions and tools, and may fork via `branches` into another step. Hooks and tools emit directives — pre-LLM hooks emit `PreDirective` (the extension), post-LLM hooks and tools emit plain `Directive`. The `flow` namespace validates and merges them.
+Read it top-down. The agent owns flows, tools, and instructions, and binds them to a single schema and a single context type. A flow owns steps and may scope its own instructions and tools. A step references the schema through `collect` and `requires`, may carry its own scoped instructions and tools, and may fork via `branches` into another step. Hooks and tools emit directives — pre-LLM hooks use the pre-LLM fields (`appendPrompt`, `injectTools`, `halt`), post-LLM hooks use position/state/reply fields. The `flow` namespace validates and merges them.
 
-The two state types — `Schema` for `TData`, `Context` for `TContext` — sit at the bottom because everything else points at them. They are not primitives in the same sense as the seven types; they are the typed surfaces those primitives operate on, and they are owned by the agent.
+The two state types — `Schema` for `TData`, `Context` for `TContext` — sit at the bottom because everything else points at them. They are not primitives in the same sense as the six types; they are the typed surfaces those primitives operate on, and they are owned by the agent.
 
 Two things are deliberately absent from this diagram. There is no separate "router" primitive — flow selection is an internal pipeline phase, not a user-facing type. There is no separate "session" primitive in the declaration model — sessions are runtime state, indexed by `sessionId`, persisted by adapters, but not something application code constructs as a building block. Both of those concerns live in the [turn pipeline](./pipeline.md), where they are explained as steps in the per-turn sequence rather than parts of the static structure.
 
@@ -241,9 +234,9 @@ There is no implicit messaging. The framework never emits a message of its own. 
 
 There is no glossary. Eight terms are defined in the callout at the top of this page, and every other term in the docs defines itself at first use on the page that introduces it. The framework's surface is small enough that a glossary would duplicate prose without adding clarity.
 
-## Why seven primitives
+## Why six primitives
 
-The set of seven is the result of a few specific cuts. Each one collapsed a category of duplication into a single shape, and each one is worth naming for its own sake — not for migration purposes (the [migration guide](../migration/v1-to-v2.md) covers that), but because the surface visible today is the result of those choices.
+The set of six is the result of a few specific cuts. Each one collapsed a category of duplication into a single shape, and each one is worth naming for its own sake — not for migration purposes (the [migration guide](../migration/v1-to-v2.md) covers that), but because the surface visible today is the result of those choices.
 
 **One word per concept.** The verb form `route()` is still the act of selecting a flow, and "routing" is still the gerund — but the noun for "a single conversational goal" is **Flow**. The system that selects one is the **FlowRouter**. There is no overlap between the noun and the verb, which keeps the surface readable when the two appear in the same sentence.
 
@@ -251,7 +244,7 @@ The set of seven is the result of a few specific cuts. Each one collapsed a cate
 
 **One Tool with optional metadata.** A `Tool` is a single interface. The simple case is `{ id, handler }`. The production case adds `validateInput`, `checkPermissions`, `isReadOnly`, `isConcurrencySafe`, `isDestructive`, and `maxResultSizeChars` — every one optional. There is no upgrade boundary mid-codebase: a tool that starts as a plain function adds metadata fields when it needs them, without changing type or import. The executor reads each field defensively (undefined falls back to safe defaults), so the same tool runs identically with two metadata fields or zero.
 
-The remaining four primitives — Agent, Step, Directive, PreDirective — were always single-shape concepts. The seven-primitive count is what survives those three consolidations plus the four that stood on their own.
+The remaining four primitives — Agent, Step, Flow, Directive — were always single-shape concepts. The six-primitive count is what survives those three consolidations plus the three that stood on their own.
 
 ## Construction shape
 
@@ -274,7 +267,7 @@ The construction shape encodes the ownership tree: an agent owns flows, tools, a
 
 ## What's next
 
-The next page walks through what happens when `agent.respond(message)` is called: the per-turn pipeline, resolution precedence (`pendingDirective` first, then signals + routing in parallel, then auto-step chains, then branches, then linear succession), the directive bus, and how `flow.merge` collapses simultaneous emissions into a single applied directive. After that, the [Directives](./directives.md) page goes deeper into the directive shape itself — why it is flat, how the inheritance chain `Directive → PreDirective → SignalDirective` works, and what each field does.
+The next page walks through what happens when `agent.respond(message)` is called: the per-turn pipeline, resolution precedence (`pendingDirective` first, then signals + routing in parallel, then auto-step chains, then branches, then linear succession), the directive bus, and how `flow.merge` collapses simultaneous emissions into a single applied directive. After that, the [Directives](./directives.md) page goes deeper into the directive shape itself — why it is flat, how `SignalDirective` extends it for signals, and what each field does.
 
 If the goal right now is to write code, the [tutorial](../start/01-install.md) starts from a one-line install and arrives at a working agent in five short pages. If the goal is to look up an exact contract, every primitive on this page has a [reference](../reference/create-agent.md) page with the full TypeScript declaration, a fields table, two short examples, and the typed errors it can throw.
 

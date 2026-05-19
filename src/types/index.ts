@@ -52,7 +52,6 @@ export type {
   FlowLifecycleHooks,
   StepLifecycleHooks,
   Directive,
-  PreDirective,
   BranchEntry,
   BranchMap,
   BranchPredicate,

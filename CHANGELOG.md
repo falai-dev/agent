@@ -2,30 +2,21 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
-## [1.3.0]
+## [2.1.0]
 
 ### ⚠️ BREAKING CHANGES
 
-#### `Route` domain noun renamed to `Flow`
+#### `PreDirective` removed — merged into `Directive`
 
-The `Route` domain noun has been renamed to `Flow` across the entire `@falai/agent` package. This is a clean break with no compatibility shims or dual-naming layer.
+- **What changed:** The `PreDirective` interface and its export have been removed entirely. The three pre-LLM-only fields (`appendPrompt`, `injectTools`, `halt`) now live directly on `Directive`. `SignalDirective` extends `Directive` directly.
+- **Migration:** Replace any `import { PreDirective }` with `import { Directive }`. All hook return types (`onEnter`, `prepare`) now return `Directive` instead of `PreDirective`. The shape is identical — no code changes needed beyond the type annotation.
+- **Runtime behavior:** Pre-LLM fields emitted from post-LLM hooks (`finalize`, `onComplete`) or persisted to `session.pendingDirective` are now ignored with a `WARN`-level log (previously `DEBUG`). This makes misuse visible in logs without crashing.
 
-**What changed:**
+### Improved
 
-- All `Route`-prefixed symbols, types, methods, fields, and constants have been renamed to their `Flow`-prefixed equivalents (e.g. `Route` → `Flow`, `RouteOptions` → `FlowOptions`, `RoutingEngine` → `FlowRouter`, `RouteConfigurationError` → `FlowConfigurationError`).
-- Agent API: `agent.createRoute()` → `agent.createFlow()`, `agent.getRoutes()` → `agent.getFlows()`, `agent.routes` → `agent.flows`, `AgentOptions.routes` → `flows`, `AgentOptions.routeSwitchMargin` → `flowSwitchMargin`.
-- Session shape: `session.currentRoute` → `session.currentFlow`, `session.routeHistory` → `session.flowHistory`.
-- Constants: `END_ROUTE` → `END_FLOW`, `END_ROUTE_ID` → `END_FLOW_ID`.
-- Utilities: `generateRouteId()` → `generateFlowId()`, `enterRoute()` → `enterFlow()`.
-- Adapter method: `updateRouteStep()` → `updateFlowStep()` on all seven persistence adapters.
-
-**Preserved (verb form and gerund):** The method name `route()` on `FlowRouter` and the gerund "routing" are preserved — routing-as-an-action remains the correct verb for selecting a flow.
-
-**Persistence changes (operators must run migration):** All adapters rename persisted columns/fields: `current_route` → `current_flow`, `route_history` → `flow_history`, and the `route` column/field → `flow`. Operators must run the appropriate migration for their backend before upgrading.
-
-**ID prefix changed:** Generated IDs now use the `flow_` prefix instead of `route_`. Existing stored IDs with the `route_` prefix must be migrated.
-
-See the [Migration Guide](docs/guides/migration/route-to-flow-rename.md) for the full rename table, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
+- **Type variance fix:** `Directive` is now covariant in both `TContext` and `TData`, eliminating 15+ pre-existing type errors in internal pipeline code. The fix: `complete.next` uses `Directive<unknown, unknown>` (the chained directive doesn't need precise generics), and `injectTools` uses `Tool[]` (default params).
+- **Cleaner `flow.merge`:** The merge function no longer casts through `Record<string, unknown>` for the pre-LLM fields — they're accessed directly on the typed `Directive`.
+- **Docs:** Architecture page updated from "seven primitives" to "six primitives." All references to the PreDirective/Directive inheritance chain removed. The concepts page now explains pre-LLM fields as a lifetime rule enforced at runtime, not a type-system boundary.
 
 ## [2.0.1]
 
@@ -334,6 +325,31 @@ The following deprecated methods and accessors are removed from `Agent` with no 
 - **`AgentResponse.appliedInstructions`** — new optional field populated with the set of instructions that passed `enabled` and `when` evaluation and were rendered into the prompt for that turn. Deterministic (derived from rendering, not from LLM self-report).
 - **`AgentResponseStreamChunk.appliedInstructions`** — same field, populated on the final (`done: true`) chunk.
 
+## [1.3.0]
+
+### ⚠️ BREAKING CHANGES
+
+#### `Route` domain noun renamed to `Flow`
+
+The `Route` domain noun has been renamed to `Flow` across the entire `@falai/agent` package. This is a clean break with no compatibility shims or dual-naming layer.
+
+**What changed:**
+
+- All `Route`-prefixed symbols, types, methods, fields, and constants have been renamed to their `Flow`-prefixed equivalents (e.g. `Route` → `Flow`, `RouteOptions` → `FlowOptions`, `RoutingEngine` → `FlowRouter`, `RouteConfigurationError` → `FlowConfigurationError`).
+- Agent API: `agent.createRoute()` → `agent.createFlow()`, `agent.getRoutes()` → `agent.getFlows()`, `agent.routes` → `agent.flows`, `AgentOptions.routes` → `flows`, `AgentOptions.routeSwitchMargin` → `flowSwitchMargin`.
+- Session shape: `session.currentRoute` → `session.currentFlow`, `session.routeHistory` → `session.flowHistory`.
+- Constants: `END_ROUTE` → `END_FLOW`, `END_ROUTE_ID` → `END_FLOW_ID`.
+- Utilities: `generateRouteId()` → `generateFlowId()`, `enterRoute()` → `enterFlow()`.
+- Adapter method: `updateRouteStep()` → `updateFlowStep()` on all seven persistence adapters.
+
+**Preserved (verb form and gerund):** The method name `route()` on `FlowRouter` and the gerund "routing" are preserved — routing-as-an-action remains the correct verb for selecting a flow.
+
+**Persistence changes (operators must run migration):** All adapters rename persisted columns/fields: `current_route` → `current_flow`, `route_history` → `flow_history`, and the `route` column/field → `flow`. Operators must run the appropriate migration for their backend before upgrading.
+
+**ID prefix changed:** Generated IDs now use the `flow_` prefix instead of `route_`. Existing stored IDs with the `route_` prefix must be migrated.
+
+See the [Migration Guide](docs/guides/migration/route-to-flow-rename.md) for the full rename table, per-adapter SQL/Mongo/Redis/OpenSearch migration snippets, and ID prefix migration guidance.
+
 ## [1.2.8]
 
 ### Fixed
@@ -547,3 +563,4 @@ const agent = new Agent({
 ### Added
 
 - **Agent-level `rules` and `prohibitions`**: `AgentOptions` now accepts `rules` and `prohibitions` arrays (same `Template` type used by routes). These are merged with route-level rules/prohibitions and included in all prompt compositions — single-step, batch, and streaming. See [Agent Rules & Prohibitions](docs/core/agent/rules-and-prohibitions.md) for details.
+

@@ -262,7 +262,7 @@ export function sessionStepToData<TData = Record<string, unknown>>(
   currentStep?: string;
   collectedData: CollectedStateData<TData>;
 } {
-  // Strip PreDirective fields before persisting pendingDirective
+  // Strip pre-LLM-only fields before persisting pendingDirective
   let pendingDirective: SessionState<TData>["pendingDirective"] | undefined;
   if (session.pendingDirective) {
     pendingDirective = stripPreDirectiveFields(session.pendingDirective);
@@ -354,7 +354,7 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
 
 
 /**
- * Strip PreDirective-only fields from a directive before persistence.
+ * Strip pre-LLM-only fields from a directive before persistence.
  *
  * `appendPrompt`, `injectTools`, and `halt` are transient (one-turn lifetime)
  * and must not be serialized. This is a belt-and-suspenders safety net —
@@ -380,8 +380,8 @@ function stripPreDirectiveFields<TData>(
   ].filter(Boolean);
 
   if (droppedFields.length > 0) {
-    logger.debug(
-      `[createPersistedState] Stripped PreDirective-only fields before persistence: ${droppedFields.join(", ")}`
+    logger.warn(
+      `[createPersistedState] Ignoring pre-LLM-only fields before persistence (these have no effect outside pre-LLM hooks): ${droppedFields.join(", ")}`
     );
   }
 
@@ -393,7 +393,7 @@ function stripPreDirectiveFields<TData>(
  *
  * This is the shared helper that every persistence adapter should call before
  * writing session state. It ensures:
- * - `pendingDirective` has PreDirective-only fields (`appendPrompt`,
+ * - `pendingDirective` has pre-LLM-only fields (`appendPrompt`,
  *   `injectTools`, `halt`) stripped (these are one-turn-lifetime and not
  *   serializable across turns).
  * - `pendingDirective` is omitted from the result when `undefined` (adapters

@@ -33,7 +33,7 @@ export interface BuildResponsePromptParams<
   // NEW: Agent-level schema for data validation
   agentSchema?: StructuredSchema;
   /**
-   * Per-turn transient appendage from merged PreDirective.appendPrompt arrays.
+   * Per-turn transient appendage from merged Directive.appendPrompt arrays.
    * Appended to the system prompt after all other sections.
    * Fresh every turn, never cached, never persisted.
    */

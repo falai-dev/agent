@@ -15,7 +15,7 @@ import type { AiProvider } from "../types/ai";
 import type { Event } from "../types/history";
 import { MessageRole as MessageRoleEnum } from "../types/history";
 import type { SessionState } from "../types/session";
-import type { PreDirective, Directive } from "../types/flow";
+import type { Directive } from "../types/flow";
 import type {
     Signal,
     SignalContext,
@@ -295,14 +295,14 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
 
     /**
      * Pre-signal phase. Delegates to `runPhase('pre', ...)`.
-     * Return type narrows `mergedDirective` to `PreDirective | undefined`.
+     * Return type narrows `mergedDirective` to `Directive | undefined`.
      */
     async runPreSignalPhase(params: {
         session: SessionState<TData>;
         history: Event[];
         context: TContext;
     }): Promise<{
-        mergedDirective?: PreDirective<TContext, TData>;
+        mergedDirective?: Directive<TContext, TData>;
         firings: SignalFiring<TContext, TData>[];
         updatedSession: SessionState<TData>;
     }> {
@@ -335,7 +335,7 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
         phase: 'pre' | 'post',
         params: { session: SessionState<TData>; history: Event[]; context: TContext },
     ): Promise<{
-        mergedDirective?: PreDirective<TContext, TData>;
+        mergedDirective?: Directive<TContext, TData>;
         firings: SignalFiring<TContext, TData>[];
         updatedSession: SessionState<TData>;
     }> {
@@ -584,7 +584,7 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
         }
 
         // ── STEP 9: merge directives ─────────────────────────────────────────
-        let mergedDirective: PreDirective<TContext, TData> | undefined;
+        let mergedDirective: Directive<TContext, TData> | undefined;
 
         if (bus.length > 0) {
             mergedDirective = this.mergeDirectives(bus);
@@ -633,8 +633,8 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
      */
     private mergeDirectives(
         directives: SignalDirective<TContext, TData>[],
-    ): PreDirective<TContext, TData> {
-        const merged: PreDirective<TContext, TData> = {};
+    ): Directive<TContext, TData> {
+        const merged: Directive<TContext, TData> = {};
 
         for (const d of directives) {
             // Position fields — last-write-wins

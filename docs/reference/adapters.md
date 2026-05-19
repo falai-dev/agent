@@ -474,7 +474,7 @@ Adapter errors propagate from the underlying driver — the agent does not wrap 
 ## Related
 
 - [Persistence](../guides/persistence.md) — recipe for swapping memory for a real adapter
-- [Architecture](../concepts/architecture.md) — where the adapter sits among the seven primitives
+- [Architecture](../concepts/architecture.md) — where the adapter sits among the six primitives
 - [createAgent](./create-agent.md) — the `persistence` and `sessionId` fields
 - [Directive](./directive.md) — what `pendingDirective` stores
 - [Signals](./signals.md) — what the `signals` column stores

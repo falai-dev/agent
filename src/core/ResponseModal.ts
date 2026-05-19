@@ -18,7 +18,7 @@ import type {
     ScopedInstructions,
     AppliedInstruction,
     PrepareResult,
-    PreDirective,
+    Directive,
 } from "../types";
 import type { SignalFiring } from "../types/signals";
 import type { Agent } from "./Agent";
@@ -140,7 +140,7 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
     /** Signal firings accumulated across both phases (pre + post) for the response surface. */
     signalFirings?: SignalFiring<TContext, TData>[];
     /** Pre-phase merged directive from signals (non-position fields like appendPrompt, injectTools). */
-    signalPreDirective?: PreDirective<TContext, TData>;
+    signalPreDirective?: Directive<TContext, TData>;
     /** Whether the pre-signal phase emitted a halt directive. */
     signalHalted?: boolean;
     /** Reply from a halt directive. */
@@ -477,7 +477,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session: SessionState<TData>;
                 isFlowComplete: boolean;
                 signalFirings?: SignalFiring<TContext, TData>[];
-                signalPreDirective?: PreDirective<TContext, TData>;
+                signalPreDirective?: Directive<TContext, TData>;
                 signalHalted?: boolean;
                 signalHaltReply?: string;
             };
@@ -533,7 +533,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         /** Signal firings from the pre-phase (threaded through for response surface). */
         signalFirings?: SignalFiring<TContext, TData>[];
         /** Non-position signal directive for pre-LLM augmentation (appendPrompt, injectTools, etc). */
-        signalPreDirective?: PreDirective<TContext, TData>;
+        signalPreDirective?: Directive<TContext, TData>;
         /** Pre-signal phase halted the turn. */
         signalHalted?: boolean;
         /** Reply text from the halt directive. */
@@ -752,7 +752,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         signalResult: {
             firings: SignalFiring<TContext, TData>[];
             updatedSession: SessionState<TData>;
-            mergedDirective: PreDirective<TContext, TData> | undefined;
+            mergedDirective: Directive<TContext, TData> | undefined;
         },
         _params: { session: SessionState<TData>; history: Event[]; context: TContext },
     ): {
@@ -762,7 +762,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         session: SessionState<TData>;
         isFlowComplete: boolean;
         signalFirings?: SignalFiring<TContext, TData>[];
-        signalPreDirective?: PreDirective<TContext, TData>;
+        signalPreDirective?: Directive<TContext, TData>;
         signalHalted?: boolean;
         signalHaltReply?: string;
     } {
@@ -1381,15 +1381,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         historyEvents: Event[];
         signal?: AbortSignal;
         /**
-         * Per-turn transient appendage from merged PreDirective.appendPrompt.
+         * Per-turn transient appendage from merged directive.appendPrompt.
          * Fresh every turn, never cached, never persisted.
          */
         transientAppendage?: string[];
         /**
-         * Merged PreDirective from the directive bus's pre-LLM phase drain.
+         * Merged directive from the directive bus's pre-LLM phase drain.
          * When `halt: true`, the LLM call is skipped entirely.
          */
-        mergedPreDirective?: PreDirective<TContext, TData>;
+        mergedPreDirective?: Directive<TContext, TData>;
     }): Promise<{
         message: string;
         toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
@@ -1503,7 +1503,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // ── STEP.REPLY SHORT-CIRCUIT (Requirement 25.1–25.7, 17.9) ──────────────
         // A step with `reply` set emits a verbatim template response without LLM.
         // onEnter and prepare have already fired normally at this point.
-        // If prepare returned a PreDirective with `reply`, that overrides
+        // If prepare returned a Directive with `reply`, that overrides
         // the step-declared reply (last-emission-wins per Algorithm 4).
         if (nextStep.reply != null) {
             // Determine the effective reply: prepare-emitted reply wins over step-declared
@@ -1515,7 +1515,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             return { message: effectiveReply, session, stoppedReason: 'reply' };
         }
 
-        // Transient appendage: per-turn slot from PreDirective.appendPrompt.
+        // Transient appendage: per-turn slot from Directive.appendPrompt.
         // Fresh each turn, never cached, never persisted.
         // Wrapped in try/finally to ensure cleanup even on abnormal termination.
         let turnTransientAppendage: string[] | undefined = transientAppendage;
@@ -1592,7 +1592,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             return { message, toolCalls, session, appliedInstructions };
         } finally {
             // Drain the transient appendage at end of turn.
-            // This ensures PreDirective.appendPrompt does not leak to subsequent
+            // This ensures Directive.appendPrompt does not leak to subsequent
             // turns even when the turn terminates abnormally (error, abort, reject).
             turnTransientAppendage = undefined;
         }
@@ -1799,15 +1799,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         historyEvents: Event[];
         signal?: AbortSignal;
         /**
-         * Per-turn transient appendage from merged PreDirective.appendPrompt.
+         * Per-turn transient appendage from merged directive.appendPrompt.
          * Fresh every turn, never cached, never persisted.
          */
         transientAppendage?: string[];
         /**
-         * Merged PreDirective from the directive bus's pre-LLM phase drain.
+         * Merged directive from the directive bus's pre-LLM phase drain.
          * When `halt: true`, the LLM call is skipped entirely.
          */
-        mergedPreDirective?: PreDirective<TContext, TData>;
+        mergedPreDirective?: Directive<TContext, TData>;
     }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
         const { selectedFlow, selectedStep, responseDirectives, history, context, historyEvents, signal, transientAppendage, mergedPreDirective } = params;
         let session = params.session;
@@ -1918,7 +1918,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // ── STEP.REPLY SHORT-CIRCUIT (Requirement 25.1–25.7, 17.9) ──────────────
         // A step with `reply` set emits a verbatim template response without LLM.
         // onEnter and prepare have already fired normally. If prepare returned
-        // a PreDirective with `reply`, that overrides the step-declared reply.
+        // a Directive with `reply`, that overrides the step-declared reply.
         if (nextStep.reply != null) {
             const effectiveReply = mergedPreDirective?.reply ?? await render(
                 nextStep.reply,
@@ -1937,7 +1937,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             return;
         }
 
-        // Transient appendage: per-turn slot from PreDirective.appendPrompt.
+        // Transient appendage: per-turn slot from Directive.appendPrompt.
         // Fresh each turn, never cached, never persisted.
         // Wrapped in try/finally to ensure cleanup even on abnormal termination.
         let turnTransientAppendage: string[] | undefined = transientAppendage;
@@ -2092,7 +2092,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             }
         } finally {
             // Drain the transient appendage at end of turn.
-            // This ensures PreDirective.appendPrompt does not leak to subsequent
+            // This ensures Directive.appendPrompt does not leak to subsequent
             // turns even when the turn terminates abnormally (error, abort, reject).
             turnTransientAppendage = undefined;
         }

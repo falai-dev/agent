@@ -25,7 +25,7 @@ import type { StoppedReason } from "../types/flow";
 
 /**
  * The directive-like object that `prepare` may return on auto-steps.
- * This is a structural subset of the full PreDirective that v2 will formalize.
+ * This is a structural subset of Directive (pre-LLM fields).
  */
 export interface AutoStepPrepareResult {
     dataUpdate?: Record<string, unknown>;
@@ -292,7 +292,7 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
 
     /**
      * Run onEnter and prepare hooks for an auto-step, collecting any
-     * PreDirective-like return values.
+     * Directive return values (pre-LLM fields honored).
      */
     private async runStepHooks(
         step: Step<TContext, TData>,
@@ -310,7 +310,7 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
             }
         }
 
-        // prepare hook — for auto-steps, prepare may return a PreDirective-like object
+        // prepare hook — for auto-steps, prepare may return a Directive with pre-LLM fields
         if (step.prepare) {
             if (typeof step.prepare === 'function') {
                 const prepareResult = await (step.prepare as (

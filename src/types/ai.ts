@@ -1,5 +1,5 @@
 /**
- * AI provider strategy types
+ * AI provider types
  */
 
 import type { HistoryItem } from "./history";

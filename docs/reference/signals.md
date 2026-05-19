@@ -83,7 +83,7 @@ interface SignalContext<TContext = unknown, TData = unknown, TExtract = void> {
 }
 
 interface SignalDirective<TContext = unknown, TData = unknown>
-  extends PreDirective<TContext, TData> {
+  extends Directive<TContext, TData> {
   stopOtherSignals?: boolean;
   replyWith?: string | ((ctx: SignalContext<TContext, TData>) => string);
 }
@@ -176,7 +176,7 @@ Passed to handlers when a signal fires. Symmetric with `ToolContext`.
 
 ### `SignalDirective`
 
-Extends [`PreDirective`](./pre-directive.md), which extends [`Directive`](./directive.md). All position fields (`goTo`, `goToStep`, `complete`, `abort`, `reset`), state writes (`dataUpdate`, `contextUpdate`), `reply`, and PreDirective extras (`appendPrompt`, `injectTools`, `halt`) are inherited unchanged.
+Extends [`Directive`](./directive.md). All position fields (`goTo`, `goToStep`, `complete`, `abort`, `reset`), state writes (`dataUpdate`, `contextUpdate`), `reply`, and pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) are inherited unchanged.
 
 | Added field | Type | Notes |
 |-------------|------|-------|
@@ -349,8 +349,7 @@ Soft failures handled in-band (no thrown error, turn continues):
 ## Related
 
 - [Turn pipeline](../concepts/pipeline.md) — where signal phases sit in the turn lifecycle.
-- [Directives](../concepts/directives.md) — the inheritance chain Directive → PreDirective → SignalDirective.
+- [Directives](../concepts/directives.md) — the Directive shape and SignalDirective extension.
 - [Directive](./directive.md) — base shape for all position and state fields.
-- [PreDirective](./pre-directive.md) — pre-LLM extras inherited by `SignalDirective`.
 - [createAgent](./create-agent.md) — `signals` and `signalBatchSize` options.
 - [Errors](./errors.md) — `FlowConfigurationError` format contract.

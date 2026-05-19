@@ -36,7 +36,7 @@ const response = await agent.respond("Hi, I'm Alice");
 console.log(response.message);
 ```
 
-That is the whole program. No persistence config, no tools, no branches, no signals. Three primitives appear by name (`Agent`, `Flow`, `Step`) and four more sit one decision away (`Tool`, `Instruction`, `Directive`, `PreDirective`). The next sections walk through every line.
+That is the whole program. No persistence config, no tools, no branches, no signals. Three primitives appear by name (`Agent`, `Flow`, `Step`) and three more sit one decision away (`Tool`, `Instruction`, `Directive`). The next sections walk through every line.
 
 ## Walk it line by line
 
@@ -139,7 +139,6 @@ Three primitives appear by name in the code above: [`Agent`](../concepts/archite
 - [`Tool`](../concepts/architecture.md#tool) — a typed function the AI can call. May redirect the conversation by emitting a directive. Added on page [04](./04-add-tools.md).
 - [`Instruction`](../concepts/architecture.md#instruction) — a `must` / `never` / `should` behavioral statement at agent, flow, or step scope.
 - [`Directive`](../concepts/architecture.md#directive) — a flat object any tool, hook, or branch returns to write state, change position, or speak verbatim.
-- [`PreDirective`](../concepts/architecture.md#predirective) — a `Directive` plus per-turn shaping (`appendPrompt`, `injectTools`, `halt`) returned from `onEnter` and `prepare` hooks.
 
 Read [Architecture](../concepts/architecture.md) end to end when you want the full mental model — what each primitive owns, how they reference each other, and why the set is exactly seven.
 

@@ -174,7 +174,7 @@ Sources, in fixed order:
 4. `step.hooks.prepare`
 5. Any `ctx.dispatch` calls made inside the above hooks
 
-These return `PreDirective` — the same shape as `Directive` plus the
+These return `Directive` — with the pre-LLM fields
 three pre-LLM-only fields (`appendPrompt`, `injectTools`, `halt`). The
 merged result feeds the prompt composer and tool manager before the
 LLM call:
@@ -199,7 +199,7 @@ Sources, in fixed order:
 5. The `then` branch of any matched `step.branches` entry whose `then`
    was a full `Directive` (not just a step id)
 
-These return plain `Directive`. PreDirective-only fields here are
+These return `Directive`. Pre-LLM-only fields here are
 dropped with a debug warning — `halt` after the fact has no meaning,
 and `appendPrompt` / `injectTools` could not influence a call that
 has already happened.
@@ -222,7 +222,7 @@ the persistence boundary.
 ## Algorithm 4 — merge rules
 
 When the bus has more than one directive in a phase, the pipeline
-folds them into a single `Directive` (or `PreDirective` in the pre-LLM
+folds them into a single `Directive` (with pre-LLM fields honored in the pre-LLM
 phase) using the following rules. Same rules in both phases; the
 pre-LLM phase additionally folds the three augmentation fields.
 
@@ -392,7 +392,7 @@ elides:
 The pipeline is the *what happens*. The directive is the *how
 handlers ask for things to happen*. The next concept page covers the
 flat shape, the position field rules, the inheritance chain
-`Directive → PreDirective → SignalDirective`, and the `flow`
+`Directive → SignalDirective`, and the `flow`
 namespace helpers (`flow.isDirective`, `flow.merge`, `flow.validate`)
 that make the bus introspectable from user code.
 

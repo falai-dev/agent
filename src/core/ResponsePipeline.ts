@@ -9,7 +9,6 @@ import type {
   AgentStructuredResponse,
   Tool,
   Directive,
-  PreDirective,
 } from "../types";
 import type { SignalFiring } from "../types/signals";
 import type { SignalProcessor } from "./SignalProcessor";
@@ -162,7 +161,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   ): Promise<{
     firings: SignalFiring<TContext, TData>[];
     updatedSession: SessionState<TData>;
-    mergedDirective: PreDirective<TContext, TData> | undefined;
+    mergedDirective: Directive<TContext, TData> | undefined;
   }> {
     if (!this.signalProcessor) {
       return { firings: [], updatedSession: session, mergedDirective: undefined };

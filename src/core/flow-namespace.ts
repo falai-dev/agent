@@ -25,7 +25,12 @@ const POSITION_PRECEDENCE: Record<PositionField, number> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getSetPositionFields(d: Directive): PositionField[] {
+/** Structural type for anything that has position fields (read-only access). */
+type HasPositionFields = {
+    readonly [K in PositionField]?: unknown;
+};
+
+function getSetPositionFields(d: HasPositionFields): PositionField[] {
     return POSITION_FIELDS.filter((f) => d[f] !== undefined && d[f] !== null);
 }
 
@@ -44,7 +49,7 @@ function beatsCurrent(
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Type guard: is `x` a Directive (or any subtype like PreDirective)?
+ * Type guard: is `x` a Directive (or any subtype like SignalDirective)?
  *
  * A value is considered a Directive if it is a non-null object. The Directive
  * interface has all-optional fields, so any plain object qualifies structurally.
@@ -65,31 +70,31 @@ function isDirective(x: unknown): x is Directive {
  *   ties broken by emission order (b wins over a — last wins).
  * - reply: last-wins (b.reply overrides a.reply if set).
  * - dataUpdate / contextUpdate: shallow-merge (b overrides a on key collision).
- * - appendPrompt / injectTools (PreDirective fields): concatenate then dedupe.
+ * - appendPrompt / injectTools (pre-LLM fields): concatenate then dedupe.
  * - halt: logical-OR.
  */
-function merge<T extends Directive>(a: T, b: T): T {
+function merge<TContext, TData>(a: Directive<TContext, TData>, b: Directive<TContext, TData>): Directive<TContext, TData> {
     const result = {} as Record<string, unknown>;
 
     // ── Position field: winner-takes-all by precedence, b wins ties ──
-    const aPos = getSetPositionFields(a as Directive);
-    const bPos = getSetPositionFields(b as Directive);
+    const aPos = getSetPositionFields(a);
+    const bPos = getSetPositionFields(b);
 
     // Pick the highest-priority position field across both directives.
     // b's fields are evaluated after a's, so b wins on same precedence (last-wins).
     let winnerField: PositionField | null = null;
-    let winnerSource: Directive | null = null;
+    let winnerSource: Directive<TContext, TData> | null = null;
 
     for (const field of aPos) {
         if (beatsCurrent(field, winnerField)) {
             winnerField = field;
-            winnerSource = a as Directive;
+            winnerSource = a;
         }
     }
     for (const field of bPos) {
         if (beatsCurrent(field, winnerField)) {
             winnerField = field;
-            winnerSource = b as Directive;
+            winnerSource = b;
         }
     }
 
@@ -98,54 +103,30 @@ function merge<T extends Directive>(a: T, b: T): T {
     }
 
     // ── reply: last-wins ──
-    if ((b as Directive).reply !== undefined) {
-        result.reply = (b as Directive).reply;
-    } else if ((a as Directive).reply !== undefined) {
-        result.reply = (a as Directive).reply;
+    if (b.reply !== undefined) {
+        result.reply = b.reply;
+    } else if (a.reply !== undefined) {
+        result.reply = a.reply;
     }
 
     // ── dataUpdate: shallow merge ──
-    const aData = (a as Record<string, unknown>).dataUpdate as
-        | Record<string, unknown>
-        | undefined;
-    const bData = (b as Record<string, unknown>).dataUpdate as
-        | Record<string, unknown>
-        | undefined;
-    if (aData || bData) {
-        result.dataUpdate = { ...aData, ...bData };
+    if (a.dataUpdate || b.dataUpdate) {
+        result.dataUpdate = { ...a.dataUpdate, ...b.dataUpdate };
     }
 
     // ── contextUpdate: shallow merge ──
-    const aCtx = (a as Record<string, unknown>).contextUpdate as
-        | Record<string, unknown>
-        | undefined;
-    const bCtx = (b as Record<string, unknown>).contextUpdate as
-        | Record<string, unknown>
-        | undefined;
-    if (aCtx || bCtx) {
-        result.contextUpdate = { ...aCtx, ...bCtx };
+    if (a.contextUpdate || b.contextUpdate) {
+        result.contextUpdate = { ...a.contextUpdate, ...b.contextUpdate };
     }
 
-    // ── appendPrompt (PreDirective): concatenate ──
-    const aPrompt = (a as Record<string, unknown>).appendPrompt as
-        | string[]
-        | undefined;
-    const bPrompt = (b as Record<string, unknown>).appendPrompt as
-        | string[]
-        | undefined;
-    if (aPrompt || bPrompt) {
-        result.appendPrompt = [...(aPrompt ?? []), ...(bPrompt ?? [])];
+    // ── appendPrompt (pre-LLM): concatenate ──
+    if (a.appendPrompt || b.appendPrompt) {
+        result.appendPrompt = [...(a.appendPrompt ?? []), ...(b.appendPrompt ?? [])];
     }
 
-    // ── injectTools (PreDirective): concatenate then dedupe by id (last wins) ──
-    const aTools = (a as Record<string, unknown>).injectTools as
-        | Array<{ id: string;[k: string]: unknown }>
-        | undefined;
-    const bTools = (b as Record<string, unknown>).injectTools as
-        | Array<{ id: string;[k: string]: unknown }>
-        | undefined;
-    if (aTools || bTools) {
-        const combined = [...(aTools ?? []), ...(bTools ?? [])];
+    // ── injectTools (pre-LLM): concatenate then dedupe by id (last wins) ──
+    if (a.injectTools || b.injectTools) {
+        const combined = [...(a.injectTools ?? []), ...(b.injectTools ?? [])];
         // Dedupe by id — last definition wins
         const seen = new Map<string, (typeof combined)[number]>();
         for (const tool of combined) {
@@ -154,14 +135,12 @@ function merge<T extends Directive>(a: T, b: T): T {
         result.injectTools = Array.from(seen.values());
     }
 
-    // ── halt (PreDirective): logical OR ──
-    const aHalt = (a as Record<string, unknown>).halt as boolean | undefined;
-    const bHalt = (b as Record<string, unknown>).halt as boolean | undefined;
-    if (aHalt || bHalt) {
+    // ── halt (pre-LLM): logical OR ──
+    if (a.halt || b.halt) {
         result.halt = true;
     }
 
-    return result as T;
+    return result as Directive<TContext, TData>;
 }
 
 /**
@@ -170,7 +149,7 @@ function merge<T extends Directive>(a: T, b: T): T {
  * - `goTo` set as empty object `{}` (no flow target).
  * - `reply` co-existing with `abort` (abort ends the conversation; a reply is nonsensical).
  */
-function validate(d: Directive): void {
+function validate<TContext, TData>(d: Directive<TContext, TData>): void {
     // ── Multiple position fields ──
     const setFields = getSetPositionFields(d);
     if (setFields.length > 1) {

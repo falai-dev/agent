@@ -8,7 +8,7 @@
  */
 
 import type { SessionState } from "./session";
-import type { PreDirective } from "./flow";
+import type { Directive } from "./flow";
 import type { Event } from "./history";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -100,19 +100,18 @@ export type SignalPredicate<TContext = unknown, TData = unknown> = (
 
 /**
  * SignalDirective — what signal handlers return.
- * Extends `PreDirective` (which extends `Directive`). Adds signal-specific
- * fields: `stopOtherSignals` and `replyWith`.
+ * Extends `Directive`. Adds signal-specific fields: `stopOtherSignals` and `replyWith`.
  *
  * All position-control (`goTo`, `goToStep`, `complete`, `abort`, `reset`),
  * state writes (`dataUpdate`, `contextUpdate`), prompt augmentation
  * (`appendPrompt`, `injectTools`), `reply`, and `halt` are inherited unchanged.
  *
  * Post-phase drop rules: when returned in the post-phase, `appendPrompt`,
- * `injectTools`, and `halt` are dropped with a debug warning — they have
+ * `injectTools`, and `halt` are dropped with a WARN log — they have
  * no meaning after the LLM call has already completed.
  */
 export interface SignalDirective<TContext = unknown, TData = unknown>
-    extends PreDirective<TContext, TData> {
+    extends Directive<TContext, TData> {
     /**
      * Stop processing remaining signals for this phase after this handler.
      * Does not affect the other phase.

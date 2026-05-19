@@ -1,5 +1,5 @@
 /**
- * Step in the route DSL
+ * Step in a conversational flow
  */
 
 import type {

@@ -9,7 +9,7 @@ order: 6
 
 > **Where this is introduced:** [Directives](../concepts/directives.md)
 
-A `Directive<TContext, TData>` is the single shape any tool, hook, or branch returns when it wants to write state, change position, or speak verbatim. It is a **flat object literal** — not a discriminated union, not a class, not a builder. Every field is optional. Every directive is plain JSON-serializable data (PreDirective adds non-serializable extensions; see [PreDirective](./pre-directive.md)).
+A `Directive<TContext, TData>` is the single shape any tool, hook, or branch returns when it wants to write state, change position, or speak verbatim. It is a **flat object literal** — not a discriminated union, not a class, not a builder. Every field is optional. Every directive is plain JSON-serializable data. Pre-LLM-only fields (`appendPrompt`, `injectTools`, `halt`) are one-turn-lifetime and ignored with a WARN log when emitted from post-LLM hooks or persisted.
 
 A directive carries up to four orthogonal payloads:
 
@@ -92,7 +92,7 @@ Shallow-merge means each top-level key is replaced wholesale. To update a nested
 `reply` co-validates with two fields:
 
 - **`abort`** — co-existence is rejected at validation. Aborted conversations cannot deliver a reply.
-- **`halt`** (PreDirective only) — when both are set, `reply` becomes the assistant output and the turn ends with `stoppedReason: 'reply'`. When `halt` is set without `reply`, the turn ends with `stoppedReason: 'halt'` and an empty assistant message.
+- **`halt`** — when both are set, `reply` becomes the assistant output and the turn ends with `stoppedReason: 'reply'`. When `halt` is set without `reply`, the turn ends with `stoppedReason: 'halt'` and an empty assistant message.
 
 Across multiple emitters this turn, `reply` is **last-wins** — the most recent emission overrides earlier ones, with a `DEBUG` log when more than one emitter set it.
 
@@ -105,9 +105,9 @@ Directives emitted during one turn — by tools (return value or `ctx.dispatch`)
 | Position fields (`goTo`, `goToStep`, `complete`, `abort`, `reset`) | **Winner-takes-all by precedence:** `abort > complete > goTo / goToStep > reset`. Among entries of the same precedence, last emission wins. A `DEBUG` log records all losers. |
 | `reply` | **Last-wins.** Most recent non-empty `reply` overrides earlier ones. `DEBUG` log when more than one was set. |
 | `dataUpdate`, `contextUpdate` | **Shallow-merged across all emitters.** Last-write-wins on key collision. Always applied — never overridden by position fields. |
-| `appendPrompt` (PreDirective) | **Concatenated** in emission order. |
-| `injectTools` (PreDirective) | **Concatenated, then deduped by `Tool.id`** (last definition wins). |
-| `halt` (PreDirective) | **Logical-OR.** Any emitter setting `halt: true` halts the turn. |
+| `appendPrompt` | **Concatenated** in emission order. |
+| `injectTools` | **Concatenated, then deduped by `Tool.id`** (last definition wins). |
+| `halt` | **Logical-OR.** Any emitter setting `halt: true` halts the turn. |
 
 The full algorithm is implemented by `flow.merge(a, b)`. See [`flow` namespace](#flow-namespace) below.
 
@@ -128,7 +128,7 @@ flow.validate(d);        // throws FlowConfigurationError on invalid shape
 | Helper | Signature | Notes |
 |--------|-----------|-------|
 | `flow.isDirective` | `(x: unknown) => x is Directive` | Structural type guard. Returns `true` for any non-null, non-array object. Filters out primitives, null/undefined, arrays, and functions. |
-| `flow.merge` | `<T extends Directive>(a: T, b: T) => T` | Merges by Algorithm 4. Position field uses precedence (b wins on tie). `reply` is last-wins. State writes shallow-merge. PreDirective fields concatenate / dedupe / OR per the table above. |
+| `flow.merge` | `<T extends Directive>(a: T, b: T) => T` | Merges by Algorithm 4. Position field uses precedence (b wins on tie). `reply` is last-wins. State writes shallow-merge. Pre-LLM fields concatenate / dedupe / OR per the table above. |
 | `flow.validate` | `(d: Directive) => void` | Throws `FlowConfigurationError` for: multiple position fields set; `goTo` set as an empty object `{}`; `reply` co-existing with `abort`. |
 
 ## Examples
@@ -228,16 +228,15 @@ const step = {
 
 Two related runtime behaviors are notable but **not** thrown errors:
 
-- Returning a `PreDirective` (with `appendPrompt` / `injectTools` / `halt`) from a post-LLM hook (`finalize`, `onComplete`) drops those three fields with a `DEBUG` log; the remaining `Directive` portion is honored.
+- Returning a directive with `appendPrompt` / `injectTools` / `halt` from a post-LLM hook (`finalize`, `onComplete`) drops those three fields with a `WARN` log; the remaining `Directive` portion is honored.
 - A `goTo` / `goToStep` referencing an unknown flow or step throws `FlowConfigurationError` at apply time, not at validation time — the validator does not have the agent's flow registry.
 
 ## Related
 
-- [Directives](../concepts/directives.md) — the mental model and inheritance chain `Directive → PreDirective → SignalDirective`.
+- [Directives](../concepts/directives.md) — the mental model for `Directive` and `SignalDirective`.
 - [Turn pipeline](../concepts/pipeline.md) — when the bus runs, and where merge sits in the per-turn sequence.
 - [Flow control](../guides/flow-control.md) — recipes for redirecting, completing, aborting, or replying from tools and hooks.
-- [PreDirective](./pre-directive.md) — pre-LLM extension adding `appendPrompt`, `injectTools`, `halt`.
-- [Signals](./signals.md) — `SignalDirective` extends `PreDirective` for signal handlers.
+- [Signals](./signals.md) — `SignalDirective` extends `Directive` for signal handlers.
 - [Tool](./tool.md) — `ctx.dispatch(directive)` and `ToolResult.directive`.
 - [Branches](./branches.md) — `then: Directive` as a branch target (note: branches bypass the bus).
 - [Errors](./errors.md) — `FlowConfigurationError` format contract.

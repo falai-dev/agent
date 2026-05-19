@@ -171,7 +171,7 @@ for (const a of response.appliedInstructions ?? []) {
 ## Related
 
 - [Instructions](../guides/instructions.md) — recipe for shaping behavior with `must` / `never` / `should`
-- [Architecture](../concepts/architecture.md) — where Instruction fits among the seven primitives
+- [Architecture](../concepts/architecture.md) — where Instruction fits among the six primitives
 - [createAgent](./create-agent.md) — `AgentOptions.instructions`
 - [Flow](./flow.md) — `FlowOptions.instructions`
 - [Step](./step.md) — `StepOptions.instructions`

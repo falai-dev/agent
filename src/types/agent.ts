@@ -146,7 +146,7 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
   contextProvider?: ContextProvider<TContext>;
   /** Lifecycle hooks for context management */
   hooks?: ContextLifecycleHooks<TContext, TData>;
-  /** AI provider strategy for generating responses */
+  /** AI provider for generating responses */
   provider: AiProvider;
   /** Initial terms for domain glossary */
   terms?: Term<TContext, TData>[];

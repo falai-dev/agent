@@ -20,10 +20,8 @@ emitters, one shape.
 
 This page explains why the shape is flat, what each field does, how
 they merge when more than one handler emits during the same turn, and
-how `Directive`, `PreDirective`, and `SignalDirective` form the
-inheritance chain that lets pre-LLM hooks and signals add capability
-without adding a parallel type system. The page is conceptual — the
-[directive reference](../reference/directive.md) carries the
+how `Directive` and `SignalDirective` relate. The page is conceptual —
+the [directive reference](../reference/directive.md) carries the
 field-by-field contract.
 
 ## Why a flat shape
@@ -70,9 +68,9 @@ algorithm answers once.
 **Composable.** A directive carries up to four orthogonal payloads
 without forcing them into a hierarchy: at most one position field,
 optional state writes (`dataUpdate` / `contextUpdate`), an optional
-verbatim `reply`, and on `PreDirective` an optional set of pre-LLM
-augmentations. `dataUpdate` works alongside `goTo`. `reply` works
-alongside `complete`. A booking tool's success result writes the
+verbatim `reply`, and optional pre-LLM augmentations (`appendPrompt`,
+`injectTools`, `halt`). `dataUpdate` works alongside `goTo`. `reply`
+works alongside `complete`. A booking tool's success result writes the
 booking id and finishes the flow in one return value:
 `{ complete: true, dataUpdate: { bookingId } }`. A bridge utterance
 at a flow boundary writes nothing and only speaks: `{ reply: "Let me
@@ -186,26 +184,24 @@ LLM for the conversation.
 
 `reply` co-validates with two other fields. With **`abort`**, it is
 rejected at validation — an aborted conversation cannot deliver a
-reply. With **`halt: true`** (a `PreDirective` field, see below), it
-is the assistant message and the turn ends with
-`stoppedReason: 'reply'`; if `halt` is set without `reply`, the turn
-ends with `stoppedReason: 'halt'` and an empty body. Across multiple
-emitters in the same turn, `reply` is **last-wins** — the most
-recent emission overrides earlier ones, with a debug log so the
-override is visible in the trace.
+reply. With **`halt: true`**, it is the assistant message and the
+turn ends with `stoppedReason: 'reply'`; if `halt` is set without
+`reply`, the turn ends with `stoppedReason: 'halt'` and an empty
+body. Across multiple emitters in the same turn, `reply` is
+**last-wins** — the most recent emission overrides earlier ones,
+with a debug log so the override is visible in the trace.
 
-`reply` is the same shape on `Directive` and on `PreDirective` —
-there is no separate "speak before the LLM" vs "speak after the
-LLM" type. The phase the directive runs in determines whether the
-reply replaces a message that would have been generated (pre-LLM) or
-replaces one that just was (post-LLM). The field stays the same.
+`reply` works the same regardless of which phase emits it. The phase
+determines whether the reply replaces a message that would have been
+generated (pre-LLM) or replaces one that just was (post-LLM).
 
-## PreDirective fields
+## Pre-LLM-only fields
 
-`PreDirective` is the `Directive` variant that pre-LLM hooks return.
-It inherits every base field — position writes, state writes,
-`reply` — and adds three more that only make sense before this turn's
-LLM call: `appendPrompt`, `injectTools`, and `halt`.
+Three fields on `Directive` only take effect in pre-LLM hooks
+(`onEnter`, `prepare`). When emitted from post-LLM hooks (`finalize`,
+`onComplete`) or persisted to `session.pendingDirective`, they are
+**ignored with a WARN log** — a visible signal in your logs that
+says "hey, this did nothing here."
 
 **`appendPrompt: string[]`** is the prompt nudge slot. Each string is
 a sentence the prompt composer appends to the system prompt for this
@@ -236,15 +232,13 @@ halt the turn. The field is the framework's circuit breaker: a hook
 that detects an unresolvable state can stop the turn outright
 without competing with other emitters.
 
-The three `PreDirective`-only fields are stripped from
-`session.pendingDirective` before persistence — `pendingDirective`
-holds a plain `Directive`, and the augmentation fields cannot survive
-across turns by design. If a post-LLM hook returns a `PreDirective`
-with these fields set, they are dropped with a debug warning: an
-`appendPrompt` after the fact has no prompt to append to, an
-`injectTools` after the fact has no LLM call to inject into, and a
-`halt` after the fact has no LLM call to halt. The remaining base
-`Directive` portion is honored.
+These fields are stripped from `session.pendingDirective` before
+persistence — they cannot survive across turns by design. If a
+post-LLM hook returns a directive with these fields set, they are
+dropped with a WARN log: an `appendPrompt` after the fact has no
+prompt to append to, an `injectTools` after the fact has no LLM call
+to inject into, and a `halt` after the fact has no LLM call to halt.
+The remaining fields are honored normally.
 
 `appendPrompt` is concatenated across emitters in emission order
 without deduplication — duplicate sentences from different sources
@@ -252,22 +246,18 @@ are preserved (a flow-level "be polite" plus a step-level "be polite"
 is acceptable redundancy). `injectTools` is concatenated and then
 deduped by `Tool.id`, with the later definition winning — typically a
 step-level injection overriding a flow-level default. `halt` is
-logical-OR. The merge rules for the inherited base fields stay
-identical: position fields by precedence, `reply` last-wins, state
-writes shallow-merged.
+logical-OR. The merge rules for the base fields stay identical:
+position fields by precedence, `reply` last-wins, state writes
+shallow-merged.
 
-## The inheritance chain
+## SignalDirective
 
-`Directive` is the base. `PreDirective` extends it with the three
-pre-LLM-only fields. `SignalDirective` extends `PreDirective` further
-with two signal-specific fields. The chain is one direction —
-capabilities accumulate as you go down — and each level is the return
-type of a specific class of emitter:
+`SignalDirective` extends `Directive` with two signal-pipeline-specific
+fields: `stopOtherSignals` and `replyWith`.
 
 ```mermaid
 classDiagram
-    Directive <|-- PreDirective
-    PreDirective <|-- SignalDirective
+    Directive <|-- SignalDirective
 
     class Directive {
         +goTo? string | object
@@ -278,9 +268,6 @@ classDiagram
         +reply? string
         +dataUpdate? Partial~TData~
         +contextUpdate? Partial~TContext~
-    }
-
-    class PreDirective {
         +appendPrompt? string[]
         +injectTools? Tool[]
         +halt? boolean
@@ -291,41 +278,25 @@ classDiagram
         +replyWith? string | function
     }
 
-    note for Directive "Returned by tools, finalize hooks, branches.\nPersistable as session.pendingDirective."
-    note for PreDirective "Returned by prepare hooks, onEnter hooks.\nTransient — one-turn lifetime."
-    note for SignalDirective "Returned by signals (pre / post / both phases)."
+    note for Directive "One type for all hooks, tools, and branches.\nPre-LLM fields ignored with WARN log outside pre-LLM hooks."
+    note for SignalDirective "Returned by signal handlers (pre / post / both phases)."
 ```
-
-`Directive` is what tools (return value or `ctx.dispatch`), `finalize`
-hooks, `flow.hooks.onComplete`, and branch `then` targets return. It
-is plain JSON-serializable data — the same shape that sits on the
-session as `pendingDirective` and crosses the persistence boundary.
-
-`PreDirective` is what `flow.hooks.onEnter`, `step.hooks.onEnter`,
-and `step.hooks.prepare` return. The three augmentation fields and a
-live `Tool[]` reference make it non-serializable; the type system
-encodes the one-turn lifetime by being a structurally separate type
-that the engine strips before persistence.
 
 `SignalDirective` is what signal handlers return — pre-phase
 handlers, post-phase handlers, and `both`-phase handlers all use the
-same type. The two added fields are signal-pipeline-specific:
-`stopOtherSignals` skips remaining handlers in the same phase (it is
-consumed inside the signal pipeline, not the directive bus), and
+same type. `stopOtherSignals` skips remaining handlers in the same
+phase (consumed inside the signal pipeline, not the directive bus).
 `replyWith` is a late-binding `reply` that accepts a function form
 evaluated at emit time. Phase semantics still apply: when a
-`SignalDirective` runs in the post-phase, the inherited `appendPrompt`
-/ `injectTools` / `halt` fields are dropped (they have no meaning
-after the LLM call) and inherited position fields set
-`pendingDirective` for the *next* turn rather than redirecting this
-one.
+`SignalDirective` runs in the post-phase, `appendPrompt` /
+`injectTools` / `halt` are dropped (they have no meaning after the
+LLM call) and position fields set `pendingDirective` for the *next*
+turn rather than redirecting this one.
 
-The three types share one merge algorithm and one validation pass.
-A pre-phase signal can dispatch a `SignalDirective`, a `prepare` hook
-can return a `PreDirective`, and the engine merges them through the
-same `flow.merge` that handles tool directives — the inheritance
-chain exists to widen the type at the call site without splitting the
-runtime.
+Both types share one merge algorithm and one validation pass. A
+pre-phase signal can dispatch a `SignalDirective`, a `prepare` hook
+can return a `Directive`, and the engine merges them through the same
+`flow.merge`.
 
 ## The `flow` namespace
 
@@ -358,9 +329,8 @@ within the same tier), `reply` is last-wins, `dataUpdate` and
 `contextUpdate` shallow-merge in emission order, `appendPrompt`
 concatenates without deduplication, `injectTools` concatenates and
 then dedupes by `Tool.id` (later definition wins), and `halt` is
-logical-OR. The function is generic in the shared subtype: merging
-two `PreDirective`s yields a `PreDirective`, merging two plain
-`Directive`s yields a `Directive`.
+logical-OR. The function is generic: merging two `Directive`s yields
+a `Directive`.
 
 `flow.validate(d)` enforces three structural invariants and throws
 `FlowConfigurationError` when any fails: at most one position field
@@ -384,8 +354,7 @@ small.
 The directive's mental model is in this page; the field-by-field
 contract — every position field's shorthand and object form, every
 state-write rule, every typed error the validator can throw — is in
-the [Directive reference](../reference/directive.md). The pre-LLM
-extras have their own [PreDirective reference](../reference/pre-directive.md).
+the [Directive reference](../reference/directive.md).
 The signal-specific additions live in [Signals](../reference/signals.md).
 
 When the goal is to *use* directives in handlers, the

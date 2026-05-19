@@ -79,54 +79,61 @@ export interface PrepareResult {
 // ─── Branch types ────────────────────────────────────────────────────────────
 
 /**
- * A programmatic transition directive. Encodes where to go and what state
- * writes to apply. Used as the `then` target of a `BranchEntry` when the
- * destination is more complex than a simple step/flow id string.
+ * A programmatic transition directive. The single shape any tool, hook, branch,
+ * or signal handler returns to write state, redirect the conversation, or speak
+ * verbatim.
  *
  * At most one position field (`goTo`, `goToStep`, `complete`, `abort`, `reset`)
  * may be set per Directive. Non-position fields (`reply`, `contextUpdate`,
  * `dataUpdate`) may accompany any position field.
+ *
+ * Pre-LLM augmentation fields (`appendPrompt`, `injectTools`, `halt`) are
+ * one-turn-lifetime: they only take effect in pre-LLM hooks (`onEnter`,
+ * `prepare`). When emitted from post-LLM hooks (`finalize`, `onComplete`) or
+ * persisted to `session.pendingDirective`, these fields are ignored and a WARN
+ * log is emitted. They are never serialized across turns.
  */
 export interface Directive<TContext = unknown, TData = unknown> {
+  // ── Position fields (mutually exclusive: at most one) ────────────
   /** Jump to a flow (string) or a flow with options (object). */
   goTo?: string | { flow?: string; step?: string; data?: Partial<TData>; reason?: string; carry?: 'preserve' | 'reset'; };
   /** Jump to a specific step, optionally in another flow. */
   goToStep?: string | { step: string; flow?: string; data?: Partial<TData>; reason?: string; };
   /** Mark the current flow as complete. */
-  complete?: true | { next?: Directive<TContext, TData>; reason?: string; };
+  complete?: true | { next?: Directive<unknown, unknown>; reason?: string; };
   /** Abort the current flow. */
   abort?: string | { reason: string; clearSession?: boolean; };
   /** Reset the current flow (or jump to a step within it). */
   reset?: true | { step?: string; clearData?: boolean; reason?: string; };
+
+  // ── Verbatim utterance ───────────────────────────────────────────
   /** Verbatim reply text to send to the user. */
   reply?: string;
+
+  // ── State writes ─────────────────────────────────────────────────
   /** Partial context update applied before the next turn. */
   contextUpdate?: Partial<TContext>;
   /** Partial data update applied before the next turn. */
   dataUpdate?: Partial<TData>;
-}
 
-/**
- * PreDirective — what `prepare` hooks and `onEnter` hooks return.
- * Adds prompt/tool shaping that only makes sense BEFORE the LLM call this turn.
- * Extends Directive — anything a Directive can do, a PreDirective can do too.
- *
- * NOT persistable: contains live Tool references and a halt flag that
- * has no meaning across turns. This type is transient (one-turn lifetime).
- */
-export interface PreDirective<TContext = unknown, TData = unknown>
-  extends Directive<TContext, TData> {
+  // ── Pre-LLM augmentation (one-turn lifetime) ─────────────────────
   /**
    * Sentences to append to the system prompt for THIS turn only.
    * Wired through PromptComposer's per-turn appendage slot.
+   *
+   * Only meaningful in pre-LLM hooks (`onEnter`, `prepare`). Ignored with
+   * a WARN log when emitted from post-LLM hooks or persisted.
    */
   appendPrompt?: string[];
 
   /**
    * Tools available for THIS turn only. Stacked on top of agent/flow/step
    * tool scopes via ToolManager's transient layer.
+   *
+   * Only meaningful in pre-LLM hooks (`onEnter`, `prepare`). Ignored with
+   * a WARN log when emitted from post-LLM hooks or persisted.
    */
-  injectTools?: Array<Tool<TContext, TData>>;
+  injectTools?: Tool[];
 
   /**
    * If true, skip the LLM call entirely this turn.
@@ -135,9 +142,14 @@ export interface PreDirective<TContext = unknown, TData = unknown>
    * assistant output (`stoppedReason: 'reply'`). When `halt` is true
    * without `reply`, the turn produces an empty assistant message
    * (`stoppedReason: 'halt'`).
+   *
+   * Only meaningful in pre-LLM hooks (`onEnter`, `prepare`). Ignored with
+   * a WARN log when emitted from post-LLM hooks or persisted.
    */
   halt?: boolean;
 }
+
+
 
 /**
  * Context passed to a `BranchPredicate` function.
@@ -241,7 +253,7 @@ export interface StepRef {
 /**
  * Flow lifecycle hooks for managing flow-specific data and behavior.
  *
- * Pre-LLM hooks (`onEnter`) return `void | PreDirective`.
+ * Pre-LLM hooks (`onEnter`) return `void | Directive`.
  * Post-LLM hooks (`onComplete`) return `void | Directive`.
  * Informational hooks (`onExit`) return `void`.
  * Data hooks (`onDataUpdate`, `onContextUpdate`) retain their v1 signatures.
@@ -249,11 +261,12 @@ export interface StepRef {
 export interface FlowLifecycleHooks<TContext = unknown, TData = unknown> {
   /**
    * Called when the flow is first entered.
-   * May return a PreDirective to augment the prompt, inject tools, or halt.
+   * May return a Directive to augment the prompt, inject tools, halt, or redirect.
+   * Pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) are honored here.
    */
   onEnter?: (
     ctx: HookContext<TContext, TData>
-  ) => void | PreDirective<TContext, TData> | Promise<void | PreDirective<TContext, TData>>;
+  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
 
   /**
    * Called when the flow is exited. Informational only — cannot influence flow control.
@@ -401,18 +414,19 @@ export interface FlowOptions<TContext = unknown, TData = unknown> {
 /**
  * Step lifecycle hooks for managing step-specific behavior.
  *
- * Pre-LLM hooks (`onEnter`, `prepare`) return `void | PreDirective`.
+ * Pre-LLM hooks (`onEnter`, `prepare`) return `void | Directive`.
  * Post-LLM hooks (`finalize`) return `void | Directive`.
  * Informational hooks (`onExit`) return `void`.
  */
 export interface StepLifecycleHooks<TContext = unknown, TData = unknown> {
   /**
-   * Called on step entry. May return a PreDirective to augment the prompt,
-   * inject tools, or halt.
+   * Called on step entry. May return a Directive to augment the prompt,
+   * inject tools, halt, or redirect.
+   * Pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) are honored here.
    */
   onEnter?: (
     ctx: HookContext<TContext, TData>
-  ) => void | PreDirective<TContext, TData> | Promise<void | PreDirective<TContext, TData>>;
+  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
 
   /**
    * Called when the step is exited. Informational only — cannot influence flow control.
@@ -424,12 +438,13 @@ export interface StepLifecycleHooks<TContext = unknown, TData = unknown> {
   ) => void | Promise<void>;
 
   /**
-   * Called pre-LLM. May return a PreDirective to augment the prompt,
+   * Called pre-LLM. May return a Directive to augment the prompt,
    * inject tools, or halt the LLM call.
+   * Pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) are honored here.
    */
   prepare?: (
     ctx: HookContext<TContext, TData>
-  ) => void | PreDirective<TContext, TData> | Promise<void | PreDirective<TContext, TData>>;
+  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
 
   /**
    * Called post-LLM. May return a Directive to redirect flow, write state,
@@ -524,7 +539,7 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
    * at construction time.
    *
    * `onEnter` and `prepare` hooks fire normally before the reply is rendered.
-   * If `prepare` returns a `PreDirective` with its own `reply` field, the
+   * If `prepare` returns a Directive with its own `reply` field, the
    * hook-emitted reply wins (last-emission-wins per Algorithm 4).
    *
    * After emission, `onExit` fires and `branches` are resolved for next step.

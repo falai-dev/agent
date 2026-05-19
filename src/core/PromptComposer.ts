@@ -419,7 +419,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
    * Build the final prompt string.
    *
    * @param options.transientAppendage - Per-turn sentences from merged
-   *   PreDirective.appendPrompt arrays (outer-to-inner: agent.onEnter →
+   *   Directive.appendPrompt arrays (outer-to-inner: agent.onEnter →
    *   flow.onEnter → step.onEnter → step.prepare). Appended after all
    *   other sections. Fresh every turn, never cached, never persisted.
    *   **Validates: Requirements 2.2, 2.8, 2.11, 27.1, 27.2, 27.4**
@@ -434,7 +434,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
       sections = this.parts.filter(Boolean);
     }
 
-    // Append transient per-turn sentences (from PreDirective.appendPrompt).
+    // Append transient per-turn sentences (from Directive.appendPrompt).
     // These are never cached — they are a fresh slot built per turn.
     if (options?.transientAppendage && options.transientAppendage.length > 0) {
       const appendageBlock = options.transientAppendage.join("\n");

@@ -262,7 +262,7 @@ Permission denials (`checkPermissions` returning `allowed: false`) are surfaced 
 ## Related
 
 - [Add tools](../start/04-add-tools.md) — tutorial that introduces this type.
-- [Architecture](../concepts/architecture.md) — where Tool fits among the seven primitives.
+- [Architecture](../concepts/architecture.md) — where Tool fits among the six primitives.
 - [Directives](../concepts/directives.md) — what `dispatch` and `directive` emit.
 - [Directive](./directive.md) — the flat shape used by both forms above.
 - [Flow control](../guides/flow-control.md) — recipes for redirecting from tools and hooks.

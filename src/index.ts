@@ -1,7 +1,7 @@
 /**
- * @falai/agent - Standalone AI Agent framework
+ * @falai/agent — Conversational state engine for TypeScript
  *
- * A strongly-typed, modular agent framework with flow DSL and AI provider strategy
+ * The AI understands. The code is in control.
  */
 
 // Core
@@ -173,7 +173,6 @@ export type {
   StoppedReason,
   PrepareResult,
   Directive,
-  PreDirective,
   BranchEntry,
   BranchMap,
   BranchPredicate,

@@ -85,7 +85,7 @@ for await (const chunk of agent.respondStream({ history })) {
 
 If you need finer-grained tool telemetry — which tool fired, with what arguments — read `chunk.toolCalls` on the terminal chunk. It mirrors the same field on the non-streaming `AgentResponse`. For per-tool progress UI, attach observability to the [tool's `handler`](../reference/tool.md) directly; the streaming chunk shape stays clean.
 
-When a step uses [verbatim `reply`](../reference/step.md) or a [`halt` directive](../reference/pre-directive.md), the engine skips the LLM entirely and yields a single chunk with `done: true` and the full text in `accumulated`. The renderer above handles that case without a special branch — there is just no spinner gap.
+When a step uses [verbatim `reply`](../reference/step.md) or a `halt` directive, the engine skips the LLM entirely and yields a single chunk with `done: true` and the full text in `accumulated`. The renderer above handles that case without a special branch — there is just no spinner gap.
 
 ## The terminal chunk
 

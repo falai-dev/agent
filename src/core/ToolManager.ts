@@ -62,7 +62,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   private toolRegistry: Map<string, Tool<TContext, TData>>;
 
   /**
-   * Per-turn transient tool layer populated from PreDirective.injectTools.
+   * Per-turn transient tool layer populated from Directive.injectTools.
    * Resolution order: transient → step → flow → agent.
    * Drained at end of turn via try/finally guard.
    *

@@ -66,7 +66,7 @@ interface StepOptions<TContext = unknown, TData = unknown> {
     | ((ctx: TContext, data?: Partial<TData>) =>
         void | PrepareResult | Promise<void | PrepareResult>);
 
-  // Lifecycle (full — receives HookContext, returns PreDirective / Directive)
+  // Lifecycle (full — receives HookContext, returns Directive)
   hooks?: StepLifecycleHooks<TContext, TData>;
 
   // Routing
@@ -75,9 +75,9 @@ interface StepOptions<TContext = unknown, TData = unknown> {
 
 interface StepLifecycleHooks<TContext = unknown, TData = unknown> {
   onEnter?: (ctx: HookContext<TContext, TData>) =>
-    void | PreDirective<TContext, TData> | Promise<void | PreDirective<TContext, TData>>;
+    void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
   prepare?: (ctx: HookContext<TContext, TData>) =>
-    void | PreDirective<TContext, TData> | Promise<void | PreDirective<TContext, TData>>;
+    void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
   finalize?: (ctx: HookContext<TContext, TData>) =>
     void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
   onExit?: (ctx: HookContext<TContext, TData>, reason: ExitReason) =>
@@ -114,8 +114,8 @@ fields, with a smaller return type.
 
 | Hook | When it fires | `hooks.<name>` returns | Top-level shorthand returns | Use it for |
 |------|---------------|------------------------|------------------------------|------------|
-| `onEnter` | Before any other work the first time the step becomes current. | `void \| PreDirective` | n/a (no shorthand) | Append per-turn prompt context, inject one-turn tools, or short-circuit with `halt + reply`. |
-| `prepare` | Right before the LLM call, after `onEnter`. | `void \| PreDirective` | `void \| PrepareResult` | Mutate session data, fetch external context, halt the LLM call. |
+| `onEnter` | Before any other work the first time the step becomes current. | `void \| Directive` | n/a (no shorthand) | Append per-turn prompt context, inject one-turn tools, or short-circuit with `halt + reply`. |
+| `prepare` | Right before the LLM call, after `onEnter`. | `void \| Directive` | `void \| PrepareResult` | Mutate session data, fetch external context, halt the LLM call. |
 | `finalize` | After the LLM call and tool loop complete. | `void \| Directive` | `void \| PrepareResult` | Validate collected data, redirect with `goTo` / `goToStep`, complete the flow. |
 | `onExit` | When the step is left (next step entered, flow completed, aborted). | `void` | n/a | Emit telemetry. Cannot influence flow control. |
 
@@ -123,7 +123,7 @@ fields, with a smaller return type.
 common Directive fields (`dataUpdate`, `contextUpdate`, `goTo`,
 `goToStep`, `complete`, `halt`, `reply`). Use `hooks.<name>` when you
 need the full `HookContext` (with `session`, `history`, `dispatch`)
-or the full `Directive` / `PreDirective` surface (`appendPrompt`,
+or the full `Directive` surface (`appendPrompt`,
 `injectTools`, `abort`, `reset`).
 
 ### Resolution within a step
@@ -133,7 +133,7 @@ For one step, the engine walks this sequence per turn:
 1. Evaluate `if` (code, AND) and `when` (AI, AND) — fails skip the step entirely.
 2. Evaluate `skip` (code, OR) — true means bypass and fall through.
 3. Check `requires` — refuse entry if any required field is missing.
-4. Run `onEnter`, then `prepare` / `hooks.prepare`. May emit a `PreDirective`.
+4. Run `onEnter`, then `prepare` / `hooks.prepare`. May emit a `Directive` (pre-LLM fields honored).
 5. **LLM step**: call the LLM with the step's prompt, tools, and instructions; tool loop runs until completion. **Auto step**: skip the LLM call. **Reply step**: render `reply` as the verbatim assistant message.
 6. Run `finalize` / `hooks.finalize`. May emit a `Directive`.
 7. Evaluate `branches`. The first entry whose `if`/`when` passes wins; its `then` resolves to a step id, a flow id, or a full `Directive`. If no entry matches, fall through.
@@ -282,7 +282,7 @@ const agent = createAgent({
   }),
 }
 
-// Full hook — receives HookContext, returns PreDirective.
+// Full hook — receives HookContext, returns Directive.
 {
   id: 'enrich',
   auto: true,
@@ -326,14 +326,13 @@ Runtime errors that surface from a step's hook execution include
 
 ## Related
 
-- [Architecture](../concepts/architecture.md) — where Step fits among the seven primitives
+- [Architecture](../concepts/architecture.md) — where Step fits among the six primitives
 - [Turn pipeline](../concepts/pipeline.md) — when each step phase fires inside a turn
 - [Flow](./flow.md) — the parent type that contains a step's `steps[]` entry
 - [Tool](./tool.md) — the shape consumed by `tools[]`
 - [Instruction](./instruction.md) — the shape consumed by `instructions[]`
 - [Branches](./branches.md) — the full `BranchEntry` / `BranchMap` contract
 - [Directive](./directive.md) — the post-LLM return type for `hooks.finalize`
-- [PreDirective](./pre-directive.md) — the pre-LLM return type for `hooks.onEnter` and `hooks.prepare`
 - [When and if](../guides/conditions.md) — picking between AI and code conditions
 - [Branching](../guides/branching.md) — adding source-local forks
 - [Flow control](../guides/flow-control.md) — redirecting from a hook

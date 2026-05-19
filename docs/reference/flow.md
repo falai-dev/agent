@@ -9,7 +9,7 @@ order: 2
 
 > **Where this is introduced:** [Architecture](../concepts/architecture.md)
 
-A `Flow` is one of the seven primitives in `@falai/agent`. It models a single conversational goal — booking a hotel, escalating a complaint, onboarding a teammate — as an ordered set of steps that share the agent's typed `TData` schema. Flows declare what data they need (`requiredFields`), what extra data they can use (`optionalFields`), when they should activate (`when` for AI strings, `if` for code), and what happens when they finish (`onComplete` or `hooks.onComplete`). The router selects exactly one flow per turn; once the active flow's required fields are satisfied, the engine fires its completion path.
+A `Flow` is one of the six primitives in `@falai/agent`. It models a single conversational goal — booking a hotel, escalating a complaint, onboarding a teammate — as an ordered set of steps that share the agent's typed `TData` schema. Flows declare what data they need (`requiredFields`), what extra data they can use (`optionalFields`), when they should activate (`when` for AI strings, `if` for code), and what happens when they finish (`onComplete` or `hooks.onComplete`). The router selects exactly one flow per turn; once the active flow's required fields are satisfied, the engine fires its completion path.
 
 ## Signature
 
@@ -95,7 +95,7 @@ class Flow<TContext = unknown, TData = unknown> {
 
 | Hook              | Returns                                | Phase    | Notes                                                                                                                  |
 | ----------------- | -------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `onEnter`         | `void \| PreDirective`                 | pre-LLM  | Fires when the flow is entered. May augment the prompt, inject tools, or `halt`. See [PreDirective](./pre-directive.md).|
+| `onEnter`         | `void \| Directive`                    | pre-LLM  | Fires when the flow is entered. May augment the prompt, inject tools, or `halt`. Pre-LLM fields honored here.|
 | `onExit`          | `void`                                 | post     | Informational. Receives an `ExitReason`; cannot influence flow control.                                                |
 | `onComplete`      | `void \| Directive`                    | post-LLM | Handler form of completion. Mutually exclusive with top-level `onComplete: string` — setting both throws.              |
 | `onDataUpdate`    | `Partial<TData>`                       | post     | Mutate or enrich the data update before it is committed to `session.data`.                                             |
@@ -229,7 +229,7 @@ All `FlowConfigurationError` messages follow the format `[FlowConfigurationError
 
 ## Related
 
-- [Architecture](../concepts/architecture.md) — where Flow fits among the seven primitives
+- [Architecture](../concepts/architecture.md) — where Flow fits among the six primitives
 - [Turn pipeline](../concepts/pipeline.md) — when flows are selected, entered, and completed
 - [Step](./step.md) — the inner DSL primitive flows are composed of
 - [Directive](./directive.md) — what `hooks.onComplete` returns

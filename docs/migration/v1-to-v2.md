@@ -208,7 +208,7 @@ type StoppedReason =
   | 'aborted'           // { abort: '...' } directive
   | 'goto'              // goTo/goToStep directive short-circuited
   | 'reset'             // { reset: true } directive
-  | 'halt'              // PreDirective halt: true
+  | 'halt'              // Directive halt: true (pre-LLM only)
   | 'reply'             // Step.reply or directive reply (LLM skipped)
   | 'max_auto_steps'    // auto-step chain cap hit
   | 'prepare_error'     // unchanged

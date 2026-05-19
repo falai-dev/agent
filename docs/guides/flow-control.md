@@ -237,18 +237,19 @@ payloads — `reply`, `dataUpdate`, and the position field don't
 compete for the same slot.
 
 To skip the LLM **before** it runs (rather than from a finalize hook
-*after*), use a [`PreDirective`](../reference/pre-directive.md) from
-a prepare hook with `halt: true` — see below.
+*after*), return a `Directive` from a prepare hook with `halt: true`
+— see below.
 
-## PreDirective extras (pre-LLM only)
+## Pre-LLM fields (pre-LLM hooks only)
 
 Pre-LLM hooks (`flow.hooks.onEnter`, `step.hooks.onEnter`,
-`step.hooks.prepare`) return a [`PreDirective`](../reference/pre-directive.md) —
-the `Directive` variant with three extra fields that only make sense
-before this turn's LLM call.
+`step.hooks.prepare`) return a `Directive` — the same type as
+post-LLM hooks, but with three fields that only take effect before
+this turn's LLM call.
 
 ```typescript
-interface PreDirective extends Directive {
+interface Directive {
+  // ...all position/state/reply fields...
   appendPrompt?: string[];
   injectTools?: Tool[];
   halt?: boolean;
@@ -257,8 +258,8 @@ interface PreDirective extends Directive {
 
 Lifetime is one turn. None of the three fields persist on
 `session.pendingDirective` — they're stripped before the write.
-Returning a PreDirective from a post-LLM hook drops these fields with
-a debug log.
+Returning a Directive with these fields from a post-LLM hook ignores
+them with a WARN log.
 
 ### `appendPrompt` — nudge the system prompt
 
@@ -349,7 +350,7 @@ await agent.dispatch({ goTo: "Billing", reply: "Transferring you now." }, sessio
 
 The call validates the directive (`flow.validate`), confirms any
 `goTo`-named flow exists (throws `FlowConfigurationError` if not),
-strips PreDirective-only fields, writes `pendingDirective` onto the
+strips pre-LLM-only fields, writes `pendingDirective` onto the
 session, and persists if an adapter is configured.
 
 `pendingDirective` is **single-shot** — consumed exactly once and
@@ -375,7 +376,7 @@ Where to emit:
 |----------------|------|-----|
 | Tool handler, mid-flight | `Directive` | `ctx.dispatch(d)` |
 | Tool handler, on return | `Directive` | `return { data, directive: d }` |
-| `prepare` / `onEnter` hook | `PreDirective` | `return d` |
+| `prepare` / `onEnter` hook | `Directive` | `return d` (pre-LLM fields honored) |
 | `finalize` / `onComplete` hook | `Directive` | `return d` |
 | Branch `then` target | `Directive` | `then: d` (see [Branching](./branching.md)) |
 | Outside a turn (webhook, job) | `Directive` | `await agent.dispatch(d, session)` |
@@ -397,8 +398,6 @@ Code or model speaking:
 
 - [Directive reference](../reference/directive.md) — every field,
   every shorthand, every validation rule.
-- [PreDirective reference](../reference/pre-directive.md) —
-  pre-LLM-only fields and merge rules.
 - [Directives concept](../concepts/directives.md) — the mental model
   and the inheritance chain.
 - [Branching](./branching.md) — when the redirect is source-local
