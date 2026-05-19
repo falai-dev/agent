@@ -18,15 +18,18 @@ All notable changes to `@falai/agent` will be documented in this file.
 - **Cleaner `flow.merge`:** The merge function no longer casts through `Record<string, unknown>` for the pre-LLM fields — they're accessed directly on the typed `Directive`.
 - **Docs:** Architecture page updated from "seven primitives" to "six primitives." All references to the PreDirective/Directive inheritance chain removed. The concepts page now explains pre-LLM fields as a lifetime rule enforced at runtime, not a type-system boundary.
 
+### Docs
+
+- Fixed dead links in docs landing page (`./guides/` and `./reference/` pointed to directories with no index file).
+- Consolidated `docs/migration/README.md` — Route → Flow rename is now presented as part of the v1 → v2 guide, not a separate section.
+- Removed standalone `docs/migration/route-to-flow.md` — content merged into v1-to-v2.md §3.
+
 ## [2.0.1]
 
 ### Fixed
 
 - Updated all model references to current 2026 models: Gemini `gemini-3.1-flash-lite` / `gemini-3.1-pro-preview`, OpenAI `gpt-5.5` / `gpt-5.4`, Anthropic `claude-sonnet-4-6` / `claude-opus-4-7`.
 - Fixed `docs/README.md` not rendering as the site homepage (added frontmatter with `type: overview`, `order: 0`).
-- Fixed dead links in docs landing page (`./guides/` and `./reference/` pointed to directories with no index file).
-- Consolidated `docs/migration/README.md` — Route → Flow rename is now presented as part of the v1 → v2 guide, not a separate section.
-- Removed standalone `docs/migration/route-to-flow.md` — content merged into v1-to-v2.md §3.
 
 ## [2.0.0]
 
