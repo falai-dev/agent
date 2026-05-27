@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.1.1]
+
+### Fixed
+
+- Fixed `ToolManager not available on agent` warning during initialization. `ResponseModal` was constructed before `ToolManager`, so `agent.tool` was `undefined` when `ResponsePipeline` captured it. Moved `ToolManager` initialization before `ResponseModal` in the `Agent` constructor.
+
 ## [2.1.0]
 
 ### ⚠️ BREAKING CHANGES

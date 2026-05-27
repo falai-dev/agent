@@ -249,6 +249,9 @@ export class Agent<TContext = any, TData = any> {
       promptSectionCache: this._promptSectionCache,
     });
 
+    // Initialize tool manager BEFORE ResponseModal (it reads agent.tool in constructor)
+    this.tool = new ToolManager<TContext, TData>(this);
+
     // Initialize ResponseModal for handling all response generation
     this._responseModal = new ResponseModal<TContext, TData>(this);
 
@@ -337,9 +340,6 @@ export class Agent<TContext = any, TData = any> {
 
     // Initialize session manager with reference to this agent for bidirectional sync
     this.session = new SessionManager<TData>(this._persistenceManager, this);
-
-    // Initialize tool manager with proper type inference
-    this.tool = new ToolManager<TContext, TData>(this);
 
     // Store sessionId for later use in getOrCreate calls
     if (options.sessionId) {
