@@ -258,13 +258,7 @@ export function eventsToHistory(events: Event[]): History {
   });
 }
 
-/**
- * Normalize a simplified history array to internal Event array
- * @deprecated Use historyToEvents instead
- */
-export function normalizeHistory(history: History): Event[] {
-  return historyToEvents(history);
-}
+
 
 /**
  * Helper function to create a user message

@@ -16,8 +16,6 @@ export enum MessageRole {
   SYSTEM = "system",
 }
 
-export type MessageRoleType = MessageRole;
-
 import type { SessionState } from "./session";
 
 /**
@@ -31,8 +29,6 @@ export enum EventKind {
   /** A status update event */
   STATUS = "status",
 }
-
-export type EventKindType = EventKind;
 
 /**
  * Participant in a conversation

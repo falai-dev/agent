@@ -59,7 +59,6 @@ export async function renderMany<TContext = unknown, TData = unknown>(
 }
 
 /**
- * @deprecated Use the asynchronous `render` function instead.
  * Renders template variables in a string using the provided context.
  * Supports {{variable}} and {{object.property}} syntax for property access.
  *
@@ -171,7 +170,6 @@ function valueToString(value: unknown): string {
 }
 
 /**
- * @deprecated This function does not support async template functions.
  * Renders template variables in an object recursively.
  * Handles nested objects and arrays.
  *

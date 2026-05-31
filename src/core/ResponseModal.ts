@@ -363,18 +363,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Get the ToolManager instance from the agent
+     * Get the ToolManager instance from the agent.
      * @private
      */
-    private getToolManager(): ToolManager<TContext, TData> | undefined {
-        // Check if agent has a tool property (ToolManager)
-        if (this.agent && 'tool' in this.agent && this.agent.tool) {
-            return this.agent.tool;
-        }
-
-        // Log warning if ToolManager is not available
-        logger.warn(`[ResponseModal] ToolManager not available on agent - tool execution will use fallback methods`);
-        return undefined;
+    private getToolManager(): ToolManager<TContext, TData> {
+        return this.agent.tool;
     }
 
     /**
@@ -1983,7 +1976,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     const toolManager = this.getToolManager();
 
                     // Use concurrent execution for the initial batch of tool calls
-                    if (toolManager && typeof toolManager.executeWithConcurrency === 'function') {
+                    {
                         const toolCallRequests: ToolCallRequest[] = toolCalls.map((tc, i) => ({
                             id: `${tc.toolName}-${i}-${Date.now()}`,
                             toolName: tc.toolName,
@@ -2046,14 +2039,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                             session = toolResult.session;
                             toolCalls = toolResult.finalToolCalls;
                         }
-                    } else {
-                        // Fallback: no ToolManager or no executeWithConcurrency, use unified tool loop
-                        const toolResult = await this.executeUnifiedToolLoop({
-                            toolCalls, context, session, history, selectedFlow,
-                            responsePrompt, availableTools, responseSchema, signal,
-                        });
-                        session = toolResult.session;
-                        toolCalls = toolResult.finalToolCalls;
                     }
                 }
 
@@ -2150,22 +2135,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     try {
                         // Use ToolManager for unified tool execution
                         const toolManager = this.getToolManager();
-                        let toolResult;
-
-                        if (toolManager) {
-                            toolResult = await toolManager.executeTool({
-                                tool: tool,
-                                context,
-                                updateContext: this.agent.updateContext.bind(this.agent),
-                                updateData: this.agent.updateCollectedData.bind(this.agent),
-                                history: historyEvents, // Use Event[] for tool execution
-                                data: session.data,
-                                toolArguments: toolCall.arguments,
-                            });
-                        } else {
-                            // Fallback: execute tool directly if ToolManager not available
-                            throw new Error(`ToolManager not available for tool execution: ${toolCall.toolName}`);
-                        }
+                        const toolResult = await toolManager.executeTool({
+                            tool: tool,
+                            context,
+                            updateContext: this.agent.updateContext.bind(this.agent),
+                            updateData: this.agent.updateCollectedData.bind(this.agent),
+                            history: historyEvents, // Use Event[] for tool execution
+                            data: session.data,
+                            toolArguments: toolCall.arguments,
+                        });
 
                         // Store the actual tool result data for history
                         toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
@@ -2298,22 +2276,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         try {
                             // Use ToolManager for unified tool execution
                             const toolManager = this.getToolManager();
-                            let toolResult;
-
-                            if (toolManager) {
-                                toolResult = await toolManager.executeTool({
-                                    tool: tool,
-                                    context,
-                                    updateContext: this.agent.updateContext.bind(this.agent),
-                                    updateData: this.agent.updateCollectedData.bind(this.agent),
-                                    history: historyToEvents(updatedHistory), // Convert to Event[] for tool execution
-                                    data: session.data,
-                                    toolArguments: toolCall.arguments,
-                                });
-                            } else {
-                                // Fallback: execute tool directly if ToolManager not available
-                                throw new Error(`ToolManager not available for follow-up tool execution: ${toolCall.toolName}`);
-                            }
+                            const toolResult = await toolManager.executeTool({
+                                tool: tool,
+                                context,
+                                updateContext: this.agent.updateContext.bind(this.agent),
+                                updateData: this.agent.updateCollectedData.bind(this.agent),
+                                history: historyToEvents(updatedHistory), // Convert to Event[] for tool execution
+                                data: session.data,
+                                toolArguments: toolCall.arguments,
+                            });
 
                             // Check if tool execution was successful
                             if (!toolResult.success) {
@@ -2815,41 +2786,20 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
 
     /**
-     * Find an available tool by name for the given flow using ToolManager
-     * Delegates to ToolManager for unified tool resolution
+     * Find an available tool by name for the given flow.
+     * Delegates to ToolManager for unified tool resolution.
      * @private
      */
     private findAvailableTool(
         toolName: string,
         flow?: Flow<TContext, TData>
     ): Tool<TContext, TData> | undefined {
-        // Use ToolManager for unified tool resolution
-        const toolManager = this.getToolManager();
-        if (toolManager) {
-            return toolManager.find(toolName, undefined, undefined, flow);
-        }
-
-        // Fallback to legacy resolution if ToolManager not available
-        logger.warn(`[ResponseModal] ToolManager not available, using legacy tool resolution for: ${toolName}`);
-
-        // Check flow-level tools first (if flow provided)
-        if (flow) {
-            const flowTool = flow
-                .getTools()
-                .find((tool: Tool<TContext, TData>) => tool.id === toolName || tool.id === toolName);
-            if (flowTool) return flowTool;
-        }
-
-        // Fall back to agent-level tools
-        const agentTools = this.agent.getTools();
-        return agentTools.find(
-            (tool) => tool.id === toolName || tool.id === toolName
-        );
+        return this.getToolManager().find(toolName, undefined, undefined, flow);
     }
 
     /**
-     * Collect all available tools for the given flow and step context using ToolManager
-     * Delegates to ToolManager for unified tool resolution and deduplication
+     * Collect all available tools for the given flow and step context.
+     * Delegates to ToolManager for unified tool resolution and deduplication.
      * @private
      */
     private collectAvailableTools(
@@ -2861,77 +2811,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         description?: string;
         parameters?: unknown;
     }> {
-        // Use ToolManager for unified tool collection if available
-        const toolManager = this.getToolManager();
-        if (toolManager) {
-            const availableTools = toolManager.getAvailable(undefined, step, flow);
-            return availableTools.map((tool) => ({
-                id: tool.id,
-                name: tool.id || tool.id,
-                description: tool.description,
-                parameters: tool.parameters,
-            }));
-        }
-
-        // Fallback to legacy collection logic if ToolManager not available
-        logger.warn(`[ResponseModal] ToolManager not available, using legacy tool collection`);
-
-        const availableTools = new Map<string, Tool<TContext, TData>>();
-
-        // Add agent-level tools
-        this.agent.getTools().forEach((tool) => {
-            availableTools.set(tool.id, tool);
-        });
-
-        // Add flow-level tools (these take precedence)
-        if (flow) {
-            flow.getTools().forEach((tool: Tool<TContext, TData>) => {
-                availableTools.set(tool.id, tool);
-            });
-        }
-
-        // Filter by step-level allowed tools if specified
-        if (step?.tools) {
-            const allowedToolIds = new Set<string>();
-            const stepTools: Tool<TContext, TData>[] = [];
-
-            for (const toolRef of step.tools) {
-                if (typeof toolRef === "string") {
-                    // Reference to registered tool
-                    allowedToolIds.add(toolRef);
-                } else {
-                    // Inline tool definition
-                    if (toolRef.id) {
-                        allowedToolIds.add(toolRef.id);
-                        stepTools.push(toolRef);
-                    }
-                }
-            }
-
-            // If step specifies tools, only include those
-            if (allowedToolIds.size > 0) {
-                const filteredTools = new Map<string, Tool<TContext, TData>>();
-                for (const toolId of Array.from(allowedToolIds)) {
-                    const tool = availableTools.get(toolId);
-                    if (tool) {
-                        filteredTools.set(toolId, tool);
-                    }
-                }
-                // Add inline tools
-                stepTools.forEach((tool) => {
-                    if (tool.id) {
-                        filteredTools.set(tool.id, tool);
-                    }
-                });
-                availableTools.clear();
-                filteredTools.forEach((tool, id) => availableTools.set(id, tool));
-            }
-        }
-
-        // Convert to the format expected by AI providers
-        return Array.from(availableTools.values()).map((tool) => ({
+        const availableTools = this.getToolManager().getAvailable(undefined, step, flow);
+        return availableTools.map((tool) => ({
             id: tool.id,
-            name: tool.id || tool.id,
+            name: tool.id,
             description: tool.description,
             parameters: tool.parameters,
         }));
@@ -2963,40 +2846,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             if (typeof prepareOrFinalize === "string") {
                 // Tool ID - use ToolManager for unified resolution
-                const toolManager = this.getToolManager();
-                if (toolManager) {
-                    tool = toolManager.find(prepareOrFinalize, undefined, step, flow);
-                } else {
-                    // Fallback to legacy resolution if ToolManager not available
-                    logger.warn(`[ResponseModal] ToolManager not available, using legacy tool resolution for prepare/finalize: ${prepareOrFinalize}`);
-
-                    const availableTools = new Map<string, Tool<TContext, TData>>();
-
-                    // Add agent-level tools
-                    this.agent.getTools().forEach((t) => {
-                        availableTools.set(t.id, t);
-                    });
-
-                    // Add flow-level tools
-                    if (flow) {
-                        flow.getTools().forEach((t: Tool<TContext, TData>) => {
-                            availableTools.set(t.id, t);
-                        });
-                    }
-
-                    // Add step-level tools
-                    if (step?.tools) {
-                        for (const toolRef of step.tools) {
-                            if (typeof toolRef === "string") {
-                                // Keep as is
-                            } else if (typeof toolRef === 'object' && 'id' in toolRef && toolRef.id) {
-                                availableTools.set(toolRef.id, toolRef);
-                            }
-                        }
-                    }
-
-                    tool = availableTools.get(prepareOrFinalize);
-                }
+                tool = this.getToolManager().find(prepareOrFinalize, undefined, step, flow);
             } else {
                 // Tool object - use directly
                 tool = prepareOrFinalize;
@@ -3004,22 +2854,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             if (tool) {
                 // Use ToolManager for unified tool execution
-                const toolManager = this.getToolManager();
-                let result;
-
-                if (toolManager) {
-                    result = await toolManager.executeTool({
-                        tool,
-                        context,
-                        updateContext: this.agent.updateContext.bind(this.agent),
-                        updateData: this.agent.updateCollectedData.bind(this.agent),
-                        history: [], // Empty history for prepare/finalize
-                        data,
-                    });
-                } else {
-                    // Fallback: execute tool directly if ToolManager not available
-                    throw new Error(`ToolManager not available for prepare/finalize tool execution: ${typeof prepareOrFinalize === "string" ? prepareOrFinalize : "inline tool"}`);
-                }
+                const result = await this.getToolManager().executeTool({
+                    tool,
+                    context,
+                    updateContext: this.agent.updateContext.bind(this.agent),
+                    updateData: this.agent.updateCollectedData.bind(this.agent),
+                    history: [], // Empty history for prepare/finalize
+                    data,
+                });
 
                 if (!result.success) {
                     logger.error(

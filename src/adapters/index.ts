@@ -30,7 +30,7 @@ export type {
 export { SQLiteAdapter } from "./SQLiteAdapter";
 export type {
   SqliteDatabase,
-  SqliteStepment,
+  SqliteStatement,
   SQLiteAdapterOptions,
 } from "./SQLiteAdapter";
 

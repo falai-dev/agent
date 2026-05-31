@@ -36,15 +36,15 @@ import { createSessionId } from "../utils";
  * SQLite database interface - matches better-sqlite3
  */
 export interface SqliteDatabase {
-  prepare(sql: string): SqliteStepment;
+  prepare(sql: string): SqliteStatement;
   exec(sql: string): void;
   close(): void;
 }
 
 /**
- * SQLite stepment interface
+ * SQLite statement interface - matches better-sqlite3 Statement
  */
-export interface SqliteStepment {
+export interface SqliteStatement {
   run(...params: unknown[]): { changes: number; lastInsertRowid: number };
   get(...params: unknown[]): Record<string, unknown> | undefined;
   all(...params: unknown[]): Array<Record<string, unknown>>;

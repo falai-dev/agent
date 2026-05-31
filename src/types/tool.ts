@@ -159,8 +159,6 @@ export enum ToolScope {
 
 
 
-// --- EnhancedTool (deprecated internal alias — use Tool directly) ---
-
 /**
  * Result of input validation on a tool call
  */

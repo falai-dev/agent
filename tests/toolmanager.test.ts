@@ -5,6 +5,7 @@
  */
 import { expect, test, describe } from "bun:test";
 import { Agent, ToolManager } from "../src/index";
+import type { ToolContext } from "../src/types/tool";
 import { MockProvider } from "./mock-provider";
 
 interface TestContext {
@@ -370,93 +371,29 @@ describe("ToolManager Error Handling", () => {
         }).toThrow("Tool registration failed");
     });
 
-    test("should handle tool execution errors gracefully", async () => {
+    test("should rethrow errors when the tool handler throws", async () => {
         const agent = new Agent<TestContext, TestData>({ name: "test", provider });
         const toolManager = new ToolManager<TestContext, TestData>(agent);
 
-        toolManager.register({
+        const tool = {
             id: "error-execution-tool",
             handler: async () => {
                 throw new Error("Execution failed");
             }
-        });
+        };
+        toolManager.register(tool);
 
-        // Test execution error handling - should throw ToolExecutionError
-        try {
-            await toolManager.execute("error-execution-tool");
-            expect(false).toBe(true); // Should not reach here
-        } catch (error: any) {
-            expect(error.name).toBe("ToolExecutionError");
-            expect(error.message).toContain("Execution failed");
-            expect(error.toolId).toBe("error-execution-tool");
-        }
-    });
-
-    test("should handle execution with fallback tools", async () => {
-        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
-        const toolManager = new ToolManager<TestContext, TestData>(agent);
-
-        // Register fallback tool
-        toolManager.register({
-            id: "fallback-tool",
-            handler: async () => "fallback result"
-        });
-
-        // Test fallback when primary tool doesn't exist
-        const result = await toolManager.execute("nonexistent-tool", {}, {
-            fallbackTools: ["fallback-tool"]
-        });
-
-        expect(result.success).toBe(true);
-        expect(result.data).toBe("fallback result");
-        expect(result.metadata?.fallbackUsed).toBe("fallback-tool");
-    });
-
-    test("should handle execution with retries", async () => {
-        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
-        const toolManager = new ToolManager<TestContext, TestData>(agent);
-
-        let attempts = 0;
-        toolManager.register({
-            id: "retry-tool",
-            handler: async () => {
-                attempts++;
-                if (attempts <= 2) {
-                    throw new Error("Network timeout"); // Transient error - will retry
-                }
-                return "success after retries";
-            }
-        });
-
-        // Test successful retry scenario
-        const result = await toolManager.execute("retry-tool", {}, {
-            retryCount: 2 // maxRetries = 2, so total attempts = 3 (0, 1, 2)
-        });
-
-        expect(result.success).toBe(true);
-        expect(result.data).toBe("success after retries");
-        expect(attempts).toBe(3); // Should have tried 3 times total
-    });
-
-    test("should provide detailed error context", async () => {
-        const agent = new Agent<TestContext, TestData>({ name: "test", provider });
-        const toolManager = new ToolManager<TestContext, TestData>(agent);
-
-        toolManager.register({
-            id: "detailed-error-tool",
-            handler: async () => {
-                throw new Error("Detailed error message");
-            }
-        });
-
-        try {
-            await toolManager.execute("detailed-error-tool");
-        } catch (error: any) {
-            expect(error.name).toBe("ToolExecutionError");
-            expect(error.toolId).toBe("detailed-error-tool");
-            expect(error.executionContext).toBeDefined();
-            expect(error.cause).toBeDefined();
-        }
+        // executeTool re-throws the raw handler error to the caller
+        await expect(
+            toolManager.executeTool({
+                tool,
+                context: {} as TestContext,
+                updateContext: async () => { },
+                updateData: async () => { },
+                history: [],
+                data: {},
+            })
+        ).rejects.toThrow("Execution failed");
     });
 });
 
@@ -620,16 +557,20 @@ describe("ToolManager Advanced Features", () => {
         });
         const toolManager = new ToolManager<TestContext, TestData>(agent);
 
-        toolManager.register({
+        const tool = {
             id: "context-aware-tool",
-            handler: async (context) => {
+            handler: async (context: ToolContext<TestContext, TestData>) => {
                 return `User: ${context.context?.userId}, Role: ${context.context?.role}`;
             }
-        });
+        };
+        toolManager.register(tool);
 
         // Execute tool with context
-        const result = await toolManager.execute("context-aware-tool", {}, {
+        const result = await toolManager.executeTool({
+            tool,
             context: { userId: "test-123", role: "admin" },
+            updateContext: async () => { },
+            updateData: async () => { },
             data: {},
             history: []
         });

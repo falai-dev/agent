@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
 import { Agent, ToolManager } from "../src/index";
 import type {
-    EnhancedTool,
+    Tool,
     ToolContext,
     ToolValidationResult,
     ToolPermissionResult,
@@ -21,17 +21,16 @@ function makeAgent() {
 }
 
 /** Track whether handler was invoked */
-function makeEnhancedTool(opts: {
+function makeGatedTool(opts: {
     id: string;
     validateResult?: ToolValidationResult;
     permissionResult?: ToolPermissionResult;
     maxResultSizeChars?: number;
     resultData?: string;
-}): { tool: EnhancedTool<Ctx, Data>; handlerCalled: () => boolean } {
+}): { tool: Tool<Ctx, Data>; handlerCalled: () => boolean } {
     let called = false;
-    const tool: EnhancedTool<Ctx, Data> = {
+    const tool: Tool<Ctx, Data> = {
         id: opts.id,
-        name: opts.id,
         handler: async (_ctx, _args) => {
             called = true;
             return { data: opts.resultData ?? `result-${opts.id}`, success: true };
@@ -51,13 +50,26 @@ function makeEnhancedTool(opts: {
     return { tool, handlerCalled: () => called };
 }
 
+/** Execute a tool through the live executeTool path with default context wiring. */
+function runTool(tm: ToolManager<Ctx, Data>, tool: Tool<Ctx, Data>) {
+    return tm.executeTool({
+        tool,
+        context: { userId: "u1" },
+        updateContext: async () => { },
+        updateData: async () => { },
+        history: [],
+        data: {},
+        toolArguments: { someArg: "value" },
+    });
+}
+
 // --- Property 10: Validation and Permission Gating ---
 
 describe("Property 10: Validation and Permission Gating", () => {
     /**
      * **Validates: Requirements 9.2, 9.3**
      *
-     * For any EnhancedTool where validateInput returns { valid: false }
+     * For any tool where validateInput returns { valid: false }
      * or checkPermissions returns { allowed: false }, the handler is never invoked.
      */
 
@@ -70,17 +82,12 @@ describe("Property 10: Validation and Permission Gating", () => {
                     const agent = makeAgent();
                     const tm = new ToolManager<Ctx, Data>(agent);
 
-                    const { tool, handlerCalled } = makeEnhancedTool({
+                    const { tool, handlerCalled } = makeGatedTool({
                         id: toolId,
                         validateResult: { valid: false, error: errorMsg },
                     });
 
-                    tm.register(tool);
-
-                    const result = await tm.execute(toolId, { someArg: "value" }, {
-                        context: { userId: "u1" },
-                        retryCount: 0,
-                    });
+                    const result = await runTool(tm, tool);
 
                     expect(handlerCalled()).toBe(false);
                     expect(result.success).toBe(false);
@@ -101,17 +108,12 @@ describe("Property 10: Validation and Permission Gating", () => {
                     const agent = makeAgent();
                     const tm = new ToolManager<Ctx, Data>(agent);
 
-                    const { tool, handlerCalled } = makeEnhancedTool({
+                    const { tool, handlerCalled } = makeGatedTool({
                         id: toolId,
                         permissionResult: { allowed: false, reason, canOverride },
                     });
 
-                    tm.register(tool);
-
-                    const result = await tm.execute(toolId, { someArg: "value" }, {
-                        context: { userId: "u1" },
-                        retryCount: 0,
-                    });
+                    const result = await runTool(tm, tool);
 
                     expect(handlerCalled()).toBe(false);
                     expect(result.success).toBe(false);
@@ -126,17 +128,12 @@ describe("Property 10: Validation and Permission Gating", () => {
         const agent = makeAgent();
         const tm = new ToolManager<Ctx, Data>(agent);
 
-        const { tool, handlerCalled } = makeEnhancedTool({
+        const { tool, handlerCalled } = makeGatedTool({
             id: "valid-tool",
             validateResult: { valid: true },
         });
 
-        tm.register(tool);
-
-        const result = await tm.execute("valid-tool", { someArg: "value" }, {
-            context: { userId: "u1" },
-            retryCount: 0,
-        });
+        const result = await runTool(tm, tool);
 
         expect(handlerCalled()).toBe(true);
         expect(result.success).toBe(true);
@@ -146,17 +143,12 @@ describe("Property 10: Validation and Permission Gating", () => {
         const agent = makeAgent();
         const tm = new ToolManager<Ctx, Data>(agent);
 
-        const { tool, handlerCalled } = makeEnhancedTool({
+        const { tool, handlerCalled } = makeGatedTool({
             id: "allowed-tool",
             permissionResult: { allowed: true },
         });
 
-        tm.register(tool);
-
-        const result = await tm.execute("allowed-tool", { someArg: "value" }, {
-            context: { userId: "u1" },
-            retryCount: 0,
-        });
+        const result = await runTool(tm, tool);
 
         expect(handlerCalled()).toBe(true);
         expect(result.success).toBe(true);
@@ -166,18 +158,13 @@ describe("Property 10: Validation and Permission Gating", () => {
         const agent = makeAgent();
         const tm = new ToolManager<Ctx, Data>(agent);
 
-        const { tool, handlerCalled } = makeEnhancedTool({
+        const { tool, handlerCalled } = makeGatedTool({
             id: "both-gates",
             validateResult: { valid: false, error: "bad input" },
             permissionResult: { allowed: false, reason: "no access" },
         });
 
-        tm.register(tool);
-
-        const result = await tm.execute("both-gates", { someArg: "value" }, {
-            context: { userId: "u1" },
-            retryCount: 0,
-        });
+        const result = await runTool(tm, tool);
 
         expect(handlerCalled()).toBe(false);
         // Should fail on validation, not permission
@@ -189,18 +176,15 @@ describe("Property 10: Validation and Permission Gating", () => {
         const tm = new ToolManager<Ctx, Data>(agent);
 
         let called = false;
-        tm.register({
+        const tool: Tool<Ctx, Data> = {
             id: "plain-tool",
             handler: async () => {
                 called = true;
                 return { data: "ok", success: true };
             },
-        });
+        };
 
-        const result = await tm.execute("plain-tool", { someArg: "value" }, {
-            context: { userId: "u1" },
-            retryCount: 0,
-        });
+        const result = await runTool(tm, tool);
 
         expect(called).toBe(true);
         expect(result.success).toBe(true);
@@ -245,7 +229,7 @@ describe("Property 11: Per-Tool Result Size Budget", () => {
     /**
      * **Validates: Requirement 9.4**
      *
-     * For any EnhancedTool with maxResultSizeChars, yielded result content
+     * For any tool with maxResultSizeChars, yielded result content
      * does not exceed that limit (plus truncation notice overhead).
      */
 
@@ -258,9 +242,8 @@ describe("Property 11: Per-Tool Result Size Budget", () => {
                     const contentLength = budget + extraChars;
                     const bigContent = "x".repeat(contentLength);
 
-                    const tool: EnhancedTool<Ctx, Data> = {
+                    const tool: Tool<Ctx, Data> = {
                         id: "big-tool",
-                        name: "big-tool",
                         handler: async () => ({ data: bigContent, success: true }),
                         maxResultSizeChars: budget,
                     };
@@ -273,12 +256,10 @@ describe("Property 11: Per-Tool Result Size Budget", () => {
                     const resultUpdate = updates.find((u) => u.result !== undefined);
                     expect(resultUpdate).toBeDefined();
 
-                    const resultStr = JSON.stringify(resultUpdate!.result!.data);
-                    // The raw data content (without JSON quotes) should not exceed budget + truncation notice
+                    // The truncated content should be shorter than the original
                     const dataStr = typeof resultUpdate!.result!.data === "string"
                         ? resultUpdate!.result!.data
                         : JSON.stringify(resultUpdate!.result!.data);
-                    // The truncated content should be shorter than the original
                     expect(dataStr.length).toBeLessThan(contentLength + 100);
                 }
             ),
@@ -293,9 +274,8 @@ describe("Property 11: Per-Tool Result Size Budget", () => {
                 async (budget) => {
                     const content = "y".repeat(budget - 10); // well within budget
 
-                    const tool: EnhancedTool<Ctx, Data> = {
+                    const tool: Tool<Ctx, Data> = {
                         id: "small-tool",
-                        name: "small-tool",
                         handler: async () => ({ data: content, success: true }),
                         maxResultSizeChars: budget,
                     };

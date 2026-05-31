@@ -19,7 +19,6 @@ export type {
   HookContext,
   ExitReason,
 } from "./agent";
-export { CompositionMode } from "./agent";
 
 // History types
 export type {
@@ -41,7 +40,6 @@ export type {
   ToolHistoryItem,
 } from "./history";
 export { EventKind, MessageRole } from "./history";
-export * from "./history";
 
 // Flow types
 export type {
@@ -105,12 +103,12 @@ export type {
   CompactionResult,
 } from "./compaction";
 
-// Prompt cache types (re-exported from core)
+// Prompt cache types
 export type {
   PromptSectionType,
   PromptCacheConfig,
   SectionCompute,
-} from "../core/PromptSectionCache";
+} from "./prompt-cache";
 
 // AI provider types
 export type {
@@ -124,10 +122,6 @@ export type {
 
 // Schema types
 export type { StructuredSchema } from "./schema";
-
-// Routing types
-export type { RoutingDecision } from "./routing";
-export * from "./routing";
 
 // Persistence types
 export type {
@@ -143,7 +137,6 @@ export type {
   SaveMessageOptions,
   CollectedStateData,
 } from "./persistence";
-export * from "./persistence";
 
 // Template types
 export type {

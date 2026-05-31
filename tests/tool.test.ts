@@ -397,11 +397,11 @@ describe("Tool Execution", () => {
     expect(result).toContain("has field: true");
   });
 
-  test("should execute tool via ToolManager.execute()", async () => {
+  test("should execute a registered tool via ToolManager.executeTool()", async () => {
     const agent = createToolTestAgent();
 
     // Register tool first
-    agent.tool.register({
+    const tool = agent.tool.register({
       id: "registered_execution_tool",
       description: "Tool executed via ToolManager",
       handler: async (context, args) => {
@@ -410,16 +410,24 @@ describe("Tool Execution", () => {
     });
 
     // Execute via ToolManager
-    const result = await agent.tool.execute("registered_execution_tool", { input: "test data" });
+    const result = await agent.tool.executeTool({
+      tool,
+      context: await agent.getContext(),
+      updateContext: async () => { },
+      updateData: async () => { },
+      history: [],
+      data: {},
+      toolArguments: { input: "test data" },
+    });
 
     expect(result.success).toBe(true);
     expect(result.data).toBe("Executed via ToolManager: test data");
   });
 
-  test("should handle tool execution errors gracefully", async () => {
+  test("should rethrow errors when the tool handler throws", async () => {
     const agent = createToolTestAgent();
 
-    agent.tool.register({
+    const tool = agent.tool.register({
       id: "error_tool",
       description: "Tool that throws errors",
       handler: (_context, _args) => {
@@ -427,14 +435,16 @@ describe("Tool Execution", () => {
       },
     });
 
-    try {
-      await agent.tool.execute("error_tool");
-      expect(false).toBe(true); // Should not reach here
-    } catch (error: any) {
-      expect(error.name).toBe("ToolExecutionError");
-      expect(error.message).toContain("Tool execution failed");
-      expect(error.toolId).toBe("error_tool");
-    }
+    await expect(
+      agent.tool.executeTool({
+        tool,
+        context: await agent.getContext(),
+        updateContext: async () => { },
+        updateData: async () => { },
+        history: [],
+        data: {},
+      })
+    ).rejects.toThrow("Tool execution failed");
   });
 
   test("should execute async tools with proper timing", async () => {

@@ -29,8 +29,6 @@ export {
 export {
   render,
   renderMany,
-  renderTemplate,
-  renderTemplateObject,
   formatKnowledgeBase,
   createTemplateContext,
 } from "./template";
@@ -43,7 +41,6 @@ export { getLastMessageFromHistory } from "./event";
 
 // History utilities
 export {
-  normalizeHistory,
   historyItemToEvent,
   historyToEvents,
   eventToHistoryItem,

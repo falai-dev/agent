@@ -12,7 +12,7 @@ import type { StructuredSchema } from "./schema";
 import type { Event } from "./history";
 import type { Template } from "./template";
 import type { ConditionWhen, ConditionIf } from "./flow";
-import type { PromptCacheConfig } from "../core/PromptSectionCache";
+import type { PromptCacheConfig } from "./prompt-cache";
 
 /**
  * Context passed to every lifecycle hook (flow and step).
@@ -71,14 +71,6 @@ export interface AgentCompactionConfig {
    * @default true when config is provided
    */
   enabled?: boolean;
-}
-
-/**
- * Composition mode determines how the agent processes and structures responses
- */
-export enum CompositionMode {
-  /** Fluid, natural conversation without strict structure */
-  FLUID = "fluid",
 }
 
 /**

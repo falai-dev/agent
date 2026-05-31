@@ -2,6 +2,44 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.2.0]
+
+### Changed
+
+- **`@google/genai` upgraded** from `^0.3.0` to `^2.7.0`. The `GeminiProvider` already targeted the modern unified SDK surface (`new GoogleGenAI()`, `models.generateContent`, `Type` enum), so no provider code changes were required. Typecheck, lint, and the full test suite pass against the new SDK.
+
+### Removed
+
+These were all dead or `@deprecated` symbols carrying no runtime behavior. If you imported any of them, the fix is a straight deletion or the noted replacement.
+
+- **`CompositionMode` enum** — had a single member (`FLUID`) and was referenced nowhere. Already documented as removed in the v1→v2 migration guide; the dead export is now actually gone.
+- **`RoutingDecision` / `RoutingSchemaOptions` types** — listed as removed in the v1→v2 migration guide but still present as zombie exports. Now removed. The live routing type is `FlowRoutingDecisionOutput` (internal).
+- **`normalizeHistory` utility** — `@deprecated` alias for `historyToEvents`. Use `historyToEvents` instead.
+- **`renderTemplate` / `renderTemplateObject`** — `@deprecated` synchronous helpers, removed from the public surface. Use the async `render` function instead. (Both remain internal implementation details of `render`.)
+- **`NamedSchema` type** — unused, never exported on the stable surface.
+- **`MessageRoleType` / `EventKindType` type aliases** — unused aliases of the `MessageRole` / `EventKind` enums. Use the enums directly.
+- **`Flow.getTerms()`** — `@deprecated`, always returned `[]` (flow-level terms were removed in v2). Terms are agent-level via `agent.getTerms()`.
+- **`ToolManager.execute()` / `ToolManager.executeTools()`** — an unused fallback-tools + retry subsystem with no callers. The live execution paths are `ToolManager.executeTool()` (single) and `ToolManager.executeWithConcurrency()` (batched). Tool error handling, validation gates, and permission gates are unchanged — they live in `executeTool()`.
+
+### Fixed
+
+- **`SqliteStatement` typo** — the exported SQLite statement interface was misspelled `SqliteStepment` (a find/replace artifact from the v2 Route→Flow/Step rename). Renamed to `SqliteStatement`. Update any type imports.
+
+### Internal
+
+- Removed unreachable "ToolManager not available" fallback branches in `ResponseModal` — `agent.tool` is always initialized in the `Agent` constructor, so `getToolManager()` now returns a non-optional `ToolManager`.
+- Fixed a layering inversion: prompt-cache config types (`PromptSectionType`, `PromptCacheConfig`, `SectionCompute`) moved from `core/PromptSectionCache` to `types/prompt-cache`. Core now imports them from `types/` instead of `types/` reaching into `core/`.
+- De-duplicated re-exports in `types/index.ts` (removed redundant `export *` over explicit named exports).
+
+### Dependencies
+
+- Moved `@types/pg` to `devDependencies` (type-only, for an optional peer).
+- Removed `@types/redis` (unused — the `RedisAdapter` defines its own `RedisClient` interface).
+- Removed `vitest` from `devDependencies` (tests run on `bun:test`; `vitest` was never imported).
+- Removed `mysql2` from peer dependencies (no MySQL adapter exists).
+- Removed the `redis` (node-redis) peer-meta entry — the `RedisAdapter` targets `ioredis`.
+- Pinned previously empty peer-dependency version ranges: `ioredis ^5.0.0`, `mongodb ^6.0.0`, `pg ^8.0.0`.
+
 ## [2.1.1]
 
 ### Fixed

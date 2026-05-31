@@ -57,7 +57,7 @@ export type {
 export { SQLiteAdapter } from "./adapters/SQLiteAdapter";
 export type {
   SqliteDatabase,
-  SqliteStepment,
+  SqliteStatement,
   SQLiteAdapterOptions,
 } from "./adapters/SQLiteAdapter";
 export { MemoryAdapter } from "./adapters/MemoryAdapter";
@@ -77,7 +77,6 @@ export {
   hasProgrammaticConditions
 } from "./utils/condition";
 export {
-  normalizeHistory,
   historyItemToEvent,
   historyToEvents,
   eventToHistoryItem,
@@ -181,5 +180,5 @@ export type {
   ConditionIf,
   ConditionWhen,
 } from "./types";
-export { CompositionMode, EventKind, MessageRole } from "./types";
+export { EventKind, MessageRole } from "./types";
 export { createSession, createSessionId, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils";

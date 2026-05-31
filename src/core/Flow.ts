@@ -9,7 +9,6 @@ import type {
   FlowLifecycleHooks,
   StructuredSchema,
   Instruction,
-  Term,
   Tool,
   TemplateContext,
   ConditionEvaluationResult,
@@ -365,14 +364,6 @@ export class Flow<TContext = unknown, TData = unknown> {
    */
   getInstructions(): Instruction<TContext, TData>[] {
     return [...this.instructions];
-  }
-
-  /**
-   * Get all terms for this flow
-   * @deprecated Flow-level terms removed in v2. Always returns empty array.
-   */
-  getTerms(): Term<TContext>[] {
-    return [];
   }
 
   /**
