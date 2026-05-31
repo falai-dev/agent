@@ -124,7 +124,74 @@ describe("Instruction kind prefix rendering", () => {
     });
 });
 
-// ─── 2. appliedInstructions across scopes ────────────────────────────────────
+// ─── 2. when condition rendering ─────────────────────────────────────────────
+
+describe("Instruction when condition rendering", () => {
+    test("textual when condition is rendered for the AI to evaluate", async () => {
+        const scoped: ScopedInstructions<TestContext, TestData> = {
+            global: [
+                {
+                    id: "conditional",
+                    when: "the user is asking about pricing",
+                    prompt: "Quote only rates fetched from the live API",
+                },
+            ],
+        };
+
+        const pc = buildComposer();
+        await pc.addInstructions(scoped);
+        const prompt = await pc.build();
+
+        expect(prompt).toContain(
+            "- [should] [Always] Quote only rates fetched from the live API (apply only when: the user is asking about pricing)"
+        );
+    });
+
+    test("multiple textual when conditions render with OR semantics", async () => {
+        const scoped: ScopedInstructions<TestContext, TestData> = {
+            global: [
+                {
+                    id: "conditional-array",
+                    when: [
+                        "the user is asking about pricing",
+                        "the user is comparing enterprise plans",
+                    ],
+                    prompt: "Offer an annual billing comparison",
+                },
+            ],
+        };
+
+        const pc = buildComposer();
+        await pc.addInstructions(scoped);
+        const prompt = await pc.build();
+
+        expect(prompt).toContain(
+            "Offer an annual billing comparison (apply only when: the user is asking about pricing OR the user is comparing enterprise plans)"
+        );
+    });
+
+    test("failing if condition omits the instruction and its textual when condition", async () => {
+        const scoped: ScopedInstructions<TestContext, TestData> = {
+            global: [
+                {
+                    id: "conditional-filtered",
+                    if: () => false,
+                    when: "the user is asking about pricing",
+                    prompt: "Offer a discount",
+                },
+            ],
+        };
+
+        const pc = buildComposer();
+        await pc.addInstructions(scoped);
+        const prompt = await pc.build();
+
+        expect(prompt).not.toContain("Offer a discount");
+        expect(prompt).not.toContain("the user is asking about pricing");
+    });
+});
+
+// ─── 3. appliedInstructions across scopes ────────────────────────────────────
 
 describe("appliedInstructions populated correctly across scopes", () => {
     test("global instructions have scope: 'global' with no scopeRef", async () => {
@@ -276,7 +343,7 @@ describe("appliedInstructions populated correctly across scopes", () => {
     });
 });
 
-// ─── 3. Integration: Agent.respond returns appliedInstructions ───────────────
+// ─── 4. Integration: Agent.respond returns appliedInstructions ───────────────
 
 describe("Agent.respond populates appliedInstructions correctly", () => {
     test("agent-level instructions appear in response.appliedInstructions", async () => {

@@ -20,8 +20,8 @@ import { eventsToHistory, logger } from "../utils";
 
 /**
  * The AI condition evaluator function signature.
- * Accepts an array of condition strings (AND semantics) and returns
- * whether all conditions are satisfied.
+ * Accepts an array of condition strings (OR semantics) and returns
+ * whether any condition is satisfied.
  *
  * This is the same evaluation mechanism used by `step.when` — condition
  * strings are evaluated by the AI provider against the conversation context.
@@ -65,7 +65,7 @@ export function createAiConditionEvaluator<TContext = unknown>(
             "Condition(s):",
             conditionText,
             "",
-            "Return JSON with a single boolean field `result`: true if ALL conditions are satisfied, false otherwise.",
+            "Return JSON with a single boolean field `result`: true if ANY condition is satisfied, false otherwise.",
         ].join("\n");
 
         const result = await provider.generateMessage<TContext, { result: boolean }>({
@@ -78,7 +78,7 @@ export function createAiConditionEvaluator<TContext = unknown>(
                     properties: {
                         result: {
                             type: "boolean",
-                            description: "Whether all conditions are met based on the conversation context",
+                            description: "Whether any condition is met based on the conversation context",
                         },
                     },
                     required: ["result"],

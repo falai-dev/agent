@@ -242,15 +242,15 @@ describe("Scoped Guidelines", () => {
     });
 
     /**
-     * T7: P7 — programmatic when = false drops the guideline
+     * T7: P7 — programmatic if = false drops the guideline
      *
      * **Validates: Requirements 4.4**
      */
-    test("T7: programmatic when=false drops guideline", async () => {
+    test("T7: programmatic if=false drops guideline", async () => {
         const scoped: ScopedInstructions = {
             global: [
-                { id: "g1", when: () => false, prompt: "Should be dropped" },
-                { id: "g2", when: () => true, prompt: "Should be kept" },
+                { id: "g1", if: () => false, prompt: "Should be dropped" },
+                { id: "g2", if: () => true, prompt: "Should be kept" },
             ],
         };
 
@@ -271,7 +271,7 @@ describe("Scoped Guidelines", () => {
         const scoped: ScopedInstructions = {
             global: [
                 { id: "g1", prompt: "Disabled one", enabled: false },
-                { id: "g2", when: () => false, prompt: "Inactive one" },
+                { id: "g2", if: () => false, prompt: "Inactive one" },
             ],
         };
 
@@ -515,7 +515,7 @@ describe("Scoped Guidelines", () => {
             global: [
                 { id: "g-active", prompt: "Active global" },
                 { id: "g-disabled", prompt: "Disabled global", enabled: false },
-                { id: "g-inactive", when: () => false, prompt: "Inactive global" },
+                { id: "g-inactive", if: () => false, prompt: "Inactive global" },
             ],
             flow: {
                 flowTitle: "Support",
@@ -528,7 +528,7 @@ describe("Scoped Guidelines", () => {
                 stepId: "triage",
                 items: [
                     { id: "s-active", prompt: "Active step" },
-                    { id: "s-inactive", when: () => false, prompt: "Inactive step" },
+                    { id: "s-inactive", if: () => false, prompt: "Inactive step" },
                 ],
             },
         };

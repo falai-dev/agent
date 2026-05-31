@@ -55,7 +55,7 @@ describe("Conditions: when/if split", () => {
             expect(result.aiContextStrings).toEqual(["user wants to subscribe"]);
         });
 
-        test("array of strings on when combines with AND (all passed to AI)", async () => {
+        test("array of strings on when combines with OR (all passed to AI)", async () => {
             const agent = new Agent<TestContext, TestData>({
                 name: "TestAgent",
                 provider: MockProviderFactory.basic(),

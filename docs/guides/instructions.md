@@ -62,7 +62,7 @@ createAgent({
 });
 ```
 
-Reach narrows as you nest. Agent-scope instructions render on every turn for every flow. Flow-scope instructions render only while that flow is active. Step-scope instructions render only while that step is current. Conditions on `when` and `if` apply on top — an agent-scope instruction with `when: "User is angry"` still requires that activation to fire, just like a step-scope one.
+Reach narrows as you nest. Agent-scope instructions render on every turn for every flow. Flow-scope instructions render only while that flow is active. Step-scope instructions render only while that step is current. Conditions apply on top: `if` removes an instruction locally when its predicate fails, while `when` is rendered with the instruction so the model can decide whether the natural-language condition applies.
 
 The composer renders the resolved set under a single `## Instructions` heading and tags each line with a scope caption so the model can read both *what* and *where from* in one pass:
 
@@ -74,28 +74,28 @@ The composer renders the resolved set under a single `## Instructions` heading a
 
 ## Rendering format
 
-Each active instruction lands in the prompt as a single bullet:
+Each eligible instruction lands in the prompt as a single bullet:
 
 ```
-- [<kind>] [<scope>] <prompt>
+- [<kind>] [<scope>] <prompt> (apply only when: <when-clause> OR <when-clause>)
 ```
 
-A composed block looks like this:
+The condition suffix is omitted when `when` is not set. A composed block looks like this:
 
 ```
 ## Instructions
 
 - [must] [Always] Validate dates are in the future before booking.
 - [never] [Always] Promise rates you have not looked up.
-- [should] [In: Booking] Offer to compare two options before committing.
+- [should] [In: Booking] Offer to compare two options before committing. (apply only when: the user is comparing hotel options)
 - [must] [Step: payment] If the card is declined, never retry without confirmation.
 ```
 
-The format is fixed. The kind prefix is always present (defaulting to `[should]`), the scope caption is always present, and the prompt text follows verbatim. There is nothing to configure — what you write in `prompt` is what the model reads.
+The format is fixed. The kind prefix is always present (defaulting to `[should]`), the scope caption is always present, and the prompt text follows verbatim. When present, `when` clauses are joined with `OR` and appended for the model to evaluate.
 
 ## `appliedInstructions` on the response
 
-Every `respond()` call returns an `appliedInstructions` array listing exactly which instructions were rendered into that turn's prompt. The set is deterministic — it comes from the prompt composer, not the model — so you can use it for observability, audits, and tests:
+Every `respond()` call returns an `appliedInstructions` array listing exactly which instructions were rendered into that turn's prompt. The set is deterministic — it comes from the prompt composer, not the model — so you can use it for observability, audits, and tests. For an instruction with `when`, inclusion means the conditional instruction reached the model; it does not claim that the model judged the condition true:
 
 ```typescript
 const response = await agent.respond("I want to book a room.");

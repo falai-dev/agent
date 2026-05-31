@@ -11,7 +11,7 @@ order: 5
 
 An `Instruction` is a single statement of behavior the agent should follow. v2 collapses three v1 types into one — every instruction now carries a `kind` discriminator (`'must'`, `'never'`, or `'should'`) and a `prompt` that is rendered into the system prompt with a scope caption. The same shape works at agent, flow, and step scope; only its position in the configuration changes.
 
-The set of instructions actually rendered into a given turn's prompt is reported back on the response as `appliedInstructions` — observability is deterministic, derived from rendering, not self-reported by the model.
+The set of instructions actually rendered into a given turn's prompt is reported back on the response as `appliedInstructions` — observability is deterministic, derived from rendering, not self-reported by the model. For instructions with a textual `when`, this means the condition was presented to the model, not that the model reported a match.
 
 ## Signature
 
@@ -19,7 +19,7 @@ The set of instructions actually rendered into a given turn's prompt is reported
 interface Instruction<TContext = unknown, TData = unknown> {
   id?: string;
   kind?: 'must' | 'never' | 'should';        // default: 'should'
-  when?: ConditionWhen;                       // AI-evaluated string(s), AND semantics
+  when?: ConditionWhen;                       // AI-evaluated string(s), OR semantics
   if?: ConditionIf<TContext, TData>;          // code-evaluated function(s), AND semantics
   prompt: Template<TContext, TData>;
   enabled?: boolean;                          // default: true
@@ -48,7 +48,7 @@ interface AppliedInstruction {
 |-------|------|----------|---------|-------|
 | `prompt` | `Template<TContext, TData>` | yes | — | Behavioral text rendered into the prompt under the `## Instructions` section. |
 | `kind` | `'must' \| 'never' \| 'should'` | no | `'should'` | Severity. `'must'` = absolute do, `'never'` = absolute don't, `'should'` = conditional nudge. |
-| `when` | `ConditionWhen` | no | — | AI-evaluated activation string (or array, AND semantics). Functions are not allowed here; use `if`. |
+| `when` | `ConditionWhen` | no | — | AI-evaluated activation string (or array, OR semantics). Functions are not allowed here; use `if`. |
 | `if` | `ConditionIf<TContext, TData>` | no | — | Code-evaluated activation function (or array). Free to evaluate. When both `when` and `if` are set, `if` runs first; `when` is only evaluated if `if` passes. |
 | `id` | `string` | no | auto | Stable identifier used in `AppliedInstruction.id`. Auto-generated when omitted. |
 | `enabled` | `boolean` | no | `true` | Set `false` to skip the instruction without removing it from configuration. |
@@ -71,11 +71,13 @@ The same `Instruction` shape attaches at three positions:
 - **Flow:** `FlowOptions.instructions` — considered when the active flow matches.
 - **Step:** `StepOptions.instructions` — considered when the active step matches.
 
-At prompt-build time the composer renders each active instruction as a single bullet:
+At prompt-build time the composer renders each eligible instruction as a single bullet:
 
 ```
-- [<kind>] [<scope-caption>] <prompt>
+- [<kind>] [<scope-caption>] <prompt> (apply only when: <when-clause> OR <when-clause>)
 ```
+
+The parenthesized condition is omitted when `when` is not set. Code-evaluated `if` predicates run first; a failing predicate removes the entire bullet before the prompt reaches the model.
 
 Scope captions are fixed by where the instruction was declared:
 

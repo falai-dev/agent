@@ -246,7 +246,8 @@ export class Flow<TContext = unknown, TData = unknown> {
   /**
    * Evaluate when/if conditions using the v2 split logic.
    * `if` (code predicate) evaluates first (free); `when` (AI) evaluates only when `if` passes.
-   * Both are combined with AND semantics.
+   * `if` predicates use AND semantics. `when` strings use OR semantics.
+   * When both fields are set, the passing `if` gate and AI match are combined with AND.
    */
   async evaluateWhen(
     templateContext: TemplateContext<TContext, TData>

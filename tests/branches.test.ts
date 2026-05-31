@@ -589,7 +589,8 @@ describe("Property: BranchMap construction-time validation rejects invalid shape
 // Phase 3 — Resolution Algorithm Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { evaluateBranches } from "../src/core/BranchEvaluator";
+import { createAiConditionEvaluator, evaluateBranches } from "../src/core/BranchEvaluator";
+import type { AiProvider } from "../src/types/ai";
 import type { BranchPredicateContext } from "../src/types/flow";
 import type { SessionState } from "../src/types/session";
 
@@ -627,6 +628,28 @@ function createMockAiEvaluator(result: boolean = true) {
         reset() { callCount = 0; },
     };
 }
+
+describe("createAiConditionEvaluator", () => {
+    test("prompts the provider to match any textual when condition", async () => {
+        let prompt = "";
+        const provider: AiProvider = {
+            name: "RecordingProvider",
+            async generateMessage(input) {
+                prompt = input.prompt;
+                return { message: "" };
+            },
+            async *generateMessageStream() {
+                return;
+            },
+        };
+
+        const evaluator = createAiConditionEvaluator(provider, [], {});
+        await evaluator(["the user asked about the address", "the user asked where we are located"]);
+
+        expect(prompt).toContain("true if ANY condition is satisfied");
+        expect(prompt).not.toContain("true if ALL conditions are satisfied");
+    });
+});
 
 // ─── Unit Tests: Resolution Algorithm ────────────────────────────────────────
 

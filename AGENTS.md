@@ -11,21 +11,22 @@
 - **Runtime:** Node 18+ or Bun 1.0+
 - **Language:** TypeScript 5.3+ (strict mode)
 - **Module system:** Dual ESM/CJS (ESM primary)
-- **Package manager:** Bun (bun.lock present), npm-compatible scripts
+- **Package manager:** Bun (`bun.lock` present)
 
 ## Quick Commands
 
 | Task | Command |
 |------|---------|
 | Install | `bun install` |
-| Build (full) | `npm run build` |
-| Build ESM only | `npm run build:esm` |
-| Typecheck | `npm run typecheck` |
-| Typecheck examples | `npm run typecheck:examples` |
-| Lint | `npm run lint` |
-| Lint + fix | `npm run lint:fix` |
+| Build (full) | `bun run build` |
+| Build ESM only | `bun run build:esm` |
+| Typecheck | `bun run typecheck` |
+| Typecheck examples | `bun run typecheck:examples` |
+| Lint | `bun run lint` |
+| Lint + fix | `bun run lint:fix` |
 | Test | `bun test tests/*.test.ts` |
-| Clean | `npm run clean` |
+| Clean | `bun run clean` |
+| Publish current version | `bun run release` |
 
 ## Architecture
 

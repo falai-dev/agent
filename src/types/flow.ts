@@ -25,7 +25,7 @@ export type ConditionIf<TContext = unknown, TData = unknown> =
   | ConditionPredicate<TContext, TData>[];
 
 /**
- * The `when` field shape: a single AI-evaluated string or array of strings (AND semantics).
+ * The `when` field shape: a single AI-evaluated string or array of strings (OR semantics).
  * Functions are NOT allowed on `when` — they belong on `if` only.
  */
 export type ConditionWhen = string | string[];
@@ -196,7 +196,7 @@ export type BranchPredicate<TContext = unknown, TData = unknown> = (
  */
 export interface BranchEntry<TContext = unknown, TData = unknown> {
   /**
-   * AI-evaluated condition. String or array of strings (AND semantics).
+   * AI-evaluated condition. String or array of strings (OR semantics).
    * Costs LLM tokens. Reuses the same machinery as `step.when`.
    * Only evaluated if `if` passes (or is absent) — code-first short-circuit.
    */
@@ -324,7 +324,7 @@ export interface FlowOptions<TContext = unknown, TData = unknown> {
   description?: string;
 
   /**
-   * AI-evaluated activation condition(s). String or array of strings (AND semantics).
+   * AI-evaluated activation condition(s). String or array of strings (OR semantics).
    * Costs LLM tokens. Functions are NOT allowed here — use `if` for code predicates.
    */
   when?: ConditionWhen;
@@ -498,7 +498,7 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
    */
   requires?: (keyof TData)[];
   /**
-   * AI-evaluated activation condition(s). String or array of strings (AND semantics).
+   * AI-evaluated activation condition(s). String or array of strings (OR semantics).
    * Costs LLM tokens. Functions are NOT allowed here — use `if` for code predicates.
    */
   when?: ConditionWhen;

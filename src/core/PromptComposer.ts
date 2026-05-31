@@ -2,7 +2,6 @@ import type { Event, Term, Instruction, AgentOptions, ScopedInstructions, Applie
 import type { Flow } from "./Flow";
 import { render, renderMany, formatKnowledgeBase, createTemplateContext } from "../utils/template";
 import { TemplateContext } from "../types/template";
-import { ConditionEvaluator } from "../utils/condition";
 import { PromptSectionCache } from "./PromptSectionCache";
 import { logger } from "../utils";
 
@@ -155,8 +154,6 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     // Reset the per-turn applied set
     this.lastAppliedInstructions = [];
 
-    const evaluator = new ConditionEvaluator(this.renderContext);
-
     /**
      * Evaluate a single instruction's `if` code predicate(s).
      * Returns true if all predicates pass (AND semantics).
@@ -183,17 +180,6 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     };
 
     /**
-     * Evaluate a single instruction's `when` condition.
-     * Returns true if the instruction should be active.
-     */
-    const evaluateWhen = async (when: Instruction<TContext, TData>['when']): Promise<boolean> => {
-      if (when === undefined) return true;
-      const evaluation = await evaluator.evaluateCondition(when, 'AND');
-      if (!evaluation.hasProgrammaticConditions) return true;
-      return evaluation.programmaticResult;
-    };
-
-    /**
      * Resolve the kind prefix for rendering.
      * Default kind is 'should'.
      */
@@ -203,7 +189,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
     };
 
     /**
-     * Process a scope bucket: filter enabled, evaluate when, collect active lines and applied records.
+     * Process a scope bucket: filter enabled, gate by `if`, render `when`, and collect applied records.
      */
     const processScope = async (
       items: Instruction<TContext, TData>[],
@@ -219,14 +205,17 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
         const ifPassed = await evaluateIf(g.if);
         if (!ifPassed) continue;
 
-        // Evaluate `when` (AI condition) only when `if` passed
-        const active = await evaluateWhen(g.when);
-        if (!active) continue;
-
         const text = await render(g.prompt, this.renderContext);
         if (!text) continue;
 
-        lines.push(`- ${kindPrefix(g.kind)} ${caption} ${text}`);
+        const whenContextStrings = g.when
+          ? (Array.isArray(g.when) ? g.when : [g.when])
+          : [];
+        const condition = whenContextStrings.length > 0
+          ? ` (apply only when: ${whenContextStrings.join(" OR ")})`
+          : "";
+
+        lines.push(`- ${kindPrefix(g.kind)} ${caption} ${text}${condition}`);
         this.lastAppliedInstructions.push({
           id: g.id || '',
           scope,

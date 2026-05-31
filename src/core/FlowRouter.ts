@@ -1151,7 +1151,7 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
       if (candidate.step.when) {
         const whenResult = await candidate.step.evaluateWhen(templateContext);
         if (whenResult.aiContextStrings.length > 0) {
-          parts.push(`   When conditions: ${whenResult.aiContextStrings.join(", ")}`);
+          parts.push(`   When any condition matches: ${whenResult.aiContextStrings.join(" OR ")}`);
         } else if (typeof candidate.step.when === 'string') {
           parts.push(`   When this step should be completed: ${candidate.step.when}`);
         }
@@ -1436,7 +1436,7 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
           if (step.when) {
             const whenResult = await step.evaluateWhen(templateContext);
             if (whenResult.aiContextStrings.length > 0) {
-              stepInfo.push(`   When conditions: ${whenResult.aiContextStrings.join(", ")}`);
+              stepInfo.push(`   When any condition matches: ${whenResult.aiContextStrings.join(" OR ")}`);
               activeStepConditionContext.push(...whenResult.aiContextStrings);
             } else if (typeof step.when === 'string') {
               stepInfo.push(`   When this step should be completed: ${step.when}`);

@@ -7,7 +7,7 @@ order: 1
 
 # When and if
 
-Conditions decide whether a flow activates, a step runs, an instruction renders, or a branch fires. v2 splits them into two distinct fields with different evaluators:
+Conditions decide whether a flow activates, a step runs, an instruction applies, or a branch fires. v2 splits them into two distinct fields with different evaluators:
 
 - `when` — strings the LLM evaluates against intent and the conversation. Costs tokens.
 - `if` — TypeScript predicates the engine evaluates locally. Free.
@@ -38,19 +38,19 @@ If the answer lives in `data`, `context`, or `session`, it's `if`. If the answer
 }
 ```
 
-Multiple strings combine with **AND** semantics — every clause must pass for the condition to match.
+Multiple strings combine with **OR** semantics — any clause may pass for the condition to match. Use the array form for alternative natural-language expressions of the same intent:
 
 ```typescript
 {
-  title: "Premium Refund",
+  title: "Address",
   when: [
-    "the user is requesting a refund",
-    "the user is asking about an enterprise plan",
+    "the user asked about the address",
+    "the user asked where we are located",
   ],
 }
 ```
 
-The strings are sent to the LLM as part of the routing or activation prompt. Keep them short, intent-shaped, and free of code-style boolean expressions — `"the user wants to cancel"` lands; `"data.cancelRequested === true"` does not.
+The strings are sent to the LLM as part of the routing or activation prompt. For instructions, the string is appended to the instruction bullet so the response model can apply the instruction conditionally. Keep conditions short, intent-shaped, and free of code-style boolean expressions — `"the user wants to cancel"` lands; `"data.cancelRequested === true"` does not.
 
 ## `if` — code predicates
 
@@ -120,7 +120,7 @@ The same `when` / `if` shape attaches to four primitives. Semantics are identica
 | --------------- | ----------------------- | -------------------------------------------------- |
 | Flow            | `FlowOptions.when/if`   | Whether the router selects this flow this turn     |
 | Step            | `StepOptions.when/if`   | Whether the step is reachable in the current flow  |
-| Instruction     | `Instruction.when/if`   | Whether the instruction renders into the prompt    |
+| Instruction     | `Instruction.when/if`   | Whether the instruction applies to the response    |
 | BranchEntry     | `BranchEntry.when/if`   | Whether this branch entry matches inside `step.branches` |
 
 ```typescript
@@ -160,7 +160,8 @@ A short checklist before shipping a condition:
 
 - Does it read a field, flag, or context value? Use `if`.
 - Does it interpret natural language? Use `when`.
-- Multiple clauses that all must pass? Drop them in an array — both fields AND.
+- Multiple natural-language alternatives where any may match? Put them in `when` — arrays use OR.
+- Multiple code predicates that must all pass? Put them in `if` — arrays use AND.
 - Need to skip when a value is already collected? `step.skip` (OR semantics).
 - Both fields set? `if` runs first, free; `when` only fires if `if` passes.
 

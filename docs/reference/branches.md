@@ -19,7 +19,7 @@ Branches resolve **after** the step's post-LLM phase (tool execution, `finalize`
 
 ```typescript
 interface BranchEntry<TContext = unknown, TData = unknown> {
-  /** AI-evaluated condition. String or array of strings (AND semantics). */
+  /** AI-evaluated condition. String or array of strings (OR semantics). */
   when?: string | string[];
 
   /** Code predicate. Function or array of functions (AND semantics). */
@@ -64,7 +64,7 @@ interface BranchPredicateContext<TContext = unknown, TData = unknown> {
 
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
-| `when` | `string \| string[]` | no | — | AI-evaluated condition. Reuses the same machinery as `step.when`. Only evaluated if `if` passes (or is absent). Costs LLM tokens. |
+| `when` | `string \| string[]` | no | — | AI-evaluated condition. Arrays use OR semantics. Reuses the same machinery as `step.when`. Only evaluated if `if` passes (or is absent). Costs LLM tokens. |
 | `if` | `BranchPredicate \| BranchPredicate[]` | no | — | Code predicate. Free to evaluate. When both `when` and `if` are set, `if` runs first; `when` is only evaluated if all `if` predicates pass. |
 | `then` | `string \| Directive` | yes | — | Target. See [Resolution of `then`](#resolution-of-then) below. |
 | `label` | `string` | no | — | Optional label surfaced in event traces and flow visualization. |

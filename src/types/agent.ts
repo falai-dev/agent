@@ -267,7 +267,7 @@ export interface Instruction<TContext = unknown, TData = unknown> {
    */
   kind?: 'must' | 'never' | 'should';
   /**
-   * AI-evaluated activation condition. String or array of strings (AND semantics).
+   * AI-evaluated activation condition. String or array of strings (OR semantics).
    * Undefined = always active. Functions are NOT allowed here — use `if`.
    */
   when?: ConditionWhen;
@@ -307,7 +307,8 @@ export interface ScopedInstructions<TContext = unknown, TData = unknown> {
 }
 
 /**
- * Observability record for an instruction that was active and rendered into a turn's prompt.
+ * Observability record for an instruction that was rendered into a turn's prompt.
+ * Textual `when` conditions are included in the prompt for the AI to evaluate.
  * Deterministic — derived from rendering, not from LLM self-report.
  */
 export interface AppliedInstruction {
@@ -329,7 +330,8 @@ export interface AgentResponse<TData = Record<string, unknown>> {
   /** Why execution stopped (for multi-step execution) */
   stoppedReason?: StoppedReason;
   /**
-   * Instructions whose conditions passed and were rendered into this turn's prompt.
+   * Instructions rendered into this turn's prompt after code-evaluated gates passed.
+   * Textual `when` conditions remain in the prompt for the AI to evaluate.
    * Deterministic — derived from rendering, not from LLM self-report.
    */
   appliedInstructions?: AppliedInstruction[];

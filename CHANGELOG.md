@@ -2,6 +2,17 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.2.1]
+
+### Fixed
+
+- **Conditional instruction `when` clauses now reach the response model.** `PromptComposer.addInstructions()` previously collected textual `when` clauses but rendered only the instruction prompt, so the model could not apply the condition. Conditional instructions now render their `when` clauses inline after deterministic `if` predicates pass.
+- **`when: string[]` now consistently means OR across flows, steps, instructions, and branches.** Arrays represent alternative natural-language matches, such as `"client asked about the address"` or `"client asked where we are located"`. Code-evaluated `if: predicate[]` retains AND semantics. Signal conditions keep their documented specialized include/exclude behavior.
+
+### Internal
+
+- Migrated package scripts from npm invocations to Bun (`bun run`, `bun pm version`, and `bun publish`) and removed an empty `preinstall` hook.
+
 ## [2.2.0]
 
 ### Changed
@@ -610,4 +621,3 @@ const agent = new Agent({
 ### Added
 
 - **Agent-level `rules` and `prohibitions`**: `AgentOptions` now accepts `rules` and `prohibitions` arrays (same `Template` type used by routes). These are merged with route-level rules/prohibitions and included in all prompt compositions — single-step, batch, and streaming. See [Agent Rules & Prohibitions](docs/core/agent/rules-and-prohibitions.md) for details.
-

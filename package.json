@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Conversational state engine for TypeScript where the AI understands, but the code is in control",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -38,7 +38,7 @@
   },
   "homepage": "https://falai.dev",
   "scripts": {
-    "build": "npm run build:esm && npm run build:cjs && npm run fix:cjs",
+    "build": "bun run build:esm && bun run build:cjs && bun run fix:cjs",
     "build:esm": "tsc",
     "build:cjs": "tsc --project tsconfig.cjs.json",
     "fix:cjs": "echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
@@ -48,15 +48,14 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
-    "prebuild": "npm run clean",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run build && bun run test",
-    "release:patch": "npm version patch && npm publish",
-    "release:minor": "npm version minor && npm publish",
-    "release:major": "npm version major && npm publish",
-    "release:alpha": "npm publish --tag alpha",
-    "release": "npm publish",
-    "test": "bun test tests/*.test.ts",
-    "preinstall": "node preinstall.js"
+    "prebuild": "bun run clean",
+    "prepublishOnly": "bun run lint && bun run typecheck && bun run build && bun run test",
+    "release:patch": "bun pm version patch && bun publish",
+    "release:minor": "bun pm version minor && bun publish",
+    "release:major": "bun pm version major && bun publish",
+    "release:alpha": "bun publish --tag alpha",
+    "release": "bun publish",
+    "test": "bun test tests/*.test.ts"
   },
   "keywords": [
     "ai",

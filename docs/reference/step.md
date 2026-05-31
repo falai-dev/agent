@@ -96,7 +96,7 @@ interface StepLifecycleHooks<TContext = unknown, TData = unknown> {
 | `auto` | `boolean` | no | `false` | When `true`, the step runs without an LLM call — only `onEnter`, `prepare`, and `branches` execute. Cannot coexist with `prompt`, `collect`, `tools`, or `finalize`. Counts against `maxAutoStepsPerTurn`. |
 | `collect` | `(keyof TData)[]` | no | `[]` | Schema field keys this step is responsible for extracting from the user message. Every key must exist in the agent's `schema`. The engine skips the step automatically when every listed key is already present in `session.data` (pre-extraction). |
 | `requires` | `(keyof TData)[]` | no | `[]` | Prerequisite field keys. The engine refuses to enter the step until every key is present in `session.data`. When fields covered by `requires` are read inside `branches[].if` predicates, they are guaranteed to be defined. |
-| `when` | `string \| string[]` | no | — | AI-evaluated activation strings (AND semantics). Evaluated by the LLM at routing time. Functions are not allowed here — the constructor throws `FlowConfigurationError` if a function is found. |
+| `when` | `string \| string[]` | no | — | AI-evaluated activation strings (OR semantics). Evaluated by the LLM at routing time. Functions are not allowed here — the constructor throws `FlowConfigurationError` if a function is found. |
 | `if` | `(ctx) => boolean \| Promise<boolean>` or array | no | — | Code-evaluated activation predicates (AND semantics). Evaluated locally — no LLM cost. When both `when` and `if` are set, `if` runs first; `when` is only evaluated if every `if` predicate passes. |
 | `skip` | `(ctx) => boolean \| Promise<boolean>` or array | no | — | Code-evaluated skip predicates (OR semantics). When any predicate returns `true`, the step is bypassed. Only code predicates — no AI strings. |
 | `tools` | `(string \| Tool<TContext, TData>)[]` | no | `[]` | Tools available during this step. Strings are resolved against the agent's tool registry; objects are inline tools. Stacked on top of agent and flow scopes. |
@@ -130,7 +130,7 @@ or the full `Directive` surface (`appendPrompt`,
 
 For one step, the engine walks this sequence per turn:
 
-1. Evaluate `if` (code, AND) and `when` (AI, AND) — fails skip the step entirely.
+1. Evaluate `if` (code, AND) and `when` (AI, OR) — fails skip the step entirely.
 2. Evaluate `skip` (code, OR) — true means bypass and fall through.
 3. Check `requires` — refuse entry if any required field is missing.
 4. Run `onEnter`, then `prepare` / `hooks.prepare`. May emit a `Directive` (pre-LLM fields honored).
