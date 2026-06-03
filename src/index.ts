@@ -31,6 +31,8 @@ export { OpenRouterProvider } from "./providers/OpenRouterProvider";
 export type { OpenRouterProviderOptions } from "./providers/OpenRouterProvider";
 export { AnthropicProvider } from "./providers/AnthropicProvider";
 export type { AnthropicProviderOptions } from "./providers/AnthropicProvider";
+export { DeepSeekProvider } from "./providers/DeepSeekProvider";
+export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider";
 
 // Adapters
 export { PrismaAdapter } from "./adapters/PrismaAdapter";

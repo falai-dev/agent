@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.2.2]
+
+### Added
+
+- **`DeepSeekProvider`** — New provider for the DeepSeek API (OpenAI-compatible). Supports `deepseek-chat` and `deepseek-reasoner` models with backup model failover, retry logic, streaming, and reasoning content extraction. Uses the `openai` SDK with a custom base URL — no new dependencies required.
+
 ## [2.2.1]
 
 ### Fixed

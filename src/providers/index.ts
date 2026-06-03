@@ -14,3 +14,6 @@ export type { OpenAIProviderOptions } from "./OpenAIProvider";
 
 export { OpenRouterProvider } from "./OpenRouterProvider";
 export type { OpenRouterProviderOptions } from "./OpenRouterProvider";
+
+export { DeepSeekProvider } from "./DeepSeekProvider";
+export type { DeepSeekProviderOptions } from "./DeepSeekProvider";

@@ -11,7 +11,7 @@ order: 10
 
 Providers are the strategy plug between an `Agent` and a model vendor. Every provider implements the same `AiProvider` interface, so the Agent itself stays vendor-agnostic. Pass an instance to `createAgent({ provider })` and the agent talks to that vendor for every turn (and for compaction, if you wire it in).
 
-`@falai/agent` ships four built-in providers. All four accept an `apiKey` and a required `model`, support `backupModels` for automatic failover on overload or 5xx, and accept a vendor-typed `config` object that flows through to the underlying SDK.
+`@falai/agent` ships five built-in providers. All five accept an `apiKey` and a required `model`, support `backupModels` for automatic failover on overload or 5xx, and accept a vendor-typed `config` object that flows through to the underlying SDK.
 
 | Provider | Class | Options | SDK |
 |----------|-------|---------|-----|
@@ -19,6 +19,7 @@ Providers are the strategy plug between an `Agent` and a model vendor. Every pro
 | OpenAI | `OpenAIProvider` | `OpenAIProviderOptions` | `openai` |
 | Anthropic Claude | `AnthropicProvider` | `AnthropicProviderOptions` | `@anthropic-ai/sdk` |
 | OpenRouter | `OpenRouterProvider` | `OpenRouterProviderOptions` | `openai` (compat) |
+| DeepSeek | `DeepSeekProvider` | `DeepSeekProviderOptions` | `openai` (compat) |
 
 ## Use with createAgent
 
@@ -31,6 +32,7 @@ import {
   OpenAIProvider,
   AnthropicProvider,
   OpenRouterProvider,
+  DeepSeekProvider,
 } from "@falai/agent";
 
 const provider =
@@ -40,6 +42,8 @@ const provider =
     ? new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY!, model: "claude-sonnet-4-6" })
     : process.env.PROVIDER === "openrouter"
     ? new OpenRouterProvider({ apiKey: process.env.OPENROUTER_API_KEY!, model: "anthropic/claude-sonnet-4.6" })
+    : process.env.PROVIDER === "deepseek"
+    ? new DeepSeekProvider({ apiKey: process.env.DEEPSEEK_API_KEY!, model: "deepseek-chat" })
     : new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY!, model: "gemini-3.1-pro-preview" });
 
 const agent = createAgent({ provider, schema, flows });
@@ -204,9 +208,51 @@ const openrouter = new OpenRouterProvider({
 });
 ```
 
+## DeepSeekProvider
+
+DeepSeek is OpenAI-compatible and offers powerful reasoning models. The `deepseek-reasoner` model streams thinking/reasoning content via `reasoning_content` on the delta, which is logged at debug level.
+
+### Signature
+
+```typescript
+new DeepSeekProvider(options: DeepSeekProviderOptions)
+
+interface DeepSeekProviderOptions {
+  apiKey: string;
+  model: string;
+  backupModels?: string[];
+  baseURL?: string;
+  config?: Partial<Omit<ChatCompletionCreateParamsNonStreaming, "model" | "messages">>;
+  retryConfig?: { timeout?: number; retries?: number };
+}
+```
+
+### Fields
+
+| Field | Type | Required | Default | Notes |
+|-------|------|----------|---------|-------|
+| `apiKey` | `string` | yes | — | Throws if empty. |
+| `model` | `string` | yes | — | e.g. `"deepseek-chat"`, `"deepseek-reasoner"`. |
+| `backupModels` | `string[]` | no | `[]` | Tried in order on overload/rate-limit errors. |
+| `baseURL` | `string` | no | `"https://api.deepseek.com"` | Custom endpoint for self-hosted or proxy deployments. |
+| `config` | OpenAI params | no | — | OpenAI-shaped defaults (forwarded to DeepSeek). |
+| `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
+| `retryConfig.retries` | `number` | no | `3` | Total attempts. |
+
+### Example
+
+```typescript
+const deepseek = new DeepSeekProvider({
+  apiKey: process.env.DEEPSEEK_API_KEY!,
+  model: "deepseek-chat",
+  backupModels: ["deepseek-reasoner"],
+  config: { temperature: 0.3 },
+});
+```
+
 ## Errors
 
-All four providers share the same construction-time guards and runtime failure modes.
+All five providers share the same construction-time guards and runtime failure modes.
 
 | When | Error | Why |
 |------|-------|-----|
