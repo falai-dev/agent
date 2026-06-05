@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.2.3]
+
+### Added
+
+- **`createPersistedState` re-exported from package root** — The session persistence helper was previously only available via `@falai/agent/utils`. Now exported from the main entry point for convenience.
+
 ## [2.2.2]
 
 ### Added

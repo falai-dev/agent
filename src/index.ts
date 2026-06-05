@@ -183,4 +183,4 @@ export type {
   ConditionWhen,
 } from "./types";
 export { EventKind, MessageRole } from "./types";
-export { createSession, createSessionId, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils";
+export { createSession, createSessionId, createPersistedState, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils";
