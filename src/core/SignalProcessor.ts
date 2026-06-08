@@ -533,7 +533,7 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
                     bus.push(resolvedDirective);
                 }
 
-                // Update session via recordTrigger
+                // Record trigger only after the handler has completed successfully.
                 updatedSession = recordTrigger(updatedSession, m.signal, m.reason, phase);
 
                 const handlerDurationMs = performance.now() - start;
@@ -567,9 +567,6 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
 
                 // Handler errors logged at ERROR regardless of debug flag (Requirement 13.2)
                 logger.error(`[Signals] Handler threw for signal "${m.signal.id ?? 'unknown'}": ${errorMessage}`);
-
-                // Still record trigger even on error (the signal matched)
-                updatedSession = recordTrigger(updatedSession, m.signal, m.reason, phase);
 
                 firings.push({
                     id: m.signal.id ?? 'unknown',

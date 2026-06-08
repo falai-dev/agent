@@ -36,7 +36,7 @@ interface AgentResponseStreamChunk<TData> {
 }
 ```
 
-`delta` is the new token(s); concatenating every `delta` reproduces the final reply. `accumulated` is the running total — useful when your renderer needs the full string each tick (e.g., a Markdown view that re-parses on every update). `done` flips to `true` exactly once, on the terminal chunk.
+`delta` is the new token(s); concatenating every `delta` reproduces the final reply unless a post-phase signal replaces the message on the terminal chunk. `accumulated` is the authoritative running total — useful when your renderer needs the full string each tick (e.g., a Markdown view that re-parses on every update). `done` flips to `true` exactly once, on the terminal chunk.
 
 ## Render incrementally
 

@@ -20,15 +20,15 @@ import type { Event } from "./history";
  * Shape is locked to enable forward-compatible persistence in v2.0.
  */
 export interface SignalTriggerState {
-    /** When this signal first fired. */
+    /** When this signal first completed its handler successfully. */
     firstTriggeredAt: Date;
-    /** When this signal last fired. */
+    /** When this signal last completed its handler successfully. */
     lastTriggeredAt: Date;
-    /** Total number of times this signal has fired. */
+    /** Total number of successful handler completions for this signal. */
     count: number;
-    /** Free-text reason from the last trigger (if the signal supplied one). */
+    /** Free-text reason from the last successful trigger (if supplied). */
     lastReason?: string;
-    /** Which phase the signal last fired in. */
+    /** Which phase the signal last completed in. */
     lastPhase?: 'pre' | 'post';
 }
 
@@ -197,9 +197,9 @@ export interface SignalContext<
  * Conditions use the v2 `when` / `if` split:
  * - `when`: AI-evaluated string(s). Entries prefixed with `!` are exclusion
  *   conditions rendered under "DO NOT TRIGGER WHEN" in the classifier prompt.
- *   Non-prefixed entries render under "TRIGGER WHEN". Positive entries use AND
- *   semantics (all must match). Negative entries use OR semantics (any match
- *   inhibits firing).
+ *   Non-prefixed entries render under "TRIGGER WHEN". Positive entries use OR
+ *   semantics (any match can trigger). Negative entries also use OR semantics
+ *   for exclusion (any match inhibits firing).
  * - `if`: Code-evaluated function(s). Free. AND semantics.
  *
  * When both `if` and `when` are set, `if` evaluates first. If `if` returns
@@ -225,7 +225,7 @@ export interface Signal<
 
     /**
      * AI-evaluated trigger condition(s). String or array of strings.
-     * - Non-prefixed entries: AND semantics. All must match to trigger.
+     * - Non-prefixed entries: OR semantics. Any match can trigger.
      * - `!`-prefixed entries: OR exclusion. Any match inhibits firing.
      *
      * At prompt-render time, the framework splits entries by prefix:

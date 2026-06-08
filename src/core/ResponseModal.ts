@@ -371,6 +371,18 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
+     * Post-phase signal replies replace the user-visible message after the
+     * response has otherwise completed. Undefined means "leave it unchanged";
+     * an empty string is an explicit replacement.
+     */
+    private applyPostSignalReply(
+        message: string,
+        directive: Directive<TContext, TData> | undefined,
+    ): string {
+        return directive?.reply !== undefined ? directive.reply : message;
+    }
+
+    /**
      * Collect scoped instructions from agent, flow, and step into a ScopedInstructions value.
      * @private
      */
@@ -1112,14 +1124,16 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session = { ...session, pendingDirective: postResult.mergedDirective };
             }
 
+            const message = this.applyPostSignalReply(haltMessage, postResult.mergedDirective);
+
             await this.finalizeSession(session, effectiveContext);
             return {
-                message: haltMessage,
+                message,
                 session,
                 toolCalls: undefined,
                 isFlowComplete: false,
                 executedSteps: [],
-                stoppedReason: signalHaltReply ? 'reply' : 'halt',
+                stoppedReason: haltMessage ? 'reply' : 'halt',
                 triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
             };
         }
@@ -1286,6 +1300,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
             session = { ...session, pendingDirective: postResult.mergedDirective };
         }
+
+        message = this.applyPostSignalReply(message, postResult.mergedDirective);
 
         // Ensure response structure completeness (Requirement 8.1, 8.2, 8.3)
         // - executedSteps: array of steps executed (empty array if none)
@@ -1634,10 +1650,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session = { ...session, pendingDirective: postResult.mergedDirective };
             }
 
+            const message = this.applyPostSignalReply(haltMessage, postResult.mergedDirective);
+
             await this.finalizeSession(session, effectiveContext);
             yield {
-                delta: haltMessage,
-                accumulated: haltMessage,
+                delta: message,
+                accumulated: message,
                 done: true,
                 session,
                 stoppedReason: haltMessage ? 'reply' : 'halt',
@@ -1767,8 +1785,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     finalSession = { ...finalSession, pendingDirective: postResult.mergedDirective };
                 }
 
+                const accumulated = this.applyPostSignalReply(chunk.accumulated, postResult.mergedDirective);
+                const delta = postResult.mergedDirective?.reply !== undefined
+                    ? accumulated
+                    : chunk.delta;
+
                 yield {
                     ...chunk,
+                    delta,
+                    accumulated,
                     session: finalSession,
                     triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
                 } as AgentResponseStreamChunk<TData>;

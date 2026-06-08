@@ -372,7 +372,8 @@ describe("Signals — SignalEvaluator", () => {
             const prompt = buildSignalClassifierPrompt([signal], sampleHistory, {});
 
             // Positive entries under TRIGGER WHEN
-            expect(prompt).toContain("TRIGGER WHEN (ALL must match):");
+            expect(prompt).toContain("Positive TRIGGER WHEN entries are alternatives");
+            expect(prompt).toContain("TRIGGER WHEN (ANY matches):");
             expect(prompt).toContain("user explicitly asks to talk to a human");
 
             // Negative entries under DO NOT TRIGGER WHEN (prefix stripped)
@@ -451,7 +452,7 @@ describe("Signals — SignalEvaluator", () => {
             const prompt = buildSignalClassifierPrompt([signal], sampleHistory, {});
             expect(prompt).toContain("ALWAYS EXTRACT");
             // Should NOT have TRIGGER WHEN since it's unconditional
-            expect(prompt).not.toContain("TRIGGER WHEN");
+            expect(prompt).not.toContain("  TRIGGER WHEN");
         });
 
         it("renders SIGNAL header with id and title", () => {
@@ -489,7 +490,7 @@ describe("Signals — SignalEvaluator", () => {
             };
 
             const prompt = buildSignalClassifierPrompt([signal], sampleHistory, {});
-            expect(prompt).toContain("TRIGGER WHEN (ALL must match):");
+            expect(prompt).toContain("TRIGGER WHEN (ANY matches):");
             expect(prompt).toContain("user says hello");
         });
     });
@@ -1657,6 +1658,45 @@ describe("Signals — SignalProcessor", () => {
             expect(trigger.firstTriggeredAt).toEqual(firstTriggeredAt);
             expect(trigger.lastTriggeredAt.getTime()).toBeGreaterThanOrEqual(firstTriggeredAt.getTime());
         });
+
+        it("does not record trigger state when the handler throws", async () => {
+            let calls = 0;
+            const signals = [
+                {
+                    id: "retry_sig",
+                    phase: "pre" as const,
+                    behavior: "once" as const,
+                    handler: () => {
+                        calls++;
+                        if (calls === 1) {
+                            throw new Error("app-side write failed");
+                        }
+                    },
+                },
+            ];
+
+            const processor = makeProcessor(signals);
+
+            const result1 = await processor.runPreSignalPhase({
+                session: makeSession(),
+                history: sampleHistory,
+                context: {},
+            });
+
+            expect(calls).toBe(1);
+            expect(result1.firings[0].handlerError).toBe("app-side write failed");
+            expect(result1.updatedSession.signals?.triggers?.retry_sig).toBeUndefined();
+
+            const result2 = await processor.runPreSignalPhase({
+                session: result1.updatedSession,
+                history: sampleHistory,
+                context: {},
+            });
+
+            expect(calls).toBe(2);
+            expect(result2.firings[0].handlerError).toBeUndefined();
+            expect(result2.updatedSession.signals?.triggers?.retry_sig.count).toBe(1);
+        });
     });
 
 
@@ -2222,7 +2262,7 @@ describe("Signals — SignalProcessor", () => {
 
                         // Positive entries should appear in the prompt (under TRIGGER WHEN)
                         if (positiveEntries.length > 0) {
-                            expect(prompt).toContain("TRIGGER WHEN (ALL must match):");
+                            expect(prompt).toContain("TRIGGER WHEN (ANY matches):");
                             for (const entry of positiveEntries) {
                                 expect(prompt).toContain(entry);
                             }
@@ -2669,6 +2709,69 @@ describe("Signals — Pipeline Integration", () => {
             expect(response2.session?.currentFlow?.title).toBe("OtherFlow");
             // pendingDirective should be consumed
             expect(response2.session?.pendingDirective).toBeUndefined();
+        });
+    });
+
+    // ─── Post-phase: reply replacement ──────────────────────────────────────
+
+    describe("Post-phase: reply replaces the generated message", () => {
+        it("respond() returns the post-signal reply while preserving the completed turn", async () => {
+            const provider = new PipelineMockProvider({
+                signalResponse: {
+                    signals: [{ id: "post_reply_sig", matched: true, reason: "replace reply" }],
+                },
+            });
+
+            const agent = createPipelineAgent({
+                signals: [
+                    {
+                        id: "post_reply_sig",
+                        when: "replace the final reply",
+                        phase: "post",
+                        handler: () => ({ reply: "Post-signal replacement." }),
+                    },
+                ],
+                provider,
+            });
+
+            const session = await agent.session.getOrCreate();
+            const response = await agent.respond({ history: baseHistory, session });
+
+            expect(provider.responseCallCount).toBe(1);
+            expect(response.message).toBe("Post-signal replacement.");
+            expect(response.triggeredSignals?.[0]?.id).toBe("post_reply_sig");
+        });
+
+        it("respondStream() exposes the post-signal reply on the terminal chunk", async () => {
+            const provider = new PipelineMockProvider({
+                signalResponse: {
+                    signals: [{ id: "post_stream_reply_sig", matched: true, reason: "replace stream reply" }],
+                },
+            });
+
+            const agent = createPipelineAgent({
+                signals: [
+                    {
+                        id: "post_stream_reply_sig",
+                        when: "replace the final stream reply",
+                        phase: "post",
+                        handler: () => ({ reply: "Stream post-signal replacement." }),
+                    },
+                ],
+                provider,
+            });
+
+            const session = await agent.session.getOrCreate();
+            const chunks: Array<{ done: boolean; delta: string; accumulated: string }> = [];
+
+            for await (const chunk of agent.respondStream({ history: baseHistory, session })) {
+                chunks.push(chunk);
+            }
+
+            const finalChunk = chunks.find((chunk) => chunk.done);
+            expect(provider.responseCallCount).toBe(1);
+            expect(finalChunk?.delta).toBe("Stream post-signal replacement.");
+            expect(finalChunk?.accumulated).toBe("Stream post-signal replacement.");
         });
     });
 

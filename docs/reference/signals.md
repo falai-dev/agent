@@ -130,7 +130,7 @@ interface AgentOptions<TContext, TData> {
 | `id` | `string` | no | auto-generated | Stable identifier within a session. Used for `SignalsState.triggers` keying and on `SignalFiring`. Must be unique across the agent's signals. |
 | `title` | `string` | no | — | Display title shown in logs and traces. |
 | `description` | `string` | no | — | Free-text description; rendered into the classifier prompt. |
-| `when` | `string \| string[]` | no | — | AI-evaluated condition(s). Entries prefixed with `!` are exclusion conditions rendered under "DO NOT TRIGGER WHEN" (OR semantics — any match inhibits firing). Non-prefixed entries render under "TRIGGER WHEN" (AND semantics — all must match). |
+| `when` | `string \| string[]` | no | — | AI-evaluated condition(s). Non-prefixed entries render under "TRIGGER WHEN" (OR semantics — any match can trigger). Entries prefixed with `!` are exclusion conditions rendered under "DO NOT TRIGGER WHEN" (OR semantics — any match inhibits firing). |
 | `if` | `SignalPredicate \| SignalPredicate[]` | no | — | Code predicate(s). AND semantics. Free to evaluate. Runs before `when`; if any returns `false`, `when` is skipped (no token cost). |
 | `extract` | `SignalSchema<TExtract>` | no | — | When set, the signal operates in extraction mode. JSON Schema object describing the per-signal `extracted` field merged into the classifier response. The `TExtract` generic carries the resulting type onto `ctx.extracted`. |
 | `phase` | `'pre' \| 'post' \| 'both'` | yes | — | When the signal evaluates. `'pre'` runs in parallel with routing. `'post'` runs after the LLM call, before persistence. `'both'` evaluates in both phases. |
@@ -207,11 +207,13 @@ Persisted on `session.signals`. Adapters preserve this shape bit-identical.
 
 | `SignalTriggerState` field | Type | Notes |
 |----------------------------|------|-------|
-| `firstTriggeredAt` | `Date` | When this signal first fired in the session. Never updated on subsequent fires. |
-| `lastTriggeredAt` | `Date` | When this signal last fired. Drives `cooldown` arithmetic. |
-| `count` | `number` | Total fires for this signal in this session. Monotonically increasing. |
-| `lastReason` | `string \| undefined` | The `reason` from the most recent firing. |
-| `lastPhase` | `'pre' \| 'post' \| undefined` | The phase of the most recent firing. |
+| `firstTriggeredAt` | `Date` | When this signal first completed its handler successfully in the session. Never updated on subsequent successful triggers. |
+| `lastTriggeredAt` | `Date` | When this signal last completed its handler successfully. Drives `cooldown` arithmetic. |
+| `count` | `number` | Total successful handler completions for this signal in this session. Monotonically increasing. |
+| `lastReason` | `string \| undefined` | The `reason` from the most recent successful trigger. |
+| `lastPhase` | `'pre' \| 'post' \| undefined` | The phase of the most recent successful trigger. |
+
+Handler errors are still surfaced on `SignalFiring.handlerError`, but they do not update `SignalsState.triggers`. A `behavior: 'once'` or cooldown signal can therefore retry after an app-side handler failure.
 
 ### `signalBatchSize`
 

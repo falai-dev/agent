@@ -2,6 +2,14 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.2.4]
+
+### Fixed
+
+- **Signal `when` arrays now use OR semantics for positive entries.** Non-`!` entries are treated as alternative natural-language matches, consistent with flows, steps, instructions, and branches. `!` exclusions still inhibit when any exclusion matches.
+- **Post-phase signal `reply` / `replyWith` now replaces the final message.** Non-streaming responses return the post-signal replacement, and streaming responses expose it on the terminal chunk's authoritative `accumulated` value.
+- **Failed signal handlers no longer burn `once` or cooldown state.** `SignalsState.triggers` is recorded only after the handler completes successfully; handler failures still appear on `SignalFiring.handlerError`.
+
 ## [2.2.3]
 
 ### Added

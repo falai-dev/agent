@@ -45,7 +45,7 @@ export interface EvaluateSignalsParams<TContext = unknown, TData = unknown> {
  * Builds the classifier prompt for a batch of signals.
  *
  * Splits `when` entries by `!` prefix at render time:
- * - Non-`!` → "TRIGGER WHEN (ALL must match)"
+ * - Non-`!` → "TRIGGER WHEN (ANY matches)"
  * - `!` entries → prefix stripped, "DO NOT TRIGGER WHEN (ANY inhibits)"
  *
  * Extraction schemas render under "WHEN MATCHED, EXTRACT".
@@ -61,6 +61,7 @@ export function buildSignalClassifierPrompt<TContext = unknown, TData = unknown>
         "You are evaluating signals for this conversation.",
         "",
         "For each signal, decide whether it matched based on the most recent user message AND the conversation context. Be conservative: only mark a signal matched when there is CLEAR, EXPLICIT evidence.",
+        "Positive TRIGGER WHEN entries are alternatives: ANY one positive entry can trigger the signal. DO NOT TRIGGER WHEN entries are exclusions: ANY one exclusion inhibits the signal.",
     ].join("\n");
 
     const signalBlocks: string[] = [];
@@ -89,7 +90,7 @@ export function buildSignalClassifierPrompt<TContext = unknown, TData = unknown>
             // Unconditional + extract → ALWAYS EXTRACT
             lines.push(`  ALWAYS EXTRACT`);
         } else if (positiveEntries.length > 0) {
-            lines.push(`  TRIGGER WHEN (ALL must match):`);
+            lines.push(`  TRIGGER WHEN (ANY matches):`);
             for (const entry of positiveEntries) {
                 lines.push(`    • ${entry}`);
             }
