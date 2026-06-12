@@ -27,8 +27,9 @@ import { AutoChainExecutor, type AutoChainResult } from "./AutoChainExecutor";
 import { StepLifecycle } from "./StepLifecycle";
 import { SessionFinalizer } from "./SessionFinalizer";
 import { ToolLoopExecutor } from "./ToolLoopExecutor";
+import { SignalCoordinator } from "./SignalCoordinator";
 import { ResponseGenerationError } from "./ResponseGenerationError";
-import { cloneDeep, mergeCollected, enterStep, enterFlow, getLastMessageFromHistory, logger, historyToEvents, eventsToHistory, completeCurrentFlow, render } from "../utils";
+import { cloneDeep, mergeCollected, enterStep, getLastMessageFromHistory, logger, historyToEvents, eventsToHistory, completeCurrentFlow, render } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
 
@@ -106,6 +107,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     private readonly stepLifecycle: StepLifecycle<TContext, TData>;
     private readonly sessionFinalizer: SessionFinalizer<TContext, TData>;
     private readonly toolLoopExecutor: ToolLoopExecutor<TContext, TData>;
+    private readonly signalCoordinator: SignalCoordinator<TContext, TData>;
 
     constructor(
         private readonly agent: Agent<TContext, TData>,
@@ -118,8 +120,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         this.responsePipeline = new ResponsePipeline<TContext, TData>(
             this.agent.getAgentOptions(),
             () => this.agent.getFlows(), // Pass a function to get flows dynamically
-            this.agent.getFlowRouter(),
-            this.agent.signalProcessor
+            this.agent.getFlowRouter()
         );
 
         // Step prepare/finalize execution, shared by the prepare phase and finalizer
@@ -149,6 +150,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             updateCollectedData: this.agent.updateCollectedData.bind(this.agent),
             updateSessionData: this.agent.getUpdateDataMethod(),
             maxToolLoops: this.options?.maxToolLoops,
+        });
+
+        // Signal pre/post phase orchestration
+        this.signalCoordinator = new SignalCoordinator<TContext, TData>({
+            getFlows: () => this.agent.getFlows(),
+            signalProcessor: this.agent.signalProcessor,
         });
     }
 
@@ -347,18 +354,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Post-phase signal replies replace the user-visible message after the
-     * response has otherwise completed. Undefined means "leave it unchanged";
-     * an empty string is an explicit replacement.
-     */
-    private applyPostSignalReply(
-        message: string,
-        directive: Directive<TContext, TData> | undefined,
-    ): string {
-        return directive?.reply !== undefined ? directive.reply : message;
-    }
-
-    /**
      * Collect scoped instructions from agent, flow, and step into a ScopedInstructions value.
      * @private
      */
@@ -531,8 +526,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             const routingSkipResult = await this.attemptRoutingSkipForCollect(params);
             if (routingSkipResult) {
                 // Even when routing is skipped, run pre-signal phase if processor is present
-                if (this.agent.signalProcessor) {
-                    const signalResult = await this.responsePipeline.runPreSignalPhase(
+                if (this.signalCoordinator.enabled) {
+                    const signalResult = await this.signalCoordinator.runPrePhase(
                         params.session, params.context, params.history,
                     );
                     // If signal halts, override the routing skip result
@@ -547,9 +542,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     }
                     // If signal has position fields, override routing skip result
                     if (hasDirectivePositionField(signalResult.mergedDirective)) {
-                        return this.applySignalPositionDirective(
-                            signalResult, params,
-                        );
+                        return this.signalCoordinator.applyPositionDirective(signalResult);
                     }
                     // Non-position directive: propagate for pre-LLM augmentation
                     return {
@@ -565,10 +558,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // ── PARALLEL PRE-SIGNAL PHASE + ROUTING (Algorithm 5) ────────────────
             // When signalProcessor is present, run pre-signals in parallel with routing.
             // When absent, call the router directly (zero overhead, preserve current behavior).
-            if (this.agent.signalProcessor) {
+            if (this.signalCoordinator.enabled) {
                 // Run pre-signal phase in parallel with routing (Requirement 8.1)
                 const [signalResult, routingResult] = await Promise.all([
-                    this.responsePipeline.runPreSignalPhase(
+                    this.signalCoordinator.runPrePhase(
                         params.session, params.context, params.history,
                     ),
                     this.responsePipeline.handleRoutingAndStepSelection({
@@ -594,9 +587,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                 // ── Requirement 8.3: position directive → discard routing, apply signal position ──
                 if (hasDirectivePositionField(signalResult.mergedDirective)) {
-                    return this.applySignalPositionDirective(
-                        signalResult, params,
-                    );
+                    return this.signalCoordinator.applyPositionDirective(signalResult);
                 }
 
                 // ── Requirement 8.4: non-position directive → use routing, propagate augmentation ──
@@ -724,132 +715,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         } catch (error) {
             throw ResponseGenerationError.fromError(error, 'routing_optimization', params);
         }
-    }
-
-    /**
-     * Apply a signal's position directive (goTo, goToStep, complete, abort, reset).
-     * Discards routing result and uses the signal's position decision.
-     * @private
-     * @requirements 8.3
-     */
-    private applySignalPositionDirective(
-        signalResult: {
-            firings: SignalFiring<TContext, TData>[];
-            updatedSession: SessionState<TData>;
-            mergedDirective: Directive<TContext, TData> | undefined;
-        },
-        _params: { session: SessionState<TData>; history: Event[]; context: TContext },
-    ): {
-        selectedFlow?: Flow<TContext, TData>;
-        selectedStep?: Step<TContext, TData>;
-        responseDirectives?: string[];
-        session: SessionState<TData>;
-        isFlowComplete: boolean;
-        signalFirings?: SignalFiring<TContext, TData>[];
-        signalPreDirective?: Directive<TContext, TData>;
-        signalHalted?: boolean;
-        signalHaltReply?: string;
-    } {
-        const directive = signalResult.mergedDirective!;
-        let session = signalResult.updatedSession;
-        const flows = this.agent.getFlows();
-        let selectedFlow: Flow<TContext, TData> | undefined;
-        let selectedStep: Step<TContext, TData> | undefined;
-        let isFlowComplete = false;
-
-        // Apply data updates if present alongside position
-        if (directive.dataUpdate) {
-            session = mergeCollected(session, directive.dataUpdate);
-        }
-
-        if (directive.goTo) {
-            const flowTarget = typeof directive.goTo === 'string'
-                ? directive.goTo
-                : directive.goTo.flow ?? directive.goTo.step;
-
-            if (flowTarget) {
-                const targetFlow = flows.find(f => f.id === flowTarget || f.title === flowTarget);
-                if (targetFlow) {
-                    session = enterFlow(session, targetFlow.id, targetFlow.title);
-                    selectedFlow = targetFlow;
-
-                    if (typeof directive.goTo === 'object' && directive.goTo.step) {
-                        const targetStep = targetFlow.getStep(directive.goTo.step);
-                        if (targetStep) {
-                            session = enterStep(session, targetStep.id, targetStep.description);
-                            selectedStep = targetStep;
-                        }
-                    }
-                } else {
-                    logger.warn(`[Signals] Pre-phase goTo target not found: "${flowTarget}". Falling back to no flow.`);
-                }
-            }
-        } else if (directive.goToStep) {
-            const stepTarget = typeof directive.goToStep === 'string'
-                ? directive.goToStep
-                : directive.goToStep.step;
-            const flowTarget = typeof directive.goToStep === 'object'
-                ? directive.goToStep.flow
-                : undefined;
-
-            if (flowTarget) {
-                const targetFlow = flows.find(f => f.id === flowTarget || f.title === flowTarget);
-                if (targetFlow) {
-                    session = enterFlow(session, targetFlow.id, targetFlow.title);
-                    selectedFlow = targetFlow;
-                    const targetStep = targetFlow.getStep(stepTarget);
-                    if (targetStep) {
-                        session = enterStep(session, targetStep.id, targetStep.description);
-                        selectedStep = targetStep;
-                    }
-                }
-            } else if (session.currentFlow) {
-                const currentFlow = flows.find(f => f.id === session.currentFlow?.id);
-                if (currentFlow) {
-                    selectedFlow = currentFlow;
-                    const targetStep = currentFlow.getStep(stepTarget);
-                    if (targetStep) {
-                        session = enterStep(session, targetStep.id, targetStep.description);
-                        selectedStep = targetStep;
-                    }
-                }
-            }
-        } else if (directive.complete) {
-            isFlowComplete = true;
-        } else if (directive.abort) {
-            // Abort — no flow, session cleared or marked
-            isFlowComplete = true;
-        } else if (directive.reset) {
-            if (session.currentFlow) {
-                const currentFlow = flows.find(f => f.id === session.currentFlow?.id);
-                if (currentFlow) {
-                    selectedFlow = currentFlow;
-                    const resetStep = typeof directive.reset === 'object' && directive.reset.step
-                        ? directive.reset.step
-                        : undefined;
-                    if (resetStep) {
-                        const targetStep = currentFlow.getStep(resetStep);
-                        if (targetStep) {
-                            session = enterStep(session, targetStep.id, targetStep.description);
-                            selectedStep = targetStep;
-                        }
-                    } else {
-                        const initialStep = currentFlow.initialStep;
-                        session = enterStep(session, initialStep.id, initialStep.description);
-                        selectedStep = initialStep;
-                    }
-                }
-            }
-        }
-
-        return {
-            selectedFlow,
-            selectedStep,
-            session,
-            isFlowComplete,
-            signalFirings: signalResult.firings,
-            signalPreDirective: signalResult.mergedDirective || undefined,
-        };
     }
 
     /**
@@ -1093,18 +958,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (signalHalted) {
             const haltMessage = signalHaltReply || '';
             // Run post-signal phase even on halt (post-phase sees complete turn context)
-            const postResult = await this.responsePipeline.runPostSignalPhase(
-                session, effectiveContext, historyEvents,
-            );
-            session = postResult.updatedSession;
-            signalFirings.push(...postResult.firings);
-
-            // Apply post-phase position directive as pendingDirective (Requirement 9.3)
-            if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
-                session = { ...session, pendingDirective: postResult.mergedDirective };
-            }
-
-            const message = this.applyPostSignalReply(haltMessage, postResult.mergedDirective);
+            const post = await this.signalCoordinator.applyPostPhase({
+                session, context: effectiveContext, historyEvents, message: haltMessage,
+            });
+            session = post.session;
+            signalFirings.push(...post.firings);
+            const message = post.message;
 
             await this.sessionFinalizer.finalize(session, effectiveContext);
             return {
@@ -1266,22 +1125,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         // Runs after finalize/onComplete and before session persistence.
         // Post-phase signals see the complete turn result: assistant message in
         // history, collected data, tool results.
-        const postResult = await this.responsePipeline.runPostSignalPhase(
-            session, effectiveContext, historyEvents,
-        );
-        session = postResult.updatedSession;
-
+        const post = await this.signalCoordinator.applyPostPhase({
+            session, context: effectiveContext, historyEvents, message,
+        });
+        session = post.session;
         // Append post-phase firings to the accumulator (preserves fire order)
-        signalFirings.push(...postResult.firings);
-
-        // Requirement 9.3: Post-phase position directive sets session.pendingDirective
-        // (no mid-turn re-entry per D6 decision). Pre-LLM-only fields are already
-        // dropped inside runPostSignalPhase per Phase 4.5.
-        if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
-            session = { ...session, pendingDirective: postResult.mergedDirective };
-        }
-
-        message = this.applyPostSignalReply(message, postResult.mergedDirective);
+        signalFirings.push(...post.firings);
+        message = post.message;
 
         // Ensure response structure completeness (Requirement 8.1, 8.2, 8.3)
         // - executedSteps: array of steps executed (empty array if none)
@@ -1563,17 +1413,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         if (signalHalted) {
             const haltMessage = signalHaltReply || '';
             // Run post-signal phase even on halt
-            const postResult = await this.responsePipeline.runPostSignalPhase(
-                session, effectiveContext, historyEvents,
-            );
-            session = postResult.updatedSession;
-            signalFirings.push(...postResult.firings);
-
-            if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
-                session = { ...session, pendingDirective: postResult.mergedDirective };
-            }
-
-            const message = this.applyPostSignalReply(haltMessage, postResult.mergedDirective);
+            const post = await this.signalCoordinator.applyPostPhase({
+                session, context: effectiveContext, historyEvents, message: haltMessage,
+            });
+            session = post.session;
+            signalFirings.push(...post.firings);
+            const message = post.message;
 
             await this.sessionFinalizer.finalize(session, effectiveContext);
             yield {
@@ -1697,21 +1542,17 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         for await (const chunk of innerStream!) {
             if (chunk.done) {
                 // Run post-signal phase on final chunk (Requirement 9.1, 9.2)
-                const postResult = await this.responsePipeline.runPostSignalPhase(
-                    chunk.session || session, effectiveContext, historyEvents,
-                );
-                let finalSession = postResult.updatedSession;
-                signalFirings.push(...postResult.firings);
+                const post = await this.signalCoordinator.applyPostPhase({
+                    session: chunk.session || session,
+                    context: effectiveContext,
+                    historyEvents,
+                    message: chunk.accumulated,
+                });
+                const finalSession = post.session;
+                signalFirings.push(...post.firings);
 
-                // Requirement 9.3: Post-phase position directive sets session.pendingDirective
-                if (postResult.mergedDirective && hasDirectivePositionField(postResult.mergedDirective)) {
-                    finalSession = { ...finalSession, pendingDirective: postResult.mergedDirective };
-                }
-
-                const accumulated = this.applyPostSignalReply(chunk.accumulated, postResult.mergedDirective);
-                const delta = postResult.mergedDirective?.reply !== undefined
-                    ? accumulated
-                    : chunk.delta;
+                const accumulated = post.message;
+                const delta = post.replyOverridden ? accumulated : chunk.delta;
 
                 yield {
                     ...chunk,

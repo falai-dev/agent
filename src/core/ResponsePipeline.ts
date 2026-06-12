@@ -8,8 +8,6 @@ import type {
   SessionState,
   Directive,
 } from "../types";
-import type { SignalFiring } from "../types/signals";
-import type { SignalProcessor } from "./SignalProcessor";
 import {
   createSession,
   enterStep,
@@ -78,8 +76,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   constructor(
     private readonly options: AgentOptions<TContext, TData>,
     private readonly getFlows: () => Flow<TContext, TData>[],
-    private readonly flowRouter: FlowRouter<TContext, TData>,
-    private readonly signalProcessor?: SignalProcessor<TContext, TData>
+    private readonly flowRouter: FlowRouter<TContext, TData>
   ) { }
 
   /**
@@ -109,75 +106,6 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
    */
   createDirectiveBus(): DirectiveBus<TContext, TData> {
     return new DirectiveBus<TContext, TData>();
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Signal pipeline phases
-  // ──────────────────────────────────────────────────────────────────────────
-
-  /**
-   * PRE-SIGNAL PHASE — Evaluates pre/both signals in parallel with routing.
-   *
-   * Delegates to `signalProcessor.runPreSignalPhase(...)` when configured.
-   * When no signal processor is present (zero-cost path), returns a stable
-   * empty shape so callers don't need to branch.
-   *
-   * @requirements 2.1, 2.3, 8.6, 13.3
-   */
-  async runPreSignalPhase(
-    session: SessionState<TData>,
-    context: TContext,
-    history: Event[],
-  ): Promise<{
-    firings: SignalFiring<TContext, TData>[];
-    updatedSession: SessionState<TData>;
-    mergedDirective: Directive<TContext, TData> | undefined;
-  }> {
-    if (!this.signalProcessor) {
-      return { firings: [], updatedSession: session, mergedDirective: undefined };
-    }
-    const result = await this.signalProcessor.runPreSignalPhase({ session, history, context });
-    return {
-      firings: result.firings,
-      updatedSession: result.updatedSession,
-      mergedDirective: result.mergedDirective,
-    };
-  }
-
-  /**
-   * POST-SIGNAL PHASE — Evaluates post/both signals after finalize/onComplete.
-   *
-   * Delegates to `signalProcessor.runPostSignalPhase(...)` when configured.
-   * When no signal processor is present, returns a stable empty shape.
-   *
-   * Post-phase signals see the complete turn result: assistant message in history,
-   * collected data, tool results. Position directives from this phase set
-   * `session.pendingDirective` (no mid-turn re-entry per D6 decision).
-   *
-   * Pre-LLM-only fields (`appendPrompt`, `injectTools`, `halt`) are already
-   * dropped inside `runPostSignalPhase` per Phase 4.5 — this seam does NOT
-   * re-introduce them.
-   *
-   * @requirements 9.1, 9.2, 9.3, 9.4
-   */
-  async runPostSignalPhase(
-    session: SessionState<TData>,
-    context: TContext,
-    history: Event[],
-  ): Promise<{
-    firings: SignalFiring<TContext, TData>[];
-    updatedSession: SessionState<TData>;
-    mergedDirective: Directive<TContext, TData> | undefined;
-  }> {
-    if (!this.signalProcessor) {
-      return { firings: [], updatedSession: session, mergedDirective: undefined };
-    }
-    const result = await this.signalProcessor.runPostSignalPhase({ session, history, context });
-    return {
-      firings: result.firings,
-      updatedSession: result.updatedSession,
-      mergedDirective: result.mergedDirective,
-    };
   }
 
   /**
