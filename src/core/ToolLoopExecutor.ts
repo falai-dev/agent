@@ -84,7 +84,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
             // Execute initial dynamic tool calls
             if (toolCalls && toolCalls.length > 0) {
-                logger.debug(`[ResponseModal] Executing ${toolCalls.length} dynamic tool calls:`, toolCalls.map(tc => tc.toolName));
+                logger.debug(`[ToolLoopExecutor] Executing ${toolCalls.length} dynamic tool calls:`, toolCalls.map(tc => tc.toolName));
 
                 for (const toolCall of toolCalls) {
                     const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
@@ -96,7 +96,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                     try {
                         // Use ToolManager for unified tool execution
                         const toolResult = await this.deps.toolManager.executeTool({
-                            tool: tool,
+                            tool,
                             context,
                             updateContext: this.deps.updateContext,
                             updateData: this.deps.updateCollectedData,
@@ -111,7 +111,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
                         // Check if tool execution was successful
                         if (!toolResult.success) {
-                            logger.error(`[ResponseModal] Tool execution failed: ${toolCall.toolName} - ${toolResult.error}`);
+                            logger.error(`[ToolLoopExecutor] Tool execution failed: ${toolCall.toolName} - ${toolResult.error}`);
                             // Continue with other tools rather than failing completely
                             continue;
                         }
@@ -121,7 +121,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                             try {
                                 await this.deps.updateContext(toolResult.contextUpdate as Partial<TContext>);
                             } catch (error) {
-                                logger.error(`[ResponseModal] Failed to update context from tool ${toolCall.toolName}:`, error);
+                                logger.error(`[ToolLoopExecutor] Failed to update context from tool ${toolCall.toolName}:`, error);
                                 // Continue execution but log the error
                             }
                         }
@@ -130,16 +130,16 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                         if (toolResult.dataUpdate) {
                             try {
                                 session = await this.deps.updateSessionData(session, toolResult.dataUpdate as Partial<TData>);
-                                logger.debug(`[ResponseModal] Tool updated collected data:`, toolResult.dataUpdate);
+                                logger.debug(`[ToolLoopExecutor] Tool updated collected data:`, toolResult.dataUpdate);
                             } catch (error) {
-                                logger.error(`[ResponseModal] Failed to update data from tool ${toolCall.toolName}:`, error);
+                                logger.error(`[ToolLoopExecutor] Failed to update data from tool ${toolCall.toolName}:`, error);
                                 // Continue execution but log the error
                             }
                         }
 
-                        logger.debug(`[ResponseModal] Executed dynamic tool: ${toolCall.toolName} (success: ${toolResult.success})`);
+                        logger.debug(`[ToolLoopExecutor] Executed dynamic tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                     } catch (error) {
-                        logger.error(`[ResponseModal] Tool execution error for ${toolCall.toolName}:`, error);
+                        logger.error(`[ToolLoopExecutor] Tool execution error for ${toolCall.toolName}:`, error);
                         // Continue with other tools rather than failing the entire response
                         continue;
                     }
@@ -155,7 +155,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
             while (hasToolCalls && toolLoopCount < MAX_TOOL_LOOPS) {
                 toolLoopCount++;
-                logger.debug(`[ResponseModal] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS} with ${toolCalls?.length || 0} tool calls`);
+                logger.debug(`[ToolLoopExecutor] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS} with ${toolCalls?.length || 0} tool calls`);
 
                 // Create tool result history items
                 const toolResultHistoryItems: HistoryItem[] = [];
@@ -191,7 +191,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 const agentOptions = this.deps.getAgentOptions();
                 const shouldProvideTools = toolLoopCount === 1;
 
-                logger.debug(`[ResponseModal] Making follow-up AI call (loop ${toolLoopCount}):`, {
+                logger.debug(`[ToolLoopExecutor] Making follow-up AI call (loop ${toolLoopCount}):`, {
                     providingTools: shouldProvideTools,
                     toolsCount: shouldProvideTools ? availableTools.length : 0,
                     addingTextInstruction: toolLoopCount > 1,
@@ -213,7 +213,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 const followUpToolCalls = followUpResult.structured?.toolCalls;
                 hasToolCalls = followUpToolCalls && followUpToolCalls.length > 0;
 
-                logger.debug(`[ResponseModal] Follow-up AI response (loop ${toolLoopCount}):`, {
+                logger.debug(`[ToolLoopExecutor] Follow-up AI response (loop ${toolLoopCount}):`, {
                     hasMessage: !!followUpResult.message,
                     messageLength: followUpResult.message?.length || 0,
                     hasToolCalls,
@@ -222,7 +222,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 });
 
                 if (hasToolCalls) {
-                    logger.debug(`[ResponseModal] Follow-up call produced ${followUpToolCalls!.length} additional tool calls`);
+                    logger.debug(`[ToolLoopExecutor] Follow-up call produced ${followUpToolCalls!.length} additional tool calls`);
 
                     // Execute the follow-up tool calls
                     for (const toolCall of followUpToolCalls!) {
@@ -235,7 +235,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                         try {
                             // Use ToolManager for unified tool execution
                             const toolResult = await this.deps.toolManager.executeTool({
-                                tool: tool,
+                                tool,
                                 context,
                                 updateContext: this.deps.updateContext,
                                 updateData: this.deps.updateCollectedData,
@@ -246,7 +246,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
                             // Check if tool execution was successful
                             if (!toolResult.success) {
-                                logger.error(`[ResponseModal] Follow-up tool execution failed: ${toolCall.toolName} - ${toolResult.error}`);
+                                logger.error(`[ToolLoopExecutor] Follow-up tool execution failed: ${toolCall.toolName} - ${toolResult.error}`);
                                 continue;
                             }
 
@@ -255,16 +255,16 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                                 try {
                                     await this.deps.updateContext(toolResult.contextUpdate as Partial<TContext>);
                                 } catch (error) {
-                                    logger.error(`[ResponseModal] Failed to update context from follow-up tool ${toolCall.toolName}:`, error);
+                                    logger.error(`[ToolLoopExecutor] Failed to update context from follow-up tool ${toolCall.toolName}:`, error);
                                 }
                             }
 
                             if (toolResult.dataUpdate) {
                                 try {
                                     session = await this.deps.updateSessionData(session, toolResult.dataUpdate as Partial<TData>);
-                                    logger.debug(`[ResponseModal] Follow-up tool updated collected data:`, toolResult.dataUpdate);
+                                    logger.debug(`[ToolLoopExecutor] Follow-up tool updated collected data:`, toolResult.dataUpdate);
                                 } catch (error) {
-                                    logger.error(`[ResponseModal] Failed to update data from follow-up tool ${toolCall.toolName}:`, error);
+                                    logger.error(`[ToolLoopExecutor] Failed to update data from follow-up tool ${toolCall.toolName}:`, error);
                                 }
                             }
 
@@ -272,9 +272,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                             toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
                             toolArgsMap.set(toolCall.toolName, toolCall.arguments);
 
-                            logger.debug(`[ResponseModal] Executed follow-up tool: ${toolCall.toolName} (success: ${toolResult.success})`);
+                            logger.debug(`[ToolLoopExecutor] Executed follow-up tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                         } catch (error) {
-                            logger.error(`[ResponseModal] Follow-up tool execution error for ${toolCall.toolName}:`, error);
+                            logger.error(`[ToolLoopExecutor] Follow-up tool execution error for ${toolCall.toolName}:`, error);
                             continue;
                         }
                     }
@@ -282,7 +282,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                     // Update toolCalls for next iteration or final response
                     toolCalls = followUpToolCalls;
                 } else {
-                    logger.debug(`[ResponseModal] Tool loop completed after ${toolLoopCount} iterations`);
+                    logger.debug(`[ToolLoopExecutor] Tool loop completed after ${toolLoopCount} iterations`);
                     // Update final message and toolCalls from follow-up result if no more tools
                     finalMessage = followUpResult.structured?.message || followUpResult.message;
                     followUpStructured = followUpResult.structured;
@@ -300,7 +300,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             // This prevents the original tool-invocation message (e.g. "Let me check...")
             // from being returned as the final user-facing response.
             if (!finalMessage && toolLoopCount > 0) {
-                logger.debug(`[ResponseModal] No final message after tool loop, making additional LLM call for text response`);
+                logger.debug(`[ToolLoopExecutor] No final message after tool loop, making additional LLM call for text response`);
 
                 // Build tool result history from toolResultsMap which contains ALL
                 // tool executions (initial + follow-up). We can't use `toolCalls` here
@@ -346,17 +346,17 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                         followUpStructured = textResult.structured;
                     }
 
-                    logger.debug(`[ResponseModal] Generated final text response after tool loop:`, {
+                    logger.debug(`[ToolLoopExecutor] Generated final text response after tool loop:`, {
                         hasMessage: !!finalMessage,
                         messageLength: finalMessage?.length || 0,
                     });
                 } catch (error) {
-                    logger.error(`[ResponseModal] Failed to generate final text response after tool loop:`, error);
+                    logger.error(`[ToolLoopExecutor] Failed to generate final text response after tool loop:`, error);
                     // finalMessage remains undefined; caller will use original message as fallback
                 }
             }
 
-            logger.debug(`[ResponseModal] Tool loop completed:`, {
+            logger.debug(`[ToolLoopExecutor] Tool loop completed:`, {
                 totalIterations: toolLoopCount,
                 hasFinalMessage: !!finalMessage,
                 finalMessageLength: finalMessage?.length || 0,
@@ -437,7 +437,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                     try {
                         await this.deps.updateContext(update.contextUpdate as Partial<TContext>);
                     } catch (error) {
-                        logger.error(`[ResponseModal] Failed to update context from concurrent tool:`, error);
+                        logger.error(`[ToolLoopExecutor] Failed to update context from concurrent tool:`, error);
                     }
                 }
 
@@ -446,7 +446,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                     try {
                         session = await this.deps.updateSessionData(session, update.dataUpdate);
                     } catch (error) {
-                        logger.error(`[ResponseModal] Failed to update data from concurrent tool:`, error);
+                        logger.error(`[ToolLoopExecutor] Failed to update data from concurrent tool:`, error);
                     }
                 }
 
@@ -464,9 +464,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 }
             }
 
-            logger.debug(`[ResponseModal] Concurrent tool execution completed for ${toolCallRequests.length} tools`);
+            logger.debug(`[ToolLoopExecutor] Concurrent tool execution completed for ${toolCallRequests.length} tools`);
         } catch (error) {
-            logger.error(`[ResponseModal] Concurrent tool execution failed, falling back to sequential:`, error);
+            logger.error(`[ToolLoopExecutor] Concurrent tool execution failed, falling back to sequential:`, error);
             // Fall back to the unified tool loop on failure
             const toolResult = await this.runLoop({
                 toolCalls, context, session, history, selectedFlow,

@@ -45,12 +45,12 @@ export class SessionFinalizer<TContext = unknown, TData = unknown> {
                 if (result.strategy !== 'none') {
                     session.history = result.history;
                     logger.info(
-                        `[ResponseModal] Compaction applied: strategy='${result.strategy}', ` +
+                        `[SessionFinalizer] Compaction applied: strategy='${result.strategy}', ` +
                         `estimatedTokens=${result.estimatedTokens}, messagesCompacted=${result.messagesCompacted}`
                     );
                 }
             } catch (error) {
-                logger.warn("[ResponseModal] Compaction failed at finalize, continuing without compaction", error);
+                logger.warn("[SessionFinalizer] Compaction failed at finalize, continuing without compaction", error);
             }
         }
 
@@ -63,7 +63,7 @@ export class SessionFinalizer<TContext = unknown, TData = unknown> {
             (this.deps.enableAutoSave !== false && agentOptions.persistence?.autoSave !== false)
         ) {
             await persistenceManager.saveSessionState(session.id, session);
-            logger.debug(`[ResponseModal] Auto-saved session step to persistence: ${session.id}`);
+            logger.debug(`[SessionFinalizer] Auto-saved session step to persistence: ${session.id}`);
         }
 
         // Execute finalize function

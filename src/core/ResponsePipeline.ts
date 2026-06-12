@@ -26,7 +26,6 @@ import { Step, FlowConfigurationError } from "../core/Step";
 import { FlowRouter } from "./FlowRouter";
 import { evaluateBranches, createAiConditionEvaluator } from "./BranchEvaluator";
 import { DirectiveChainTracker } from "./DirectiveChainTracker";
-import { DirectiveBus } from "./DirectiveBus";
 import { ResponseGenerationError } from "./ResponseGenerationError";
 import type { SignalCoordinator } from "./SignalCoordinator";
 
@@ -109,15 +108,6 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Create a fresh DirectiveBus for a new turn.
-   * The bus collects directives from hooks, tools, and branches during the turn
-   * and merges them at phase boundaries via Algorithm 4.
-   */
-  createDirectiveBus(): DirectiveBus<TContext, TData> {
-    return new DirectiveBus<TContext, TData>();
-  }
-
-  /**
    * Prepare context and session for response generation
    */
   async prepareResponseContext(params: {
@@ -182,7 +172,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     if (targetSession.pendingDirective) {
       const directive = targetSession.pendingDirective;
       logger.debug(
-        `[ResponseHandler] Applying pending directive at start of turn`
+        `[ResponsePipeline] Applying pending directive at start of turn`
       );
 
       // Track directive chain depth (Requirement 22.1)
@@ -218,7 +208,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
           if (targetFlow) {
             logger.debug(
-              `[ResponseHandler] Pending directive goTo → flow: ${targetFlow.title}`
+              `[ResponsePipeline] Pending directive goTo → flow: ${targetFlow.title}`
             );
             targetSession = enterFlow(
               targetSession,
@@ -348,7 +338,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       // Log if flow is complete
       if (isFlowComplete) {
         logger.debug(
-          `[ResponseHandler] Flow complete: all required data collected or last step reached`
+          `[ResponsePipeline] Flow complete: all required data collected or last step reached`
         );
       }
     }
@@ -389,7 +379,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     // branches or linear/AI selection — the caller applies the bus directive.
     if (hasDirectivePositionField(busDirective)) {
       logger.debug(
-        `[ResponseHandler] Directive bus winner has position field — skipping branch evaluation and linear/AI selection`,
+        `[ResponsePipeline] Directive bus winner has position field — skipping branch evaluation and linear/AI selection`,
       );
       return { nextStep: undefined, session };
     }
@@ -438,7 +428,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       if (candidates.length > 0) {
         nextStep = candidates[0].step;
         logger.debug(
-          `[ResponseHandler] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`
+          `[ResponsePipeline] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`
         );
       } else {
         // Fallback to initial step even if it should be skipped
@@ -457,7 +447,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       );
       if (missingRequires.length > 0) {
         logger.debug(
-          `[ResponseHandler] Cannot enter step "${nextStep.id}": missing required fields [${missingRequires.join(', ')}]. Staying at current step.`
+          `[ResponsePipeline] Cannot enter step "${nextStep.id}": missing required fields [${missingRequires.join(', ')}]. Staying at current step.`
         );
         // Stay at current step - don't enter the next one
         const currentStepId = session.currentStep?.id;
@@ -477,7 +467,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       nextStep.id,
       nextStep.description
     );
-    logger.debug(`[ResponseHandler] Entered step: ${nextStep.id}`);
+    logger.debug(`[ResponsePipeline] Entered step: ${nextStep.id}`);
 
     return { nextStep, session: updatedSession };
   }
@@ -537,7 +527,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     const localStep = selectedFlow.getStep(result);
     if (localStep) {
       const updatedSession = enterStep(session, localStep.id, localStep.description);
-      logger.debug(`[ResponseHandler] Branch resolved to local step: ${localStep.id}`);
+      logger.debug(`[ResponsePipeline] Branch resolved to local step: ${localStep.id}`);
       return { nextStep: localStep, session: updatedSession };
     }
 
@@ -546,7 +536,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     const targetFlow = flows.find(f => f.id === result || f.title === result);
     if (targetFlow) {
       // Treat as applyDirective({ goTo: result }) — enter the target flow
-      logger.debug(`[ResponseHandler] Branch resolved to flow: ${targetFlow.title}`);
+      logger.debug(`[ResponsePipeline] Branch resolved to flow: ${targetFlow.title}`);
       const updatedSession = enterFlow(session, targetFlow.id, targetFlow.title);
       return { nextStep: undefined, session: updatedSession, flowChanged: targetFlow };
     }
@@ -596,7 +586,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           updatedSession = enterStep(updatedSession, stepTarget);
           // Try to resolve the target step instance for the caller
           const targetStepInstance = targetFlow.getStep(stepTarget);
-          logger.debug(`[ResponseHandler] Branch directive goToStep → ${flowTarget}.${stepTarget}`);
+          logger.debug(`[ResponsePipeline] Branch directive goToStep → ${flowTarget}.${stepTarget}`);
           return { nextStep: targetStepInstance || undefined, session: updatedSession, flowChanged: targetFlow };
         }
         throw new FlowConfigurationError(
@@ -609,7 +599,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       const targetStep = selectedFlow.getStep(stepTarget);
       if (targetStep) {
         updatedSession = enterStep(updatedSession, targetStep.id, targetStep.description);
-        logger.debug(`[ResponseHandler] Branch directive goToStep → ${targetStep.id}`);
+        logger.debug(`[ResponsePipeline] Branch directive goToStep → ${targetStep.id}`);
         return { nextStep: targetStep, session: updatedSession };
       }
       throw new FlowConfigurationError(
@@ -634,7 +624,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
             updatedSession = enterStep(updatedSession, directive.goTo.step);
           }
 
-          logger.debug(`[ResponseHandler] Branch directive goTo → ${targetFlow.title}`);
+          logger.debug(`[ResponsePipeline] Branch directive goTo → ${targetFlow.title}`);
           return { nextStep: undefined, session: updatedSession, flowChanged: targetFlow };
         }
         throw new FlowConfigurationError(
@@ -645,12 +635,12 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     }
 
     if (directive.complete) {
-      logger.debug(`[ResponseHandler] Branch directive complete`);
+      logger.debug(`[ResponsePipeline] Branch directive complete`);
       return { nextStep: undefined, session: updatedSession };
     }
 
     if (directive.abort) {
-      logger.debug(`[ResponseHandler] Branch directive abort`);
+      logger.debug(`[ResponsePipeline] Branch directive abort`);
       return { nextStep: undefined, session: updatedSession };
     }
 
@@ -668,7 +658,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       // Reset to initial step
       const initialStep = selectedFlow.initialStep;
       updatedSession = enterStep(updatedSession, initialStep.id, initialStep.description);
-      logger.debug(`[ResponseHandler] Branch directive reset → ${initialStep.id}`);
+      logger.debug(`[ResponsePipeline] Branch directive reset → ${initialStep.id}`);
       return { nextStep: initialStep, session: updatedSession };
     }
 
@@ -804,7 +794,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         if (routingResult.selectedFlow && !isFlowComplete) {
           if (this.shouldPreExtractData(routingResult.selectedFlow)) {
             logger.debug(
-              `[ResponseModal] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
+              `[ResponsePipeline] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
             );
             const extractedData = await this.preExtractFlowData({
               route: routingResult.selectedFlow,
@@ -814,7 +804,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
               signal: params.signal,
             });
             if (extractedData && Object.keys(extractedData).length > 0) {
-              logger.debug(`[ResponseModal] Pre-extracted data:`, extractedData);
+              logger.debug(`[ResponsePipeline] Pre-extracted data:`, extractedData);
               updatedSession = mergeCollected(updatedSession, extractedData);
               await this.updateCollectedData(extractedData);
             }
@@ -859,7 +849,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         // This ensures step selection has the most up-to-date data
         if (this.shouldPreExtractData(routingResult.selectedFlow)) {
           logger.debug(
-            `[ResponseModal] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
+            `[ResponsePipeline] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
           );
 
           const extractedData = await this.preExtractFlowData({
@@ -872,7 +862,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
           if (extractedData && Object.keys(extractedData).length > 0) {
             logger.debug(
-              `[ResponseModal] Pre-extracted data:`,
+              `[ResponsePipeline] Pre-extracted data:`,
               extractedData
             );
             // Merge pre-extracted data into session before step selection
@@ -940,7 +930,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         ? selectedFlow.getStep(session.currentStep.id)
         : undefined;
 
-      logger.debug(`[ResponseModal] Step determination: flow match=${isInSameFlow}, currentFlow=${session.currentFlow?.id}, selectedFlow=${selectedFlow.id}, currentStep=${currentStep?.id || 'none'}`);
+      logger.debug(`[ResponsePipeline] Step determination: flow match=${isInSameFlow}, currentFlow=${session.currentFlow?.id}, selectedFlow=${selectedFlow.id}, currentStep=${currentStep?.id || 'none'}`);
 
       // STEP 1 (Algorithm 1): branches win over linear chain
       if (currentStep?.branches && currentStep.branches.length > 0) {
@@ -966,11 +956,11 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           createTemplateContext({ data: session.data, session, context })
         );
 
-        logger.debug(`[ResponseModal] Found ${candidates.length} candidate steps${currentStep ? ' from current step ' + currentStep.id : ' (new flow entry)'}`);
+        logger.debug(`[ResponsePipeline] Found ${candidates.length} candidate steps${currentStep ? ' from current step ' + currentStep.id : ' (new flow entry)'}`);
 
         if (candidates.length > 0) {
           nextStep = candidates[0].step;
-          logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`);
+          logger.debug(`[ResponsePipeline] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`);
         } else {
           // Fallback to initial step even if it should be skipped
           nextStep = selectedFlow.initialStep;
@@ -997,16 +987,16 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           const currentStepInstance = selectedFlow.getStep(currentStepId);
           if (currentStepInstance) {
             nextStep = currentStepInstance;
-            logger.debug(`[ResponseModal] Staying at current step: ${nextStep.id} due to missing requires`);
+            logger.debug(`[ResponsePipeline] Staying at current step: ${nextStep.id} due to missing requires`);
           }
         }
       } else {
         session = enterStep(session, nextStep.id, nextStep.description);
-        logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+        logger.debug(`[ResponsePipeline] Entered step: ${nextStep.id}`);
       }
     } else {
       session = enterStep(session, nextStep.id, nextStep.description);
-      logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+      logger.debug(`[ResponsePipeline] Entered step: ${nextStep.id}`);
     }
 
     return { nextStep, session, flowTransition: false };
@@ -1095,7 +1085,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
     // ROUTING SKIP: pre-extraction populated collect fields → retain current flow/step
     logger.debug(
-      `[ResponseModal] Routing skip: pre-extraction populated collect fields [${populatedCollectFields.join(', ')}] for step "${currentStep.id}" — skipping FlowRouter`
+      `[ResponsePipeline] Routing skip: pre-extraction populated collect fields [${populatedCollectFields.join(', ')}] for step "${currentStep.id}" — skipping FlowRouter`
     );
 
     // Merge extracted data into session
@@ -1117,7 +1107,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       selectedStep: stepResult.nextStep,
       responseDirectives: undefined,
       session: stepResult.session,
-      isFlowComplete: stepResult.flowChanged ? false : false,
+      isFlowComplete: false,
     };
   }
 
@@ -1158,7 +1148,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     // Build a schema for data extraction based on flow's fields
     const extractionSchema = this.getSchema();
     if (!extractionSchema) {
-      logger.warn(`[ResponseModal] No schema available for pre-extraction`);
+      logger.warn(`[ResponsePipeline] No schema available for pre-extraction`);
       return {};
     }
 
@@ -1209,7 +1199,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
       return result.structured || {};
     } catch (error) {
-      logger.error(`[ResponseModal] Pre-extraction failed:`, error);
+      logger.error(`[ResponsePipeline] Pre-extraction failed:`, error);
       return {};
     }
   }

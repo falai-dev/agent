@@ -222,7 +222,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Generate response using unified logic
             const result = await this.generateUnifiedResponse(responseContext);
 
-            // Finalize session
+            // Finalize session — the non-streaming turn's single finalize
             await this.sessionFinalizer.finalize(result.session!, responseContext.effectiveContext);
 
             return result;
@@ -597,8 +597,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         let executedSteps: StepRef[] | undefined;
         let stoppedReason: StoppedReason | undefined;
         let appliedInstructions: AppliedInstruction[] | undefined;
-
-
 
         if (selectedFlow && !isFlowComplete) {
             // AUTO-CHAIN: Walk consecutive auto-steps before any LLM work.
@@ -1201,7 +1199,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 accumulated: effectiveReply,
                 done: true,
                 session,
-                stoppedReason: 'reply' as StoppedReason,
+                stoppedReason: 'reply',
                 executedSteps: [{ id: nextStep.id, flowId: selectedFlow.id }],
             } as AgentResponseStreamChunk<TData>;
             return;
@@ -1486,10 +1484,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         return nextSession;
     }
 
-    /**
-     * Stream flow completion response
-     * @private
-     */
     /**
      * Stream a flow completion as a single terminal chunk.
      *

@@ -509,13 +509,3 @@ describe("DirectiveBus: clear and drainAll", () => {
         expect(bus.drainAll()).toBeUndefined();
     });
 });
-
-// ─── Integration with ResponsePipeline ───────────────────────────────────────
-
-describe("DirectiveBus: ResponsePipeline integration", () => {
-    test("createDirectiveBus is available on ResponsePipeline", async () => {
-        // Import ResponsePipeline to verify the method exists
-        const { ResponsePipeline } = await import("../src/core/ResponsePipeline");
-        expect(ResponsePipeline.prototype.createDirectiveBus).toBeTypeOf("function");
-    });
-});

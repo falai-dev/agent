@@ -35,11 +35,11 @@ export class StepLifecycle<TContext = unknown, TData = unknown> {
                 const currentStep = currentFlow.getStep(session.currentStep.id);
                 // Skip auto-steps — their prepare is handled by AutoChainExecutor
                 if (currentStep?.auto) {
-                    logger.debug(`[ResponseModal] Skipping pre-routing prepare for auto-step: ${currentStep.id}`);
+                    logger.debug(`[StepLifecycle] Skipping pre-routing prepare for auto-step: ${currentStep.id}`);
                     return;
                 }
                 if (currentStep?.prepare) {
-                    logger.debug(`[ResponseModal] Executing prepare for step: ${currentStep.id}`);
+                    logger.debug(`[StepLifecycle] Executing prepare for step: ${currentStep.id}`);
                     await this.executePrepareFinalize(
                         currentStep.prepare,
                         context,
@@ -64,7 +64,7 @@ export class StepLifecycle<TContext = unknown, TData = unknown> {
                 const currentStep = currentFlow.getStep(session.currentStep.id);
                 if (currentStep?.finalize) {
                     logger.debug(
-                        `[ResponseModal] Executing finalize for step: ${currentStep.id}`
+                        `[StepLifecycle] Executing finalize for step: ${currentStep.id}`
                     );
                     await this.executePrepareFinalize(
                         currentStep.finalize,
@@ -122,13 +122,13 @@ export class StepLifecycle<TContext = unknown, TData = unknown> {
 
                 if (!result.success) {
                     logger.error(
-                        `[ResponseModal] Tool execution failed in prepare/finalize: ${result.error}`
+                        `[StepLifecycle] Tool execution failed in prepare/finalize: ${result.error}`
                     );
                     throw new Error(`Tool execution failed: ${result.error}`);
                 }
             } else {
                 logger.warn(
-                    `[ResponseModal] Tool not found for prepare/finalize: ${typeof prepareOrFinalize === "string"
+                    `[StepLifecycle] Tool not found for prepare/finalize: ${typeof prepareOrFinalize === "string"
                         ? prepareOrFinalize
                         : "inline tool"
                     }`
