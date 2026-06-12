@@ -4,6 +4,10 @@ All notable changes to `@falai/agent` will be documented in this file.
 
 ## [2.4.1]
 
+### Fixed
+
+- **Sessions now finalize exactly once per turn.** Non-streaming halt paths (signal halt, auto-chain halt/complete) previously finalized twice — running the step `finalize` hook and the persistence auto-save a second time. Streaming previously persisted the session *before* the post-signal phase, so a post-signal `pendingDirective` was never persisted for `respondStream()`-only callers, and the branch flow-transition chunk never finalized at all. Both paths now run post-signal phase → finalize, once.
+
 ### Internal
 
 - **Response layer decomposition** (no behavior change; the public API surface is untouched). `ResponseModal` (~2,900 lines owning roughly eleven concerns) is now a thin coordinator over focused collaborators:
