@@ -7,13 +7,17 @@ import type {
   Event,
   SessionState,
   Directive,
+  StructuredSchema,
 } from "../types";
+import type { SignalFiring } from "../types/signals";
 import {
   createSession,
   enterStep,
   mergeCollected,
   logger,
   historyToEvents,
+  eventsToHistory,
+  getLastMessageFromHistory,
 } from "../utils";
 import { enterFlow } from "../utils/session";
 import { createTemplateContext } from "../utils/template";
@@ -23,6 +27,8 @@ import { FlowRouter } from "./FlowRouter";
 import { evaluateBranches, createAiConditionEvaluator } from "./BranchEvaluator";
 import { DirectiveChainTracker } from "./DirectiveChainTracker";
 import { DirectiveBus } from "./DirectiveBus";
+import { ResponseGenerationError } from "./ResponseGenerationError";
+import type { SignalCoordinator } from "./SignalCoordinator";
 
 /**
  * Position fields on a Directive that represent a navigation decision.
@@ -76,7 +82,10 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   constructor(
     private readonly options: AgentOptions<TContext, TData>,
     private readonly getFlows: () => Flow<TContext, TData>[],
-    private readonly flowRouter: FlowRouter<TContext, TData>
+    private readonly flowRouter: FlowRouter<TContext, TData>,
+    private readonly signalCoordinator: SignalCoordinator<TContext, TData>,
+    private readonly updateCollectedData: (updates: Partial<TData>) => Promise<void>,
+    private readonly getSchema: () => StructuredSchema | undefined
   ) { }
 
   /**
@@ -666,6 +675,543 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     // Directive with only non-position fields (e.g., just dataUpdate/contextUpdate/reply)
     // No position change — fall through to linear selection
     return { nextStep: undefined, session: updatedSession };
+  }
+
+
+  /**
+   * TURN ROUTING + STEP SELECTION — the single entry point for deciding which
+   * flow and step a turn renders. Runs the routing-skip optimization, the
+   * pre-signal phase (parallel with routing when a processor is configured),
+   * pre-extraction, and next-step determination.
+   */
+  async routeAndSelectStep(params: {
+    session: SessionState<TData>;
+    history: Event[]; // Use Event[] for internal processing
+    context: TContext;
+    signal?: AbortSignal;
+  }): Promise<{
+    selectedFlow?: Flow<TContext, TData>;
+    selectedStep?: Step<TContext, TData>;
+    responseDirectives?: string[];
+    session: SessionState<TData>;
+    isFlowComplete: boolean;
+    /** Signal firings from the pre-phase (threaded through for response surface). */
+    signalFirings?: SignalFiring<TContext, TData>[];
+    /** Non-position signal directive for pre-LLM augmentation (appendPrompt, injectTools, etc). */
+    signalPreDirective?: Directive<TContext, TData>;
+    /** Pre-signal phase halted the turn. */
+    signalHalted?: boolean;
+    /** Reply text from the halt directive. */
+    signalHaltReply?: string;
+  }> {
+    try {
+      // Create a fresh chain tracker for this turn (Requirement 22.1)
+      this.createChainTracker();
+
+      // ROUTING SKIP OPTIMIZATION (Requirements 20.1, 20.2, 20.3):
+      // When the current step has collect fields AND pre-extraction populates at least
+      // one of those fields, skip FlowRouter.decideFlowAndStep for this turn.
+      const routingSkipResult = await this.attemptRoutingSkipForCollect(params);
+      if (routingSkipResult) {
+        // Even when routing is skipped, run pre-signal phase if processor is present
+        if (this.signalCoordinator.enabled) {
+          const signalResult = await this.signalCoordinator.runPrePhase(
+            params.session, params.context, params.history,
+          );
+          // If signal halts, override the routing skip result
+          if (signalResult.mergedDirective?.halt) {
+            return {
+              ...routingSkipResult,
+              session: signalResult.updatedSession,
+              signalFirings: signalResult.firings,
+              signalHalted: true,
+              signalHaltReply: signalResult.mergedDirective.reply,
+            };
+          }
+          // If signal has position fields, override routing skip result
+          if (hasDirectivePositionField(signalResult.mergedDirective)) {
+            return this.signalCoordinator.applyPositionDirective(signalResult);
+          }
+          // Non-position directive: propagate for pre-LLM augmentation
+          return {
+            ...routingSkipResult,
+            session: signalResult.updatedSession,
+            signalFirings: signalResult.firings,
+            signalPreDirective: signalResult.mergedDirective || undefined,
+          };
+        }
+        return routingSkipResult;
+      }
+
+      // ── PARALLEL PRE-SIGNAL PHASE + ROUTING (Algorithm 5) ────────────────
+      // When signalProcessor is present, run pre-signals in parallel with routing.
+      // When absent, call the router directly (zero overhead, preserve current behavior).
+      if (this.signalCoordinator.enabled) {
+        // Run pre-signal phase in parallel with routing (Requirement 8.1)
+        const [signalResult, routingResult] = await Promise.all([
+          this.signalCoordinator.runPrePhase(
+            params.session, params.context, params.history,
+          ),
+          this.handleRoutingAndStepSelection({
+            session: params.session,
+            history: params.history,
+            context: params.context,
+            signal: params.signal,
+          }),
+        ]);
+
+        // ── Requirement 8.2: halt → discard routing, skip LLM ────────────
+        if (signalResult.mergedDirective?.halt) {
+          return {
+            selectedFlow: undefined,
+            selectedStep: undefined,
+            session: signalResult.updatedSession,
+            isFlowComplete: false,
+            signalFirings: signalResult.firings,
+            signalHalted: true,
+            signalHaltReply: signalResult.mergedDirective.reply,
+          };
+        }
+
+        // ── Requirement 8.3: position directive → discard routing, apply signal position ──
+        if (hasDirectivePositionField(signalResult.mergedDirective)) {
+          return this.signalCoordinator.applyPositionDirective(signalResult);
+        }
+
+        // ── Requirement 8.4: non-position directive → use routing, propagate augmentation ──
+        // ── Requirement 8.5: no directive → use routing as-is ─────────────
+        let updatedSession = signalResult.updatedSession;
+
+        // Apply data/context updates from signal to the routed session
+        if (signalResult.mergedDirective?.dataUpdate) {
+          updatedSession = mergeCollected(updatedSession, signalResult.mergedDirective.dataUpdate);
+        }
+
+        // Use routing result for flow/step, but carry signal session state
+        // Merge routing session changes on top of signal session
+        const routingSession = routingResult.session;
+        updatedSession = {
+          ...updatedSession,
+          currentFlow: routingSession.currentFlow,
+          currentStep: routingSession.currentStep,
+          flowHistory: routingSession.flowHistory,
+          pendingDirective: routingSession.pendingDirective,
+        };
+
+        const isFlowComplete = routingResult.isFlowComplete;
+
+        // PRE-EXTRACTION: same logic as below — extract data from user message
+        if (routingResult.selectedFlow && !isFlowComplete) {
+          if (this.shouldPreExtractData(routingResult.selectedFlow)) {
+            logger.debug(
+              `[ResponseModal] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
+            );
+            const extractedData = await this.preExtractFlowData({
+              route: routingResult.selectedFlow,
+              history: params.history,
+              context: params.context,
+              session: updatedSession,
+              signal: params.signal,
+            });
+            if (extractedData && Object.keys(extractedData).length > 0) {
+              logger.debug(`[ResponseModal] Pre-extracted data:`, extractedData);
+              updatedSession = mergeCollected(updatedSession, extractedData);
+              await this.updateCollectedData(extractedData);
+            }
+          }
+        }
+
+        // Determine next step
+        const stepResult = await this.determineNextStep({
+          selectedFlow: routingResult.selectedFlow,
+          selectedStep: routingResult.selectedStep,
+          session: updatedSession,
+          isFlowComplete,
+          context: params.context,
+        });
+
+        return {
+          selectedFlow: stepResult.flowChanged || routingResult.selectedFlow,
+          selectedStep: stepResult.nextStep,
+          responseDirectives: routingResult.responseDirectives,
+          session: stepResult.session,
+          isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
+          signalFirings: signalResult.firings,
+          signalPreDirective: signalResult.mergedDirective || undefined,
+        };
+      }
+
+      // ── No signal processor: existing behavior (zero overhead) ────────────
+      const routingResult = await this.handleRoutingAndStepSelection({
+        session: params.session,
+        history: params.history,
+        context: params.context,
+        signal: params.signal,
+      });
+
+      let updatedSession = routingResult.session;
+      const isFlowComplete = routingResult.isFlowComplete;
+
+      // PRE-EXTRACTION: If entering a flow that collects data, extract data from user message first
+      // This allows us to skip steps whose data is already provided
+      if (routingResult.selectedFlow && !isFlowComplete) {
+        // Always pre-extract when flow collects data (not just on new flow entry)
+        // This ensures step selection has the most up-to-date data
+        if (this.shouldPreExtractData(routingResult.selectedFlow)) {
+          logger.debug(
+            `[ResponseModal] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
+          );
+
+          const extractedData = await this.preExtractFlowData({
+            route: routingResult.selectedFlow,
+            history: params.history,
+            context: params.context,
+            session: updatedSession,
+            signal: params.signal,
+          });
+
+          if (extractedData && Object.keys(extractedData).length > 0) {
+            logger.debug(
+              `[ResponseModal] Pre-extracted data:`,
+              extractedData
+            );
+            // Merge pre-extracted data into session before step selection
+            updatedSession = mergeCollected(updatedSession, extractedData);
+            // Also update agent's collected data
+            await this.updateCollectedData(extractedData);
+          }
+        }
+      }
+
+      // Determine next step using pipeline method for consistency
+      const stepResult = await this.determineNextStep({
+        selectedFlow: routingResult.selectedFlow,
+        selectedStep: routingResult.selectedStep,
+        session: updatedSession, // Use updated session with pre-extracted data
+        isFlowComplete, // Use updated completion status
+        context: params.context,
+      });
+
+      return {
+        selectedFlow: stepResult.flowChanged || routingResult.selectedFlow,
+        selectedStep: stepResult.nextStep, // Use the determined next step
+        responseDirectives: routingResult.responseDirectives,
+        session: stepResult.session,
+        // If a branch changed the flow, the original isFlowComplete no longer applies
+        isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
+      };
+    } catch (error) {
+      throw ResponseGenerationError.fromError(error, 'routing_optimization', params);
+    }
+  }
+
+  /**
+   * RENDER-STEP RESOLUTION — resolve the step a flow response will render,
+   * shared by the streaming and non-streaming paths. When no step was
+   * pre-selected: branches win over the linear chain, then candidate steps,
+   * then the initial-step fallback. Enforces `requires` (stays at the current
+   * step when required fields are missing) and enters the resolved step.
+   *
+   * Returns `flowTransition: true` when a branch resolved to a flow
+   * transition or completion — there is no local step to render and the
+   * caller handles the transition.
+   */
+  async resolveRenderStep(params: {
+    selectedFlow: Flow<TContext, TData>;
+    selectedStep?: Step<TContext, TData>;
+    session: SessionState<TData>;
+    context: TContext;
+  }): Promise<{
+    nextStep?: Step<TContext, TData>;
+    session: SessionState<TData>;
+    flowTransition: boolean;
+  }> {
+    const { selectedFlow, selectedStep, context } = params;
+    let session = params.session;
+
+    // Determine next step
+    let nextStep: Step<TContext, TData>;
+    if (selectedStep) {
+      nextStep = selectedStep;
+    } else {
+      // Determine current step from session if we're already in this flow
+      const isInSameFlow = session.currentFlow?.id === selectedFlow.id;
+      const currentStep = isInSameFlow && session.currentStep
+        ? selectedFlow.getStep(session.currentStep.id)
+        : undefined;
+
+      logger.debug(`[ResponseModal] Step determination: flow match=${isInSameFlow}, currentFlow=${session.currentFlow?.id}, selectedFlow=${selectedFlow.id}, currentStep=${currentStep?.id || 'none'}`);
+
+      // STEP 1 (Algorithm 1): branches win over linear chain
+      if (currentStep?.branches && currentStep.branches.length > 0) {
+        const branchResult = await this.evaluateStepBranches(
+          currentStep, selectedFlow, session, context
+        );
+        if (branchResult) {
+          if (branchResult.nextStep) {
+            nextStep = branchResult.nextStep;
+            session = branchResult.session;
+          } else {
+            // Flow transition or completion — no local step to render
+            return { nextStep: undefined, session: branchResult.session, flowTransition: true };
+          }
+        }
+      }
+
+      if (!nextStep!) {
+        // Get candidate steps based on current position in the flow
+        const candidates = await this.flowRouter.getCandidateStepsWithConditions(
+          selectedFlow,
+          currentStep, // Pass current step instead of undefined to maintain progression
+          createTemplateContext({ data: session.data, session, context })
+        );
+
+        logger.debug(`[ResponseModal] Found ${candidates.length} candidate steps${currentStep ? ' from current step ' + currentStep.id : ' (new flow entry)'}`);
+
+        if (candidates.length > 0) {
+          nextStep = candidates[0].step;
+          logger.debug(`[ResponseModal] Using first valid step: ${nextStep.id}${currentStep ? ' (progressing from ' + currentStep.id + ')' : ' for new flow'}`);
+        } else {
+          // Fallback to initial step even if it should be skipped
+          nextStep = selectedFlow.initialStep;
+          logger.warn(`[FlowConfigurationError] No valid steps found: all candidates were skipped in flow. Falling back to initial step "${nextStep.id}". Review step skip conditions.`);
+        }
+      }
+    }
+
+    // Update session with next step
+    // If the next step has requires fields that are missing, stay at the previous step
+    if (nextStep.requires && nextStep.requires.length > 0) {
+      const sessionData = session.data || {};
+      const missingRequires = nextStep.requires.filter(
+        field => (sessionData as Record<string, unknown>)[String(field)] === undefined
+      );
+      if (missingRequires.length > 0) {
+        const warning = `[FlowConfigurationError] Cannot advance to step "${nextStep.description || nextStep.id}": ` +
+          `missing required fields [${missingRequires.join(', ')}]. Staying at current step. Ensure preceding steps collect these fields.`;
+        logger.warn(warning);
+        console.warn(warning);
+        // Stay at the current step - don't enter the next one
+        const currentStepId = session.currentStep?.id;
+        if (currentStepId) {
+          const currentStepInstance = selectedFlow.getStep(currentStepId);
+          if (currentStepInstance) {
+            nextStep = currentStepInstance;
+            logger.debug(`[ResponseModal] Staying at current step: ${nextStep.id} due to missing requires`);
+          }
+        }
+      } else {
+        session = enterStep(session, nextStep.id, nextStep.description);
+        logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+      }
+    } else {
+      session = enterStep(session, nextStep.id, nextStep.description);
+      logger.debug(`[ResponseModal] Entered step: ${nextStep.id}`);
+    }
+
+    return { nextStep, session, flowTransition: false };
+  }
+
+  /**
+   * Routing skip optimization (Requirements 20.1, 20.2, 20.3):
+   * When the current step declares `collect` fields AND pre-extraction populates
+   * at least one of those fields from the user's message, skip routing for this turn.
+   *
+   * Returns the routing result if the skip applies, or undefined to fall through
+   * to normal routing.
+   */
+  private async attemptRoutingSkipForCollect(params: {
+    session: SessionState<TData>;
+    history: Event[];
+    context: TContext;
+    signal?: AbortSignal;
+  }): Promise<{
+    selectedFlow?: Flow<TContext, TData>;
+    selectedStep?: Step<TContext, TData>;
+    responseDirectives?: string[];
+    session: SessionState<TData>;
+    isFlowComplete: boolean;
+  } | undefined> {
+    const { session } = params;
+
+    // Only applies when we already have a current flow and step
+    if (!session.currentFlow || !session.currentStep) {
+      return undefined;
+    }
+
+    // Also skip this optimization if there's a pending directive (it takes priority)
+    if (session.pendingDirective) {
+      return undefined;
+    }
+
+    // Look up the actual Flow and Step objects to access `collect`
+    const currentFlow = this.getFlows().find(
+      (f) => f.id === session.currentFlow?.id
+    );
+    if (!currentFlow) {
+      return undefined;
+    }
+
+    const currentStep = currentFlow.getStep(session.currentStep.id);
+    if (!currentStep || !currentStep.collect || currentStep.collect.length === 0) {
+      return undefined;
+    }
+
+    // We have a step with collect fields. Run pre-extraction to see if the
+    // user's message populates any of them.
+    const collectFields = currentStep.collect;
+
+    // Snapshot current data for comparison
+    const dataBefore = { ...session.data };
+
+    // Run pre-extraction against the current flow
+    const extractedData = await this.preExtractFlowData({
+      route: currentFlow,
+      history: params.history,
+      context: params.context,
+      session,
+      signal: params.signal,
+    });
+
+    if (!extractedData || Object.keys(extractedData).length === 0) {
+      return undefined;
+    }
+
+    // Determine which collect fields were newly populated by pre-extraction
+    const populatedCollectFields: string[] = [];
+    for (const field of collectFields) {
+      const key = field as string;
+      const hadValue = dataBefore[field] !== undefined && dataBefore[field] !== null;
+      const hasNewValue = extractedData[field] !== undefined && extractedData[field] !== null;
+      if (hasNewValue && !hadValue) {
+        populatedCollectFields.push(key);
+      }
+    }
+
+    if (populatedCollectFields.length === 0) {
+      // Pre-extraction didn't populate any declared collect field — no skip
+      return undefined;
+    }
+
+    // ROUTING SKIP: pre-extraction populated collect fields → retain current flow/step
+    logger.debug(
+      `[ResponseModal] Routing skip: pre-extraction populated collect fields [${populatedCollectFields.join(', ')}] for step "${currentStep.id}" — skipping FlowRouter`
+    );
+
+    // Merge extracted data into session
+    const updatedSession = mergeCollected(session, extractedData);
+    await this.updateCollectedData(extractedData);
+
+    // Determine next step using pipeline method for consistency
+    // Pass the current flow/step as the routing result (retained)
+    const stepResult = await this.determineNextStep({
+      selectedFlow: currentFlow,
+      selectedStep: currentStep,
+      session: updatedSession,
+      isFlowComplete: false,
+      context: params.context,
+    });
+
+    return {
+      selectedFlow: stepResult.flowChanged || currentFlow,
+      selectedStep: stepResult.nextStep,
+      responseDirectives: undefined,
+      session: stepResult.session,
+      isFlowComplete: stepResult.flowChanged ? false : false,
+    };
+  }
+
+  /**
+   * Check if a flow should pre-extract data before determining the initial step
+   */
+  private shouldPreExtractData(flow: Flow<TContext, TData>): boolean {
+    // Pre-extract if flow has declared required or optional fields
+    if (flow.requiredFields && flow.requiredFields.length > 0) {
+      return true;
+    }
+    if (flow.optionalFields && flow.optionalFields.length > 0) {
+      return true;
+    }
+
+    // Pre-extract if any step in the flow collects data
+    const steps = flow.getAllSteps();
+    const hasDataCollectionSteps = steps.some(
+      step => step.collect && step.collect.length > 0
+    );
+
+    return hasDataCollectionSteps;
+  }
+
+  /**
+   * Pre-extract data from user message when entering a flow
+   * This allows skipping steps whose data is already provided
+   */
+  private async preExtractFlowData(params: {
+    route: Flow<TContext, TData>;
+    history: Event[];
+    context: TContext;
+    session: SessionState<TData>;
+    signal?: AbortSignal;
+  }): Promise<Partial<TData>> {
+    const { route: flow, history, signal } = params;
+
+    // Build a schema for data extraction based on flow's fields
+    const extractionSchema = this.getSchema();
+    if (!extractionSchema) {
+      logger.warn(`[ResponseModal] No schema available for pre-extraction`);
+      return {};
+    }
+
+    // Get last user message
+    const lastMessage = getLastMessageFromHistory(history);
+
+    // Build extraction prompt
+    const extractionPrompt = [
+      `Extract any relevant information from the user's message that matches the following data fields.`,
+      `Only extract information that is explicitly stated or clearly implied.`,
+      ``,
+      `User's message: "${lastMessage}"`,
+      ``,
+      `Extract data for these fields if present:`,
+    ];
+
+    // Add field descriptions
+    if (flow.requiredFields) {
+      extractionPrompt.push(`Required fields: ${flow.requiredFields.join(', ')}`);
+    }
+    if (flow.optionalFields) {
+      extractionPrompt.push(`Optional fields: ${flow.optionalFields.join(', ')}`);
+    }
+
+    extractionPrompt.push(
+      ``,
+      `Return ONLY the extracted data as JSON. If no data can be extracted, return an empty object {}.`
+    );
+
+    // Convert Event[] to HistoryItem[] for provider call
+    const historyItems = eventsToHistory(history);
+
+    // Call AI to extract data
+    try {
+      const result = await this.options.provider.generateMessage<TContext, Partial<TData>>({
+        prompt: extractionPrompt.join('\n'),
+        history: historyItems,
+        context: {} as TContext, // Passed as empty object so AI doesn't "extract" from context
+        // NOTE: context is intentionally NOT passed here.
+        // Passing context caused the AI to "extract" data from the lead's context
+        // (e.g., name, sector, city) instead of from what the user actually said.
+        signal,
+        parameters: {
+          jsonSchema: extractionSchema,
+          schemaName: 'data_extraction',
+        },
+      });
+
+      return result.structured || {};
+    } catch (error) {
+      logger.error(`[ResponseModal] Pre-extraction failed:`, error);
+      return {};
+    }
   }
 
 }
