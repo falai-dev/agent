@@ -4,6 +4,7 @@
  */
 
 import type {
+    AgentOptions,
     AgentResponse,
     AgentResponseStreamChunk,
     History,
@@ -16,9 +17,17 @@ import type {
     ScopedInstructions,
     AppliedInstruction,
     Directive,
+    Instruction,
+    Term,
+    StructuredSchema,
+    CompactionOptions,
 } from "../types";
 import type { SignalFiring } from "../types/signals";
-import type { Agent } from "./Agent";
+import type { SessionManager } from "./SessionManager";
+import type { SignalProcessor } from "./SignalProcessor";
+import type { PromptSectionCache } from "./PromptSectionCache";
+import type { FlowRouter } from "./FlowRouter";
+import type { PersistenceManager } from "./PersistenceManager";
 import type { Flow } from "./Flow";
 import { Step } from "./Step";
 import { ResponseEngine } from "./ResponseEngine";
@@ -32,6 +41,40 @@ import { ResponseGenerationError } from "./ResponseGenerationError";
 import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
+
+/**
+ * The narrow surface ResponseModal (and its collaborators) need from the
+ * Agent. Agent implements this; the response layer is constructible and
+ * testable against this interface without a full Agent.
+ */
+export interface ResponseModalDeps<TContext = unknown, TData = unknown> {
+    /** Session manager (history, live session, sync). */
+    readonly session: SessionManager<TData>;
+    /** Tool registry/resolver and single-tool executor. */
+    readonly tool: ToolManager<TContext, TData>;
+    readonly signalProcessor: SignalProcessor<TContext, TData> | undefined;
+    readonly promptSectionCache: PromptSectionCache;
+    readonly instructions: Instruction<TContext, TData>[];
+    readonly schema: StructuredSchema | undefined;
+    readonly maxAutoStepsPerTurn: number;
+    /** The agent's live session reference (read and replaced at finalize). */
+    currentSession: SessionState<TData> | undefined;
+    getAgentOptions(): AgentOptions<TContext, TData>;
+    getFlows(): Flow<TContext, TData>[];
+    getTerms(): Term<TContext, TData>[];
+    getFlowRouter(): FlowRouter<TContext, TData>;
+    getContext(): Promise<TContext | undefined>;
+    getCompactionOptions(): CompactionOptions | undefined;
+    getPersistenceManager(): PersistenceManager<TData> | undefined;
+    getUpdateDataMethod(): (
+        session: SessionState<TData>,
+        dataUpdate: Partial<TData>
+    ) => Promise<SessionState<TData>>;
+    updateContext(updates: Partial<TContext>): Promise<void>;
+    updateCollectedData(updates: Partial<TData>): Promise<void>;
+    /** Drain data staged before any session existed. */
+    consumePendingData(): Partial<TData>;
+}
 
 /**
  * Configuration options for ResponseModal
@@ -110,7 +153,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     private readonly signalCoordinator: SignalCoordinator<TContext, TData>;
 
     constructor(
-        private readonly agent: Agent<TContext, TData>,
+        private readonly agent: ResponseModalDeps<TContext, TData>,
         private readonly options?: ResponseModalOptions
     ) {
         // Initialize response engine

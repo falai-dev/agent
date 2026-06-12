@@ -23,7 +23,7 @@ import type { Signal } from "../types/signals";
 import { NotImplementedError } from "../types/errors";
 import { SignalProcessor } from "./SignalProcessor";
 import { SignalEvaluator } from "./SignalEvaluator";
-import type { StreamOptions, GenerateOptions, RespondParams } from "./ResponseModal";
+import type { StreamOptions, GenerateOptions, RespondParams, ResponseModalDeps } from "./ResponseModal";
 import {
   mergeCollected,
   enterFlow,
@@ -69,7 +69,7 @@ class FlowConfigurationError extends Error {
  * Main Agent class with generic context and data support
  */
  
-export class Agent<TContext = unknown, TData = unknown> {
+export class Agent<TContext = unknown, TData = unknown> implements ResponseModalDeps<TContext, TData> {
   private _terms: Term<TContext, TData>[] = [];
   private _instructions: Instruction<TContext, TData>[] = [];
   private _tools: Tool<TContext, TData>[] = [];
