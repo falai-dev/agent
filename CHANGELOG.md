@@ -2,6 +2,19 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.4.1]
+
+### Internal
+
+- **Response layer decomposition** (no behavior change; the public API surface is untouched). `ResponseModal` (~2,900 lines owning roughly eleven concerns) is now a thin coordinator over focused collaborators:
+  - `ResponsePipeline` is the single owner of routing, step selection, and branch evaluation — `routeAndSelectStep()` is the turn's routing entry point (routing-skip optimization, pre-signal phase in parallel with routing, pre-extraction, next-step determination) and `resolveRenderStep()` replaces the render-step logic previously duplicated in the streaming and non-streaming paths. ~600 lines of dead duplicated tool/data-collection logic were removed from it.
+  - `ToolLoopExecutor` owns the tool follow-up loop (run tools → ask the LLM again → reconstruct tool-result history → force a final text response) and the streaming concurrent batch via `ToolManager.executeWithConcurrency`, which falls back to the same loop. `ToolManager` remains the registry/resolver and single-tool executor.
+  - `SessionFinalizer` is the single implementation of end-of-turn finalization: deterministic compaction, persistence auto-save, the step `finalize` hook, and live-session sync.
+  - `SignalCoordinator` owns signal pre/post phase orchestration, including position-directive application and the post-phase result application previously duplicated at four sites.
+  - `StepLifecycle` executes step `prepare`/`finalize` handlers (function, tool id, or inline tool).
+  - `ResponseGenerationError` moved to `src/core/ResponseGenerationError.ts`.
+  - `ResponseModal` consumes a narrow `ResponseModalDeps` interface (implemented by `Agent`), so the response layer is testable without constructing a full `Agent`.
+
 ## [2.4.0]
 
 Architecture hardening release: concurrency safety for sessions, a consolidated provider layer, and a stricter type surface. See `docs/migration/v2-3-to-v2-4.md` for the upgrade guide.
