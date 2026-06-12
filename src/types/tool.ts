@@ -9,7 +9,7 @@ import type { Directive } from "./flow";
 /**
  * Context provided to tool handlers
  */
-export interface ToolContext<TContext = any, TData = any> {
+export interface ToolContext<TContext = unknown, TData = unknown> {
   /** The agent's context data */
   context: TContext;
   /** Complete agent-level data collected so far */
@@ -47,9 +47,9 @@ export interface ToolContext<TContext = any, TData = any> {
  * Result returned by a tool
  */
 export interface ToolResult<
-  TResultData = any,
-  TContext = any,
-  TData = any
+  TResultData = unknown,
+  TContext = unknown,
+  TData = unknown
 > {
   /** The result data */
   data?: TResultData;
@@ -71,9 +71,9 @@ export interface ToolResult<
  * Handler function for a tool
  */
 export type ToolHandler<
-  TContext = any,
-  TData = any,
-  TResult = any
+  TContext = unknown,
+  TData = unknown,
+  TResult = unknown
 > = (
   context: ToolContext<TContext, TData>,
   args?: Record<string, unknown>
@@ -90,9 +90,9 @@ export type ToolHandler<
  * metadata fields optional. `EnhancedTool` is removed from the public surface.
  */
 export interface Tool<
-  TContext = any,
-  TData = any,
-  TResult = any
+  TContext = unknown,
+  TData = unknown,
+  TResult = unknown
 > {
   /** Tool identifier */
   id: string;

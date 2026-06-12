@@ -19,7 +19,8 @@ import type {
 import type { Directive } from "../types/flow";
 import { ToolScope } from "../types";
 import { logger } from "../utils";
-import { Agent } from "./Agent";
+// Type-only import: ToolManager must not create a runtime cycle with Agent
+import type { Agent } from "./Agent";
 import { Flow } from "./Flow";
 import { Step } from "./Step";
 import { StreamingToolExecutor } from "./StreamingToolExecutor";

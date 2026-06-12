@@ -37,8 +37,13 @@ interface PersistenceAdapter<TData> {
 
 interface PersistenceConfig<TData> {
   adapter: PersistenceAdapter<TData>;
-  autoSave?: boolean;   // default: true
-  userId?: string;      // attached to created sessions/messages
+  autoSave?: boolean;       // default: true
+  userId?: string;          // attached to created sessions/messages
+  schemaVersion?: number;   // stamps persisted state; see "Schema versioning"
+  migrateSession?: (       // upgrades state written under an older schemaVersion
+    collectedData: CollectedStateData<TData>,
+    fromVersion: number | undefined
+  ) => CollectedStateData<TData> | Promise<CollectedStateData<TData>>;
 }
 ```
 
@@ -46,6 +51,8 @@ The `SessionRepository` write methods accept a `CollectedStateData` payload that
 
 ```typescript
 interface CollectedStateData<TData> {
+  /** User-defined schema version of the agent that wrote this state. */
+  schemaVersion?: number;
   data: Partial<TData>;
   flowHistory: SessionState<TData>["flowHistory"];
   history?: SessionState<TData>["history"];
@@ -63,6 +70,43 @@ Two columns deserve special attention:
 - **`signals`** — the [signals](./signals.md) runtime state (firing counts, cooldown timestamps, last-extracted payloads). Stored as JSON.
 
 Both are **required columns** on every adapter's session schema. v1 schemas had a `pending_transition` column instead; v2 replaces it. See the per-adapter migration notes below and the consolidated [v1 → v2 migration](../migration/v1-to-v2.md).
+
+## Optimistic locking
+
+Every session row carries a `version: number` (on `SessionData` / `SessionState`), incremented by the repository on every update. `SessionRepository.update()` takes an optional compare-and-swap guard:
+
+```typescript
+interface SessionUpdateOptions {
+  /** Reject the update with SessionConflictError if the stored `version` differs. */
+  expectedVersion?: number;
+}
+
+update(
+  id: string,
+  data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+  options?: SessionUpdateOptions
+): Promise<SessionData<TData> | null>;
+```
+
+When the agent saves a session and another writer bumped the stored `version` since this copy was loaded (concurrent `respond()` calls from two processes, parallel webhooks, two tabs), the save throws the exported [`SessionConflictError`](./errors.md) — carrying `sessionId`, `expectedVersion`, and `actualVersion` — instead of silently overwriting the winner's state. Recommended handling: reload the session and retry. Same-process concurrent saves of one session are serialized through a per-session queue and never conflict with each other.
+
+What each adapter needs:
+
+| Adapter | `version` storage | Migration from pre-2.4 |
+|---------|-------------------|------------------------|
+| `MemoryAdapter` | in-memory field | None. |
+| `MongoAdapter` | document field | None — added on next save. |
+| `RedisAdapter` | inside the JSON value | None. |
+| `OpenSearchAdapter` | document field | None. |
+| `SQLiteAdapter` | `version INTEGER` column | None — `initialize()` auto-adds the column. |
+| `PostgreSQLAdapter` | `version INTEGER` column | None — `initialize()` auto-adds the column. |
+| `PrismaAdapter` | your model's `version Int?` | Add `version Int?` to your session model. Without it the adapter detects the missing column and degrades gracefully — locking stays inactive. |
+
+Rows written by pre-2.4 versions have no stored `version` and are **accepted without conflict**; the first v2.4 save stamps them. If you implement a custom `SessionRepository`, honor `options.expectedVersion` as a compare-and-swap (see `MemoryAdapter` for the reference implementation) or ignore the parameter to opt out of locking.
+
+## Schema versioning
+
+Independent of the locking `version`, `CollectedStateData.schemaVersion` tracks the **user-defined shape** of your persisted state. Configure `persistence.schemaVersion` and the agent stamps it on every save; on load, a session written under a different (or missing) version is passed through `persistence.migrateSession` before use. See the [persistence guide](../guides/persistence.md#schema-versioning-migrate-old-sessions-on-load) for the recipe.
 
 ### Wiring with `sessionId`
 
@@ -148,7 +192,7 @@ interface PrismaAdapterOptions {
 
 ### Schema requirements
 
-Your `Session` model must declare `pendingDirective` and `signals` JSON columns alongside the standard fields:
+Your `Session` model must declare `pendingDirective` and `signals` JSON columns alongside the standard fields. Add `version Int?` to enable [optimistic locking](#optimistic-locking):
 
 ```prisma
 model AgentSession {
@@ -161,6 +205,7 @@ model AgentSession {
   collectedData     Json?
   pendingDirective  Json?
   signals           Json?
+  version           Int?
   messageCount      Int       @default(0)
   lastMessageAt     DateTime?
   completedAt       DateTime?
@@ -169,7 +214,7 @@ model AgentSession {
 }
 ```
 
-If your existing schema lacks these columns, see [v1 → v2 migration](../migration/v1-to-v2.md) for the column rename and DDL.
+`version` is optional — the adapter detects a missing column on the first write and degrades gracefully, leaving locking inactive. The other columns are required; if your existing schema lacks them, see [v1 → v2 migration](../migration/v1-to-v2.md) for the column rename and DDL.
 
 ### Examples
 
@@ -318,7 +363,7 @@ interface PostgreSQLAdapterOptions {
 
 ### Schema requirements
 
-`initialize()` creates tables with the v2 columns. Migrating from v1:
+`initialize()` creates tables with the v2 columns and auto-adds the `version` column to tables created by pre-2.4 versions — no manual DDL for the locking upgrade. Migrating from v1:
 
 ```sql
 ALTER TABLE agent_sessions DROP COLUMN IF EXISTS pending_transition;
@@ -369,7 +414,7 @@ interface SQLiteAdapterOptions {
 
 ### Schema requirements
 
-`initialize()` creates the v2 tables. Migrating from v1 (SQLite 3.35+):
+`initialize()` creates the v2 tables and auto-adds the `version` column to tables created by pre-2.4 versions — no manual DDL for the locking upgrade. Migrating from v1 (SQLite 3.35+):
 
 ```sql
 ALTER TABLE agent_sessions DROP COLUMN pending_transition;
@@ -462,10 +507,11 @@ const agent = createAgent({
 
 ## Errors
 
-Adapter errors propagate from the underlying driver — the agent does not wrap them. Your `try`/`catch` sees the native vendor error (e.g., `PrismaClientKnownRequestError`, `MongoServerError`, `ioredis.ReplyError`).
+Adapter errors propagate from the underlying driver — the agent does not wrap them. Your `try`/`catch` sees the native vendor error (e.g., `PrismaClientKnownRequestError`, `MongoServerError`, `ioredis.ReplyError`). The one framework-owned exception is `SessionConflictError`.
 
 | When | Error | Why |
 |------|-------|-----|
+| A save carries a stale `version` — a concurrent writer persisted the session first | `SessionConflictError` (exported) | Reload the session and retry. See [Optimistic locking](#optimistic-locking). |
 | `pendingDirective` or `signals` column missing on a v1 schema | Driver-specific column-not-found error | Run the v2 migration shown above for your adapter. |
 | `findById` returns `null` for a `sessionId` you passed to `createAgent` | None — a new session is created with that id | Treat unknown ids as "first turn." |
 | `initialize()` not called on Postgres / SQLite / OpenSearch | Driver-specific table/index-not-found error on first write | Call `await adapter.initialize()` once on boot, or run the equivalent DDL yourself. |
@@ -478,4 +524,6 @@ Adapter errors propagate from the underlying driver — the agent does not wrap 
 - [createAgent](./create-agent.md) — the `persistence` and `sessionId` fields
 - [Directive](./directive.md) — what `pendingDirective` stores
 - [Signals](./signals.md) — what the `signals` column stores
+- [Errors](./errors.md) — `SessionConflictError` fields and recovery
 - [v1 → v2 migration](../migration/v1-to-v2.md) — column renames and DDL diffs
+- [v2.3 → v2.4 migration](../migration/v2-3-to-v2-4.md) — the `version` column and `update()` signature change

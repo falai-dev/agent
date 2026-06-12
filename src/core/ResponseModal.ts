@@ -27,6 +27,7 @@ import { Step } from "./Step";
 import { ResponseEngine } from "./ResponseEngine";
 import { ResponsePipeline, hasDirectivePositionField } from "./ResponsePipeline";
 import { AutoChainExecutor, type AutoChainResult } from "./AutoChainExecutor";
+import { CompactionEngine } from "./CompactionEngine";
 import { cloneDeep, mergeCollected, enterStep, enterFlow, getLastMessageFromHistory, logger, historyToEvents, eventsToHistory, serializeToolResult, completeCurrentFlow, render } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
@@ -180,6 +181,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * Generate a non-streaming response using unified logic
      */
     async respond(params: RespondParams<TContext, TData>): Promise<AgentResponse<TData>> {
+        // Snapshot the managed session so a failed turn has no in-memory effect:
+        // without this, mutations made before the failure leave the live session
+        // diverged from persisted state
+        const preTurnSession = this.agent.session.current
+            ? cloneDeep(this.agent.session.current)
+            : undefined;
         try {
             // Use unified response preparation and routing
             const responseContext = await this.prepareUnifiedResponseContext(params);
@@ -192,6 +199,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             return result;
 
         } catch (error) {
+            if (preTurnSession) {
+                this.agent.session.syncSession(preTurnSession);
+            }
             throw new ResponseGenerationError(
                 `[ResponseGenerationError] Response generation failed: ${error instanceof Error ? error.message : String(error)}. ` +
                 `Check provider configuration and network connectivity.`,
@@ -204,6 +214,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * Generate a streaming response using unified logic
      */
     async *respondStream(params: RespondParams<TContext, TData>): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+        // Same failed-turn rollback semantics as respond()
+        const preTurnSession = this.agent.session.current
+            ? cloneDeep(this.agent.session.current)
+            : undefined;
         try {
             // Use unified response preparation and routing
             const responseContext = await this.prepareUnifiedResponseContext(params);
@@ -212,6 +226,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             yield* this.generateUnifiedStreamingResponse(responseContext);
 
         } catch (error) {
+            if (preTurnSession) {
+                this.agent.session.syncSession(preTurnSession);
+            }
             // Stream error to caller
             yield {
                 delta: "",
@@ -246,17 +263,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             history = this.agent.session.getHistory();
         }
 
-        // Get or create session
-        let session = await this.agent.session.getOrCreate();
-
-        // Merge agent's collected data into session (agent data takes precedence)
-        const collectedData = this.agent.getCollectedData();
-        if (Object.keys(collectedData).length > 0) {
-            session = mergeCollected(session, collectedData);
-            // Update the session manager with the merged data
-            await this.agent.session.setData(collectedData);
-            logger.debug("[ResponseModal] Merged agent collected data into stream session:", collectedData);
-        }
+        // Get or create session — session.data is the single source of truth,
+        // so no agent-side data merge is needed
+        const session = await this.agent.session.getOrCreate();
 
         // Stream response using existing respondStream method
         let finalMessage = "";
@@ -308,17 +317,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             history = this.agent.session.getHistory();
         }
 
-        // Get or create session
-        let session = await this.agent.session.getOrCreate();
-
-        // Merge agent's collected data into session (agent data takes precedence)
-        const collectedData = this.agent.getCollectedData();
-        if (Object.keys(collectedData).length > 0) {
-            session = mergeCollected(session, collectedData);
-            // Update the session manager with the merged data
-            await this.agent.session.setData(collectedData);
-            logger.debug("[ResponseModal] Merged agent collected data into generate session:", collectedData);
-        }
+        // Get or create session — session.data is the single source of truth,
+        // so no agent-side data merge is needed
+        const session = await this.agent.session.getOrCreate();
 
         // Generate response using existing respond method
         const result = await this.respond({
@@ -423,46 +424,47 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Keep original HistoryItem[] format for external APIs
             const history = simpleHistory;
 
-            // Use ResponsePipeline for optimized context and session preparation
-            // This leverages existing optimizations and avoids code duplication
+            // Use ResponsePipeline for context and session preparation; context
+            // and session are passed explicitly — the pipeline holds no state
             let responseContext: {
                 effectiveContext: TContext;
                 session: SessionState<TData>;
+                contextAfterHook?: TContext;
             };
             try {
-                // Set current context and session in pipeline for consistency
-                this.responsePipeline.setContext(await this.agent.getContext());
-                this.responsePipeline.setCurrentSession(this.agent.currentSession);
-
                 responseContext = await this.responsePipeline.prepareResponseContext({
                     contextOverride,
                     session: params.session ? cloneDeep(params.session) : undefined,
+                    currentContext: await this.agent.getContext(),
+                    currentSession: this.agent.currentSession,
                 });
             } catch (error) {
                 throw ResponseGenerationError.fromError(error, 'pipeline_context_preparation', params);
             }
 
-            const { effectiveContext } = responseContext;
+            const { effectiveContext, contextAfterHook } = responseContext;
             let session = responseContext.session;
 
-            // Update our stored context if it was modified by beforeRespond hook
-            const storedContext = this.responsePipeline.getStoredContext();
-            if (storedContext !== undefined) {
+            // Sync the beforeRespond hook's context result back to the agent
+            if (contextAfterHook !== undefined) {
                 try {
-                    await this.agent.updateContext(storedContext as Partial<TContext>);
+                    await this.agent.updateContext(contextAfterHook as Partial<TContext>);
                 } catch (error) {
-                    throw ResponseGenerationError.fromError(error, 'context_update_from_pipeline', params, { storedContext });
+                    throw ResponseGenerationError.fromError(error, 'context_update_from_pipeline', params, { contextAfterHook });
                 }
             }
 
-            // Merge agent's collected data into session (agent data takes precedence)
-            const collectedData = this.agent.getCollectedData();
-            if (Object.keys(collectedData).length > 0) {
+            // Apply data staged before any session existed (initialData,
+            // pre-session updateCollectedData calls). Reading the live session's
+            // data here would leak state across sessions when an explicit
+            // session is passed, so only the staging buffer is merged.
+            const stagedData = this.agent.consumePendingData();
+            if (Object.keys(stagedData).length > 0) {
                 try {
-                    session = mergeCollected(session, collectedData);
-                    logger.debug("[ResponseModal] Merged agent collected data into session:", collectedData);
+                    session = mergeCollected(session, stagedData);
+                    logger.debug("[ResponseModal] Merged staged agent data into session:", stagedData);
                 } catch (error) {
-                    throw ResponseGenerationError.fromError(error, 'data_merging', params, { collectedData });
+                    throw ResponseGenerationError.fromError(error, 'data_merging', params, { stagedData });
                 }
             }
 
@@ -671,6 +673,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     selectedStep: routingResult.selectedStep,
                     session: updatedSession,
                     isFlowComplete,
+                    context: params.context,
                 });
 
                 return {
@@ -732,6 +735,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 selectedStep: routingResult.selectedStep,
                 session: updatedSession, // Use updated session with pre-extracted data
                 isFlowComplete, // Use updated completion status
+                context: params.context,
             });
 
             return {
@@ -971,6 +975,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             selectedStep: currentStep,
             session: updatedSession,
             isFlowComplete: false,
+            context: params.context,
         });
 
         return {
@@ -1134,7 +1139,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 isFlowComplete: false,
                 executedSteps: [],
                 stoppedReason: haltMessage ? 'reply' : 'halt',
-                triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+                triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
             };
         }
 
@@ -1315,7 +1320,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             executedSteps: executedSteps || [],
             stoppedReason,
             appliedInstructions,
-            triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+            triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
         };
     }
 
@@ -1660,7 +1665,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 session,
                 stoppedReason: haltMessage ? 'reply' : 'halt',
                 executedSteps: [],
-                triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+                triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
             } as AgentResponseStreamChunk<TData>;
             return;
         }
@@ -1698,7 +1703,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         session,
                         stoppedReason: 'halt',
                         executedSteps: [],
-                        triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+                        triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
                     } as AgentResponseStreamChunk<TData>;
                     return;
                 }
@@ -1795,7 +1800,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     delta,
                     accumulated,
                     session: finalSession,
-                    triggeredSignals: signalFirings.length > 0 ? signalFirings as unknown as SignalFiring<unknown, TData>[] : undefined,
+                    triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
                 } as AgentResponseStreamChunk<TData>;
             } else {
                 yield chunk;
@@ -2784,6 +2789,24 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      * @private
      */
     private async finalizeSession(session: SessionState<TData>, context: TContext): Promise<void> {
+        // Deterministic compaction: runs on every finalize (not just addMessage)
+        // so respond()-only callers get bounded history too
+        const compactionOptions = this.agent.getCompactionOptions();
+        if (compactionOptions && session.history && session.history.length > 0) {
+            try {
+                const result = await CompactionEngine.checkAndCompact(session.history, compactionOptions);
+                if (result.strategy !== 'none') {
+                    session.history = result.history;
+                    logger.info(
+                        `[ResponseModal] Compaction applied: strategy='${result.strategy}', ` +
+                        `estimatedTokens=${result.estimatedTokens}, messagesCompacted=${result.messagesCompacted}`
+                    );
+                }
+            } catch (error) {
+                logger.warn("[ResponseModal] Compaction failed at finalize, continuing without compaction", error);
+            }
+        }
+
         // Auto-save session step to persistence if configured
         const persistenceManager = this.agent.getPersistenceManager();
         const agentOptions = this.agent.getAgentOptions();

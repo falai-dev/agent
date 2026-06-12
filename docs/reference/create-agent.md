@@ -59,9 +59,9 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
 | `name` | `string` | yes | — | Display name surfaced in logs and prompt sections. |
 | `goal` | `string` | no | — | One-line objective rendered into the system prompt. |
 | `persona` | `Template<TContext>` | no | — | Who the agent is and how it communicates — role, tone, and self-concept. Rendered into the system prompt. |
-| `provider` | `AiProvider` | yes | — | Strategy instance: `GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, or `OpenRouterProvider`. |
+| `provider` | `AiProvider` | yes | — | Strategy instance: `GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, or your own (must declare `capabilities`). |
 | `schema` | `StructuredSchema` | no | — | Single source of truth for `TData`. Every `collect` key in every step must reference a property defined here. |
-| `initialData` | `Partial<TData>` | no | — | Pre-populates `session.data` when the agent is constructed. |
+| `initialData` | `Partial<TData>` | no | — | Staged at construction and seeds `session.data` when the first session is created. Loading an existing session keeps the stored data instead. |
 | `flows` | `FlowOptions<TContext, TData>[]` | no | `[]` | Conversation flows. May also be added later via `agent.createFlow(...)`. |
 | `tools` | `Tool<TContext, TData, unknown>[]` | no | `[]` | Agent-scoped tools. Each tool's `Tool.id` must be unique. |
 | `instructions` | `Instruction<TContext, TData>[]` | no | `[]` | Behavioral statements discriminated by `kind: 'must' \| 'never' \| 'should'`. Scoped at agent, flow, or step level. |
@@ -71,7 +71,7 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
 | `context` | `TContext` | no | — | Static ambient data (user info, env, etc.) available to every hook and tool. |
 | `contextProvider` | `ContextProvider<TContext>` | no | — | Async context loader. Use instead of `context` when ambient data must be fetched per turn. |
 | `hooks` | `ContextLifecycleHooks<TContext, TData>` | no | — | `beforeRespond`, `onContextUpdate`, `onDataUpdate` — fire around every turn. |
-| `persistence` | `PersistenceConfig<TData>` | no | in-memory | Session storage. Omit for `MemoryAdapter`. |
+| `persistence` | `PersistenceConfig<TData>` | no | in-memory | Session storage: `adapter`, `autoSave`, `userId`, plus `schemaVersion` / `migrateSession` for upgrading state written by older deployments. Omit for `MemoryAdapter`. |
 | `knowledgeBase` | `Record<string, unknown>` | no | — | Arbitrary JSON inlined into the prompt as background knowledge. |
 | `flowSwitchMargin` | `number` | no | `15` | Margin (0–100) the best alternative flow must exceed the current flow's score by before switching. Higher values make the agent stickier. |
 | `maxAutoStepsPerTurn` | `number` | no | `10` | Cap on consecutive `auto: true` steps per turn. Throws `FlowConfigurationError` when exceeded. |

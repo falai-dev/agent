@@ -23,8 +23,13 @@ understand which layer fires when.
 ## Enable compaction
 
 Compaction is opt-in. Set `AgentOptions.compaction` and the agent
-validates the config at construction time, then runs the engine on
-every `respond` / `respondStream` call before the prompt is composed.
+validates the config at construction time, then runs the engine
+deterministically at end-of-turn finalize on every `respond()` /
+`chat()` / `stream()` call — and additionally whenever a message is
+appended via `session.addMessage()`. Since v2.4 the finalize run is
+guaranteed, so respond-only integrations that never call
+`addMessage()` get bounded history too (previously compaction only
+ran inside `addMessage()`).
 
 ```typescript
 import { createAgent, GeminiProvider } from "@falai/agent";
@@ -60,10 +65,12 @@ work together — per-tool first, global later.
 
 ## How a turn checks the budget
 
-Before each turn, the session manager calls
+At the end of every turn (and on each `session.addMessage()`), the
+engine runs
 `CompactionEngine.checkAndCompact(session.history, options)`. The
-engine estimates the current token count using a character-based
-heuristic (~4 characters per token), compares against
+compacted history is what gets persisted and carried into the next
+turn's prompt. The engine estimates the current token count using a
+character-based heuristic (~4 characters per token), compares against
 `maxTokens * compactionThreshold`, and applies the cheapest layer that
 brings history below the threshold. If even the most expensive layer
 cannot, an aggressive truncation fallback removes the oldest items

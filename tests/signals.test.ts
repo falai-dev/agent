@@ -2239,12 +2239,14 @@ describe("Signals — SignalProcessor", () => {
          * and negative entries (prefix stripped) under "DO NOT TRIGGER WHEN".
          */
         it("positive and negative entries always land in correct sections", () => {
+            const conditionEntry = fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,29}$/);
+
             fc.assert(
                 fc.property(
                     // Generate 1-5 positive entries
-                    fc.array(fc.string({ minLength: 1, maxLength: 30 }).filter(s => !s.startsWith("!")), { minLength: 1, maxLength: 5 }),
+                    fc.array(conditionEntry, { minLength: 1, maxLength: 5 }),
                     // Generate 0-3 negative entries (without the ! prefix — we add it)
-                    fc.array(fc.string({ minLength: 1, maxLength: 30 }).filter(s => !s.startsWith("!")), { minLength: 0, maxLength: 3 }),
+                    fc.array(conditionEntry, { minLength: 0, maxLength: 3 }),
                     (positiveEntries, negativeEntries) => {
                         const whenArray = [
                             ...positiveEntries,

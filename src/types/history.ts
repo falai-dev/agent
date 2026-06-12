@@ -64,8 +64,7 @@ export type ToolHistoryItem = {
   role: "tool";
   tool_call_id: string;
   name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  content: any;
+  content: unknown;
 };
 
 export type SystemHistoryItem = {

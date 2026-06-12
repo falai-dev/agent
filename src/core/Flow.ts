@@ -19,6 +19,7 @@ import type { StepResult } from "../types/flow";
 import type { ConditionWhen, ConditionIf } from "../types/flow";
 
 import { generateFlowId, logger } from "../utils";
+import { splitWhenConditions } from "../utils/condition";
 
 import { Step, FlowConfigurationError } from "./Step";
 import { Agent } from './Agent'
@@ -246,7 +247,8 @@ export class Flow<TContext = unknown, TData = unknown> {
   /**
    * Evaluate when/if conditions using the v2 split logic.
    * `if` (code predicate) evaluates first (free); `when` (AI) evaluates only when `if` passes.
-   * `if` predicates use AND semantics. `when` strings use OR semantics.
+   * `if` predicates use AND semantics. Non-`!` `when` strings use OR semantics;
+   * `!` strings are exclusions where any match inhibits activation.
    * When both fields are set, the passing `if` gate and AI match are combined with AND.
    */
   async evaluateWhen(
@@ -257,6 +259,7 @@ export class Flow<TContext = unknown, TData = unknown> {
       return {
         programmaticResult: true,
         aiContextStrings: [],
+        aiExclusionStrings: [],
         hasProgrammaticConditions: false,
       };
     }
@@ -277,6 +280,7 @@ export class Flow<TContext = unknown, TData = unknown> {
             return {
               programmaticResult: false,
               aiContextStrings: [],
+              aiExclusionStrings: [],
               hasProgrammaticConditions: true,
             };
           }
@@ -285,6 +289,7 @@ export class Flow<TContext = unknown, TData = unknown> {
           return {
             programmaticResult: false,
             aiContextStrings: [],
+            aiExclusionStrings: [],
             hasProgrammaticConditions: true,
           };
         }
@@ -293,10 +298,11 @@ export class Flow<TContext = unknown, TData = unknown> {
 
     // `if` passed (or was absent) — now evaluate `when` (AI-evaluated strings)
     if (this.when) {
-      const whenStrings = Array.isArray(this.when) ? this.when : [this.when];
+      const whenConditions = splitWhenConditions(this.when);
       return {
         programmaticResult: true,
-        aiContextStrings: whenStrings,
+        aiContextStrings: whenConditions.positive,
+        aiExclusionStrings: whenConditions.negative,
         hasProgrammaticConditions: !!this.if,
       };
     }
@@ -305,6 +311,7 @@ export class Flow<TContext = unknown, TData = unknown> {
     return {
       programmaticResult: true,
       aiContextStrings: [],
+      aiExclusionStrings: [],
       hasProgrammaticConditions: true,
     };
   }

@@ -15,8 +15,9 @@ import {
     ToolManager,
     createSession,
     flow,
-    DirectiveChainTracker,
 } from "../src/index";
+// Internal — not part of the public barrel since v2.4
+import { DirectiveChainTracker } from "../src/core/DirectiveChainTracker";
 import type {
     Directive,
     SessionState,

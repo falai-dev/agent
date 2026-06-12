@@ -14,7 +14,9 @@ import type {
   MessageRole,
   Event,
   CreateSessionData,
+  SessionUpdateOptions,
 } from "../types";
+import { SessionConflictError } from "../types/errors";
 import { logger } from '../utils'
 import { createSessionId } from '../utils';
 
@@ -202,6 +204,13 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
   private prisma: PrismaClient;
   private tableName: string;
   private fieldMap: Partial<Record<keyof SessionData<TData>, string>>;
+  /**
+   * Whether the user's Prisma model has a `version` column. Unknown until the
+   * first write; when Prisma rejects the field, writes fall back to omitting
+   * it so models without the column keep working (optimistic locking is then
+   * inactive — add `version Int?` to the model to enable it).
+   */
+  private versionSupported?: boolean;
 
   constructor(
     prismaClient: PrismaClient,
@@ -211,6 +220,34 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
     this.prisma = prismaClient;
     this.tableName = tableName;
     this.fieldMap = fieldMappings || {};
+  }
+
+  /**
+   * Run a write that includes the `version` field, retrying without it once
+   * if the model evidently lacks the column. The outcome is remembered.
+   */
+  private async writeWithVersionFallback<T>(
+    write: (includeVersion: boolean) => Promise<T>
+  ): Promise<T> {
+    if (this.versionSupported === false) {
+      return write(false);
+    }
+    try {
+      const result = await write(true);
+      this.versionSupported = true;
+      return result;
+    } catch (error) {
+      const versionField = this.fieldMap.version || "version";
+      if (
+        this.versionSupported === undefined &&
+        error instanceof Error &&
+        error.message.includes(versionField)
+      ) {
+        this.versionSupported = false;
+        return write(false);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -254,6 +291,7 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
       messageCount: unmapped.messageCount as number | undefined,
       lastMessageAt: unmapped.lastMessageAt as Date | undefined,
       completedAt: unmapped.completedAt as Date | undefined,
+      version: (unmapped.version as number | null) ?? undefined,
       createdAt: unmapped.createdAt as Date,
       updatedAt: unmapped.updatedAt as Date,
     };
@@ -264,14 +302,14 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
   }
 
   async create(data: CreateSessionData<TData>): Promise<SessionData<TData>> {
-    const mapped = this.mapFields({
-      ...data,
-      id:
-        data.id ||
-        createSessionId(),
-    });
-    const result = await this.getModel().create({
-      data: mapped,
+    const id = data.id || createSessionId();
+    const result = await this.writeWithVersionFallback((includeVersion) => {
+      const mapped = this.mapFields(
+        includeVersion
+          ? { ...data, id, version: data.version ?? 1 }
+          : { ...data, id }
+      );
+      return this.getModel().create({ data: mapped });
     });
     return this.unmapFields(result);
   }
@@ -314,15 +352,43 @@ class PrismaSessionRepository<TData = Record<string, unknown>>
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null> {
-    const mapped = this.mapFields(data as Record<string, unknown>);
-    const result = await this.getModel().update({
-      where: { [this.fieldMap.id || "id"]: id },
-      data: {
-        ...mapped,
-        [this.fieldMap.updatedAt || "updatedAt"]: new Date(),
-      },
+    // Read-check-write: the Prisma model is user-defined, so we cannot emit a
+    // conditional UPDATE generically. Add `version Int?` to your Prisma model
+    // for optimistic locking to be effective.
+    const existing = await this.findById(id);
+    if (!existing) return null;
+
+    if (
+      options?.expectedVersion !== undefined &&
+      existing.version !== undefined &&
+      existing.version !== options.expectedVersion
+    ) {
+      throw new SessionConflictError(
+        id,
+        options.expectedVersion,
+        existing.version
+      );
+    }
+
+    const result = await this.writeWithVersionFallback((includeVersion) => {
+      const mapped = this.mapFields(
+        includeVersion
+          ? {
+            ...(data as Record<string, unknown>),
+            version: (existing.version ?? options?.expectedVersion ?? 0) + 1,
+          }
+          : { ...(data as Record<string, unknown>) }
+      );
+      return this.getModel().update({
+        where: { [this.fieldMap.id || "id"]: id },
+        data: {
+          ...mapped,
+          [this.fieldMap.updatedAt || "updatedAt"]: new Date(),
+        },
+      });
     });
     return this.unmapFields(result);
   }

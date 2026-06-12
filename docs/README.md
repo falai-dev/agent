@@ -37,4 +37,4 @@ One page per public type. Signatures, field tables, errors, and short runnable e
 
 ---
 
-Upgrading from `1.x`? See the [v1 → v2 migration guide](./migration/v1-to-v2.md).
+Upgrading? See the [v2.3 → v2.4 migration guide](./migration/v2-3-to-v2-4.md) or, from `1.x`, the [v1 → v2 migration guide](./migration/v1-to-v2.md).

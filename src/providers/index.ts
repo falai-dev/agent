@@ -17,3 +17,16 @@ export type { OpenRouterProviderOptions } from "./OpenRouterProvider";
 
 export { DeepSeekProvider } from "./DeepSeekProvider";
 export type { DeepSeekProviderOptions } from "./DeepSeekProvider";
+
+export { OpenAICompatibleProvider } from "./OpenAICompatibleProvider";
+export type {
+  OpenAICompatibleProviderInit,
+  OpenAICompatibleRequestConfig,
+} from "./OpenAICompatibleProvider";
+
+export {
+  classifyProviderError,
+  isBackupEligible,
+  toProviderError,
+} from "./errorClassification";
+export type { ErrorClassificationOptions } from "./errorClassification";

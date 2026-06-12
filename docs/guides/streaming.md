@@ -134,4 +134,6 @@ When the signal aborts, the loop exits cleanly — no exception is thrown by the
 
 For a Stop button, store the `controller` reference for the active stream on the UI side and call `controller.abort()` from the click handler. For server-side hard ceilings, wrap `respondStream` with an `AbortController` whose `setTimeout` fires at your SLO budget.
 
+If the turn fails — the generator surfaces an error chunk — it has no lasting effect: the in-memory session rolls back to its pre-turn snapshot (the user message added by `stream()` before the turn is retained), and persisted state is whatever the previous turn saved. Retrying is always safe.
+
 **Next:** [Errors](./error-handling.md)

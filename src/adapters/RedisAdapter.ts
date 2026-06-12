@@ -11,7 +11,9 @@ import type {
   SessionRepository,
   SessionStatus,
   CollectedStateData,
+  SessionUpdateOptions,
 } from "../types";
+import { SessionConflictError } from "../types/errors";
 import { createSessionId, logger } from "../utils";
 
 /**
@@ -139,6 +141,7 @@ class RedisSessionRepository<TData = Record<string, unknown>>
       updatedAt: now,
       status: data.status || "active",
       messageCount: data.messageCount || 0,
+      version: data.version ?? 1,
     };
 
     await this.redis.setex(this.getKey(id), this.ttl, JSON.stringify(session));
@@ -201,14 +204,29 @@ class RedisSessionRepository<TData = Record<string, unknown>>
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
 
+    // Check-then-set on the stored JSON — not fully atomic (no WATCH/MULTI)
+    if (
+      options?.expectedVersion !== undefined &&
+      existing.version !== undefined &&
+      existing.version !== options.expectedVersion
+    ) {
+      throw new SessionConflictError(
+        id,
+        options.expectedVersion,
+        existing.version
+      );
+    }
+
     const updated: SessionData<TData> = {
       ...existing,
       ...data,
+      version: (existing.version ?? options?.expectedVersion ?? 0) + 1,
       updatedAt: new Date(),
     };
 

@@ -267,7 +267,8 @@ export interface Instruction<TContext = unknown, TData = unknown> {
    */
   kind?: 'must' | 'never' | 'should';
   /**
-   * AI-evaluated activation condition. String or array of strings (OR semantics).
+   * AI-evaluated activation condition. Non-`!` strings are OR alternatives;
+   * `!` strings are OR exclusions where any match inhibits the instruction.
    * Undefined = always active. Functions are NOT allowed here — use `if`.
    */
   when?: ConditionWhen;

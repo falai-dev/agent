@@ -31,6 +31,17 @@ class ToolExecutionError      extends Error {
   cause?: Error;
 }
 class NotImplementedError     extends Error { /* name = "NotImplementedError" */ }
+class ProviderError           extends Error {
+  code: ProviderErrorCode;   // 'rate_limited' | 'overloaded' | 'auth' | 'invalid_request'
+                             // | 'schema_rejected' | 'timeout' | 'network' | 'unknown'
+  provider: string;          // e.g. "openai"
+  cause?: unknown;           // original SDK/HTTP error
+}
+class SessionConflictError    extends Error {
+  sessionId: string;
+  expectedVersion: number;
+  actualVersion: number | undefined;
+}
 
 // Internal — match by `error.name` (not exported from the package barrel)
 class DataValidationError     extends Error { errors: ValidationError[] }
@@ -53,6 +64,8 @@ class ResponseGenerationError extends Error {
 | `ToolExecutionError` | A handler throws, all retries fail, or `validateInput` cannot correct invalid args. | `toolId`, `executionContext`, `cause` | Surface a user-friendly message; optionally `agent.dispatch({ goTo: '<recovery-flow>' })`. |
 | `DataValidationError` | `agent.respond(...)` collects values that violate the declared `schema`. | `errors: ValidationError[]` | Re-prompt for the offending fields, then retry. |
 | `ResponseGenerationError` | The provider call fails or the response cannot be parsed. | `details.phase`, `details.originalError` | Retry with backoff, fall back to a different provider, or surface a soft failure to the user. |
+| `ProviderError` | A provider call fails terminally — retries and `backupModels` exhausted. Normalized across all vendors. | `code`, `provider`, `cause` (original SDK error) | Match on `code`: backoff for `rate_limited`/`overloaded`, fix credentials for `auth`, fail fast otherwise. Inside a turn it surfaces on `ResponseGenerationError.details.originalError`. |
+| `SessionConflictError` | A session save carries a stale `version` — another writer persisted the session after this one loaded it (concurrent `respond()` calls, parallel webhooks, two tabs). | `sessionId`, `expectedVersion`, `actualVersion` | Reload the session and retry the operation, or surface the conflict. |
 | `NotImplementedError` | A reserved option is set to a value this version does not support (e.g. `routerMode: 'embedding'` in v2.0). | `message` | Use a supported value. |
 
 ## Examples
@@ -87,7 +100,57 @@ try {
 }
 ```
 
-### 2. The format contract in practice
+### 2. Matching provider failures by normalized code
+
+Terminal provider failures throw `ProviderError` with a vendor-agnostic `code`. Inside a turn, the agent wraps it in `ResponseGenerationError` — unwrap via `details.originalError`.
+
+```typescript
+import { ProviderError } from "@falai/agent";
+
+function asProviderError(err: unknown): ProviderError | undefined {
+  if (err instanceof ProviderError) return err;
+  if (err instanceof Error && err.name === "ResponseGenerationError") {
+    const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
+    if (original instanceof ProviderError) return original;
+  }
+  return undefined;
+}
+
+const providerError = asProviderError(err);
+if (providerError) {
+  switch (providerError.code) {
+    case "rate_limited":
+    case "overloaded":
+      return retryWithBackoff();         // transient — wait and retry
+    case "auth":
+      throw providerError;               // config bug — crash loudly
+    default:
+      log.error({ cause: providerError.cause }, providerError.message);
+      return "I'm having trouble reaching the model. Please retry.";
+  }
+}
+```
+
+### 3. Recovering from a session conflict
+
+`SessionConflictError` means another writer persisted the session between your load and your save. Reload, then retry.
+
+```typescript
+import { SessionConflictError } from "@falai/agent";
+
+try {
+  await agent.respond({ history, session });
+} catch (err) {
+  const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
+  if (err instanceof SessionConflictError || original instanceof SessionConflictError) {
+    const fresh = await agent.session.getOrCreate(sessionId);
+    return agent.respond({ history, session: fresh });
+  }
+  throw err;
+}
+```
+
+### 4. The format contract in practice
 
 Every thrown message is parseable. The leading `[<ErrorClass>]` token mirrors the class name, the colon separates `<what>` from `<why>`, and the trailing sentence is `<how to fix>`.
 
@@ -120,3 +183,5 @@ Tool input validation, permission denials, and missing-tool warnings are reporte
 - [createAgent](./create-agent.md) — construction-time errors thrown from `new Agent(...)`.
 - [Tool](./tool.md) — handler return shape and the `ToolExecutionError` triggers.
 - [Directive](./directive.md) — the validation rules that surface as `FlowConfigurationError`.
+- [Providers](./providers.md) — the retry/backup pipeline that ends in `ProviderError`.
+- [Persistence adapters](./adapters.md) — the optimistic locking that throws `SessionConflictError`.

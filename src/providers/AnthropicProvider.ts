@@ -15,8 +15,16 @@ import type {
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
 } from "../types";
+import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
 import { withTimeoutAndRetry, logger } from "../utils";
+import {
+  classifyProviderError,
+  getErrorMessage,
+  isBackupEligible,
+  toProviderError,
+  type ErrorClassificationOptions,
+} from "./errorClassification";
 
 const DEFAULT_RETRY_CONFIG = {
   timeout: 60000,
@@ -44,84 +52,34 @@ export interface AnthropicProviderOptions {
 }
 
 /**
- * Type guard for errors with status/code properties
+ * Anthropic-specific error classification signals (HTTP 529 plus
+ * overloaded_error/api_error types and the "overloaded" code).
  */
-interface ErrorWithStatus {
-  status?: number;
-  code?: string;
-  message?: string;
-  type?: string;
-}
-
-/**
- * Type guard to check if error is ErrorWithStatus
- */
-function isErrorWithStatus(error: unknown): error is ErrorWithStatus {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    ("status" in error || "code" in error || "message" in error)
-  );
-}
-
-/**
- * Safely extract error message
- */
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (isErrorWithStatus(error) && error.message) {
-    return error.message;
-  }
-  return String(error);
-}
-
-/**
- * Determines if an error should trigger backup model usage
- */
-const shouldUseBackupModel = (error: unknown): boolean => {
-  if (!isErrorWithStatus(error)) {
-    return false;
-  }
-
-  // Server errors
-  if (error.status === 500 || error.status === 503 || error.status === 529) {
-    return true;
-  }
-
-  // Rate limiting
-  if (error.status === 429) {
-    return true;
-  }
-
-  // Model overloaded or unavailable
-  if (
-    error.type === "overloaded_error" ||
-    error.type === "api_error" ||
-    error.code === "overloaded"
-  ) {
-    return true;
-  }
-
-  const message = getErrorMessage(error);
-  if (
-    message.includes("overloaded") ||
-    message.includes("unavailable") ||
-    message.includes("internal error") ||
-    message.includes("Internal error")
-  ) {
-    return true;
-  }
-
-  return false;
+const CLASSIFICATION_OPTIONS: ErrorClassificationOptions = {
+  overloadedStatuses: [529],
+  overloadedTypes: ["overloaded_error", "api_error"],
+  overloadedCodes: ["overloaded"],
 };
+
+/**
+ * Determines if an error should trigger backup model usage.
+ * Derived from the normalized error classification.
+ */
+const shouldUseBackupModel = (error: unknown): boolean =>
+  isBackupEligible(classifyProviderError(error, CLASSIFICATION_OPTIONS));
 
 /**
  * Anthropic provider implementation with backup models and retry logic
  */
 export class AnthropicProvider implements AiProvider {
   public readonly name = "anthropic";
+  public readonly capabilities: ProviderCapabilities = {
+    supportsTools: true,
+    supportsNativeJsonSchema: false, // JSON output is enforced via a prompt instruction, not a native schema mode
+    supportsStreaming: true,
+    supportsStreamingToolCalls: true,
+    supportsPromptCaching: true,
+  };
   private client: Anthropic;
   private primaryModel: string;
   private backupModels: string[];
@@ -251,7 +209,7 @@ export class AnthropicProvider implements AiProvider {
       );
 
       if (!shouldUseBackupModel(primaryError)) {
-        throw primaryError;
+        throw toProviderError(primaryError, this.name, CLASSIFICATION_OPTIONS);
       }
 
       logger.debug(`[ANTHROPIC] Trying backup models`);
@@ -295,7 +253,7 @@ export class AnthropicProvider implements AiProvider {
       logger.error(
         `[ANTHROPIC] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
-      throw lastBackupError;
+      throw toProviderError(lastBackupError, this.name, CLASSIFICATION_OPTIONS);
     }
   }
 
@@ -460,7 +418,7 @@ export class AnthropicProvider implements AiProvider {
       );
 
       if (!shouldUseBackupModel(primaryError)) {
-        throw primaryError;
+        throw toProviderError(primaryError, this.name, CLASSIFICATION_OPTIONS);
       }
 
       logger.debug(`[ANTHROPIC] Trying backup models for streaming`);
@@ -504,7 +462,7 @@ export class AnthropicProvider implements AiProvider {
       logger.error(
         `[ANTHROPIC] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
-      throw lastBackupError;
+      throw toProviderError(lastBackupError, this.name, CLASSIFICATION_OPTIONS);
     }
   }
 

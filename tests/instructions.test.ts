@@ -170,6 +170,50 @@ describe("Instruction when condition rendering", () => {
         );
     });
 
+    test("! textual when conditions render as exclusions", async () => {
+        const scoped: ScopedInstructions<TestContext, TestData> = {
+            global: [
+                {
+                    id: "conditional-exclusion",
+                    when: [
+                        "the user is asking about pricing",
+                        "!the user is asking for support",
+                    ],
+                    prompt: "Offer an annual billing comparison",
+                },
+            ],
+        };
+
+        const pc = buildComposer();
+        await pc.addInstructions(scoped);
+        const prompt = await pc.build();
+
+        expect(prompt).toContain(
+            "Offer an annual billing comparison (apply only when: the user is asking about pricing; do not apply when: the user is asking for support)"
+        );
+        expect(prompt).not.toContain("!the user is asking for support");
+    });
+
+    test("negative-only textual when renders as apply-unless", async () => {
+        const scoped: ScopedInstructions<TestContext, TestData> = {
+            global: [
+                {
+                    id: "conditional-negative-only",
+                    when: "!the user is asking for support",
+                    prompt: "Keep the checkout flow moving",
+                },
+            ],
+        };
+
+        const pc = buildComposer();
+        await pc.addInstructions(scoped);
+        const prompt = await pc.build();
+
+        expect(prompt).toContain(
+            "Keep the checkout flow moving (do not apply when: the user is asking for support)"
+        );
+    });
+
     test("failing if condition omits the instruction and its textual when condition", async () => {
         const scoped: ScopedInstructions<TestContext, TestData> = {
             global: [

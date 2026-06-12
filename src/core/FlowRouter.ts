@@ -67,6 +67,7 @@ export interface BuildStepSelectionPromptParams<
   context?: TContext;
   session?: SessionState<TData>;
   stepConditionContext?: string[]; // AI context strings from step conditions
+  stepExclusionContext?: string[]; // AI exclusion strings from step conditions
 }
 
 export interface BuildRoutingPromptParams<TContext = unknown, TData = unknown> {
@@ -384,9 +385,11 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
 
     // Collect AI context strings from step conditions
     const stepConditionContext: string[] = [];
+    const stepExclusionContext: string[] = [];
     for (const candidate of candidates) {
       const whenResult = await candidate.step.evaluateWhen(templateContext);
       stepConditionContext.push(...whenResult.aiContextStrings);
+      stepExclusionContext.push(...whenResult.aiExclusionStrings);
     }
 
     // Check if any candidate is a completion marker (isFlowComplete = true)
@@ -403,6 +406,7 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
       context,
       session: updatedSession,
       stepConditionContext,
+      stepExclusionContext,
       includeCompletion: hasCompletionOption,
     });
 
@@ -1100,6 +1104,7 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
       context,
       session,
       stepConditionContext,
+      stepExclusionContext,
       includeCompletion = false,
     } = params;
     const templateContext = createTemplateContext({ context, session, history });
@@ -1152,8 +1157,9 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
         const whenResult = await candidate.step.evaluateWhen(templateContext);
         if (whenResult.aiContextStrings.length > 0) {
           parts.push(`   When any condition matches: ${whenResult.aiContextStrings.join(" OR ")}`);
-        } else if (typeof candidate.step.when === 'string') {
-          parts.push(`   When this step should be completed: ${candidate.step.when}`);
+        }
+        if (whenResult.aiExclusionStrings.length > 0) {
+          parts.push(`   Do not choose when any condition matches: ${whenResult.aiExclusionStrings.join(" OR ")}`);
         }
       }
 
@@ -1181,6 +1187,18 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
           ...stepConditionContext.map(ctx => `- ${ctx}`),
           "",
           "Consider this context when selecting the most appropriate step.",
+        ].join("\n")
+      );
+    }
+
+    if (stepExclusionContext && stepExclusionContext.length > 0) {
+      await pc.addInstruction(
+        [
+          "",
+          "Additional step exclusion context:",
+          ...stepExclusionContext.map(ctx => `- ${ctx}`),
+          "",
+          "Avoid selecting steps when their exclusion context matches.",
         ].join("\n")
       );
     }
@@ -1424,6 +1442,7 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
           "Available steps in active route (choose one to transition to):",
         ];
         const activeStepConditionContext: string[] = [];
+        const activeStepExclusionContext: string[] = [];
 
         for (const step of activeFlowSteps) {
           const idx = activeFlowSteps.indexOf(step);
@@ -1438,8 +1457,10 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
             if (whenResult.aiContextStrings.length > 0) {
               stepInfo.push(`   When any condition matches: ${whenResult.aiContextStrings.join(" OR ")}`);
               activeStepConditionContext.push(...whenResult.aiContextStrings);
-            } else if (typeof step.when === 'string') {
-              stepInfo.push(`   When this step should be completed: ${step.when}`);
+            }
+            if (whenResult.aiExclusionStrings.length > 0) {
+              stepInfo.push(`   Do not choose when any condition matches: ${whenResult.aiExclusionStrings.join(" OR ")}`);
+              activeStepExclusionContext.push(...whenResult.aiExclusionStrings);
             }
           }
 
@@ -1469,6 +1490,17 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
               ...activeStepConditionContext.map(ctx => `- ${ctx}`),
               "",
               "Use this context to inform your step selection decision.",
+            ].join("\n")
+          );
+        }
+        if (activeStepExclusionContext.length > 0) {
+          await pc.addInstruction(
+            [
+              "",
+              "Additional step exclusion context:",
+              ...activeStepExclusionContext.map(ctx => `- ${ctx}`),
+              "",
+              "Avoid selecting steps when their exclusion context matches.",
             ].join("\n")
           );
         }

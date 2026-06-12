@@ -19,10 +19,18 @@ import type {
   AgentStructuredResponse,
   StructuredSchema,
 } from "../types";
+import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
 import { withTimeoutAndRetry } from "../utils/retry";
 import { tryParseJSONResponse } from "../utils/json";
 import { logger } from "../utils/logger";
+import {
+  classifyProviderError,
+  getErrorMessage,
+  isBackupEligible,
+  toProviderError,
+  type ErrorClassificationOptions,
+} from "./errorClassification";
 
 const DEFAULT_RETRY_CONFIG = {
   timeout: 60000,
@@ -50,82 +58,33 @@ export interface GeminiProviderOptions {
 }
 
 /**
- * Type guard for errors with status/code properties
+ * Gemini-specific error classification signals ("overloaded" code plus
+ * the "not available"/"INTERNAL" message patterns Gemini emits).
  */
-interface ErrorWithStatus {
-  status?: number;
-  code?: string;
-  message?: string;
-  type?: string;
-}
-
-/**
- * Type guard to check if error is ErrorWithStatus
- */
-function isErrorWithStatus(error: unknown): error is ErrorWithStatus {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    ("status" in error || "code" in error || "message" in error)
-  );
-}
-
-/**
- * Safely extract error message
- */
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (isErrorWithStatus(error) && error.message) {
-    return error.message;
-  }
-  return String(error);
-}
-
-/**
- * Determines if an error should trigger backup model usage
- */
-const shouldUseBackupModel = (error: unknown): boolean => {
-  if (!isErrorWithStatus(error)) {
-    return false;
-  }
-
-  // Server errors
-  if (error.status === 500 || error.status === 503) {
-    return true;
-  }
-
-  // Rate limiting
-  if (error.status === 429) {
-    return true;
-  }
-
-  // Model overloaded or unavailable
-  if (error.code === "overloaded") {
-    return true;
-  }
-
-  const message = getErrorMessage(error);
-  if (
-    message.includes("overloaded") ||
-    message.includes("unavailable") ||
-    message.includes("not available") ||
-    message.includes("internal error") ||
-    message.includes("Internal error") ||
-    message.includes("INTERNAL")
-  ) {
-    return true;
-  }
-
-  return false;
+const CLASSIFICATION_OPTIONS: ErrorClassificationOptions = {
+  overloadedCodes: ["overloaded"],
+  overloadedMessages: ["not available", "INTERNAL"],
 };
+
+/**
+ * Determines if an error should trigger backup model usage.
+ * Derived from the normalized error classification.
+ */
+const shouldUseBackupModel = (error: unknown): boolean =>
+  isBackupEligible(classifyProviderError(error, CLASSIFICATION_OPTIONS));
 
 /**
  * Gemini provider implementation with backup models and retry logic
  */
 export class GeminiProvider implements AiProvider {
   public readonly name = "gemini";
+  public readonly capabilities: ProviderCapabilities = {
+    supportsTools: true,
+    supportsNativeJsonSchema: true,
+    supportsStreaming: true,
+    supportsStreamingToolCalls: true,
+    supportsPromptCaching: false,
+  };
   private genAI: GoogleGenAIType;
   private primaryModel: string;
   private backupModels: string[];
@@ -408,7 +367,7 @@ export class GeminiProvider implements AiProvider {
       );
 
       if (!shouldUseBackupModel(primaryError)) {
-        throw primaryError;
+        throw toProviderError(primaryError, this.name, CLASSIFICATION_OPTIONS);
       }
 
       logger.debug(`[GEMINI] Trying backup models`);
@@ -449,7 +408,7 @@ export class GeminiProvider implements AiProvider {
       logger.error(
         `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
-      throw lastBackupError;
+      throw toProviderError(lastBackupError, this.name, CLASSIFICATION_OPTIONS);
     }
   }
 
@@ -615,7 +574,7 @@ export class GeminiProvider implements AiProvider {
       );
 
       if (!shouldUseBackupModel(primaryError)) {
-        throw primaryError;
+        throw toProviderError(primaryError, this.name, CLASSIFICATION_OPTIONS);
       }
 
       logger.debug(`[GEMINI] Trying backup models for streaming`);
@@ -656,7 +615,7 @@ export class GeminiProvider implements AiProvider {
       logger.error(
         `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
       );
-      throw lastBackupError;
+      throw toProviderError(lastBackupError, this.name, CLASSIFICATION_OPTIONS);
     }
   }
 

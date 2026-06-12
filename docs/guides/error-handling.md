@@ -17,21 +17,25 @@ Every thrown message follows the same shape:
 [<ErrorClass>] <what>: <why>. <how to fix>.
 ```
 
-The bracketed prefix mirrors the class name. The colon separates `<what>` from `<why>`. The trailing sentence is `<how to fix>`. The contract is uniform across the five classes the framework throws — `FlowConfigurationError`, `DataValidationError`, `ToolExecutionError`, `ResponseGenerationError`, and `NotImplementedError` — so log lines and `try/catch` blocks parse the same way regardless of which class fired.
+The bracketed prefix mirrors the class name. The colon separates `<what>` from `<why>`. The trailing sentence is `<how to fix>`. The contract is uniform across the classes the framework throws — `FlowConfigurationError`, `DataValidationError`, `ToolExecutionError`, `ResponseGenerationError`, `SessionConflictError`, and `NotImplementedError` — so log lines and `try/catch` blocks parse the same way regardless of which class fired. The one exception is `ProviderError`, which carries the vendor's own message verbatim; its structure lives in the normalized `code` field instead.
 
 The format applies to framework-thrown errors. If you write a custom tool or hook that throws, follow the same shape so downstream handlers stay uniform.
 
-## The five classes
+## The error classes
 
 | Class | Thrown when | Recover by |
 |-------|-------------|------------|
 | `FlowConfigurationError` | Misconfigured agent: duplicate ids, unknown `collect` keys, malformed `Directive`, branch targets that don't resolve, auto-step cycles, function on `when`. | Don't. Surface in CI. |
 | `DataValidationError` | A user message produces a value that violates the declared `schema`. | Re-prompt the user for the offending fields. |
 | `ToolExecutionError` | A tool handler throws, all retries fail, or `validateInput` cannot correct invalid args. | User-friendly message, optional retry, optional `agent.dispatch` to a recovery flow. |
-| `ResponseGenerationError` | The provider call fails or the response cannot be parsed. | Backoff retry, fall back to a different provider, or surface a soft failure. |
+| `ResponseGenerationError` | Anything inside the turn fails — provider call, parsing, persistence. Wraps the underlying error in `details.originalError`. | Inspect `details.originalError` first; backoff retry, fall back, or surface a soft failure. |
+| `ProviderError` | A provider call fails terminally — retries and `backupModels` exhausted. Normalized `code` across all vendors; original SDK error on `cause`. | Match on `code`: backoff for `rate_limited` / `overloaded`, fix credentials for `auth`. |
+| `SessionConflictError` | A session save carries a stale `version` — another writer persisted the session after this one loaded it. | Reload the session and retry the turn. |
 | `NotImplementedError` | A reserved option is set to a value this version does not support (e.g. `routerMode: 'embedding'` in v2.0). | Use a supported value. Same posture as `FlowConfigurationError`. |
 
-`FlowConfigurationError`, `ToolExecutionError`, and `NotImplementedError` are exported from `@falai/agent` and matchable with `instanceof`. `DataValidationError` and `ResponseGenerationError` are internal — match them by `error.name`.
+`FlowConfigurationError`, `ToolExecutionError`, `ProviderError`, `SessionConflictError`, and `NotImplementedError` are exported from `@falai/agent` and matchable with `instanceof`. `DataValidationError` and `ResponseGenerationError` are internal — match them by `error.name`.
+
+One framing that makes recovery simpler: **a failed turn has no effect**. If `respond()` or `stream()` throws mid-turn, the in-memory session is rolled back to its pre-turn snapshot (the user message added by `chat()`/`stream()` before the turn is retained), and persisted state is whatever the previous turn saved. There is no partially mutated session to repair — retrying the turn is always safe.
 
 ## Pattern 1: try/catch + instanceof narrowing
 
@@ -124,17 +128,32 @@ if (err instanceof ToolExecutionError && err.toolId === "charge_card") {
 
 The dispatched [`Directive`](../reference/directive.md) lands in `session.pendingDirective` and is consumed at the start of the next turn.
 
-## Pattern 4: ResponseGenerationError → backoff or fallback provider
+## Pattern 4: ProviderError → match the code, backoff or fallback provider
 
-Provider errors are usually transient. Retry with backoff first; fall back to a second provider only if the primary keeps failing.
+Terminal provider failures throw `ProviderError` with a normalized `code` (`rate_limited`, `overloaded`, `auth`, `invalid_request`, `schema_rejected`, `timeout`, `network`, `unknown`) — the same shape whether you run Gemini, OpenAI, Anthropic, OpenRouter, or DeepSeek. Inside a turn it arrives wrapped in `ResponseGenerationError`; unwrap via `details.originalError`. Retry with backoff for transient codes; fall back to a second provider only if the primary keeps failing.
 
 ```typescript
+import { ProviderError } from "@falai/agent";
+
+function asProviderError(err: unknown): ProviderError | undefined {
+  if (err instanceof ProviderError) return err;
+  if (err instanceof Error && err.name === "ResponseGenerationError") {
+    const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
+    if (original instanceof ProviderError) return original;
+  }
+  return undefined;
+}
+
 async function respondWithFallback(history: HistoryItem[], session: Session) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await primaryAgent.respond({ history, session });
     } catch (err) {
-      if (err instanceof Error && err.name === "ResponseGenerationError") {
+      const providerError = asProviderError(err);
+      if (providerError?.code === "auth" || providerError?.code === "invalid_request") {
+        throw err; // config bug — retrying won't help
+      }
+      if (providerError) {
         await new Promise((r) => setTimeout(r, 200 * 2 ** attempt));
         continue;
       }
@@ -145,9 +164,40 @@ async function respondWithFallback(history: HistoryItem[], session: Session) {
 }
 ```
 
-Both agents share the same `flows`, `tools`, and `schema` — only the `provider` differs. The session is provider-agnostic, so the fallback picks up exactly where the primary left off.
+Both agents share the same `flows`, `tools`, and `schema` — only the `provider` differs. The session is provider-agnostic, so the fallback picks up exactly where the primary left off. The original SDK error stays available on `providerError.cause` for vendor-specific logging.
 
-## Pattern 5: FlowConfigurationError → don't catch in production
+## Pattern 5: SessionConflictError → reload and retry
+
+With a durable adapter, every save is a compare-and-swap on the session's `version`. When two writers race — concurrent `respond()` calls from parallel webhooks, two browser tabs on one `sessionId` — the loser's save throws `SessionConflictError` instead of silently overwriting the winner's state. (Same-process concurrent saves of one session are serialized automatically and never conflict.)
+
+The error names `sessionId`, `expectedVersion`, and `actualVersion`. The recovery is mechanical: reload the session, retry the turn. The failed turn rolled back, so there is nothing to clean up.
+
+```typescript
+import { SessionConflictError } from "@falai/agent";
+
+function isSessionConflict(err: unknown): boolean {
+  if (err instanceof SessionConflictError) return true;
+  if (err instanceof Error && err.name === "ResponseGenerationError") {
+    const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
+    return original instanceof SessionConflictError;
+  }
+  return false;
+}
+
+try {
+  return await agent.respond({ history, session });
+} catch (err) {
+  if (isSessionConflict(err)) {
+    const fresh = await agent.session.getOrCreate(sessionId); // reload winning state
+    return agent.respond({ history, session: fresh });
+  }
+  throw err;
+}
+```
+
+Cap the retries — a hot session under sustained contention should surface the conflict rather than spin. See [Persistence](./persistence.md) for how the `version` column works per adapter.
+
+## Pattern 6: FlowConfigurationError → don't catch in production
 
 `FlowConfigurationError` is a *bug*, not a runtime condition. It fires when the agent definition is malformed: a step references a flow id that doesn't exist, two steps share a `collect` key, a branch target points nowhere, an auto-step chain loops. The right place to catch it is the test runner and CI — never the request path.
 

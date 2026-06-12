@@ -101,7 +101,7 @@ flow({
 
 `when` strings reuse the same machinery as `step.when`. One LLM call evaluates each entry's condition in declaration order; the first match wins. Conditions are written from the agent's perspective — `"user wants to cancel"` reads naturally and matches the prompts the model already speaks. Don't try to compress them into keywords; the AI is doing classification, not pattern matching.
 
-When one branch has several alternative phrasings, use an array. The entries use OR semantics: any one match activates the branch.
+When one branch has several alternative phrasings, use an array. Non-`!` entries use OR semantics: any one match activates the branch. Prefix an entry with `!` to make it an exclusion; any matching exclusion prevents that branch from activating.
 
 The fallback at the end is doing real work too. When the model can't classify the message into any of the three buckets — say the user typed "hi" — `general_help` catches it instead of dropping the user into AI step selection.
 

@@ -83,8 +83,10 @@ export type Template<TContext = unknown, TData = unknown> =
 export interface ConditionEvaluationResult {
   /** Result of function evaluations only */
   programmaticResult: boolean;
-  /** String values for AI context */
+  /** Positive string values for AI context. Any one may satisfy the condition. */
   aiContextStrings: string[];
+  /** Negative string values for AI context. Any one inhibits the condition. */
+  aiExclusionStrings?: string[];
   /** Whether any functions were evaluated */
   hasProgrammaticConditions: boolean;
   /** Detailed evaluation information for debugging */

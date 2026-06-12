@@ -15,6 +15,7 @@ import type { StepResult, BranchSpec, BranchResult } from "../types/flow";
 import { ToolScope, Template, TemplateContext } from "../types";
 import type { ConditionWhen, ConditionIf } from "../types/flow";
 import { generateStepId, logger } from "../utils";
+import { splitWhenConditions } from "../utils/condition";
 import { Agent } from './Agent'
 
 /**
@@ -448,7 +449,8 @@ export class Step<TContext = unknown, TData = unknown> {
   /**
    * Evaluate when/if conditions using the v2 split logic.
    * `if` (code predicate) evaluates first (free); `when` (AI) evaluates only when `if` passes.
-   * `if` predicates use AND semantics. `when` strings use OR semantics.
+   * `if` predicates use AND semantics. Non-`!` `when` strings use OR semantics;
+   * `!` strings are exclusions where any match inhibits activation.
    * When both fields are set, the passing `if` gate and AI match are combined with AND.
    */
   async evaluateWhen(
@@ -456,6 +458,7 @@ export class Step<TContext = unknown, TData = unknown> {
   ): Promise<{
     shouldActivate: boolean;
     aiContextStrings: string[];
+    aiExclusionStrings: string[];
     hasProgrammaticConditions: boolean;
   }> {
     // If neither `when` nor `if` is set, step is always eligible
@@ -463,6 +466,7 @@ export class Step<TContext = unknown, TData = unknown> {
       return {
         shouldActivate: true,
         aiContextStrings: [],
+        aiExclusionStrings: [],
         hasProgrammaticConditions: false
       };
     }
@@ -483,6 +487,7 @@ export class Step<TContext = unknown, TData = unknown> {
             return {
               shouldActivate: false,
               aiContextStrings: [],
+              aiExclusionStrings: [],
               hasProgrammaticConditions: true
             };
           }
@@ -491,6 +496,7 @@ export class Step<TContext = unknown, TData = unknown> {
           return {
             shouldActivate: false,
             aiContextStrings: [],
+            aiExclusionStrings: [],
             hasProgrammaticConditions: true
           };
         }
@@ -499,13 +505,14 @@ export class Step<TContext = unknown, TData = unknown> {
 
     // `if` passed (or was absent) — now evaluate `when` (AI-evaluated strings)
     if (this.when) {
-      const whenStrings = Array.isArray(this.when) ? this.when : [this.when];
+      const whenConditions = splitWhenConditions(this.when);
       // `when` strings are handed to the AI — return them as aiContextStrings
       // The programmatic result is true (strings don't fail programmatically;
       // they're scored by the AI at routing time)
       return {
         shouldActivate: true,
-        aiContextStrings: whenStrings,
+        aiContextStrings: whenConditions.positive,
+        aiExclusionStrings: whenConditions.negative,
         hasProgrammaticConditions: !!this.if
       };
     }
@@ -514,6 +521,7 @@ export class Step<TContext = unknown, TData = unknown> {
     return {
       shouldActivate: true,
       aiContextStrings: [],
+      aiExclusionStrings: [],
       hasProgrammaticConditions: true
     };
   }

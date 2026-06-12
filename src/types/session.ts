@@ -74,4 +74,13 @@ export interface SessionState<TData = unknown> {
     lastUpdatedAt?: Date;
     [key: string]: unknown;
   };
+
+  /**
+   * Optimistic-concurrency version, managed by the persistence layer.
+   * Incremented on every successful save; a save with a stale version
+   * throws SessionConflictError instead of silently overwriting state
+   * written by a concurrent turn. Undefined for sessions never persisted
+   * or persisted by a pre-2.4 version (no conflict check is performed then).
+   */
+  version?: number;
 }

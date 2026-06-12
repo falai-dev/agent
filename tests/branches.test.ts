@@ -593,6 +593,7 @@ import { createAiConditionEvaluator, evaluateBranches } from "../src/core/Branch
 import type { AiProvider } from "../src/types/ai";
 import type { BranchPredicateContext } from "../src/types/flow";
 import type { SessionState } from "../src/types/session";
+import type { WhenConditionGroups } from "../src/utils/condition";
 
 /**
  * Helper: creates a minimal valid BranchPredicateContext for testing.
@@ -618,14 +619,20 @@ function createTestContext(overrides: Partial<BranchPredicateContext<unknown, Te
  */
 function createMockAiEvaluator(result: boolean = true) {
     let callCount = 0;
-    const evaluator = async (_conditions: string[]): Promise<boolean> => {
+    let lastConditions: WhenConditionGroups | undefined;
+    const evaluator = async (conditions: WhenConditionGroups): Promise<boolean> => {
         callCount++;
+        lastConditions = conditions;
         return result;
     };
     return {
         evaluator,
         get callCount() { return callCount; },
-        reset() { callCount = 0; },
+        get lastConditions() { return lastConditions; },
+        reset() {
+            callCount = 0;
+            lastConditions = undefined;
+        },
     };
 }
 
@@ -644,10 +651,40 @@ describe("createAiConditionEvaluator", () => {
         };
 
         const evaluator = createAiConditionEvaluator(provider, [], {});
-        await evaluator(["the user asked about the address", "the user asked where we are located"]);
+        await evaluator({
+            positive: ["the user asked about the address", "the user asked where we are located"],
+            negative: [],
+        });
 
-        expect(prompt).toContain("true if ANY condition is satisfied");
+        expect(prompt).toContain("ANY positive condition is satisfied");
+        expect(prompt).toContain("NO exclusion condition is satisfied");
         expect(prompt).not.toContain("true if ALL conditions are satisfied");
+    });
+
+    test("renders !-prefixed textual conditions as exclusions", async () => {
+        let prompt = "";
+        const provider: AiProvider = {
+            name: "RecordingProvider",
+            async generateMessage(input) {
+                prompt = input.prompt;
+                return { message: "" };
+            },
+            async *generateMessageStream() {
+                return;
+            },
+        };
+
+        const evaluator = createAiConditionEvaluator(provider, [], {});
+        await evaluator({
+            positive: ["the user asked about the address"],
+            negative: ["the user is asking for support"],
+        });
+
+        expect(prompt).toContain("Positive condition(s) (OR):");
+        expect(prompt).toContain("the user asked about the address");
+        expect(prompt).toContain("Exclusion condition(s) (OR, any match inhibits):");
+        expect(prompt).toContain("the user is asking for support");
+        expect(prompt).not.toContain("!the user is asking for support");
     });
 });
 
@@ -757,6 +794,26 @@ describe("Branch Resolution Algorithm (evaluateBranches)", () => {
 
             expect(result).toBe("help_step");
             expect(ai.callCount).toBe(1);
+        });
+
+        test("! entries are passed to the AI evaluator as exclusions", async () => {
+            const ai = createMockAiEvaluator(true);
+            const ctx = createTestContext();
+
+            const result = await evaluateBranches(
+                [{
+                    when: ["user wants help", "!user is asking for support"],
+                    then: "help_step",
+                }],
+                ctx,
+                ai.evaluator,
+            );
+
+            expect(result).toBe("help_step");
+            expect(ai.lastConditions).toEqual({
+                positive: ["user wants help"],
+                negative: ["user is asking for support"],
+            });
         });
     });
 
@@ -1194,7 +1251,7 @@ describe("Property: Branch predicate errors degrade gracefully", () => {
                 fc.string({ minLength: 1 }),
                 async (whenCondition, thenTarget) => {
                     // AI evaluator that throws
-                    const throwingAi = async (_conditions: string[]): Promise<boolean> => {
+                    const throwingAi = async (_conditions: WhenConditionGroups): Promise<boolean> => {
                         throw new Error("provider unavailable");
                     };
                     const ctx = createTestContext();
@@ -3053,15 +3110,13 @@ describe("Phase 5: Pipeline-Level Resolution Precedence (Task 5.1)", () => {
                 history: [],
             } as any;
 
-            pipeline.setContext({});
-            pipeline.setCurrentSession(session);
-
             // Call determineNextStep WITH a busDirective that has a position field
             const result = await pipeline.determineNextStep({
                 selectedFlow: flow,
                 selectedStep: undefined,
                 session,
                 isFlowComplete: false,
+                context: {},
                 busDirective: { goTo: "some-other-flow" },
             });
 
@@ -3111,15 +3166,13 @@ describe("Phase 5: Pipeline-Level Resolution Precedence (Task 5.1)", () => {
                 history: [],
             } as any;
 
-            pipeline.setContext({});
-            pipeline.setCurrentSession(session);
-
             // Call determineNextStep WITH a busDirective that has NO position field
             const result = await pipeline.determineNextStep({
                 selectedFlow: flow,
                 selectedStep: undefined,
                 session,
                 isFlowComplete: false,
+                context: {},
                 busDirective: { dataUpdate: { tier: "pro" } } as Directive<unknown, TestData>,
             });
 
@@ -3169,15 +3222,13 @@ describe("Phase 5: Pipeline-Level Resolution Precedence (Task 5.1)", () => {
                 history: [],
             } as any;
 
-            pipeline.setContext({});
-            pipeline.setCurrentSession(session);
-
             // Call determineNextStep WITHOUT busDirective (undefined)
             const result = await pipeline.determineNextStep({
                 selectedFlow: flow,
                 selectedStep: undefined,
                 session,
                 isFlowComplete: false,
+                context: {},
             });
 
             // No busDirective → branches should be evaluated

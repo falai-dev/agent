@@ -11,8 +11,10 @@ import type {
   SessionData,
   SessionRepository,
   SessionStatus,
+  SessionUpdateOptions,
   CreateSessionData,
 } from "../types";
+import { SessionConflictError } from "../types/errors";
 import { cloneDeep } from "../utils/clone";
 import { createSessionId } from "../utils";
 
@@ -92,6 +94,7 @@ class MemorySessionRepository<TData = Record<string, unknown>>
       id,
       status: data.status || "active",
       messageCount: data.messageCount || 0,
+      version: data.version ?? 1,
       createdAt: now,
       updatedAt: now,
     };
@@ -126,14 +129,25 @@ class MemorySessionRepository<TData = Record<string, unknown>>
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null> {
     const existing = this.sessions.get(id);
     if (!existing) return null;
 
+    // Compare-and-swap: rows without a stored version (pre-2.4) are accepted
+    if (
+      options?.expectedVersion !== undefined &&
+      existing.version !== undefined &&
+      existing.version !== options.expectedVersion
+    ) {
+      throw new SessionConflictError(id, options.expectedVersion, existing.version);
+    }
+
     const updated: SessionData<TData> = {
       ...existing,
       ...data,
+      version: (existing.version ?? options?.expectedVersion ?? 0) + 1,
       updatedAt: new Date(),
     };
 

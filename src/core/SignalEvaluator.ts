@@ -18,6 +18,7 @@ import type {
     SignalPredicateContext,
 } from "../types/signals";
 import { eventsToHistory, logger } from "../utils";
+import { splitWhenConditions, evaluateIfPredicates } from "../utils/condition";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -44,8 +45,8 @@ export interface EvaluateSignalsParams<TContext = unknown, TData = unknown> {
 /**
  * Builds the classifier prompt for a batch of signals.
  *
- * Splits `when` entries by `!` prefix at render time:
- * - Non-`!` → "TRIGGER WHEN (ANY matches)"
+ * Splits `when` entries with the shared ConditionWhen parser:
+ * - Positive entries → "TRIGGER WHEN (ANY matches)"
  * - `!` entries → prefix stripped, "DO NOT TRIGGER WHEN (ANY inhibits)"
  *
  * Extraction schemas render under "WHEN MATCHED, EXTRACT".
@@ -80,11 +81,11 @@ export function buildSignalClassifierPrompt<TContext = unknown, TData = unknown>
         }
 
         // Split when entries
-        const whenEntries = normalizeWhen(signal.when);
-        const positiveEntries = whenEntries.filter(w => !w.startsWith("!"));
-        const negativeEntries = whenEntries.filter(w => w.startsWith("!")).map(w => w.slice(1));
+        const whenConditions = splitWhenConditions(signal.when);
+        const positiveEntries = whenConditions.positive;
+        const negativeEntries = whenConditions.negative;
 
-        const isUnconditional = whenEntries.length === 0;
+        const isUnconditional = positiveEntries.length === 0 && negativeEntries.length === 0;
 
         if (isUnconditional && signal.extract) {
             // Unconditional + extract → ALWAYS EXTRACT
@@ -94,6 +95,8 @@ export function buildSignalClassifierPrompt<TContext = unknown, TData = unknown>
             for (const entry of positiveEntries) {
                 lines.push(`    • ${entry}`);
             }
+        } else if (negativeEntries.length > 0) {
+            lines.push(`  TRIGGER WHEN: no positive condition; trigger unless an exclusion matches.`);
         }
 
         if (negativeEntries.length > 0) {
@@ -207,23 +210,9 @@ export class SignalEvaluator<TContext = unknown, TData = unknown> {
         predicates: SignalPredicate<TContext, TData> | SignalPredicate<TContext, TData>[],
         ctx: SignalPredicateContext<TContext, TData>,
     ): Promise<boolean> {
-        const predicateArray = Array.isArray(predicates) ? predicates : [predicates];
-
-        for (let i = 0; i < predicateArray.length; i++) {
-            try {
-                const result = await predicateArray[i](ctx);
-                if (!result) {
-                    return false;
-                }
-            } catch (error) {
-                logger.error(
-                    `[Signals] Predicate at index ${i} threw: ${error instanceof Error ? error.message : String(error)}`,
-                );
-                return false;
-            }
-        }
-
-        return true;
+        return evaluateIfPredicates<SignalPredicateContext<TContext, TData>>(
+            predicates, ctx, "Signals"
+        );
     }
 
     /**
@@ -349,12 +338,6 @@ export function splitIntoBatches<T>(items: T[], batchSize: number): T[][] {
 // ──────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ──────────────────────────────────────────────────────────────────────────────
-
-/** Normalize `when` to a string array. */
-function normalizeWhen(when: string | string[] | undefined): string[] {
-    if (!when) return [];
-    return Array.isArray(when) ? when : [when];
-}
 
 /**
  * Render extraction schema properties as human-readable lines for the prompt.

@@ -53,6 +53,14 @@ export const MOCK_RESPONSES = {
 export class MockProvider implements AiProvider {
   public readonly name = "MockProvider";
 
+  public readonly capabilities = {
+    supportsTools: true,
+    supportsNativeJsonSchema: true,
+    supportsStreaming: true,
+    supportsStreamingToolCalls: true,
+    supportsPromptCaching: false,
+  };
+
   private config: Required<MockProviderConfig>;
 
   constructor(config: MockProviderConfig = {}) {

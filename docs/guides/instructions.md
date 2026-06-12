@@ -77,7 +77,7 @@ The composer renders the resolved set under a single `## Instructions` heading a
 Each eligible instruction lands in the prompt as a single bullet:
 
 ```
-- [<kind>] [<scope>] <prompt> (apply only when: <when-clause> OR <when-clause>)
+- [<kind>] [<scope>] <prompt> (apply only when: <when-clause> OR <when-clause>; do not apply when: <exclusion-clause>)
 ```
 
 The condition suffix is omitted when `when` is not set. A composed block looks like this:
@@ -91,7 +91,7 @@ The condition suffix is omitted when `when` is not set. A composed block looks l
 - [must] [Step: payment] If the card is declined, never retry without confirmation.
 ```
 
-The format is fixed. The kind prefix is always present (defaulting to `[should]`), the scope caption is always present, and the prompt text follows verbatim. When present, `when` clauses are joined with `OR` and appended for the model to evaluate.
+The format is fixed. The kind prefix is always present (defaulting to `[should]`), the scope caption is always present, and the prompt text follows verbatim. When present, non-`!` `when` clauses are joined with `OR`; `!`-prefixed clauses are stripped and appended as `do not apply when` exclusions for the model to evaluate.
 
 ## `appliedInstructions` on the response
 

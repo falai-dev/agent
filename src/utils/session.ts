@@ -306,6 +306,7 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
     currentFlow?: string;
     currentStep?: string;
     collectedData?: CollectedStateData<TData>;
+    version?: number;
   }
 ): SessionState<TData> {
   const collectedData: CollectedStateData<TData> = data.collectedData || {
@@ -337,6 +338,7 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
     flowHistory: collectedData.flowHistory || [],
     history: collectedData.history || [],
     metadata: collectedData.metadata || {},
+    version: data.version,
   };
 
   // Restore pendingDirective if present (ignore any legacy pendingTransition — per Req 12.3)

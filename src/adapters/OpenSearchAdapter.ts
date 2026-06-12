@@ -42,7 +42,9 @@ import type {
   MessageData,
   CollectedStateData,
   CreateSessionData,
+  SessionUpdateOptions,
 } from "../types";
+import { SessionConflictError } from "../types/errors";
 
 /**
  * OpenSearch Client interface (minimal typing for the official client)
@@ -200,6 +202,7 @@ export class OpenSearchAdapter<TData = Record<string, unknown>> implements Persi
               pendingDirective: { type: "object", enabled: false },
               signals: { type: "object", enabled: false },
               messageCount: { type: "integer" },
+              version: { type: "integer" },
               createdAt: { type: "date" },
               updatedAt: { type: "date" },
               lastMessageAt: { type: "date" },
@@ -266,6 +269,7 @@ class OpenSearchSessionRepository<TData = Record<string, unknown>>
       id,
       status: data.status || "active",
       messageCount: data.messageCount || 0,
+      version: data.version ?? 1,
       createdAt: now,
       updatedAt: now,
     };
@@ -341,10 +345,28 @@ class OpenSearchSessionRepository<TData = Record<string, unknown>>
 
   async update(
     id: string,
-    updates: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    updates: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null> {
+    // Check-then-set on the stored document — not fully atomic across writers
+    const existing = await this.findById(id);
+    if (!existing) return null;
+
+    if (
+      options?.expectedVersion !== undefined &&
+      existing.version !== undefined &&
+      existing.version !== options.expectedVersion
+    ) {
+      throw new SessionConflictError(
+        id,
+        options.expectedVersion,
+        existing.version
+      );
+    }
+
     const doc: Record<string, unknown> = {
       ...updates,
+      version: (existing.version ?? options?.expectedVersion ?? 0) + 1,
       updatedAt: new Date().toISOString(),
     };
 
@@ -485,6 +507,7 @@ class OpenSearchSessionRepository<TData = Record<string, unknown>>
       currentStep: doc.currentStep as string | undefined,
       collectedData: doc.collectedData as CollectedStateData<TData> | undefined,
       messageCount: (doc.messageCount as number) || 0,
+      version: (doc.version as number | null) ?? undefined,
       createdAt: new Date(doc.createdAt as string),
       updatedAt: new Date(doc.updatedAt as string),
       lastMessageAt: doc.lastMessageAt

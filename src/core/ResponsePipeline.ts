@@ -57,6 +57,8 @@ export function hasDirectivePositionField<TContext = unknown, TData = unknown>(
 export interface ResponsePreparationResult<TContext, TData = unknown> {
   effectiveContext: TContext;
   session: SessionState<TData>;
+  /** Context returned by the beforeRespond hook, for the caller to sync back to the agent. */
+  contextAfterHook?: TContext;
 }
 
 export interface RoutingResult<TContext, TData = unknown> {
@@ -216,17 +218,21 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   async prepareResponseContext(params: {
     contextOverride?: Partial<TContext>;
     session?: SessionState<TData>;
+    /** The agent's current context, resolved by the caller (contextProvider already applied). */
+    currentContext?: TContext;
+    /** The agent's live session, used when no explicit session is passed. */
+    currentSession?: SessionState<TData>;
   }): Promise<ResponsePreparationResult<TContext, TData>> {
     const { contextOverride, session } = params;
 
-    // Get current context (may fetch from provider)
-    let currentContext = await this.getContext();
+    let currentContext = params.currentContext;
+    let contextAfterHook: TContext | undefined;
 
     // Call beforeRespond hook if configured
     if (this.options.hooks?.beforeRespond && currentContext !== undefined) {
       currentContext = await this.options.hooks.beforeRespond(currentContext);
-      // Update stored context with the result from beforeRespond
-      this.context = currentContext;
+      // Surface the hook result so the caller can sync it back to the agent
+      contextAfterHook = currentContext;
     }
 
     // Merge context with override
@@ -235,12 +241,13 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       ...(contextOverride as Record<string, unknown>),
     } as TContext;
 
-    // Initialize or get session (use current session if available)
-    const targetSession = session || this.currentSession || createSession<TData>();
+    // Initialize or get session (use the live session if available)
+    const targetSession = session || params.currentSession || createSession<TData>();
 
     return {
       effectiveContext,
       session: targetSession,
+      contextAfterHook,
     };
   }
 
@@ -459,10 +466,12 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     selectedStep: Step<TContext, TData> | undefined;
     session: SessionState<TData>;
     isFlowComplete: boolean;
+    /** The turn's effective context, passed explicitly (no stored pipeline state). */
+    context: TContext;
     /** Merged directive from the directive bus (pre-LLM + post-LLM phases). */
     busDirective?: Directive<TContext, TData>;
   }): Promise<{ nextStep: Step<TContext, TData> | undefined; session: SessionState<TData>; flowChanged?: Flow<TContext, TData> }> {
-    const { selectedFlow, selectedStep, session, isFlowComplete, busDirective } = params;
+    const { selectedFlow, selectedStep, session, isFlowComplete, context, busDirective } = params;
 
     if (!selectedFlow) {
       return { nextStep: undefined, session };
@@ -489,9 +498,8 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         : undefined;
 
       if (currentStep?.branches && currentStep.branches.length > 0) {
-        const contextToUse = this.getStoredContext();
         const branchResult = await this.evaluateStepBranches(
-          currentStep, selectedFlow, session, contextToUse as TContext
+          currentStep, selectedFlow, session, context
         );
         if (branchResult) {
           return branchResult;
@@ -515,13 +523,11 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         ? selectedFlow.getStep(session.currentStep.id)
         : undefined;
 
-      const contextToUse = this.getStoredContext();
-
       // Get candidate steps based on current position in the flow
       const candidates = await this.flowRouter.getCandidateStepsWithConditions(
         selectedFlow,
         currentStep, // Pass current step instead of undefined to maintain progression
-        createTemplateContext({ data: session.data, session, context: contextToUse })
+        createTemplateContext({ data: session.data, session, context })
       );
 
       if (candidates.length > 0) {
@@ -1243,40 +1249,6 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Get current context (fetches from provider if configured)
-   */
-  private async getContext(): Promise<TContext | undefined> {
-    // If context provider is configured, use it to fetch fresh context
-    if (this.options.contextProvider) {
-      return await this.options.contextProvider();
-    }
-
-    // Otherwise return the stored context
-    return this.context;
-  }
-
-  // These need to be passed in or accessed differently since ResponseHandler is not part of Agent
-  private context?: TContext;
-  private currentSession?: SessionState<TData>;
-
-  // Setters for context and current session (needed for beforeRespond hook)
-  setContext(context: TContext | undefined): void {
-    this.context = context;
-  }
-
-  setCurrentSession(session: SessionState<TData> | undefined): void {
-    this.currentSession = session;
-  }
-
-  public getStoredContext(): TContext | undefined {
-    return this.context;
-  }
-
-  public getCurrentSession(): SessionState<TData> | undefined {
-    return this.currentSession;
-  }
-
-  /**
    * Handle cross-flow completion evaluation and notifications
    * This method evaluates all flows for completion and can trigger completion handlers
    */
@@ -1338,40 +1310,4 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     };
   }
 
-  /**
-   * Update data flow to ensure agent-level data consistency
-   * This method ensures that data updates are properly validated and propagated
-   */
-  async updateDataFlow(params: {
-    session: SessionState<TData>;
-    dataUpdate: Partial<TData>;
-    flows: Flow<TContext, TData>[];
-  }): Promise<SessionState<TData>> {
-    const { session, dataUpdate, flows } = params;
-
-    // Update session data
-    const updatedSession = await this.updateData(session, dataUpdate);
-
-    // Update agent-level data if handler is available
-    if (this.updateCollectedData) {
-      await this.updateCollectedData(dataUpdate);
-    }
-
-    // Evaluate flow completions after data update
-    const completionResults = await this.handleCrossFlowCompletion({
-      flows,
-      session: updatedSession,
-      context: this.context!,
-      history: [],
-    });
-
-    // Log any newly completed flows
-    if (completionResults.completedFlows.length > 0) {
-      logger.debug(
-        `[ResponsePipeline] Data update resulted in ${completionResults.completedFlows.length} completed flows`
-      );
-    }
-
-    return completionResults.session;
-  }
 }

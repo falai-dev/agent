@@ -1,6 +1,6 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 import { ConditionTemplate, TemplateContext } from "../src/types/template";
-import { ConditionEvaluator, extractAIContextStrings, hasProgrammaticConditions } from "../src/utils/condition";
+import { ConditionEvaluator, extractAIContextStrings, hasProgrammaticConditions, splitWhenConditions } from "../src/utils/condition";
 import { createTemplateContext } from "../src/utils";
 
 interface TestData {
@@ -156,6 +156,33 @@ describe("ConditionEvaluator", () => {
     expect(result.hasProgrammaticConditions).toBe(false);
   });
 
+  test("should split !-prefixed strings into AI exclusions", async () => {
+    const condition: ConditionTemplate<TestContext, TestData> = [
+      "user wants to book",
+      "!user is asking to cancel",
+      "!user is asking for support"
+    ];
+
+    const result = await evaluator.evaluateCondition(condition, 'AND');
+
+    expect(result.aiContextStrings).toEqual(["user wants to book"]);
+    expect(result.aiExclusionStrings).toEqual([
+      "user is asking to cancel",
+      "user is asking for support"
+    ]);
+  });
+
+  test("should ignore malformed runtime entries when splitting when strings", () => {
+    // Test-only malformed value: public ConditionWhen remains string | string[].
+    const malformedWhen = [123, "valid condition", "!blocked condition"] as unknown as string[];
+    const result = splitWhenConditions(malformedWhen);
+
+    expect(result).toEqual({
+      positive: ["valid condition"],
+      negative: ["blocked condition"],
+    });
+  });
+
   test("should handle OR logic with all strings", async () => {
     const condition: ConditionTemplate<TestContext, TestData> = [
       "booking cancelled",
@@ -231,6 +258,16 @@ describe("Utility Functions", () => {
     
     const strings = extractAIContextStrings(condition);
     expect(strings).toEqual(["user wants to book", "payment required"]);
+  });
+
+  test("extractAIContextStrings should omit !-prefixed exclusions", () => {
+    const condition: ConditionTemplate = [
+      "user wants to book",
+      "!user is asking to cancel"
+    ];
+
+    const strings = extractAIContextStrings(condition);
+    expect(strings).toEqual(["user wants to book"]);
   });
 
   test("extractAIContextStrings should handle nested arrays", () => {

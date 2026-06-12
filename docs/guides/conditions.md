@@ -38,7 +38,7 @@ If the answer lives in `data`, `context`, or `session`, it's `if`. If the answer
 }
 ```
 
-Multiple strings combine with **OR** semantics — any clause may pass for the condition to match. Use the array form for alternative natural-language expressions of the same intent:
+Multiple non-`!` strings combine with **OR** semantics — any clause may pass for the condition to match. Use the array form for alternative natural-language expressions of the same intent:
 
 ```typescript
 {
@@ -46,6 +46,18 @@ Multiple strings combine with **OR** semantics — any clause may pass for the c
   when: [
     "the user asked about the address",
     "the user asked where we are located",
+  ],
+}
+```
+
+Prefix a string with `!` to make it an exclusion. Exclusions also combine with OR semantics: if any exclusion matches, the condition is inhibited. A negative-only `when` means "active unless this exclusion matches."
+
+```typescript
+{
+  title: "Checkout",
+  when: [
+    "the user is ready to buy",
+    "!the user is asking for support",
   ],
 }
 ```
@@ -160,7 +172,8 @@ A short checklist before shipping a condition:
 
 - Does it read a field, flag, or context value? Use `if`.
 - Does it interpret natural language? Use `when`.
-- Multiple natural-language alternatives where any may match? Put them in `when` — arrays use OR.
+- Multiple natural-language alternatives where any may match? Put them in `when` — non-`!` entries use OR.
+- Need an AI-evaluated exclusion? Prefix that `when` entry with `!`.
 - Multiple code predicates that must all pass? Put them in `if` — arrays use AND.
 - Need to skip when a value is already collected? `step.skip` (OR semantics).
 - Both fields set? `if` runs first, free; `when` only fires if `if` passes.

@@ -25,7 +25,9 @@ import type {
   MessageData,
   SessionStatus,
   PersistenceAdapter,
+  SessionUpdateOptions,
 } from "../types";
+import { SessionConflictError } from "../types/errors";
 import { createSessionId } from "../utils";
 
 /**
@@ -133,9 +135,16 @@ export class PostgreSQLAdapter<TData = Record<string, unknown>> implements Persi
         message_count INTEGER DEFAULT 0,
         last_message_at TIMESTAMP,
         completed_at TIMESTAMP,
+        version INTEGER,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
+    `);
+
+    // Migration: add the optimistic-concurrency version column to tables
+    // created by pre-2.4 versions
+    await this.client.query(`
+      ALTER TABLE ${sessionTable} ADD COLUMN IF NOT EXISTS version INTEGER
     `);
 
     await this.client.query(`
@@ -187,9 +196,9 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
     const now = new Date();
 
     const result = await this.client.query<SessionData<TData>>(
-      `INSERT INTO ${this.tableName} 
-       (id, user_id, agent_name, status, collected_data, message_count, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO ${this.tableName}
+       (id, user_id, agent_name, status, collected_data, message_count, version, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         id,
@@ -198,6 +207,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
         data.status || "active",
         JSON.stringify(data.collectedData || {}),
         data.messageCount || 0,
+        data.version ?? 1,
         now,
         now,
       ]
@@ -244,7 +254,8 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -282,10 +293,39 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
     fields.push(`updated_at = $${paramIndex++}`);
     values.push(new Date());
 
+    if (options?.expectedVersion !== undefined) {
+      const expectedVersion = options.expectedVersion;
+
+      // Compare-and-swap in a single statement: rows without a stored version
+      // (pre-2.4) are accepted and adopt expectedVersion as their base
+      fields.push(`version = COALESCE(version, $${paramIndex++}) + 1`);
+      values.push(expectedVersion);
+
+      const idParam = paramIndex++;
+      values.push(id);
+      const versionParam = paramIndex++;
+      values.push(expectedVersion);
+
+      const result = await this.client.query<SessionData<TData>>(
+        `UPDATE ${this.tableName}
+         SET ${fields.join(", ")}
+         WHERE id = $${idParam} AND (version IS NULL OR version = $${versionParam})
+         RETURNING *`,
+        values
+      );
+
+      if (result.rows[0]) return result.rows[0];
+
+      const existing = await this.findById(id);
+      if (!existing) return null;
+      throw new SessionConflictError(id, expectedVersion, existing.version);
+    }
+
+    fields.push(`version = COALESCE(version, 0) + 1`);
     values.push(id);
 
     const result = await this.client.query<SessionData<TData>>(
-      `UPDATE ${this.tableName} 
+      `UPDATE ${this.tableName}
        SET ${fields.join(", ")}
        WHERE id = $${paramIndex}
        RETURNING *`,

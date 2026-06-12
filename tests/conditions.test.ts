@@ -77,6 +77,29 @@ describe("Conditions: when/if split", () => {
             ]);
         });
 
+        test("! entries on flow when are stripped into AI exclusions", async () => {
+            const agent = new Agent<TestContext, TestData>({
+                name: "TestAgent",
+                provider: MockProviderFactory.basic(),
+            });
+
+            const flow = agent.createFlow({
+                title: "Array When Flow",
+                when: [
+                    "user wants to subscribe",
+                    "!user is asking for support",
+                ],
+                steps: [{ id: "s1", prompt: "Hello" }],
+            });
+
+            const ctx = createTemplateContext<TestContext, TestData>({ data: {} });
+            const result = await flow.evaluateWhen(ctx);
+
+            expect(result.programmaticResult).toBe(true);
+            expect(result.aiContextStrings).toEqual(["user wants to subscribe"]);
+            expect(result.aiExclusionStrings).toEqual(["user is asking for support"]);
+        });
+
         test("function on when throws FlowConfigurationError at construction", () => {
             const agent = new Agent<TestContext, TestData>({
                 name: "TestAgent",
@@ -259,6 +282,35 @@ describe("Conditions: when/if split", () => {
 
             expect(result.shouldActivate).toBe(true);
             expect(result.aiContextStrings).toEqual(["user is ready to proceed"]);
+        });
+
+        test("! entries on step when are stripped into AI exclusions", async () => {
+            const agent = new Agent<TestContext, TestData>({
+                name: "TestAgent",
+                provider: MockProviderFactory.basic(),
+            });
+
+            const flow = agent.createFlow({
+                title: "Step When Flow",
+                steps: [
+                    {
+                        id: "s1",
+                        prompt: "Hello",
+                        when: [
+                            "user is ready to proceed",
+                            "!user is asking to cancel",
+                        ],
+                    },
+                ],
+            });
+
+            const step = flow.getStep("s1")!;
+            const ctx = createTemplateContext<TestContext, TestData>({ data: {} });
+            const result = await step.evaluateWhen(ctx);
+
+            expect(result.shouldActivate).toBe(true);
+            expect(result.aiContextStrings).toEqual(["user is ready to proceed"]);
+            expect(result.aiExclusionStrings).toEqual(["user is asking to cancel"]);
         });
 
         test("step if (function) evaluates code predicate", async () => {

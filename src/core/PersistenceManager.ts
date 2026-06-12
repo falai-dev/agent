@@ -18,7 +18,8 @@ import type {
   PersistenceAdapter,
   CollectedStateData,
 } from "../types";
-import { createSession, sessionStepToData, sessionDataToStep } from "../utils";
+import { createSession, sessionStepToData, sessionDataToStep, logger } from "../utils";
+import { SessionConflictError } from "../types/errors";
 import { convertMessagesToHistory } from "./Events";
 
 /**
@@ -29,6 +30,8 @@ export class PersistenceManager<TData = Record<string, unknown>> {
   private config: PersistenceConfig<TData>;
   private sessionRepository: SessionRepository<TData>;
   private messageRepository: MessageRepository;
+  /** Per-session in-process save queue; see saveSessionState. */
+  private saveQueues = new Map<string, Promise<SessionData<TData> | null>>();
 
   constructor(config: PersistenceConfig<TData>) {
     this.config = {
@@ -234,6 +237,28 @@ export class PersistenceManager<TData = Record<string, unknown>> {
     sessionId: string,
     sessionStep: SessionState<TData>
   ): Promise<SessionData<TData> | null> {
+    // Serialize same-process saves per session: concurrent saves of the same
+    // in-memory session would otherwise race the version compare-and-swap and
+    // spuriously conflict with each other. Cross-process conflicts (two
+    // independently loaded copies) still throw SessionConflictError.
+    const previous = this.saveQueues.get(sessionId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.doSaveSessionState(sessionId, sessionStep));
+    this.saveQueues.set(sessionId, run);
+    try {
+      return await run;
+    } finally {
+      if (this.saveQueues.get(sessionId) === run) {
+        this.saveQueues.delete(sessionId);
+      }
+    }
+  }
+
+  private async doSaveSessionState(
+    sessionId: string,
+    sessionStep: SessionState<TData>
+  ): Promise<SessionData<TData> | null> {
     // Validate input parameters
     if (!sessionId || typeof sessionId !== 'string') {
       throw new Error('Session ID must be a non-empty string');
@@ -256,21 +281,31 @@ export class PersistenceManager<TData = Record<string, unknown>> {
       throw new Error(`Failed to convert session step to persistence data: ${errorMessage}`);
     }
 
+    // Stamp the configured schema version so loads can detect stale state
+    if (this.config.schemaVersion !== undefined) {
+      persistenceData.collectedData.schemaVersion = this.config.schemaVersion;
+    }
+
     try {
       // First try to find existing session
       const existingSession = await this.sessionRepository.findById(sessionId);
 
+      let saved: SessionData<TData> | null;
       if (existingSession) {
-        // Update existing session
-        return await this.sessionRepository.update(sessionId, {
-          currentFlow: persistenceData.currentFlow,
-          currentStep: persistenceData.currentStep,
-          collectedData: persistenceData.collectedData,
-          lastMessageAt: new Date(),
-        });
+        // Compare-and-swap on the session's version: a concurrent writer
+        // bumped it since we loaded, the adapter throws SessionConflictError
+        saved = await this.sessionRepository.update(
+          sessionId,
+          {
+            currentFlow: persistenceData.currentFlow,
+            currentStep: persistenceData.currentStep,
+            collectedData: persistenceData.collectedData,
+            lastMessageAt: new Date(),
+          },
+          { expectedVersion: sessionStep.version }
+        );
       } else {
-        // Create new session if it doesn't exist
-        return await this.sessionRepository.create({
+        saved = await this.sessionRepository.create({
           id: sessionId,
           userId: persistenceData.collectedData.metadata?.userId
             ? JSON.stringify(persistenceData.collectedData.metadata?.userId)
@@ -280,9 +315,21 @@ export class PersistenceManager<TData = Record<string, unknown>> {
           currentStep: persistenceData.currentStep,
           collectedData: persistenceData.collectedData,
           messageCount: 0,
+          version: 1,
         });
       }
+
+      // Propagate the new version so the next save of this in-memory session
+      // passes the compare-and-swap
+      if (saved?.version !== undefined) {
+        sessionStep.version = saved.version;
+      }
+
+      return saved;
     } catch (error) {
+      if (error instanceof SessionConflictError) {
+        throw error;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new Error(`Failed to save session state to persistence: ${errorMessage}`);
     }
@@ -299,6 +346,28 @@ export class PersistenceManager<TData = Record<string, unknown>> {
 
     if (!sessionData) {
       return null;
+    }
+
+    // Upgrade state written under an older user schema before reconstructing
+    if (
+      this.config.schemaVersion !== undefined &&
+      sessionData.collectedData &&
+      sessionData.collectedData.schemaVersion !== this.config.schemaVersion
+    ) {
+      const fromVersion = sessionData.collectedData.schemaVersion;
+      if (this.config.migrateSession) {
+        sessionData.collectedData = await this.config.migrateSession(
+          sessionData.collectedData,
+          fromVersion
+        );
+        sessionData.collectedData.schemaVersion = this.config.schemaVersion;
+      } else {
+        logger.warn(
+          `[PersistenceManager] Session "${sessionId}" was written with schemaVersion ` +
+          `${fromVersion ?? 'none'} but the agent is configured with ${this.config.schemaVersion}, ` +
+          `and no migrateSession is configured. Loading state as-is.`
+        );
+      }
     }
 
     // Reconstruct SessionState from SessionData

@@ -56,7 +56,7 @@ A typed function the AI can call. Receives a `ToolContext` with session data, ca
 - **Build your first agent** → [docs/start/01-install.md](./docs/start/01-install.md)
 - **Explore the docs** → [docs/](./docs/README.md)
 - **Examples** → [examples/](./examples/)
-- **Migration from v1** → [docs/migration/v1-to-v2.md](./docs/migration/v1-to-v2.md)
+- **Upgrading** → [docs/migration/](./docs/migration/README.md) (v2.3 → v2.4, v1 → v2)
 
 ## Install
 
@@ -68,7 +68,7 @@ npm install @falai/agent
 pnpm add @falai/agent
 ```
 
-Requires Node 18+ or Bun 1.0+. Set a provider API key in your environment (for example `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY`).
+Requires Node 18+ or Bun 1.0+. Set a provider API key in your environment (for example `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `DEEPSEEK_API_KEY`).
 
 ## License
 

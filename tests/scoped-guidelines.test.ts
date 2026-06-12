@@ -164,6 +164,32 @@ describe("Scoped Guidelines", () => {
         expect(routingPrompt).not.toContain("Empathize with frustrated users");
     });
 
+    test("flow overview renders ! when entries as exclusions", async () => {
+        const agent = new Agent({
+            name: "TestAgent",
+            provider: mockProvider(),
+            flows: [
+                {
+                    title: "Checkout",
+                    description: "Handle checkout requests",
+                    when: [
+                        "user is ready to buy",
+                        "!user is asking for support",
+                    ],
+                },
+            ],
+        });
+
+        const ctx = createTemplateContext({});
+        const pc = new PromptComposer(ctx);
+        await pc.addActiveFlows(agent.flows);
+        const routingPrompt = await pc.build();
+
+        expect(routingPrompt).toContain("**Triggered when:** user is ready to buy");
+        expect(routingPrompt).toContain("**Do not trigger when:** user is asking for support");
+        expect(routingPrompt).not.toContain("!user is asking for support");
+    });
+
     /**
      * T4: P4 — schema-extraction prompt is guideline-free
      *

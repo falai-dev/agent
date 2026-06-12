@@ -88,12 +88,16 @@ interface SignalDirective<TContext = unknown, TData = unknown>
   replyWith?: string | ((ctx: SignalContext<TContext, TData>) => string);
 }
 
+// As reported on the response surface: replyWith already resolved onto reply
+type ResolvedSignalDirective<TContext = unknown, TData = unknown> =
+  Directive<TContext, TData> & { stopOtherSignals?: boolean };
+
 interface SignalFiring<TContext = unknown, TData = unknown> {
   id: string;
   phase: 'pre' | 'post';
   reason?: string;
   extracted?: unknown;
-  directive?: SignalDirective<TContext, TData>;
+  directive?: ResolvedSignalDirective<TContext, TData>;
   handlerError?: string;
   durationMs?: number;
 }
@@ -130,7 +134,7 @@ interface AgentOptions<TContext, TData> {
 | `id` | `string` | no | auto-generated | Stable identifier within a session. Used for `SignalsState.triggers` keying and on `SignalFiring`. Must be unique across the agent's signals. |
 | `title` | `string` | no | — | Display title shown in logs and traces. |
 | `description` | `string` | no | — | Free-text description; rendered into the classifier prompt. |
-| `when` | `string \| string[]` | no | — | AI-evaluated condition(s). Non-prefixed entries render under "TRIGGER WHEN" (OR semantics — any match can trigger). Entries prefixed with `!` are exclusion conditions rendered under "DO NOT TRIGGER WHEN" (OR semantics — any match inhibits firing). |
+| `when` | `string \| string[]` | no | — | AI-evaluated condition(s), using the same `ConditionWhen` include/exclude syntax as flows, steps, branches, and instructions. Non-prefixed entries render under "TRIGGER WHEN" (OR semantics — any match can trigger). Entries prefixed with `!` are exclusion conditions rendered under "DO NOT TRIGGER WHEN" (OR semantics — any match inhibits firing). |
 | `if` | `SignalPredicate \| SignalPredicate[]` | no | — | Code predicate(s). AND semantics. Free to evaluate. Runs before `when`; if any returns `false`, `when` is skipped (no token cost). |
 | `extract` | `SignalSchema<TExtract>` | no | — | When set, the signal operates in extraction mode. JSON Schema object describing the per-signal `extracted` field merged into the classifier response. The `TExtract` generic carries the resulting type onto `ctx.extracted`. |
 | `phase` | `'pre' \| 'post' \| 'both'` | yes | — | When the signal evaluates. `'pre'` runs in parallel with routing. `'post'` runs after the LLM call, before persistence. `'both'` evaluates in both phases. |
@@ -185,6 +189,10 @@ Extends [`Directive`](./directive.md). All position fields (`goTo`, `goToStep`, 
 
 **Post-phase drop rules.** When a signal runs in the post-phase, `appendPrompt`, `injectTools`, and `halt` are dropped with a debug warning — they have no meaning after the LLM call has already completed. Position directives in the post-phase set `session.pendingDirective` for the *next* turn (no mid-turn re-entry).
 
+### `ResolvedSignalDirective`
+
+The directive shape as reported on the response surface (`SignalFiring.directive`). The signal processor resolves `replyWith` onto `reply` and strips it before firings reach `AgentResponse` — so a `ResolvedSignalDirective` is a plain [`Directive`](./directive.md) plus `stopOtherSignals`, with the reply text (if any) always on `reply`. Exported from the package barrel.
+
 ### `SignalFiring`
 
 One entry per signal that fired this turn. Populated in fire order across both phases on `AgentResponse.triggeredSignals` (and on the final chunk of `AgentResponseStreamChunk`). Mirrors the observability framing of `executedSteps` and `appliedInstructions`.
@@ -195,7 +203,7 @@ One entry per signal that fired this turn. Populated in fire order across both p
 | `phase` | `'pre' \| 'post'` | Phase the signal fired in. |
 | `reason` | `string \| undefined` | AI rationale, `'code-only'`, or `'unconditional'`. |
 | `extracted` | `unknown` | Extracted payload when in extraction mode. |
-| `directive` | `SignalDirective \| undefined` | The directive returned (or dispatched) by the handler. |
+| `directive` | `ResolvedSignalDirective \| undefined` | The directive returned (or dispatched) by the handler, with `replyWith` already resolved onto `reply`. |
 | `handlerError` | `string \| undefined` | Error message if the handler threw. The turn continues — handler errors never break a turn. |
 | `durationMs` | `number \| undefined` | Wall-clock duration of the handler invocation. |
 

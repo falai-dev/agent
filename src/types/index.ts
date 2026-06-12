@@ -69,6 +69,7 @@ export type {
   Signal,
   SignalContext,
   SignalDirective,
+  ResolvedSignalDirective,
   SignalPredicate,
   SignalPredicateContext,
   SignalFiring,
@@ -118,6 +119,7 @@ export type {
   AgentStructuredResponse,
   ReasoningConfig,
   GenerateMessageStreamChunk,
+  ProviderCapabilities,
 } from "./ai";
 
 // Schema types
@@ -136,6 +138,7 @@ export type {
   CreateSessionData,
   SaveMessageOptions,
   CollectedStateData,
+  SessionUpdateOptions,
 } from "./persistence";
 
 // Template types
@@ -146,7 +149,8 @@ export type {
 } from "./template";
 
 // Error types
-export { NotImplementedError } from "./errors";
+export { NotImplementedError, SessionConflictError, ProviderError } from "./errors";
+export type { ProviderErrorCode } from "./errors";
 
 // Internal — ConditionTemplate is NOT exported from the public surface in v2.
 // It remains internally for the condition evaluator utility.

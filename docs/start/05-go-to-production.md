@@ -54,6 +54,7 @@ model AgentSession {
   collectedData     Json?
   pendingDirective  Json?
   signals           Json?
+  version           Int?
   messageCount      Int       @default(0)
   lastMessageAt     DateTime?
   completedAt       DateTime?
@@ -114,6 +115,8 @@ const response = await agent.respond({
 ```
 
 Unknown ids start fresh against that id; there is no "not found" error path.
+
+The `version Int?` column enables optimistic locking: when two writers race on one session (parallel webhooks, a double-send), the stale save throws `SessionConflictError` instead of silently overwriting — reload the session and retry. See [Concurrent writers](../guides/persistence.md#concurrent-writers-optimistic-locking).
 
 For the full schema migration story (renaming `pending_transition` to `pendingDirective`, adding the `signals` column) see [persistence adapters reference](../reference/adapters.md#prismaadapter).
 

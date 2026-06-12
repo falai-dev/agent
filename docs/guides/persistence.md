@@ -9,7 +9,7 @@ order: 5
 
 By default, `createAgent` runs against an in-process `MemoryAdapter`. That is the right choice while you are building — zero setup, instant resets between tests — but it forgets every conversation the moment the process exits. Production needs storage that outlives a deploy, scales to multiple replicas, and lets a session resume by id from any machine.
 
-This guide covers the swap. You will pick an adapter, wire it through `persistence`, resume sessions by `sessionId`, and run the v1 → v2 schema migration if you are upgrading an existing store.
+This guide covers the swap. You will pick an adapter, wire it through `persistence`, resume sessions by `sessionId`, handle concurrent writers with optimistic locking, version your session schema, and run the v1 → v2 schema migration if you are upgrading an existing store.
 
 ## The seven adapters
 
@@ -39,7 +39,7 @@ bun add -d prisma
 bunx prisma init
 ```
 
-**2. Declare the session model.** Two columns matter most: `pendingDirective` and `signals`. The agent serializes its [`Directive`](../reference/directive.md) and signals state into them at the end of every turn and reads them back at the start of the next. Both are required on every adapter's session schema in v2.
+**2. Declare the session model.** Two columns matter most: `pendingDirective` and `signals`. The agent serializes its [`Directive`](../reference/directive.md) and signals state into them at the end of every turn and reads them back at the start of the next. Both are required on every adapter's session schema in v2. The `version` column is optional but recommended — it enables [optimistic locking](#concurrent-writers-optimistic-locking); without it the adapter degrades gracefully and locking stays inactive.
 
 ```prisma
 model AgentSession {
@@ -51,6 +51,7 @@ model AgentSession {
   collectedData     Json?
   pendingDirective  Json?
   signals           Json?
+  version           Int?
   messageCount      Int       @default(0)
   lastMessageAt     DateTime?
   completedAt       DateTime?
@@ -155,6 +156,72 @@ A few things worth noting:
 - Connection pooling and reconnect strategy come from your Redis client (`ioredis` or `node-redis`) — the adapter does not own them.
 
 If you need an archive of every session and message (audit logs, search, analytics), pair Redis with a second adapter on a slower path, or pick a durable adapter from the table above directly.
+
+## Concurrent writers: optimistic locking
+
+Once sessions span processes, two writers can race on one id — parallel webhooks, a double-send from a chat widget, two browser tabs. Every save is a compare-and-swap on the session's `version` (incremented on each save): the loser's save throws `SessionConflictError` instead of silently overwriting the winner's state. The error carries `sessionId`, `expectedVersion`, and `actualVersion`; the recovery is mechanical — reload, retry.
+
+```typescript
+import { SessionConflictError } from "@falai/agent";
+
+function isSessionConflict(err: unknown): boolean {
+  if (err instanceof SessionConflictError) return true;
+  if (err instanceof Error && err.name === "ResponseGenerationError") {
+    const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
+    return original instanceof SessionConflictError;
+  }
+  return false;
+}
+
+try {
+  return await agent.respond({ history, session });
+} catch (err) {
+  if (isSessionConflict(err)) {
+    const fresh = await agent.session.getOrCreate(sessionId); // reload the winning state
+    return agent.respond({ history, session: fresh });
+  }
+  throw err;
+}
+```
+
+Three things you do **not** have to worry about:
+
+- **Same-process concurrency.** Concurrent saves of one session from a single process are serialized through a per-session queue — they never conflict with each other. Conflicts only fire between genuinely independent copies (two processes, or two separately loaded sessions).
+- **Existing rows.** Sessions written by pre-2.4 versions have no stored `version` and are accepted without conflict; the first save stamps them. Memory, Mongo, Redis, and OpenSearch need no schema change at all, and the SQLite/PostgreSQL adapters auto-add the `version` column in `initialize()`.
+- **Opting out.** Prisma users who skip the `version Int?` column simply run without locking — the adapter detects the missing column and degrades gracefully.
+
+The per-adapter storage details live in [persistence adapters](../reference/adapters.md#optimistic-locking); the retry pattern is also covered in [Errors](./error-handling.md).
+
+## Schema versioning: migrate old sessions on load
+
+The locking `version` guards *who* writes; `schemaVersion` guards *what shape* they write. When you rename a schema field or restructure collected data, sessions persisted by the previous deploy still carry the old shape. Declare a `schemaVersion` and a `migrateSession` function, and the agent upgrades stale state at load time:
+
+```typescript
+const agent = createAgent({
+  schema, provider, flows,
+  persistence: {
+    adapter,
+    schemaVersion: 2,
+    migrateSession: (collected, fromVersion) => {
+      // v1 stored `destination`; v2 renamed it to `city`
+      if ((fromVersion ?? 1) < 2) {
+        const { destination, ...rest } = collected.data as { destination?: string };
+        return { ...collected, data: { ...rest, city: destination } };
+      }
+      return collected;
+    },
+  },
+});
+```
+
+How it behaves:
+
+- Every save stamps the configured `schemaVersion` onto the persisted state.
+- On load, when the stored version differs from the configured one (or is missing — pre-versioning rows pass `fromVersion: undefined`), `migrateSession` runs and its return value is used for the turn. The new stamp persists on the next save.
+- The migrator may be async, and must return state valid for the current `schemaVersion`.
+- With a version mismatch but **no** `migrateSession`, the agent logs a warning and loads the state as-is.
+
+Bump `schemaVersion` with every breaking change to your collected-data shape and keep the migrator's old-version branches around — a long-idle session might skip several versions and arrive with any historical `fromVersion`.
 
 ## Schema migration: v1 → v2
 

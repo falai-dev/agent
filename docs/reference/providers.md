@@ -1,6 +1,6 @@
 ---
 title: "Providers"
-description: "Strategy classes that connect an Agent to Gemini, OpenAI, Anthropic, or OpenRouter."
+description: "Strategy classes that connect an Agent to Gemini, OpenAI, Anthropic, OpenRouter, or DeepSeek — plus the base class for building your own."
 type: reference
 order: 10
 ---
@@ -20,6 +20,32 @@ Providers are the strategy plug between an `Agent` and a model vendor. Every pro
 | Anthropic Claude | `AnthropicProvider` | `AnthropicProviderOptions` | `@anthropic-ai/sdk` |
 | OpenRouter | `OpenRouterProvider` | `OpenRouterProviderOptions` | `openai` (compat) |
 | DeepSeek | `DeepSeekProvider` | `DeepSeekProviderOptions` | `openai` (compat) |
+
+## Capabilities
+
+Every provider declares a required `capabilities: ProviderCapabilities` field — five static flags the engine reads to decide how to drive the vendor (e.g., whether structured output is schema-enforced or prompt-instructed). Custom `AiProvider` implementations **must** declare it.
+
+```typescript
+interface ProviderCapabilities {
+  supportsTools: boolean;              // tool/function calling
+  supportsNativeJsonSchema: boolean;   // native JSON-schema-enforced output (vs. prompt-based JSON instruction)
+  supportsStreaming: boolean;          // streaming responses
+  supportsStreamingToolCalls: boolean; // tool calls surfaced during streaming
+  supportsPromptCaching: boolean;      // prompt caching
+}
+```
+
+The five built-ins:
+
+| Capability | Gemini | OpenAI | Anthropic | OpenRouter | DeepSeek |
+|------------|--------|--------|-----------|------------|----------|
+| `supportsTools` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `supportsNativeJsonSchema` | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `supportsStreaming` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `supportsStreamingToolCalls` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `supportsPromptCaching` | ❌ | ❌ | ✅ | ❌ | ❌ |
+
+The two asymmetries: Anthropic reports `supportsNativeJsonSchema: false` because its JSON output is enforced via a prompt instruction, not a native schema mode — and it is the only built-in that reports `supportsPromptCaching: true`.
 
 ## Use with createAgent
 
@@ -250,6 +276,47 @@ const deepseek = new DeepSeekProvider({
 });
 ```
 
+## Building a custom OpenAI-compatible provider
+
+Many vendors (Groq, Together, Fireworks, …) expose OpenAI-compatible chat-completions APIs. Instead of implementing `AiProvider` from scratch, subclass the exported `OpenAICompatibleProvider` base class — it handles message/history building, tool-call parsing, streaming chunks, backup-model fallback, retries, schema passthrough, and normalized `ProviderError` wrapping. `OpenAIProvider`, `OpenRouterProvider`, and `DeepSeekProvider` are themselves thin subclasses.
+
+A minimal subclass supplies the configured client, naming, and capabilities:
+
+```typescript
+import OpenAI from "openai";
+import {
+  OpenAICompatibleProvider,
+  type ProviderCapabilities,
+} from "@falai/agent";
+
+export class GroqProvider extends OpenAICompatibleProvider {
+  public readonly name = "groq";
+  public readonly capabilities: ProviderCapabilities = {
+    supportsTools: true,
+    supportsNativeJsonSchema: true,
+    supportsStreaming: true,
+    supportsStreamingToolCalls: true,
+    supportsPromptCaching: false,
+  };
+
+  protected readonly logLabel = "GROQ";       // tag in log lines
+  protected readonly displayName = "Groq";    // name in retry/error messages
+
+  constructor(options: { apiKey: string; model: string; backupModels?: string[] }) {
+    super({
+      client: new OpenAI({
+        apiKey: options.apiKey,
+        baseURL: "https://api.groq.com/openai/v1",
+      }),
+      model: options.model,
+      backupModels: options.backupModels,
+    });
+  }
+}
+```
+
+That is a complete, working provider. For genuinely vendor-specific behavior, override the protected hooks — `DeepSeekProvider` is the reference pattern: it overrides `executeStructuredGenerate` (no `responses.parse` API), `structuredResponseFormat` (native `json_schema` enforcement), `configureStreamParams` (usage in stream chunks), and `onStreamDelta` (reasoning content on the delta).
+
 ## Errors
 
 All five providers share the same construction-time guards and runtime failure modes.
@@ -259,10 +326,39 @@ All five providers share the same construction-time guards and runtime failure m
 | `apiKey` is empty or missing | `Error("<vendor> API key is required")` | Thrown from the constructor. |
 | `model` is empty or missing | `Error("Model is required. ...")` | Thrown from the constructor. |
 | Vendor returns no text and no tool calls | `Error("No response from <vendor>")` | Surfaces as a `ResponseGenerationError` once it bubbles through the agent. |
-| Primary and every backup model fail | The last backup error is rethrown | After exhausting `backupModels`. The agent wraps it in `ResponseGenerationError`. |
+| Primary and every backup model fail | `ProviderError` with a normalized `code` | After exhausting retries and `backupModels`. The agent wraps it in `ResponseGenerationError`. |
 | Anthropic streaming with `system: undefined` | Vendor 400 | Set `config.system` or rely on history-derived system messages. |
 
 The retry/backup logic only kicks in for transient errors: HTTP 429 / 500 / 503 (and 529 for Anthropic), `overloaded`-style codes, or messages containing `overloaded`, `unavailable`, `internal error`, or (OpenRouter only) `capacity`. Other errors fail fast.
+
+### `ProviderError`
+
+Terminal failures — after retries and backup models are exhausted — throw the exported `ProviderError` with a normalized `code`, so callers handle failures uniformly regardless of which vendor is configured. The original SDK/HTTP error is preserved as `cause`.
+
+```typescript
+import { ProviderError } from "@falai/agent";
+
+type ProviderErrorCode =
+  | 'rate_limited'      // 429-style throttling
+  | 'overloaded'        // capacity / 503 / 529
+  | 'auth'              // invalid or missing credentials
+  | 'invalid_request'   // vendor rejected the request shape
+  | 'schema_rejected'   // structured-output schema rejected
+  | 'timeout'           // per-attempt timeout exhausted
+  | 'network'           // connection-level failure
+  | 'unknown';          // anything unclassified
+
+try {
+  await provider.generateMessage(input);
+} catch (err) {
+  if (err instanceof ProviderError) {
+    console.error(err.provider, err.code); // e.g. "openai" "rate_limited"
+    console.error(err.cause);              // original SDK error
+  }
+}
+```
+
+When the failure bubbles through `agent.respond(...)`, it is wrapped in `ResponseGenerationError` like every other turn failure — the `ProviderError` is then on `details.originalError`. See [Errors](./errors.md).
 
 ## Related
 
@@ -270,4 +366,5 @@ The retry/backup logic only kicks in for transient errors: HTTP 429 / 500 / 503 
 - [Architecture](../concepts/architecture.md) — where the provider sits in the engine
 - [createAgent](./create-agent.md) — the `provider` field
 - [Persistence adapters](./adapters.md) — the other strategy plug
-- [Errors](./errors.md) — `ResponseGenerationError` and friends
+- [Errors](./errors.md) — `ProviderError`, `ResponseGenerationError`, and friends
+- [v2.3 → v2.4 migration](../migration/v2-3-to-v2-4.md) — required `capabilities` and the `ProviderError` change

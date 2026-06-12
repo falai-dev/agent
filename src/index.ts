@@ -10,16 +10,13 @@ export { createAgent } from "./core/createAgent";
 export { Flow } from "./core/Flow";
 export { Step, FlowConfigurationError } from "./core/Step";
 export { flow } from "./core/flow-namespace";
-export { DirectiveChainTracker } from "./core/DirectiveChainTracker";
-export type { DirectiveChainEntry } from "./core/DirectiveChainTracker";
 
 export { adaptEvent, convertHistoryToEvents } from "./core/Events";
 export { PersistenceManager } from "./core/PersistenceManager";
 export { SessionManager } from "./core/SessionManager";
 export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager";
-export { NotImplementedError } from "./types/errors";
-
-export { StreamingToolExecutor } from "./core/StreamingToolExecutor";
+export { NotImplementedError, SessionConflictError, ProviderError } from "./types/errors";
+export type { ProviderErrorCode } from "./types/errors";
 
 
 // Providers
@@ -33,6 +30,8 @@ export { AnthropicProvider } from "./providers/AnthropicProvider";
 export type { AnthropicProviderOptions } from "./providers/AnthropicProvider";
 export { DeepSeekProvider } from "./providers/DeepSeekProvider";
 export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider";
+// Base class for building OpenAI-compatible providers (Groq, Together, etc.)
+export { OpenAICompatibleProvider } from "./providers/OpenAICompatibleProvider";
 
 // Adapters
 export { PrismaAdapter } from "./adapters/PrismaAdapter";
@@ -120,6 +119,7 @@ export type {
   Signal,
   SignalContext,
   SignalDirective,
+  ResolvedSignalDirective,
   SignalPredicate,
   SignalPredicateContext,
   SignalFiring,
@@ -144,6 +144,7 @@ export type {
   ComputationConfig,
   ToolScope,
   AiProvider,
+  ProviderCapabilities,
   GenerateMessageInput,
   GenerateMessageOutput,
   AgentStructuredResponse,
@@ -154,6 +155,7 @@ export type {
   CollectedStateData,
   SessionStatus,
   SessionRepository,
+  SessionUpdateOptions,
   MessageRepository,
   PersistenceConfig,
   CreateSessionOptions,

@@ -68,8 +68,8 @@ class FlowConfigurationError extends Error {
 /**
  * Main Agent class with generic context and data support
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export class Agent<TContext = any, TData = any> {
+ 
+export class Agent<TContext = unknown, TData = unknown> {
   private _terms: Term<TContext, TData>[] = [];
   private _instructions: Instruction<TContext, TData>[] = [];
   private _tools: Tool<TContext, TData>[] = [];
@@ -78,10 +78,15 @@ export class Agent<TContext = any, TData = any> {
   private _persistenceManager: PersistenceManager<TData> | undefined;
   private _routingEngine: FlowRouter<TContext, TData>;
   private _responseModal: ResponseModal<TContext, TData>;
-  private _currentSession?: SessionState<TData>;
   private _knowledgeBase: Record<string, unknown> = {};
   private _schema?: StructuredSchema;
-  private _collectedData: Partial<TData> = {};
+  /**
+   * Staging buffer for data set before any session exists (initialData and
+   * pre-session updateCollectedData calls). Consumed when a session is
+   * created; once a session exists, `session.data` is the single source of
+   * truth and this buffer stays empty.
+   */
+  private _pendingData: Partial<TData> = {};
   private _compactionOptions?: CompactionOptions;
   private _promptSectionCache: PromptSectionCache;
 
@@ -232,12 +237,9 @@ export class Agent<TContext = any, TData = any> {
           );
         }
       }
-      this._collectedData = { ...options.initialData };
-      logger.debug("[Agent] Initial data set:", this._collectedData);
+      this._pendingData = { ...options.initialData };
+      logger.debug("[Agent] Initial data set:", this._pendingData);
     }
-
-    // Initialize current session if provided
-    this._currentSession = options.session;
 
     // Initialize prompt section cache
     this._promptSectionCache = new PromptSectionCache(options.promptCache);
@@ -338,23 +340,33 @@ export class Agent<TContext = any, TData = any> {
       logger.debug("[Agent] Compaction options initialized and validated");
     }
 
-    // Initialize session manager with reference to this agent for bidirectional sync
+    // Initialize session manager — the single owner of the live session
     this.session = new SessionManager<TData>(this._persistenceManager, this);
+
+    // Adopt an explicitly provided session
+    if (options.session) {
+      this.session.syncSession(options.session);
+    }
 
     // Store sessionId for later use in getOrCreate calls
     if (options.sessionId) {
       this.session.setDefaultSessionId(options.sessionId);
-      // The session will be loaded on first getOrCreate call
-      this.session.getOrCreate(options.sessionId).then((session) => {
-        // Sync session data to agent collected data
-        if (session.data && Object.keys(session.data).length > 0) {
-          this._collectedData = { ...session.data };
-          logger.debug("[Agent] Synced session data to collected data:", this._collectedData);
-        }
-      }).catch((err) => {
+      // The session will be loaded on first getOrCreate call; session.data
+      // is the source of truth, so no data sync is needed here
+      this.session.getOrCreate(options.sessionId).catch((err) => {
         logger.error("Failed to start session", err);
       });
     }
+  }
+
+  /**
+   * Drain the pre-session data staging buffer.
+   * @internal Called by SessionManager when a session is created or loaded.
+   */
+  consumePendingData(): Partial<TData> {
+    const pending = this._pendingData;
+    this._pendingData = {};
+    return pending;
   }
 
   /**
@@ -523,16 +535,19 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get the current collected data
+   * Get the current collected data.
+   * Reads from the live session when one exists; otherwise from the
+   * pre-session staging buffer.
    */
   getCollectedData(): Partial<TData> {
-    // Ensure agent collected data is synced with session
-    this.syncSessionDataToCollectedData();
-    return { ...this._collectedData };
+    const session = this.session.current;
+    return session ? { ...session.data } : { ...this._pendingData };
   }
 
   /**
-   * Update collected data with validation
+   * Update collected data with validation.
+   * Writes to the live session when one exists; otherwise stages the data
+   * for the session that will be created.
    */
   async updateCollectedData(updates: Partial<TData>): Promise<void> {
     // Validate the updates
@@ -548,31 +563,24 @@ export class Agent<TContext = any, TData = any> {
       logger.warn(`[Agent] Data validation warnings: ${warningMessages}`);
     }
 
-    // Merge updates with current data
-    const previousData = { ...this._collectedData };
-    this._collectedData = {
-      ...this._collectedData,
+    const session = this.session.current;
+    const previousData = session ? { ...session.data } : { ...this._pendingData };
+
+    let newData: Partial<TData> = {
+      ...previousData,
       ...updates
     };
 
     // Trigger agent-level lifecycle hook if configured
     if (this.options.hooks?.onDataUpdate) {
-      this._collectedData = await this.options.hooks.onDataUpdate(
-        this._collectedData,
-        previousData
-      );
+      newData = await this.options.hooks.onDataUpdate(newData, previousData);
     }
 
-    // Update current session if it exists to keep it in sync
-    if (this._currentSession) {
-      this._currentSession = mergeCollected(this._currentSession, this._collectedData);
-    }
-
-    // Also update the session manager's session data (avoid circular call)
-    const sessionManagerSession = this.session.current;
-    if (sessionManagerSession) {
-      sessionManagerSession.data = { ...this._collectedData };
-      sessionManagerSession.metadata!.lastUpdatedAt = new Date();
+    if (session) {
+      session.data = newData;
+      session.metadata!.lastUpdatedAt = new Date();
+    } else {
+      this._pendingData = newData;
     }
 
     logger.debug("[Agent] Collected data updated:", updates);
@@ -743,18 +751,19 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Get the current session (if set)
+   * Get the current session (if set). Delegates to the SessionManager —
+   * the single owner of the live session.
    */
-  get currentSession(): SessionState | undefined {
-    return this._currentSession;
+  get currentSession(): SessionState<TData> | undefined {
+    return this.session.current;
   }
 
   /**
    * Set the current session for convenience methods
    * Set to undefined to clear the current session
    */
-  set currentSession(value: SessionState | undefined) {
-    this._currentSession = value;
+  set currentSession(value: SessionState<TData> | undefined) {
+    this.session.syncSession(value);
     this._promptSectionCache.invalidateAll();
   }
 
@@ -895,8 +904,8 @@ export class Agent<TContext = any, TData = any> {
    * Add a tool to the agent using the unified Tool interface
    * Creates and adds the tool to agent scope in one operation
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  addTool<TResult = any>(
+   
+  addTool<TResult = unknown>(
     tool: Tool<TContext, TData, TResult>
   ): this {
     // Validate tool before adding
@@ -913,8 +922,8 @@ export class Agent<TContext = any, TData = any> {
   /**
    * Register multiple tools at the agent level
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerTools<TResult = any>(tools: Tool<TContext, TData, TResult>[]): this {
+   
+  registerTools<TResult = unknown>(tools: Tool<TContext, TData, TResult>[]): this {
     tools.forEach((tool) => {
       // Validate each tool before adding
       if (!tool || !tool.id || !tool.handler) {
@@ -940,9 +949,10 @@ export class Agent<TContext = any, TData = any> {
     } as TContext;
 
     // Trigger flow-specific lifecycle hook if configured and session has current flow
-    if (this._currentSession?.currentFlow) {
+    const activeSession = this.session.current;
+    if (activeSession?.currentFlow) {
       const currentFlow = this._flows.find(
-        (r) => r.id === this._currentSession!.currentFlow?.id
+        (r) => r.id === activeSession.currentFlow?.id
       );
       if (
         currentFlow?.hooks?.onContextUpdate &&
@@ -1001,10 +1011,8 @@ export class Agent<TContext = any, TData = any> {
       ));
     }
 
-    // Update agent's collected data to stay in sync
-    this._collectedData = { ...newCollected };
-
-    // Return updated session
+    // Return updated session — session.data is the single source of truth,
+    // so no agent-side copy is kept
     return mergeCollected(session, newCollected);
   }
 
@@ -1127,33 +1135,10 @@ export class Agent<TContext = any, TData = any> {
   }
 
   /**
-   * Sync session data to agent collected data
-   * @internal Used to keep agent and session data in sync
-   */
-  private syncSessionDataToCollectedData(): void {
-    const sessionData = this.session.getData();
-    if (sessionData && Object.keys(sessionData).length > 0) {
-      this._collectedData = { ...sessionData };
-      logger.debug("[Agent] Synced session data to collected data:", this._collectedData);
-    }
-  }
-
-  /**
-   * Get collected data from current session or agent-level collected data
-   * @returns The collected data from the current session or agent-level data
+   * Get collected data from the current session (or the pre-session staging
+   * buffer when no session exists yet). Alias of getCollectedData().
    */
   getData(): Partial<TData> {
-    // Ensure agent collected data is synced with session
-    this.syncSessionDataToCollectedData();
-
-    // If we have a current session, use session data
-    if (this._currentSession) {
-      // With agent-level data, all flows share the same data structure
-      // No need for flow-specific data access
-      return (this._currentSession.data) || {};
-    }
-
-    // Otherwise, return agent-level collected data
     return this.getCollectedData();
   }
 
@@ -1184,7 +1169,7 @@ export class Agent<TContext = any, TData = any> {
     target: string | Directive<TContext, TData>,
     session?: SessionState<TData>
   ): Promise<SessionState<TData>> {
-    const targetSession = session || this._currentSession;
+    const targetSession = session || this.session.current;
 
     if (!targetSession) {
       throw new Error(
@@ -1239,8 +1224,8 @@ export class Agent<TContext = any, TData = any> {
     };
 
     // Update current session in place if no explicit session was passed
-    if (!session && this._currentSession) {
-      this._currentSession = updatedSession;
+    if (!session && this.session.current) {
+      this.session.syncSession(updatedSession);
     }
 
     logger.debug(

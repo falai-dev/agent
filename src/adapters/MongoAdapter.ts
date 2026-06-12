@@ -12,7 +12,9 @@ import type {
   SessionStatus,
   CollectedStateData,
   CreateSessionData,
+  SessionUpdateOptions,
 } from "../types";
+import { SessionConflictError } from "../types/errors";
 import { createSessionId } from "../utils";
 
 /**
@@ -144,6 +146,7 @@ class MongoSessionRepository<TData = Record<string, unknown>>
         createSessionId(),
       status: data.status || "active",
       messageCount: data.messageCount || 0,
+      version: data.version ?? 1,
       createdAt: now,
       updatedAt: now,
     };
@@ -173,11 +176,47 @@ class MongoSessionRepository<TData = Record<string, unknown>>
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null> {
+    if (options?.expectedVersion !== undefined) {
+      const expectedVersion = options.expectedVersion;
+
+      // Compare-and-swap via the filter: docs without a stored version
+      // (pre-2.4) are accepted and adopt expectedVersion as their base
+      const result = await this.collection.updateOne(
+        {
+          id,
+          $or: [
+            { version: { $exists: false } },
+            { version: null },
+            { version: expectedVersion },
+          ],
+        },
+        { $set: { ...data, version: expectedVersion + 1, updatedAt: new Date() } }
+      );
+
+      if (result.matchedCount === 0) {
+        const existing = await this.collection.findOne({ id });
+        if (!existing) return null;
+        throw new SessionConflictError(id, expectedVersion, existing.version);
+      }
+
+      return await this.findById(id);
+    }
+
+    const existing = await this.collection.findOne({ id });
+    if (!existing) return null;
+
     const result = await this.collection.updateOne(
       { id },
-      { $set: { ...data, updatedAt: new Date() } }
+      {
+        $set: {
+          ...data,
+          version: (existing.version ?? 0) + 1,
+          updatedAt: new Date(),
+        },
+      }
     );
 
     if (result.matchedCount === 0) return null;

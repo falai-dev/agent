@@ -21,7 +21,13 @@ import { FlowConfigurationError, Step } from "./Step";
 import { Flow } from "./Flow";
 import { enterStep, mergeCollected, logger } from "../utils";
 import { createTemplateContext } from "../utils/template";
-import type { StoppedReason } from "../types/flow";
+import type {
+    StoppedReason,
+    BranchMap,
+    BranchEntry,
+    BranchPredicateContext,
+} from "../types/flow";
+import { evaluateIfPredicates } from "../utils/condition";
 
 /**
  * The directive-like object that `prepare` may return on auto-steps.
@@ -38,39 +44,6 @@ export interface AutoStepPrepareResult {
     goTo?: string;
     /** Position-changing: mark the flow as complete. */
     complete?: boolean;
-}
-
-/**
- * A branch predicate context passed to `if` functions.
- */
-interface BranchPredicateContext<TContext, TData> {
-    data: Partial<TData> | undefined;
-    context: TContext;
-    session: SessionState<TData>;
-    history: Event[];
-}
-
-/**
- * A branch `then` target — either a string step/flow id or a directive object.
- */
-type BranchThen = string | { goToStep?: string; goTo?: string } | undefined;
-
-/**
- * A branch entry on a step. Supports code predicates (`if`), AI predicates (`when`),
- * and a target (`then`).
- */
-interface BranchEntry<TContext, TData> {
-    if?: ((ctx: BranchPredicateContext<TContext, TData>) => boolean | Promise<boolean>) | Array<(ctx: BranchPredicateContext<TContext, TData>) => boolean | Promise<boolean>>;
-    when?: string;
-    then?: BranchThen;
-}
-
-/**
- * Structural type for a step that may have branches (accessed via cast).
- */
-interface StepWithBranches<TContext, TData> {
-    branches?: BranchEntry<TContext, TData>[];
-    onEnter?: (context: TContext, data: Partial<TData> | undefined) => Promise<unknown>;
 }
 
 /**
@@ -250,10 +223,9 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
             }
 
             // STEP 6: branches resolution (if step has branches)
-            const stepWithBranches = step as unknown as StepWithBranches<TContext, TData>;
-            if (stepWithBranches.branches && Array.isArray(stepWithBranches.branches) && stepWithBranches.branches.length > 0) {
+            if (step.branches && step.branches.length > 0) {
                 const branchTarget = await this.evaluateBranches(
-                    stepWithBranches.branches,
+                    step.branches,
                     session,
                     context,
                     history
@@ -302,7 +274,9 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
         let merged: AutoStepPrepareResult | undefined;
 
         // onEnter (future hook — not yet in StepOptions, but handle if present)
-        const stepWithHooks = step as unknown as StepWithBranches<TContext, TData>;
+        const stepWithHooks = step as Step<TContext, TData> & {
+            onEnter?: (context: TContext, data: Partial<TData> | undefined) => Promise<unknown>;
+        };
         if (typeof stepWithHooks.onEnter === 'function') {
             const onEnterResult = await stepWithHooks.onEnter(context, session.data);
             if (onEnterResult && typeof onEnterResult === 'object') {
@@ -370,7 +344,7 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
      * context (no LLM call). If a branch entry has only `when`, it is skipped.
      */
     private async evaluateBranches(
-        branches: BranchEntry<TContext, TData>[],
+        branches: BranchMap<TContext, TData>,
         session: SessionState<TData>,
         context: TContext,
         history: Event[]
@@ -385,20 +359,12 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
 
             // Code predicate evaluation
             if (entry.if) {
-                const predicates = Array.isArray(entry.if) ? entry.if : [entry.if];
-                const predicateContext: BranchPredicateContext<TContext, TData> = { data: session.data, context, session, history };
-
-                let allPassed = true;
-                for (const predicate of predicates) {
-                    if (typeof predicate === 'function') {
-                        const result = await predicate(predicateContext);
-                        if (!result) {
-                            allPassed = false;
-                            break;
-                        }
-                    }
-                }
-
+                const predicateContext: BranchPredicateContext<TContext, TData> = {
+                    data: session.data, context, session, history,
+                };
+                const allPassed = await evaluateIfPredicates<BranchPredicateContext<TContext, TData>>(
+                    entry.if, predicateContext, "AutoChainExecutor"
+                );
                 if (!allPassed) continue;
 
                 // If entry also has `when`, skip it in auto-step context (no LLM available)
@@ -426,14 +392,18 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
      * Resolve a branch entry's `then` value to a string target.
      * Handles both string targets and Directive objects.
      */
-    private resolveBranchThen(then: BranchThen): string | undefined {
+    private resolveBranchThen(then: BranchEntry<TContext, TData>["then"]): string | undefined {
         if (typeof then === 'string') {
             return then;
         }
-        // Directive object — extract position field
+        // Directive object — extract position field (string or object form)
         if (then && typeof then === 'object') {
-            if (then.goToStep) return then.goToStep;
-            if (then.goTo) return then.goTo;
+            if (then.goToStep) {
+                return typeof then.goToStep === 'string' ? then.goToStep : then.goToStep.step;
+            }
+            if (then.goTo) {
+                return typeof then.goTo === 'string' ? then.goTo : then.goTo.flow;
+            }
         }
         return undefined;
     }

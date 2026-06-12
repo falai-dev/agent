@@ -27,6 +27,11 @@ export interface SessionData<TData = Record<string, unknown>> {
   completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Optimistic-concurrency version. Incremented by the repository on every
+   * update. Undefined on rows written by pre-2.4 versions.
+   */
+  version?: number;
 }
 
 /**
@@ -44,6 +49,12 @@ export type CreateSessionData<TData = Record<string, unknown>> = Omit<
  * This is a subset of SessionState, stored within SessionData.
  */
 export interface CollectedStateData<TData = Record<string, unknown>> {
+  /**
+   * User-defined schema version of the agent that wrote this state.
+   * Set from `PersistenceConfig.schemaVersion` on save; checked on load so
+   * `migrateSession` can upgrade state written by older agent deployments.
+   */
+  schemaVersion?: number;
   data: Partial<TData>;
   flowHistory: SessionState<TData>["flowHistory"];
   history?: SessionState<TData>["history"];
@@ -73,6 +84,18 @@ export interface MessageData {
 }
 
 /**
+ * Options for SessionRepository.update
+ */
+export interface SessionUpdateOptions {
+  /**
+   * Optimistic-concurrency guard. When set, the repository must reject the
+   * update with SessionConflictError if the stored session's `version`
+   * differs from this value.
+   */
+  expectedVersion?: number;
+}
+
+/**
  * Repository interface for sessions
  * Implement this interface with your database of choice
  */
@@ -98,11 +121,17 @@ export interface SessionRepository<TData = Record<string, unknown>> {
   findByUserId(userId: string, limit?: number): Promise<SessionData<TData>[]>;
 
   /**
-   * Update session
+   * Update session.
+   *
+   * When `options.expectedVersion` is provided, the update is a compare-and-swap:
+   * it must throw SessionConflictError if the stored `version` differs (rows with
+   * no stored version — written by pre-2.4 — are accepted). Every successful
+   * update increments `version` by one.
    */
   update(
     id: string,
-    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null>;
 
   /**
@@ -229,6 +258,25 @@ export interface PersistenceConfig<TData = Record<string, unknown>> {
    * Can also be provided per-call in methods
    */
   userId?: string;
+
+  /**
+   * Version of the user-defined agent schema. Stamped onto persisted state on
+   * save. When a loaded session carries a different (or missing) schemaVersion,
+   * `migrateSession` is invoked to upgrade it; without a migrator, a warning is
+   * logged and the state is used as-is.
+   */
+  schemaVersion?: number;
+
+  /**
+   * Migrate persisted session state written under an older schemaVersion.
+   * Receives the stored state and the version it was written with
+   * (undefined for pre-versioning rows); must return state valid for the
+   * current schemaVersion.
+   */
+  migrateSession?: (
+    collectedData: CollectedStateData<TData>,
+    fromVersion: number | undefined
+  ) => CollectedStateData<TData> | Promise<CollectedStateData<TData>>;
 }
 
 /**

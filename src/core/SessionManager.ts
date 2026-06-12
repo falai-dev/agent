@@ -79,6 +79,14 @@ export class SessionManager<TData = unknown> {
           effectiveSessionId
         );
         if (session) {
+          // Loaded session data wins over anything staged before it existed
+          const pending = this.agent?.consumePendingData();
+          if (pending && Object.keys(pending).length > 0) {
+            log.debug(
+              "SessionManager: discarding pre-session staged data in favor of loaded session state",
+              pending
+            );
+          }
           this.currentSession = session;
           return session;
         }
@@ -99,6 +107,9 @@ export class SessionManager<TData = unknown> {
     const session = createSession<TData>({
       id: sessionId,
       history: [], // Session manages its own history
+      // Seed with data staged before the session existed (initialData,
+      // pre-session updateCollectedData calls)
+      data: this.agent?.consumePendingData() ?? ({} as Partial<TData>),
     });
 
     this.currentSession = session;
@@ -237,15 +248,16 @@ export class SessionManager<TData = unknown> {
     await this.getOrCreate();
 
     if (this.currentSession && data) {
-      this.currentSession.data = {
-        ...this.currentSession.data,
-        ...data,
-      };
-      this.currentSession.metadata!.lastUpdatedAt = new Date();
-
-      // Synchronize with agent's collected data for bidirectional sync
       if (this.agent) {
-        await this.agent.updateCollectedData(this.currentSession.data);
+        // Route through the agent so schema validation and onDataUpdate
+        // hooks run; it writes into this session's data directly
+        await this.agent.updateCollectedData(data);
+      } else {
+        this.currentSession.data = {
+          ...this.currentSession.data,
+          ...data,
+        };
+        this.currentSession.metadata!.lastUpdatedAt = new Date();
       }
 
       // Auto-save to persistence
@@ -306,7 +318,7 @@ export class SessionManager<TData = unknown> {
    *
    * @internal Called from ResponseModal after stream()/generate() completion
    */
-  syncSession(session: SessionState<TData>): void {
+  syncSession(session: SessionState<TData> | undefined): void {
     this.currentSession = session;
   }
 

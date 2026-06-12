@@ -13,10 +13,12 @@ A `Tool` is a function the agent can invoke during a turn. v2 unifies tools into
 
 `Tool.id` is the sole identifier.
 
+Since v2.4 the generic defaults are `unknown` (previously `any`) on `Tool`, `ToolContext`, `ToolResult`, and `ToolHandler`. Pass explicit type parameters — or let inference flow from `createAgent`'s `schema` — to get typed `ctx.data` and `ctx.context`; untyped tool code that relied on implicit `any` needs explicit generics or a type guard.
+
 ## Signature
 
 ```typescript
-interface Tool<TContext = any, TData = any, TResult = any> {
+interface Tool<TContext = unknown, TData = unknown, TResult = unknown> {
   // Identity
   id: string;
   description?: string;

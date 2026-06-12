@@ -133,11 +133,33 @@ export interface GenerateMessageStreamChunk<
 }
 
 /**
+ * Static capability flags exposed by a provider implementation.
+ *
+ * Values describe what the implementation actually does (e.g. Anthropic
+ * enforces JSON output via a prompt instruction, not a native schema mode).
+ */
+export interface ProviderCapabilities {
+  /** Provider supports tool/function calling */
+  supportsTools: boolean;
+  /** Provider natively enforces a JSON schema on output (vs. prompt-based JSON instruction) */
+  supportsNativeJsonSchema: boolean;
+  /** Provider supports streaming responses */
+  supportsStreaming: boolean;
+  /** Provider surfaces tool calls during streaming */
+  supportsStreamingToolCalls: boolean;
+  /** Provider supports prompt caching */
+  supportsPromptCaching: boolean;
+}
+
+/**
  * AI provider interface (strategy pattern)
  */
 export interface AiProvider {
   /** Provider name/identifier */
   readonly name: string;
+
+  /** Static capability flags for this provider implementation */
+  capabilities: ProviderCapabilities;
 
   /**
    * Generate a message based on prompt and context

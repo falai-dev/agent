@@ -29,7 +29,9 @@ import type {
   PersistenceAdapter,
   CollectedStateData,
   CreateSessionData,
+  SessionUpdateOptions,
 } from "../types";
+import { SessionConflictError } from "../types/errors";
 import { createSessionId } from "../utils";
 
 /**
@@ -125,10 +127,20 @@ export class SQLiteAdapter<TData = Record<string, unknown>> implements Persisten
         message_count INTEGER DEFAULT 0,
         last_message_at TEXT,
         completed_at TEXT,
+        version INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
     `);
+
+    // Migration: add the optimistic-concurrency version column to tables
+    // created by pre-2.4 versions
+    const sessionColumns = this.db
+      .prepare(`PRAGMA table_info(${sessionTable})`)
+      .all();
+    if (!sessionColumns.some((column) => column.name === "version")) {
+      this.db.exec(`ALTER TABLE ${sessionTable} ADD COLUMN version INTEGER`);
+    }
 
     // Create indexes for sessions
     this.db.exec(`
@@ -183,14 +195,15 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       id,
       status: data.status || "active",
       messageCount: data.messageCount || 0,
+      version: data.version ?? 1,
       createdAt: now,
       updatedAt: now,
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO ${this.tableName} 
-      (id, user_id, agent_name, status, collected_data, message_count, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ${this.tableName}
+      (id, user_id, agent_name, status, collected_data, message_count, version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -200,6 +213,7 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       session.status,
       JSON.stringify(data.collectedData || {}),
       session.messageCount,
+      session.version,
       now.toISOString(),
       now.toISOString()
     );
@@ -239,7 +253,8 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
 
   async update(
     id: string,
-    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>
+    data: Partial<Omit<SessionData<TData>, "id" | "createdAt">>,
+    options?: SessionUpdateOptions
   ): Promise<SessionData<TData> | null> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -276,10 +291,36 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
     fields.push("updated_at = ?");
     values.push(new Date().toISOString());
 
+    if (options?.expectedVersion !== undefined) {
+      const expectedVersion = options.expectedVersion;
+
+      // Compare-and-swap in a single statement: rows without a stored version
+      // (pre-2.4) are accepted and adopt expectedVersion as their base
+      fields.push("version = COALESCE(version, ?) + 1");
+      values.push(expectedVersion);
+      values.push(id, expectedVersion);
+
+      const stmt = this.db.prepare(
+        `UPDATE ${this.tableName}
+         SET ${fields.join(", ")}
+         WHERE id = ? AND (version IS NULL OR version = ?)`
+      );
+
+      const result = stmt.run(...values);
+      if (result.changes === 0) {
+        const existing = await this.findById(id);
+        if (!existing) return null;
+        throw new SessionConflictError(id, expectedVersion, existing.version);
+      }
+
+      return await this.findById(id);
+    }
+
+    fields.push("version = COALESCE(version, 0) + 1");
     values.push(id);
 
     const stmt = this.db.prepare(
-      `UPDATE ${this.tableName} 
+      `UPDATE ${this.tableName}
        SET ${fields.join(", ")}
        WHERE id = ?`
     );
@@ -358,6 +399,7 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       completedAt: row.completed_at
         ? new Date(row.completed_at as string)
         : undefined,
+      version: (row.version as number | null) ?? undefined,
       createdAt: new Date(row.created_at as string),
       updatedAt: new Date(row.updated_at as string),
     };

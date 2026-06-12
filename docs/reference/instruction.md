@@ -19,7 +19,7 @@ The set of instructions actually rendered into a given turn's prompt is reported
 interface Instruction<TContext = unknown, TData = unknown> {
   id?: string;
   kind?: 'must' | 'never' | 'should';        // default: 'should'
-  when?: ConditionWhen;                       // AI-evaluated string(s), OR semantics
+  when?: ConditionWhen;                       // AI strings: positives OR, ! exclusions inhibit
   if?: ConditionIf<TContext, TData>;          // code-evaluated function(s), AND semantics
   prompt: Template<TContext, TData>;
   enabled?: boolean;                          // default: true
@@ -48,7 +48,7 @@ interface AppliedInstruction {
 |-------|------|----------|---------|-------|
 | `prompt` | `Template<TContext, TData>` | yes | — | Behavioral text rendered into the prompt under the `## Instructions` section. |
 | `kind` | `'must' \| 'never' \| 'should'` | no | `'should'` | Severity. `'must'` = absolute do, `'never'` = absolute don't, `'should'` = conditional nudge. |
-| `when` | `ConditionWhen` | no | — | AI-evaluated activation string (or array, OR semantics). Functions are not allowed here; use `if`. |
+| `when` | `ConditionWhen` | no | — | AI-evaluated activation string or array. Non-`!` entries are OR alternatives. `!` entries are OR exclusions; any matching exclusion inhibits the instruction. Functions are not allowed here; use `if`. |
 | `if` | `ConditionIf<TContext, TData>` | no | — | Code-evaluated activation function (or array). Free to evaluate. When both `when` and `if` are set, `if` runs first; `when` is only evaluated if `if` passes. |
 | `id` | `string` | no | auto | Stable identifier used in `AppliedInstruction.id`. Auto-generated when omitted. |
 | `enabled` | `boolean` | no | `true` | Set `false` to skip the instruction without removing it from configuration. |
@@ -74,10 +74,10 @@ The same `Instruction` shape attaches at three positions:
 At prompt-build time the composer renders each eligible instruction as a single bullet:
 
 ```
-- [<kind>] [<scope-caption>] <prompt> (apply only when: <when-clause> OR <when-clause>)
+- [<kind>] [<scope-caption>] <prompt> (apply only when: <when-clause> OR <when-clause>; do not apply when: <exclusion-clause>)
 ```
 
-The parenthesized condition is omitted when `when` is not set. Code-evaluated `if` predicates run first; a failing predicate removes the entire bullet before the prompt reaches the model.
+The parenthesized condition is omitted when `when` is not set. If `when` contains only `!` exclusions, the suffix uses only `do not apply when: ...`. Code-evaluated `if` predicates run first; a failing predicate removes the entire bullet before the prompt reaches the model.
 
 Scope captions are fixed by where the instruction was declared:
 

@@ -2,6 +2,50 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.4.0]
+
+Architecture hardening release: concurrency safety for sessions, a consolidated provider layer, and a stricter type surface. See `docs/migration/v2-3-to-v2-4.md` for the upgrade guide.
+
+### Added
+
+- **Optimistic session locking.** `SessionState`/`SessionData` carry a `version` incremented on every save. A save with a stale version throws the new `SessionConflictError` (exported) instead of silently overwriting state written by a concurrent turn — the failure mode for parallel webhooks or double-sends. Rows written by pre-2.4 versions have no stored version and are accepted without conflict. SQLite and PostgreSQL adapters auto-add the `version` column on `initialize()`; Prisma users should add `version Int?` to their session model (the adapter detects a missing column and degrades gracefully, leaving locking inactive). Same-process concurrent saves of one session are serialized through a per-session queue and never conflict with each other.
+- **Session schema versioning.** `PersistenceConfig.schemaVersion` stamps persisted state; `PersistenceConfig.migrateSession(collectedData, fromVersion)` upgrades state written by older deployments at load time. Without a migrator, a version mismatch logs a warning and loads as-is.
+- **Failed-turn rollback.** If `respond()`/`stream()` throws mid-turn, the in-memory session is restored to its pre-turn snapshot, so in-memory and persisted state stay consistent (a failed turn has no effect; the user message added before the turn is retained).
+- **Deterministic history compaction.** When `compaction` is configured, it now runs at end-of-turn finalize on every `respond()`/`chat()`/`stream()` — previously it only ran inside `session.addMessage()`, so respond-only integrations grew history unboundedly.
+- **`ProviderError` with normalized codes.** Terminal provider failures (after retries and backup models) now throw `ProviderError` with a `code` of `rate_limited | overloaded | auth | invalid_request | schema_rejected | timeout | network | unknown` and the original SDK error as `cause`.
+- **`AiProvider.capabilities`.** Every provider declares `ProviderCapabilities` (`supportsTools`, `supportsNativeJsonSchema`, `supportsStreaming`, `supportsStreamingToolCalls`, `supportsPromptCaching`). Notably, Anthropic reports `supportsNativeJsonSchema: false` — its structured output is prompt-instructed, not schema-enforced.
+- **`OpenAICompatibleProvider` base class** (exported). OpenAI, DeepSeek, and OpenRouter are now thin subclasses (~80–150 lines each, down from ~650); building a new OpenAI-compatible provider (Groq, Together, …) is a small subclass instead of a 600-line copy.
+- **New exports:** `SessionConflictError`, `ProviderError`, `ProviderErrorCode`, `ProviderCapabilities`, `SessionUpdateOptions`, `OpenAICompatibleProvider`, `ResolvedSignalDirective`.
+
+### Changed
+
+- **`session.data` is the single source of truth for collected data.** The bidirectional sync between `Agent`'s internal copy and the session (a divergence footgun under load) is gone. `getCollectedData()`/`getData()` read from the live session; `updateCollectedData()` writes into it. Data set before any session exists (including `initialData`) is staged and seeds the first created session; loading an existing session keeps the stored data. `agent.currentSession` now delegates to `agent.session` instead of holding a second copy.
+- **Passing an explicit `session` to `respond()` no longer merges the managed session's data into it** — that was cross-session state leakage.
+- **`ResponsePipeline` no longer holds mutable turn state.** Context and session are passed explicitly; `determineNextStep` takes a required `context` parameter.
+
+### Breaking
+
+- **Custom `AiProvider` implementations must declare `capabilities`.**
+- **Custom `SessionRepository` implementations:** `update()` gained an optional `options?: { expectedVersion?: number }` parameter. Implement the compare-and-swap (see `MemoryAdapter`) or ignore it to opt out of locking.
+- **Generic defaults are now `unknown` instead of `any`** on `Agent`, `Tool`, `ToolContext`, `ToolResult`, `ToolHandler`. Untyped tool code that relied on implicit `any` may need explicit type parameters or type guards. `ToolHistoryItem.content` is now `unknown`.
+- **`SignalFiring.directive` is typed `ResolvedSignalDirective`** — `replyWith` is resolved onto `reply` before firings reach the response surface (this was already the runtime behavior).
+- **Removed from the public barrel:** `DirectiveChainTracker`, `DirectiveChainEntry`, `StreamingToolExecutor` (internals that locked the architecture into semver).
+- **Removed:** `ResponsePipeline.setContext/setCurrentSession/getStoredContext/getCurrentSession` and `ResponsePipeline.updateDataFlow` (stored-state API replaced by explicit parameters).
+- **Provider terminal errors are now `ProviderError`** — code that matched on raw SDK error shapes after retry exhaustion should match on `error.code`, with the original error available on `error.cause`.
+
+### Internal
+
+- `ToolManager` no longer value-imports `Agent` (runtime circular dependency broken).
+- Shared `evaluateIfPredicates` utility — branch, signal, and auto-chain `if` evaluation now use one implementation; `AutoChainExecutor` uses the canonical `BranchEntry`/`BranchMap` types instead of a divergent local copy.
+- The `beforeRespond` hook's context result is returned explicitly from `prepareResponseContext` instead of being read back from pipeline state; the agent context is no longer redundantly self-updated every turn.
+- New test suite `tests/session-concurrency.test.ts` covering locking conflicts, save serialization, version round-trip, schema migration, failed-turn rollback, and pre-session data staging.
+
+## [2.3.0]
+
+### Added
+
+- **`!` exclusions are now supported across all AI-evaluated `when` fields.** Flows, steps, branches, instructions, and signals now share one `ConditionWhen` syntax: non-`!` entries are OR alternatives, while `!`-prefixed entries are stripped and treated as OR exclusions where any match inhibits the condition. Negative-only `when` values mean "active unless this exclusion matches."
+
 ## [2.2.4]
 
 ### Fixed

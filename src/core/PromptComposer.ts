@@ -4,6 +4,7 @@ import { render, renderMany, formatKnowledgeBase, createTemplateContext } from "
 import { TemplateContext } from "../types/template";
 import { PromptSectionCache } from "./PromptSectionCache";
 import { logger } from "../utils";
+import { splitWhenConditions } from "../utils/condition";
 
 export class PromptComposer<TContext = unknown, TData = unknown> {
   private parts: string[] = [];
@@ -209,10 +210,18 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
         if (!text) continue;
 
         const whenContextStrings = g.when
-          ? (Array.isArray(g.when) ? g.when : [g.when])
-          : [];
-        const condition = whenContextStrings.length > 0
-          ? ` (apply only when: ${whenContextStrings.join(" OR ")})`
+          ? splitWhenConditions(g.when)
+          : { positive: [], negative: [] };
+        const conditionParts = [
+          whenContextStrings.positive.length > 0
+            ? `apply only when: ${whenContextStrings.positive.join(" OR ")}`
+            : undefined,
+          whenContextStrings.negative.length > 0
+            ? `do not apply when: ${whenContextStrings.negative.join(" OR ")}`
+            : undefined,
+        ].filter((part): part is string => part !== undefined);
+        const condition = conditionParts.length > 0
+          ? ` (${conditionParts.join("; ")})`
           : "";
 
         lines.push(`- ${kindPrefix(g.kind)} ${caption} ${text}${condition}`);
@@ -333,14 +342,18 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
 
     const compute = (): string | null => {
       const renderedFlows = flows.map((r, i) => {
-        // v2: `when` is string | string[] (AI-evaluated). Extract directly.
-        const whenContextStrings: string[] = r.when
-          ? (Array.isArray(r.when) ? r.when : [r.when])
-          : [];
-        const conditions =
-          whenContextStrings.length > 0
-            ? `\n\n  **Triggered when:** ${whenContextStrings.join(" OR ")}`
-            : "";
+        // v2: `when` is string | string[] (AI-evaluated). Split into positives and exclusions.
+        const whenContextStrings = r.when
+          ? splitWhenConditions(r.when)
+          : { positive: [], negative: [] };
+        const conditionParts: string[] = [];
+        if (whenContextStrings.positive.length > 0) {
+          conditionParts.push(`\n\n  **Triggered when:** ${whenContextStrings.positive.join(" OR ")}`);
+        }
+        if (whenContextStrings.negative.length > 0) {
+          conditionParts.push(`\n\n  **Do not trigger when:** ${whenContextStrings.negative.join(" OR ")}`);
+        }
+        const conditions = conditionParts.join("");
         const desc = r.description
           ? `\n\n  **Description:** ${r.description}`
           : "";

@@ -10,23 +10,23 @@
 
 import type {
     BranchMap,
-    BranchPredicate,
     BranchPredicateContext,
     Directive,
 } from "../types/flow";
 import type { AiProvider } from "../types/ai";
 import type { Event } from "../types/history";
 import { eventsToHistory, logger } from "../utils";
+import { splitWhenConditions, evaluateIfPredicates, type WhenConditionGroups } from "../utils/condition";
 
 /**
  * The AI condition evaluator function signature.
- * Accepts an array of condition strings (OR semantics) and returns
- * whether any condition is satisfied.
+ * Accepts split condition strings and returns whether the condition passes:
+ * (no positives OR any positive is satisfied) AND no exclusion is satisfied.
  *
  * This is the same evaluation mechanism used by `step.when` — condition
  * strings are evaluated by the AI provider against the conversation context.
  */
-export type AiConditionEvaluator = (conditions: string[]) => Promise<boolean>;
+export type AiConditionEvaluator = (conditions: WhenConditionGroups) => Promise<boolean>;
 
 /**
  * Creates an `AiConditionEvaluator` bound to a provider and conversation context.
@@ -50,22 +50,28 @@ export function createAiConditionEvaluator<TContext = unknown>(
     history: Event[],
     context: TContext,
 ): AiConditionEvaluator {
-    return async (conditions: string[]): Promise<boolean> => {
-        if (conditions.length === 0) {
+    return async (conditions: WhenConditionGroups): Promise<boolean> => {
+        if (conditions.positive.length === 0 && conditions.negative.length === 0) {
             return true;
         }
 
-        const conditionText = conditions.length === 1
-            ? conditions[0]
-            : conditions.map((c, i) => `${i + 1}. ${c}`).join("\n");
+        const positiveText = conditions.positive.length === 0
+            ? "None. Treat the positive side as satisfied unless an exclusion matches."
+            : conditions.positive.map((c, i) => `${i + 1}. ${c}`).join("\n");
+        const negativeText = conditions.negative.length === 0
+            ? "None."
+            : conditions.negative.map((c, i) => `${i + 1}. ${c}`).join("\n");
 
         const prompt = [
-            "Evaluate whether the following condition(s) are met based on the conversation so far.",
+            "Evaluate whether the following condition rule passes based on the conversation so far.",
             "",
-            "Condition(s):",
-            conditionText,
+            "Positive condition(s) (OR):",
+            positiveText,
             "",
-            "Return JSON with a single boolean field `result`: true if ANY condition is satisfied, false otherwise.",
+            "Exclusion condition(s) (OR, any match inhibits):",
+            negativeText,
+            "",
+            "Return JSON with a single boolean field `result`: true only when (there are no positive conditions OR ANY positive condition is satisfied) AND NO exclusion condition is satisfied.",
         ].join("\n");
 
         const result = await provider.generateMessage<TContext, { result: boolean }>({
@@ -78,7 +84,7 @@ export function createAiConditionEvaluator<TContext = unknown>(
                     properties: {
                         result: {
                             type: "boolean",
-                            description: "Whether any condition is met based on the conversation context",
+                            description: "Whether the positive/exclusion condition rule passes based on the conversation context",
                         },
                     },
                     required: ["result"],
@@ -122,19 +128,9 @@ export async function evaluateBranches<TContext = unknown, TData = unknown>(
 
             // Code predicate first (free evaluation)
             if (entry.if) {
-                const predicates: BranchPredicate<TContext, TData>[] = Array.isArray(entry.if)
-                    ? entry.if
-                    : [entry.if];
-
-                let ifPassed = true;
-                for (const predicate of predicates) {
-                    const result = await predicate(ctx);
-                    if (!result) {
-                        ifPassed = false;
-                        break;
-                    }
-                }
-
+                const ifPassed = await evaluateIfPredicates<BranchPredicateContext<TContext, TData>>(
+                    entry.if, ctx, "BranchEvaluator"
+                );
                 if (!ifPassed) {
                     continue; // skip this entry; do NOT evaluate `when`
                 }
@@ -142,9 +138,7 @@ export async function evaluateBranches<TContext = unknown, TData = unknown>(
 
             // AI condition (costs tokens — only reached if `if` passed or was absent)
             if (entry.when) {
-                const conditions: string[] = Array.isArray(entry.when)
-                    ? entry.when
-                    : [entry.when];
+                const conditions = splitWhenConditions(entry.when);
 
                 const aiResult = await evaluateAi(conditions);
                 if (!aiResult) {

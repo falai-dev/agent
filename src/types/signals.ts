@@ -128,6 +128,18 @@ export interface SignalDirective<TContext = unknown, TData = unknown>
     replyWith?: string | ((ctx: SignalContext<TContext, TData>) => string);
 }
 
+/**
+ * A signal directive as reported on the response surface (SignalFiring).
+ * `replyWith` has been resolved onto `reply` and stripped by the processor,
+ * leaving a directive that is covariant in TContext — which lets firings
+ * flow into AgentResponse without casts.
+ */
+export type ResolvedSignalDirective<TContext = unknown, TData = unknown> =
+    Directive<TContext, TData> & {
+        /** Stop processing remaining signals for this phase after this handler. */
+        stopOtherSignals?: boolean;
+    };
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Signal context (handler argument)
 // ──────────────────────────────────────────────────────────────────────────────
@@ -311,8 +323,8 @@ export interface SignalFiring<TContext = unknown, TData = unknown> {
     reason?: string;
     /** Extracted data when the signal operates in extraction mode. */
     extracted?: unknown;
-    /** The directive returned by the signal handler (if any). */
-    directive?: SignalDirective<TContext, TData>;
+    /** The directive returned by the signal handler (if any), with `replyWith` already resolved to `reply`. */
+    directive?: ResolvedSignalDirective<TContext, TData>;
     /** Error message if the handler threw. */
     handlerError?: string;
     /** Wall-clock duration of the handler invocation in milliseconds. */
