@@ -3,8 +3,12 @@
  * history compaction, persistence auto-save, the step `finalize` hook,
  * and syncing the finalized session back to the agent's live session.
  *
- * Both the streaming and non-streaming response paths exit through
- * `finalize()` — it is the single implementation of turn finalization.
+ * Every turn finalizes exactly once: the non-streaming path in
+ * `respond()` after generation completes; the streaming path in the
+ * final-chunk interception loop after the post-signal phase (so
+ * post-phase session mutations are persisted), with only the
+ * pre-routing signal/auto-chain halt chunks finalizing at their own
+ * yield sites.
  */
 
 import type { AgentOptions, SessionState } from "../types";

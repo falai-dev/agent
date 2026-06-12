@@ -581,7 +581,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             signalFirings.push(...post.firings);
             const message = post.message;
 
-            await this.sessionFinalizer.finalize(session, effectiveContext);
             return {
                 message,
                 session,
@@ -622,13 +621,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                 session = autoResult.session;
 
-                // Handle halt: emit verbatim reply, persist, return — no LLM call.
+                // Handle halt: emit verbatim reply, return — no LLM call.
+                // respond() finalizes the returned session exactly once.
                 if (autoResult.stoppedReason === 'halt') {
                     message = autoResult.mergedDirective?.reply || '';
                     stoppedReason = 'halt';
                     executedSteps = [];
 
-                    await this.sessionFinalizer.finalize(session, effectiveContext);
                     return {
                         message,
                         session,
@@ -652,7 +651,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         history,
                     });
 
-                    await this.sessionFinalizer.finalize(session, effectiveContext);
                     return {
                         message: '',
                         session,
@@ -1084,10 +1082,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             });
         }
 
-        // ── Intercept the inner stream to run post-signal phase on the final chunk ──
-        // This mirrors the non-streaming path: post-phase runs after finalize/onComplete
-        // and before session persistence, attaching triggeredSignals to the final chunk
-        // (Requirement 11.2).
+        // ── Intercept the inner stream on the final chunk ──────────────────────
+        // Mirrors the non-streaming path: post-signal phase runs first, then the
+        // session (including post-phase mutations) is finalized exactly once,
+        // attaching triggeredSignals to the final chunk (Requirement 11.2).
         for await (const chunk of innerStream!) {
             if (chunk.done) {
                 // Run post-signal phase on final chunk (Requirement 9.1, 9.2)
@@ -1102,6 +1100,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                 const accumulated = post.message;
                 const delta = post.replyOverridden ? accumulated : chunk.delta;
+
+                // Single streaming exit: finalize the post-phase session so
+                // post-signal mutations (e.g. pendingDirective) are persisted
+                await this.sessionFinalizer.finalize(finalSession, effectiveContext);
 
                 yield {
                     ...chunk,
@@ -1173,7 +1175,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             const reply = mergedPreDirective.reply || '';
             const reason: StoppedReason = mergedPreDirective.reply ? 'reply' : 'halt';
             logger.debug(`[ResponseModal] Halt (streaming) — skipping LLM call for step ${nextStep.id}, stoppedReason: ${reason}`);
-            await this.sessionFinalizer.finalize(session, context);
             yield {
                 delta: reply,
                 accumulated: reply,
@@ -1195,7 +1196,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 createTemplateContext({ data: session.data || {}, context, session })
             );
             logger.debug(`[ResponseModal] Step.reply (streaming) — skipping LLM call for step ${nextStep.id}`);
-            await this.sessionFinalizer.finalize(session, context);
             yield {
                 delta: effectiveReply,
                 accumulated: effectiveReply,
@@ -1277,11 +1277,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         nextStep,
                         session,
                     });
-                }
-
-                // Handle session finalization on final chunk
-                if (chunk.done) {
-                    await this.sessionFinalizer.finalize(session, context);
                 }
 
                 // Response structure completeness (Requirement 8.1, 8.2, 8.3)
@@ -1526,8 +1521,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             history,
         });
 
-        await this.sessionFinalizer.finalize(session, context);
-
         yield {
             delta: '',
             accumulated: '',
@@ -1621,11 +1614,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         });
 
         for await (const chunk of stream) {
-            // Update current session if we have one
-            if (chunk.done) {
-                await this.sessionFinalizer.finalize(session, context);
-            }
-
             // Response structure completeness (Requirement 8.1, 8.2, 8.3)
             // - executedSteps: empty for fallback (no flow/step execution)
             // - stoppedReason: undefined for fallback (no flow context)
