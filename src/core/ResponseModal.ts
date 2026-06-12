@@ -167,12 +167,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         this.responsePipeline = new ResponsePipeline<TContext, TData>(
             this.agent.getAgentOptions(),
             () => this.agent.getFlows(), // Pass a function to get flows dynamically
-            this.agent.getTools(),
             this.agent.getFlowRouter(),
-            this.agent.updateContext.bind(this.agent),
-            this.agent.getUpdateDataMethod(),
-            this.agent.updateCollectedData.bind(this.agent),
-            this.getToolManager(),
             this.agent.signalProcessor
         );
     }
