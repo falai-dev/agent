@@ -13,7 +13,8 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 
 import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index";
-import { ResponseModal, type RespondParams, type StreamOptions, type GenerateOptions, ResponseGenerationError } from "../src/core/ResponseModal";
+import { ResponseModal, type RespondParams, type StreamOptions, type GenerateOptions } from "../src/core/ResponseModal";
+import { ResponseGenerationError } from "../src/core/ResponseGenerationError";
 import type { AiProvider, AgentStructuredResponse, GenerateMessageInput, GenerateMessageOutput, GenerateMessageStreamChunk } from "../src/types/ai";
 import {
   MockProvider,
