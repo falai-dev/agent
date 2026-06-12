@@ -17,7 +17,6 @@ import type {
     ToolCallRequest,
     ScopedInstructions,
     AppliedInstruction,
-    PrepareResult,
     Directive,
 } from "../types";
 import type { SignalFiring } from "../types/signals";
@@ -27,7 +26,8 @@ import { Step } from "./Step";
 import { ResponseEngine } from "./ResponseEngine";
 import { ResponsePipeline, hasDirectivePositionField } from "./ResponsePipeline";
 import { AutoChainExecutor, type AutoChainResult } from "./AutoChainExecutor";
-import { CompactionEngine } from "./CompactionEngine";
+import { StepLifecycle } from "./StepLifecycle";
+import { SessionFinalizer } from "./SessionFinalizer";
 import { cloneDeep, mergeCollected, enterStep, enterFlow, getLastMessageFromHistory, logger, historyToEvents, eventsToHistory, serializeToolResult, completeCurrentFlow, render } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type { ToolManager } from "./ToolManager";
@@ -155,6 +155,8 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
 export class ResponseModal<TContext = unknown, TData = unknown> {
     private readonly responseEngine: ResponseEngine<TContext, TData>;
     private readonly responsePipeline: ResponsePipeline<TContext, TData>;
+    private readonly stepLifecycle: StepLifecycle<TContext, TData>;
+    private readonly sessionFinalizer: SessionFinalizer<TContext, TData>;
 
     constructor(
         private readonly agent: Agent<TContext, TData>,
@@ -170,6 +172,25 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             this.agent.getFlowRouter(),
             this.agent.signalProcessor
         );
+
+        // Step prepare/finalize execution, shared by the prepare phase and finalizer
+        this.stepLifecycle = new StepLifecycle<TContext, TData>({
+            getFlows: () => this.agent.getFlows(),
+            toolManager: this.getToolManager(),
+            updateContext: this.agent.updateContext.bind(this.agent),
+            updateData: this.agent.updateCollectedData.bind(this.agent),
+        });
+
+        // Single owner of end-of-turn finalization (compaction + persistence + sync)
+        this.sessionFinalizer = new SessionFinalizer<TContext, TData>({
+            getCompactionOptions: () => this.agent.getCompactionOptions(),
+            getPersistenceManager: () => this.agent.getPersistenceManager(),
+            getAgentOptions: () => this.agent.getAgentOptions(),
+            getCurrentSession: () => this.agent.currentSession,
+            setCurrentSession: (session) => { this.agent.currentSession = session; },
+            stepLifecycle: this.stepLifecycle,
+            enableAutoSave: this.options?.enableAutoSave,
+        });
     }
 
     /**
@@ -189,7 +210,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             const result = await this.generateUnifiedResponse(responseContext);
 
             // Finalize session
-            await this.finalizeSession(result.session!, responseContext.effectiveContext);
+            await this.sessionFinalizer.finalize(result.session!, responseContext.effectiveContext);
 
             return result;
 
@@ -465,7 +486,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             // PHASE 1: PREPARE - Execute prepare function if current step has one
             try {
-                await this.executeStepPrepare(session, effectiveContext);
+                await this.stepLifecycle.runPrepare(session, effectiveContext);
             } catch (error) {
                 throw ResponseGenerationError.fromError(error, 'step_preparation', params, { session, effectiveContext });
             }
@@ -1126,7 +1147,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             const message = this.applyPostSignalReply(haltMessage, postResult.mergedDirective);
 
-            await this.finalizeSession(session, effectiveContext);
+            await this.sessionFinalizer.finalize(session, effectiveContext);
             return {
                 message,
                 session,
@@ -1173,7 +1194,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     stoppedReason = 'halt';
                     executedSteps = [];
 
-                    await this.finalizeSession(session, effectiveContext);
+                    await this.sessionFinalizer.finalize(session, effectiveContext);
                     return {
                         message,
                         session,
@@ -1197,7 +1218,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         history,
                     });
 
-                    await this.finalizeSession(session, effectiveContext);
+                    await this.sessionFinalizer.finalize(session, effectiveContext);
                     return {
                         message: '',
                         session,
@@ -1317,63 +1338,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             appliedInstructions,
             triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
         };
-    }
-
-    /**
-       * Execute prepare function for current step if available
-       * @private
-       */
-    private async executeStepPrepare(session: SessionState<TData>, context: TContext): Promise<void> {
-        if (session.currentFlow && session.currentStep) {
-            const currentFlow = this.agent.getFlows().find(
-                (r) => r.id === session.currentFlow?.id
-            );
-            if (currentFlow) {
-                const currentStep = currentFlow.getStep(session.currentStep.id);
-                // Skip auto-steps — their prepare is handled by AutoChainExecutor
-                if (currentStep?.auto) {
-                    logger.debug(`[ResponseModal] Skipping pre-routing prepare for auto-step: ${currentStep.id}`);
-                    return;
-                }
-                if (currentStep?.prepare) {
-                    logger.debug(`[ResponseModal] Executing prepare for step: ${currentStep.id}`);
-                    await this.executePrepareFinalize(
-                        currentStep.prepare,
-                        context,
-                        session.data,
-                        currentFlow,
-                        currentStep
-                    );
-                }
-            }
-        }
-    }
-
-    /**
-     * Execute finalize function for current step if available
-     * @private
-     */
-    private async executeStepFinalize(session: SessionState<TData>, context: TContext): Promise<void> {
-        if (session.currentFlow && session.currentStep) {
-            const currentFlow = this.agent.getFlows().find(
-                (r) => r.id === session.currentFlow?.id
-            );
-            if (currentFlow) {
-                const currentStep = currentFlow.getStep(session.currentStep.id);
-                if (currentStep?.finalize) {
-                    logger.debug(
-                        `[ResponseModal] Executing finalize for step: ${currentStep.id}`
-                    );
-                    await this.executePrepareFinalize(
-                        currentStep.finalize,
-                        context,
-                        session.data,
-                        currentFlow,
-                        currentStep
-                    );
-                }
-            }
-        }
     }
 
     /**
@@ -1652,7 +1616,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             const message = this.applyPostSignalReply(haltMessage, postResult.mergedDirective);
 
-            await this.finalizeSession(session, effectiveContext);
+            await this.sessionFinalizer.finalize(session, effectiveContext);
             yield {
                 delta: message,
                 accumulated: message,
@@ -1690,7 +1654,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // Handle halt: emit verbatim reply as a single chunk, done.
                 if (autoResult.stoppedReason === 'halt') {
                     const reply = autoResult.mergedDirective?.reply || '';
-                    await this.finalizeSession(session, effectiveContext);
+                    await this.sessionFinalizer.finalize(session, effectiveContext);
                     yield {
                         delta: reply,
                         accumulated: reply,
@@ -1921,7 +1885,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             const reply = mergedPreDirective.reply || '';
             const reason: StoppedReason = mergedPreDirective.reply ? 'reply' : 'halt';
             logger.debug(`[ResponseModal] Halt (streaming) — skipping LLM call for step ${nextStep.id}, stoppedReason: ${reason}`);
-            await this.finalizeSession(session, context);
+            await this.sessionFinalizer.finalize(session, context);
             yield {
                 delta: reply,
                 accumulated: reply,
@@ -1943,7 +1907,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 createTemplateContext({ data: session.data || {}, context, session })
             );
             logger.debug(`[ResponseModal] Step.reply (streaming) — skipping LLM call for step ${nextStep.id}`);
-            await this.finalizeSession(session, context);
+            await this.sessionFinalizer.finalize(session, context);
             yield {
                 delta: effectiveReply,
                 accumulated: effectiveReply,
@@ -2079,7 +2043,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                 // Handle session finalization on final chunk
                 if (chunk.done) {
-                    await this.finalizeSession(session, context);
+                    await this.sessionFinalizer.finalize(session, context);
                 }
 
                 // Response structure completeness (Requirement 8.1, 8.2, 8.3)
@@ -2659,7 +2623,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             history,
         });
 
-        await this.finalizeSession(session, context);
+        await this.sessionFinalizer.finalize(session, context);
 
         yield {
             delta: '',
@@ -2756,7 +2720,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         for await (const chunk of stream) {
             // Update current session if we have one
             if (chunk.done) {
-                await this.finalizeSession(session, context);
+                await this.sessionFinalizer.finalize(session, context);
             }
 
             // Response structure completeness (Requirement 8.1, 8.2, 8.3)
@@ -2779,50 +2743,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         }
     }
 
-    /**
-     * Handle session persistence and finalization
-     * @private
-     */
-    private async finalizeSession(session: SessionState<TData>, context: TContext): Promise<void> {
-        // Deterministic compaction: runs on every finalize (not just addMessage)
-        // so respond()-only callers get bounded history too
-        const compactionOptions = this.agent.getCompactionOptions();
-        if (compactionOptions && session.history && session.history.length > 0) {
-            try {
-                const result = await CompactionEngine.checkAndCompact(session.history, compactionOptions);
-                if (result.strategy !== 'none') {
-                    session.history = result.history;
-                    logger.info(
-                        `[ResponseModal] Compaction applied: strategy='${result.strategy}', ` +
-                        `estimatedTokens=${result.estimatedTokens}, messagesCompacted=${result.messagesCompacted}`
-                    );
-                }
-            } catch (error) {
-                logger.warn("[ResponseModal] Compaction failed at finalize, continuing without compaction", error);
-            }
-        }
-
-        // Auto-save session step to persistence if configured
-        const persistenceManager = this.agent.getPersistenceManager();
-        const agentOptions = this.agent.getAgentOptions();
-        if (
-            persistenceManager &&
-            session.id &&
-            (this.options?.enableAutoSave !== false && agentOptions.persistence?.autoSave !== false)
-        ) {
-            await persistenceManager.saveSessionState(session.id, session);
-            logger.debug(`[ResponseModal] Auto-saved session step to persistence: ${session.id}`);
-        }
-
-        // Execute finalize function
-        await this.executeStepFinalize(session, context);
-
-        // Update current session if we have one
-        const currentSession = this.agent.currentSession;
-        if (currentSession) {
-            this.agent.currentSession = session;
-        }
-    }
     // ============================================================================
     // UTILITY METHODS - Helper methods for tool management and other utilities
     // ============================================================================
@@ -2861,66 +2781,6 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             description: tool.description,
             parameters: tool.parameters,
         }));
-    }
-
-    /**
-     * Execute a prepare or finalize function/tool
-     * @private
-     */
-    private async executePrepareFinalize(
-        prepareOrFinalize:
-            | string
-            | Tool<TContext, TData>
-            | ((context: TContext, data?: Partial<TData>) => void | PrepareResult | Promise<void | PrepareResult>)
-            | undefined,
-        context: TContext,
-        data?: Partial<TData>,
-        flow?: Flow<TContext, TData>,
-        step?: Step<TContext, TData>
-    ): Promise<void> {
-        if (!prepareOrFinalize) return;
-
-        if (typeof prepareOrFinalize === "function") {
-            // It's a function - call it directly
-            await prepareOrFinalize(context, data);
-        } else {
-            // It's a tool reference - find and execute the tool
-            let tool: Tool<TContext, TData> | undefined;
-
-            if (typeof prepareOrFinalize === "string") {
-                // Tool ID - use ToolManager for unified resolution
-                tool = this.getToolManager().find(prepareOrFinalize, undefined, step, flow);
-            } else {
-                // Tool object - use directly
-                tool = prepareOrFinalize;
-            }
-
-            if (tool) {
-                // Use ToolManager for unified tool execution
-                const result = await this.getToolManager().executeTool({
-                    tool,
-                    context,
-                    updateContext: this.agent.updateContext.bind(this.agent),
-                    updateData: this.agent.updateCollectedData.bind(this.agent),
-                    history: [], // Empty history for prepare/finalize
-                    data,
-                });
-
-                if (!result.success) {
-                    logger.error(
-                        `[ResponseModal] Tool execution failed in prepare/finalize: ${result.error}`
-                    );
-                    throw new Error(`Tool execution failed: ${result.error}`);
-                }
-            } else {
-                logger.warn(
-                    `[ResponseModal] Tool not found for prepare/finalize: ${typeof prepareOrFinalize === "string"
-                        ? prepareOrFinalize
-                        : "inline tool"
-                    }`
-                );
-            }
-        }
     }
 
 }
