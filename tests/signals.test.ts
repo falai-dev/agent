@@ -1451,6 +1451,139 @@ describe("Signals — SignalProcessor", () => {
     });
 
 
+    // ─── Code-only (if) + extract ────────────────────────────────────────────
+
+    describe("Code-only signal (if + extract, no when) runs extraction; handler receives ctx.extracted", () => {
+        it("triggers a dedicated extraction call for an `if`-gated extract signal", async () => {
+            const extractedData = { stage: "warm", confidence: 0.8 };
+            mockEvaluator.setSignalResults({
+                "lead_stage": { matched: true, reason: "code-only", extracted: extractedData },
+            });
+
+            let receivedExtracted: any = undefined;
+            const signals = [
+                {
+                    id: "lead_stage",
+                    phase: "post" as const,
+                    if: () => true,
+                    extract: {
+                        type: "object",
+                        properties: {
+                            stage: { type: "string" },
+                            confidence: { type: "number" },
+                        },
+                    },
+                    handler: (ctx: any) => { receivedExtracted = ctx.extracted; },
+                },
+            ];
+
+            const processor = makeProcessor(signals);
+            const result = await processor.runPostSignalPhase({
+                session: makeSession(),
+                history: sampleHistory,
+                context: {},
+            });
+
+            // `if` gate evaluated, then a dedicated extraction call followed.
+            expect(mockEvaluator.evaluateIfCalls.length).toBe(1);
+            expect(mockEvaluator.evaluateSignalsCalls.length).toBe(1);
+            expect(result.firings.length).toBe(1);
+            expect(result.firings[0].extractionError).toBeUndefined();
+            expect(receivedExtracted).toEqual(extractedData);
+        });
+    });
+
+
+    // ─── if + when + extract (the reported FOLLOW_UP_SCHEDULING shape) ────────
+
+    describe("if + when + extract signal surfaces extraction to the handler", () => {
+        it("if-gates, runs the classifier batch, and passes ctx.extracted (single call, no separate extraction)", async () => {
+            const extractedData = { followUpAt: "2026-07-01T10:00:00Z" };
+            mockEvaluator.setSignalResults({
+                "follow_up": { matched: true, reason: "lead asked to reconnect", extracted: extractedData },
+            });
+
+            let receivedExtracted: any = undefined;
+            const signals = [
+                {
+                    id: "follow_up",
+                    phase: "post" as const,
+                    if: () => true,
+                    when: "the lead asks to be contacted later",
+                    extract: {
+                        type: "object",
+                        properties: { followUpAt: { type: "string" } },
+                    },
+                    handler: (ctx: any) => { receivedExtracted = ctx.extracted; },
+                },
+            ];
+
+            const processor = makeProcessor(signals);
+            const result = await processor.runPostSignalPhase({
+                session: makeSession(),
+                history: sampleHistory,
+                context: {},
+            });
+
+            // if-gate ran, extraction came from the single `when` classifier batch,
+            // and no extra evaluateSignals call was issued for it.
+            expect(mockEvaluator.evaluateIfCalls.length).toBe(1);
+            expect(mockEvaluator.evaluateSignalsBatchedCalls.length).toBe(1);
+            expect(mockEvaluator.evaluateSignalsCalls.length).toBe(0);
+            expect(result.firings.length).toBe(1);
+            expect(result.firings[0].extractionError).toBeUndefined();
+            expect(receivedExtracted).toEqual(extractedData);
+        });
+    });
+
+
+    // ─── Extraction matched but no payload → observable, not silent ───────────
+
+    describe("Extraction-mode signal matched without payload surfaces extractionError", () => {
+        it("records extractionError on the firing, warns, and passes extracted: undefined", async () => {
+            // matched=true but the classifier returned no `extracted` field.
+            mockEvaluator.setSignalResults({
+                "follow_up": { matched: true, reason: "unconditional" },
+            });
+
+            const warnSpy = spyOn(log, "warn");
+            let receivedExtracted: any = "sentinel";
+            const signals = [
+                {
+                    id: "follow_up",
+                    phase: "post" as const,
+                    extract: {
+                        type: "object",
+                        properties: { followUpAt: { type: "string" } },
+                    },
+                    handler: (ctx: any) => { receivedExtracted = ctx.extracted; },
+                },
+            ];
+
+            const processor = makeProcessor(signals);
+            const result = await processor.runPostSignalPhase({
+                session: makeSession(),
+                history: sampleHistory,
+                context: {},
+            });
+
+            expect(result.firings.length).toBe(1);
+            expect(result.firings[0].extractionError).toBeDefined();
+            expect(receivedExtracted).toBeUndefined();
+
+            const warned = warnSpy.mock.calls.some((args) =>
+                args.some((arg) =>
+                    typeof arg === "string" &&
+                    arg.includes("follow_up") &&
+                    arg.includes("extraction mode")
+                )
+            );
+            expect(warned).toBe(true);
+            warnSpy.mockRestore();
+        });
+    });
+
+
     // ─── Handler throws → handlerError; iteration continues ──────────────────
 
     describe("Handler throws → firing carries handlerError; iteration continues", () => {

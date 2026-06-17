@@ -2,6 +2,17 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.4.2]
+
+### Fixed
+
+- **Extraction-mode signals gated only by `if` (no `when`) now run their extraction.** A signal with `extract` plus an `if` predicate but no `when` — the shape of the documented `leadStage` example — matched through the code path but never issued an extraction call, so its handler always received `ctx.extracted: undefined`. Extraction now runs for every code-matched signal (unconditional or `if`-gated) that declares `extract`, alongside the existing `when`-conditioned path. LLM-conditioned signals are unaffected: their extraction is still merged into the single classifier batch.
+- **A matched extraction-mode signal that returns no payload is no longer silent.** When the classifier reports `matched: true` but returns no `extracted` value — commonly because the `extract` schema used a provider-ignored keyword such as `nullable: true` instead of `type: ['string', 'null']`, so the model omits the field — the firing now carries an `extractionError` and a WARN is logged, instead of passing `extracted: undefined` to the handler with no trace. The handler still runs.
+
+### Added
+
+- **`SignalFiring.extractionError`** — set when an extraction-mode signal matched but no `extracted` payload was returned (see above). Optional and additive.
+
 ## [2.4.1]
 
 ### Fixed

@@ -27,6 +27,11 @@ import type {
 import type { SignalEvaluator } from "./SignalEvaluator";
 import { logger } from "../utils";
 
+/** Recorded on `SignalFiring.extractionError` when a matched extraction-mode
+ * signal yields no payload (model omitted the field or returned null). */
+const EXTRACTION_MISSING_MESSAGE =
+    "Signal matched in extraction mode but the classifier returned no extracted payload.";
+
 // ──────────────────────────────────────────────────────────────────────────────
 // behaviorAllowsExecution — Algorithm 2
 // ──────────────────────────────────────────────────────────────────────────────
@@ -454,23 +459,29 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
             }
         }
 
-        // ── STEP 6b: unconditional + extract signals ────────────────────────
-        const unconditionalWithExtract = unconditional.filter((s) => s.extract != null);
-        if (unconditionalWithExtract.length > 0) {
+        // ── STEP 6b: extraction for code-matched signals ─────────────────────
+        // Signals matched by code — unconditional (no `when`/`if`) or code-only
+        // (`if` without `when`) — that carry an `extract` schema still need a
+        // dedicated extraction call. LLM-conditioned signals already had their
+        // extraction merged into the STEP 6 classifier batch, so they are
+        // excluded here by identity. Without this, an `if` + `extract` signal
+        // (e.g. the documented `leadStage` example) would reach its handler with
+        // `ctx.extracted` permanently undefined.
+        const codeMatchedWithExtract = matched.filter(
+            (m) => m.signal.extract != null && !llmConditioned.includes(m.signal),
+        );
+        if (codeMatchedWithExtract.length > 0) {
             const extractResults = await this.evaluator.evaluateSignals({
-                signals: unconditionalWithExtract,
+                signals: codeMatchedWithExtract.map((m) => m.signal),
                 session,
                 history,
                 context,
             });
 
-            // Attach extracted data to already-matched unconditional entries
-            for (const s of unconditionalWithExtract) {
-                const id = s.id ?? 'unknown';
-                const entry = matched.find((m) => m.signal === s);
-                if (entry) {
-                    entry.extracted = extractResults[id]?.extracted;
-                }
+            // Attach extracted data back onto the already-matched entries.
+            for (const m of codeMatchedWithExtract) {
+                const id = m.signal.id ?? 'unknown';
+                m.extracted = extractResults[id]?.extracted;
             }
         }
 
@@ -490,6 +501,16 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
             // Turn-local directive bus for this handler (captures dispatch calls)
             const handlerBus: SignalDirective<TContext, TData>[] = [];
 
+            // A signal in extraction mode that matched but produced no payload
+            // would otherwise pass `extracted: undefined` to the handler with no
+            // trace. Surface the miss on the firing and in logs instead.
+            const extractionMissing = m.signal.extract != null && m.extracted == null;
+            if (extractionMissing) {
+                logger.warn(
+                    `[Signals] Signal "${m.signal.id ?? 'unknown'}" matched in extraction mode ` +
+                    `but the classifier returned no extracted payload; handler receives extracted: undefined.`,
+                );
+            }
 
             const sigCtx = buildSignalContext<TContext, TData, any>({
                 signal: m.signal,
@@ -555,6 +576,7 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
                     extracted: m.extracted,
                     directive: resolvedDirective,
                     durationMs: handlerDurationMs,
+                    ...(extractionMissing ? { extractionError: EXTRACTION_MISSING_MESSAGE } : {}),
                 });
 
                 // stopOtherSignals → break iteration
@@ -574,6 +596,7 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
                     reason: m.reason,
                     handlerError: errorMessage,
                     durationMs: handlerDurationMs,
+                    ...(extractionMissing ? { extractionError: EXTRACTION_MISSING_MESSAGE } : {}),
                 });
 
                 // Continue iteration — handler errors never break the turn

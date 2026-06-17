@@ -99,6 +99,7 @@ interface SignalFiring<TContext = unknown, TData = unknown> {
   extracted?: unknown;
   directive?: ResolvedSignalDirective<TContext, TData>;
   handlerError?: string;
+  extractionError?: string;
   durationMs?: number;
 }
 
@@ -205,6 +206,7 @@ One entry per signal that fired this turn. Populated in fire order across both p
 | `extracted` | `unknown` | Extracted payload when in extraction mode. |
 | `directive` | `ResolvedSignalDirective \| undefined` | The directive returned (or dispatched) by the handler, with `replyWith` already resolved onto `reply`. |
 | `handlerError` | `string \| undefined` | Error message if the handler threw. The turn continues — handler errors never break a turn. |
+| `extractionError` | `string \| undefined` | Set when an extraction-mode signal matched but the classifier returned no `extracted` payload (model omitted the field or returned `null`). The handler still runs with `extracted: undefined`; this makes the miss observable instead of silent. Independent of `handlerError`. |
 | `durationMs` | `number \| undefined` | Wall-clock duration of the handler invocation. |
 
 ### `SignalsState` and `SignalTriggerState`
@@ -353,6 +355,7 @@ Soft failures handled in-band (no thrown error, turn continues):
 
 - **Handler throws** — recorded as `firings[i].handlerError`; iteration continues with the next signal.
 - **Classifier call fails** — all LLM-conditioned signals in that batch are treated as non-match; code-only and unconditional signals continue normally.
+- **Extraction-mode signal matched but no payload returned** — recorded as `firings[i].extractionError` with a WARN log; the handler still runs with `extracted: undefined`. Usually means the `extract` schema used a keyword the provider ignores (e.g. `nullable: true` instead of `type: ['string', 'null']`), so the model omitted the field.
 - **Post-phase emits pre-LLM-only fields** (`halt` / `appendPrompt` / `injectTools`) — dropped with debug warning.
 - **`behavior: 'cooldown'` with no `cooldownMs`** — debug warning at construction; runtime treats as `'always'`.
 

@@ -327,6 +327,12 @@ export interface SignalFiring<TContext = unknown, TData = unknown> {
     directive?: ResolvedSignalDirective<TContext, TData>;
     /** Error message if the handler threw. */
     handlerError?: string;
+    /**
+     * Set when the signal matched in extraction mode (`extract` defined) but the
+     * classifier returned no extracted payload — the handler ran with
+     * `extracted: undefined`. Independent of `handlerError`.
+     */
+    extractionError?: string;
     /** Wall-clock duration of the handler invocation in milliseconds. */
     durationMs?: number;
 }
