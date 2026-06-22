@@ -55,8 +55,8 @@ export {
 export { LoggerLevel, logger } from "./logger";
 
 // Retry utilities
-export type { RetryOptions } from "./retry";
-export { retry, withTimeoutAndRetry } from "./retry";
+export type { RetryOptions, StreamRetryOptions } from "./retry";
+export { retry, withTimeoutAndRetry, withStreamRetry } from "./retry";
 
 // Condition utilities
 export {

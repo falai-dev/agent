@@ -21,7 +21,7 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
-import { withTimeoutAndRetry } from "../utils/retry";
+import { withTimeoutAndRetry, withStreamRetry } from "../utils/retry";
 import { tryParseJSONResponse } from "../utils/json";
 import { logger } from "../utils/logger";
 import {
@@ -107,8 +107,12 @@ export class GeminiProvider implements AiProvider {
     this.backupModels = backupModels;
     this.config = config;
     this.retryConfig = {
+      // `||` is intentional: a 0ms timeout is degenerate (aborts every call
+      // immediately), so fall back to the default.
       timeout: retryConfig?.timeout || DEFAULT_RETRY_CONFIG.timeout,
-      retries: retryConfig?.retries || DEFAULT_RETRY_CONFIG.retries,
+      // `??` so an explicit `retries: 0` (disable retries) is honored instead of
+      // being clobbered to the default by a falsy-zero check.
+      retries: retryConfig?.retries ?? DEFAULT_RETRY_CONFIG.retries,
     };
   }
 
@@ -538,6 +542,17 @@ export class GeminiProvider implements AiProvider {
         } as AgentStructuredResponse;
       }
 
+      // A parsed-but-blank structured message with no tool calls is just as
+      // empty as no text at all — throw so withTimeoutAndRetry retries instead
+      // of returning {"message":""}.
+      if (
+        toolCalls.length === 0 &&
+        typeof structured?.message === "string" &&
+        !structured.message.trim()
+      ) {
+        throw new Error("No response from Gemini");
+      }
+
       return {
         message,
         metadata: {
@@ -566,7 +581,10 @@ export class GeminiProvider implements AiProvider {
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Try primary model first
     try {
-      yield* this.generateStreamWithModel(this.primaryModel, input);
+      yield* withStreamRetry(
+        () => this.generateStreamWithModel(this.primaryModel, input),
+        { maxRetries: this.retryConfig.retries, operationName: `Gemini ${this.primaryModel} stream` }
+      );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
       logger.warn(
@@ -589,7 +607,10 @@ export class GeminiProvider implements AiProvider {
         );
 
         try {
-          yield* this.generateStreamWithModel(backupModel, input);
+          yield* withStreamRetry(
+            () => this.generateStreamWithModel(backupModel, input),
+            { maxRetries: this.retryConfig.retries, operationName: `Gemini ${backupModel} stream` }
+          );
           logger.debug(`[GEMINI] Backup model ${backupModel} succeeded`);
           return;
         } catch (backupError: unknown) {
@@ -745,6 +766,18 @@ export class GeminiProvider implements AiProvider {
         ...structured,
         toolCalls,
       } as AgentStructuredResponse;
+    }
+
+    // Empty-completion guard — mirror of the non-streaming path. The effective
+    // message is the parsed structured message when a schema is used, else the
+    // accumulated text. A blank message with no tool calls means the model
+    // produced nothing usable; throw so withStreamRetry/generateStreamWithBackup
+    // retry instead of silently emitting an empty message.
+    const messageText = (
+      typeof structured?.message === "string" ? structured.message : accumulated
+    ).trim();
+    if (!messageText && toolCalls.length === 0) {
+      throw new Error("No response from Gemini");
     }
 
     // Yield final chunk

@@ -741,3 +741,78 @@ describe("Property 13: Abort Signal Propagation", () => {
         expect(queuedResult?.result?.error).toContain("cancelled");
     });
 });
+
+describe("Pre-execution gates enforced on the streaming path", () => {
+    // Regression guard: validateInput/checkPermissions used to be applied only in
+    // ToolManager.executeTool (the generate()/respond() path), so the streaming
+    // executor ran handlers without them. The gates now live in a shared module
+    // (toolGates) called by both paths.
+
+    test("denied checkPermissions does NOT invoke the handler", async () => {
+        let handlerRan = false;
+        const executor = new StreamingToolExecutor(makeToolContext());
+        const gatedTool: EnhancedTool = {
+            id: "privileged",
+            name: "privileged",
+            handler: async () => {
+                handlerRan = true;
+                return { data: "should-not-run", success: true };
+            },
+            checkPermissions: () => ({ allowed: false, reason: "not allowed", canOverride: false }),
+        };
+
+        executor.addTool(makeCall("privileged"), gatedTool);
+        const results = await collectAll(executor);
+
+        expect(handlerRan).toBe(false);
+        const res = results.find((r) => r.toolCallId === "privileged" && r.result);
+        expect(res?.result?.success).toBe(false);
+        expect(res?.result?.error).toContain("Permission denied");
+        expect(res?.result?.metadata?.gate).toBe("checkPermissions");
+    });
+
+    test("failed validateInput does NOT invoke the handler", async () => {
+        let handlerRan = false;
+        const executor = new StreamingToolExecutor(makeToolContext());
+        const gatedTool: EnhancedTool = {
+            id: "validated",
+            name: "validated",
+            handler: async () => {
+                handlerRan = true;
+                return { data: "should-not-run", success: true };
+            },
+            validateInput: () => ({ valid: false, error: "bad input" }),
+        };
+
+        executor.addTool(makeCall("validated"), gatedTool);
+        const results = await collectAll(executor);
+
+        expect(handlerRan).toBe(false);
+        const res = results.find((r) => r.toolCallId === "validated" && r.result);
+        expect(res?.result?.success).toBe(false);
+        expect(res?.result?.error).toContain("Validation failed");
+        expect(res?.result?.metadata?.gate).toBe("validateInput");
+    });
+
+    test("passing gates let the handler run normally", async () => {
+        let handlerRan = false;
+        const executor = new StreamingToolExecutor(makeToolContext());
+        const allowedTool: EnhancedTool = {
+            id: "allowed",
+            name: "allowed",
+            handler: async () => {
+                handlerRan = true;
+                return { data: "ran", success: true };
+            },
+            validateInput: () => ({ valid: true }),
+            checkPermissions: () => ({ allowed: true }),
+        };
+
+        executor.addTool(makeCall("allowed"), allowedTool);
+        const results = await collectAll(executor);
+
+        expect(handlerRan).toBe(true);
+        const res = results.find((r) => r.toolCallId === "allowed" && r.result);
+        expect(res?.result?.success).toBe(true);
+    });
+});

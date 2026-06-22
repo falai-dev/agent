@@ -19,6 +19,7 @@ import type {
     Tool,
     TrackedTool,
 } from "../types/tool";
+import { evaluateToolGates } from "./toolGates";
 
 /** Options for the StreamingToolExecutor */
 interface StreamingToolExecutorOptions {
@@ -221,6 +222,17 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
         const batchAbortController = this.siblingAbortController;
 
         try {
+            // Pre-execution gates (validateInput → checkPermissions), shared with
+            // ToolManager.executeTool. These MUST run on the streaming path too:
+            // when a gate denies, the handler is NOT invoked. Run before any abort
+            // wiring so a denial returns cleanly with nothing to unwind.
+            const gateDenial = await evaluateToolGates(tool, toolCall.arguments, this.toolContext);
+            if (gateDenial) {
+                tracked.results.push(gateDenial);
+                tracked.status = "completed";
+                return;
+            }
+
             // Create a combined abort signal from parent + sibling
             const toolAbortController = new AbortController();
             const abortTool = () => {

@@ -43,6 +43,24 @@ export class PersistenceManager<TData = Record<string, unknown>> {
   }
 
   /**
+   * Reject a non-string id before it reaches a repository query filter.
+   *
+   * SECURITY: session/user ids flow into adapter query VALUE positions (e.g.
+   * Mongo `findOne({ id })`). A non-string value such as `{ $ne: null }` —
+   * trivially produced by an HTTP body or an Express `?id[$ne]=` query — would
+   * be interpreted by a NoSQL driver as query operators, turning an equality
+   * lookup into an operator query (cross-tenant read / mass delete). Callers
+   * type these as `string`, but that guarantee is erased at runtime, so we
+   * enforce it here: the single layer every public session/user lookup funnels
+   * through.
+   */
+  private assertScalarId(value: unknown, label: string): asserts value is string {
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(`${label} must be a non-empty string`);
+    }
+  }
+
+  /**
    * Create a new session
    */
   async createSession(
@@ -67,6 +85,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
    * Get session by ID
    */
   async getSession(sessionId: string): Promise<SessionData<TData> | null> {
+    this.assertScalarId(sessionId, "Session ID");
     return await this.sessionRepository.findById(sessionId);
   }
 
@@ -80,6 +99,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
         "userId must be provided or configured in PersistenceConfig"
       );
     }
+    this.assertScalarId(effectiveUserId, "User ID");
     return await this.sessionRepository.findActiveByUserId(effectiveUserId);
   }
 
@@ -96,6 +116,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
         "userId must be provided or configured in PersistenceConfig"
       );
     }
+    this.assertScalarId(effectiveUserId, "User ID");
     return await this.sessionRepository.findByUserId(effectiveUserId, limit);
   }
 
@@ -170,6 +191,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
     sessionId: string,
     limit?: number
   ): Promise<MessageData[]> {
+    this.assertScalarId(sessionId, "Session ID");
     return await this.messageRepository.findBySessionId(sessionId, limit);
   }
 
@@ -186,6 +208,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
         "userId must be provided or configured in PersistenceConfig"
       );
     }
+    this.assertScalarId(effectiveUserId, "User ID");
     return await this.messageRepository.findByUserId(effectiveUserId, limit);
   }
 
@@ -193,6 +216,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
    * Delete a session and all its messages
    */
   async deleteSession(sessionId: string): Promise<boolean> {
+    this.assertScalarId(sessionId, "Session ID");
     // Delete all messages first
     await this.messageRepository.deleteBySessionId(sessionId);
 
@@ -260,9 +284,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
     sessionStep: SessionState<TData>
   ): Promise<SessionData<TData> | null> {
     // Validate input parameters
-    if (!sessionId || typeof sessionId !== 'string') {
-      throw new Error('Session ID must be a non-empty string');
-    }
+    this.assertScalarId(sessionId, "Session ID");
 
     if (!sessionStep || typeof sessionStep !== 'object') {
       throw new Error('Session step must be a valid object');
@@ -307,9 +329,10 @@ export class PersistenceManager<TData = Record<string, unknown>> {
       } else {
         saved = await this.sessionRepository.create({
           id: sessionId,
-          userId: persistenceData.collectedData.metadata?.userId
-            ? JSON.stringify(persistenceData.collectedData.metadata?.userId)
-            : this.config.userId,
+          // Owner is the authenticated principal from config — never derived
+          // from collectedData.metadata (model/user-influenced state), which
+          // would let collected data mis-attribute a session's tenant.
+          userId: this.config.userId,
           status: "active",
           currentFlow: persistenceData.currentFlow,
           currentStep: persistenceData.currentStep,
@@ -342,6 +365,7 @@ export class PersistenceManager<TData = Record<string, unknown>> {
   async loadSessionState(
     sessionId: string
   ): Promise<SessionState<TData> | null> {
+    this.assertScalarId(sessionId, "Session ID");
     const sessionData = await this.sessionRepository.findById(sessionId);
 
     if (!sessionData) {

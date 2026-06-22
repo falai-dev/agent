@@ -24,6 +24,7 @@ import type { Agent } from "./Agent";
 import { Flow } from "./Flow";
 import { Step } from "./Step";
 import { StreamingToolExecutor } from "./StreamingToolExecutor";
+import { evaluateToolGates } from "./toolGates";
 
 /**
  * Error thrown when tool creation fails
@@ -715,38 +716,13 @@ export class ToolManager<TContext = unknown, TData = unknown> {
 
       logger.debug(`[ToolManager] Executing tool: ${tool.id} with args:`, toolArguments);
 
-      // Tool validation gate (Req 6.1, 6.7)
-      if (typeof tool.validateInput === 'function' && toolArguments) {
-        const validation = await tool.validateInput(toolArguments, toolContext);
-        if (!validation.valid) {
-          const executionTime = Date.now() - startTime;
-          logger.warn(`[DataValidationError] Tool "${tool.id}" input validation failed: ${validation.error}. Fix the tool call arguments to match the expected schema.`);
-          return {
-            success: false,
-            error: `Validation failed: ${validation.error || 'Invalid input'}`,
-            metadata: { toolId: tool.id, executionTime, gate: 'validateInput' }
-          };
-        }
-      }
-
-      // Tool permission gate (Req 6.7, 6.8)
-      // When denied: do not invoke handler, do not process directives, do not apply state writes
-      if (typeof tool.checkPermissions === 'function' && toolArguments) {
-        const permission = await tool.checkPermissions(toolArguments, toolContext);
-        if (!permission.allowed) {
-          const executionTime = Date.now() - startTime;
-          logger.warn(`[ToolExecutionError] Tool "${tool.id}" permission denied: ${permission.reason}. The tool's checkPermissions hook rejected this call.`);
-          return {
-            success: false,
-            error: `Permission denied: ${permission.reason || 'Not allowed'}`,
-            metadata: {
-              toolId: tool.id,
-              executionTime,
-              gate: 'checkPermissions',
-              canOverride: permission.canOverride
-            }
-          };
-        }
+      // Pre-execution gates (validateInput → checkPermissions). Shared with the
+      // streaming executor (StreamingToolExecutor) so authorization/validation
+      // behave identically on every transport. When a gate denies, the handler
+      // is NOT invoked.
+      const gateDenial = await evaluateToolGates(tool, toolArguments, toolContext, startTime);
+      if (gateDenial) {
+        return gateDenial;
       }
 
       // Execute tool with timeout protection

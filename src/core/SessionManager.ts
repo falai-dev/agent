@@ -59,6 +59,13 @@ export class SessionManager<TData = unknown> {
    * Works for sessionIds that exist, don't exist, or auto-generated IDs
    */
   async getOrCreate(sessionId?: string): Promise<SessionState<TData>> {
+    // SECURITY: a non-string sessionId (e.g. `{ $ne: null }` from an HTTP body
+    // or `?sessionId[$ne]=` query) forwarded into a NoSQL query becomes an
+    // operator clause. Reject it at the entry point; `undefined` is allowed and
+    // auto-generates an id, and an empty string keeps its fall-back semantics.
+    if (sessionId !== undefined && typeof sessionId !== "string") {
+      throw new Error("sessionId must be a string");
+    }
     // Use provided sessionId or fall back to default
     const effectiveSessionId = sessionId || this.defaultSessionId;
 

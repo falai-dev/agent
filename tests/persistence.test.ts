@@ -666,6 +666,43 @@ describe("Persistence Error Handling", () => {
       expect(getCollectedData(loaded)?.testId).toBe(id);
     }
   });
+
+  test("should reject non-string ids that could carry NoSQL operators", async () => {
+    // SECURITY: an object id like { $ne: null } — trivially produced by an HTTP
+    // body or an Express `?id[$ne]=` query — would become an operator clause if
+    // forwarded into a NoSQL query value position (cross-tenant read / mass
+    // delete). Every public lookup must reject it before it reaches a query.
+    const agent = createPersistenceTestAgent();
+    const manager = agent.getPersistenceManager()!;
+    const malicious = { $ne: null } as unknown as string;
+
+    await expect(manager.getSession(malicious)).rejects.toThrow(
+      "Session ID must be a non-empty string"
+    );
+    await expect(manager.loadSessionState(malicious)).rejects.toThrow(
+      "Session ID must be a non-empty string"
+    );
+    await expect(manager.getSessionMessages(malicious)).rejects.toThrow(
+      "Session ID must be a non-empty string"
+    );
+    await expect(manager.deleteSession(malicious)).rejects.toThrow(
+      "Session ID must be a non-empty string"
+    );
+    await expect(manager.findActiveSession(malicious)).rejects.toThrow(
+      "User ID must be a non-empty string"
+    );
+    await expect(manager.getUserSessions(malicious)).rejects.toThrow(
+      "User ID must be a non-empty string"
+    );
+
+    // Primary entry point (Agent constructor / getOrCreate) rejects it too.
+    await expect(agent.session.getOrCreate(malicious)).rejects.toThrow(
+      "sessionId must be a string"
+    );
+
+    // Legitimate string ids still pass the guard (absent session → null).
+    expect(await manager.getSession("legit-id")).toBeNull();
+  });
 });
 
 describe("PersistenceManager Advanced Features", () => {

@@ -95,3 +95,58 @@ export const withTimeoutAndRetry = async <T>(
     },
   });
 };
+
+export interface StreamRetryOptions {
+  /** Maximum number of retries after the first attempt. Defaults to 3. */
+  maxRetries?: number;
+  /** Backoff before the next attempt, in ms. Defaults to capped exponential. */
+  delay?: (attempt: number) => number;
+  /** Label used in retry logs. */
+  operationName?: string;
+}
+
+/**
+ * Streaming analog of {@link withTimeoutAndRetry}. Re-runs an async-generator
+ * factory as long as it fails *before yielding its first chunk* — e.g. an
+ * empty completion that throws "No response", or an error while establishing
+ * the stream. Once any chunk has been yielded the stream is committed and
+ * further errors propagate, so a retry can never double-emit deltas that the
+ * consumer has already received.
+ *
+ * This mirrors the non-streaming path, where the provider throws on an empty
+ * completion inside `withTimeoutAndRetry` and is retried on the same model
+ * before the caller falls through to backup models.
+ */
+export async function* withStreamRetry<T>(
+  factory: () => AsyncGenerator<T>,
+  options: StreamRetryOptions = {}
+): AsyncGenerator<T> {
+  const {
+    maxRetries = 3,
+    delay = (attempt: number) => Math.min(1000 * Math.pow(2, attempt), 5000),
+    operationName = "AI stream",
+  } = options;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let yielded = false;
+    try {
+      for await (const chunk of factory()) {
+        yielded = true;
+        yield chunk;
+      }
+      return;
+    } catch (error: unknown) {
+      // Can't retry once deltas are out, and don't retry past the budget.
+      if (yielded || attempt === maxRetries) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`[${operationName}] Failed attempt ${attempt + 1}:`, message);
+      const delayMs = delay(attempt);
+      logger.debug(
+        `[${operationName}] Retrying in ${delayMs}ms... (attempt ${attempt + 2}/${maxRetries + 1})`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}

@@ -1243,6 +1243,10 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Stream chunks with unified tool handling
             for await (const chunk of stream) {
                 let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
+                // Final message/structured may be replaced by a forced post-tool
+                // response (see runStreamingBatch / gap: tools-ran-but-no-text).
+                let finalAccumulated = chunk.accumulated;
+                let finalStructured = chunk.structured;
 
                 // Extract tool calls from AI response on final chunk
                 if (chunk.done && chunk.structured?.toolCalls) {
@@ -1265,9 +1269,18 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     });
                     session = batchResult.session;
                     toolCalls = batchResult.toolCalls;
+
+                    // Tools ran but the model produced no result-aware text — use
+                    // the forced closing message so we never emit the bare
+                    // preamble (or an empty message) as the final response.
+                    if (batchResult.finalMessage) {
+                        finalAccumulated = batchResult.finalMessage;
+                        finalStructured = batchResult.structured ?? finalStructured;
+                    }
                 }
 
-                // Extract collected data on final chunk
+                // Extract collected data on final chunk (from the model's own
+                // structured output for this step, not the forced follow-up)
                 if (chunk.done && chunk.structured && nextStep.collect) {
                     session = await this.collectDataFromResponse({
                         result: { structured: chunk.structured },
@@ -1283,7 +1296,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // - session.currentStep: reflects the executed step
                 yield {
                     delta: chunk.delta,
-                    accumulated: chunk.accumulated,
+                    accumulated: finalAccumulated,
                     done: chunk.done,
                     session,
                     toolCalls,
@@ -1291,7 +1304,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     executedSteps: chunk.done ? [{ id: nextStep.id, flowId: selectedFlow.id }] : undefined,
                     stoppedReason: chunk.done ? 'needs_input' : undefined,
                     metadata: chunk.metadata,
-                    structured: chunk.structured,
+                    structured: finalStructured,
                     appliedInstructions: chunk.done ? appliedInstructions : undefined,
                 };
             }

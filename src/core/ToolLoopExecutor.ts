@@ -147,7 +147,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             }
 
             // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution
-            const MAX_TOOL_LOOPS = this.deps.maxToolLoops || 5;
+            // `??` so an explicit `maxToolLoops: 0` is honored instead of being
+            // clobbered to the default by a falsy-zero check.
+            const MAX_TOOL_LOOPS = this.deps.maxToolLoops ?? 5;
             let toolLoopCount = 0;
             let hasToolCalls = toolCalls && toolCalls.length > 0;
             let finalMessage: string | undefined;
@@ -296,63 +298,26 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             }
 
             // If tools were executed but no final text message was produced,
-            // make one more LLM call to generate a proper text response from tool results.
-            // This prevents the original tool-invocation message (e.g. "Let me check...")
-            // from being returned as the final user-facing response.
+            // make one more LLM call to generate a proper text response from tool
+            // results. This prevents the original tool-invocation message (e.g.
+            // "Let me check...") from being returned as the final user-facing
+            // response. Shared with the streaming path via forceFinalTextFromTools.
             if (!finalMessage && toolLoopCount > 0) {
                 logger.debug(`[ToolLoopExecutor] No final message after tool loop, making additional LLM call for text response`);
-
-                // Build tool result history from toolResultsMap which contains ALL
-                // tool executions (initial + follow-up). We can't use `toolCalls` here
-                // because it was reassigned to the (empty) follow-up tool calls when
-                // the while loop broke out.
-                const finalToolResultHistoryItems: HistoryItem[] = [];
-                for (const [toolName, toolResult] of toolResultsMap) {
-                    finalToolResultHistoryItems.push({
-                        role: "assistant" as const,
-                        content: null,
-                        tool_calls: [{
-                            id: toolName,
-                            name: toolName,
-                            arguments: toolArgsMap.get(toolName) || {},
-                        }],
-                    });
-                    finalToolResultHistoryItems.push({
-                        role: "tool" as const,
-                        tool_call_id: toolName,
-                        name: toolName,
-                        content: toolResult,
-                    });
+                const forced = await this.forceFinalTextFromTools({
+                    history,
+                    toolResultsMap,
+                    toolArgsMap,
+                    responsePrompt,
+                    responseSchema,
+                    context,
+                    signal,
+                });
+                if (forced.finalMessage) {
+                    finalMessage = forced.finalMessage;
                 }
-
-                const finalHistory = [...history, ...finalToolResultHistoryItems];
-                const agentOptions = this.deps.getAgentOptions();
-
-                try {
-                    const textResult = await agentOptions.provider.generateMessage({
-                        prompt: responsePrompt + "\n\nProvide a text response to the user based on the tool results. Do not call any tools.",
-                        history: finalHistory,
-                        context,
-                        tools: [], // No tools - force text response
-                        parameters: responseSchema ? {
-                            jsonSchema: responseSchema,
-                            schemaName: "tool_final_text",
-                        } : undefined,
-                        signal,
-                    });
-
-                    finalMessage = textResult.structured?.message || textResult.message;
-                    if (textResult.structured) {
-                        followUpStructured = textResult.structured;
-                    }
-
-                    logger.debug(`[ToolLoopExecutor] Generated final text response after tool loop:`, {
-                        hasMessage: !!finalMessage,
-                        messageLength: finalMessage?.length || 0,
-                    });
-                } catch (error) {
-                    logger.error(`[ToolLoopExecutor] Failed to generate final text response after tool loop:`, error);
-                    // finalMessage remains undefined; caller will use original message as fallback
+                if (forced.structured) {
+                    followUpStructured = forced.structured;
                 }
             }
 
@@ -378,11 +343,82 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
     }
 
     /**
+     * After tools have executed but the model produced no closing text, make one
+     * more LLM call (no tools) that turns the tool results into a user-facing
+     * message. Shared by the non-streaming tool loop and the streaming batch so
+     * both paths behave identically. Returns an empty object if the call fails
+     * or yields nothing, leaving the caller to fall back to its prior message.
+     */
+    private async forceFinalTextFromTools(params: {
+        history: HistoryItem[];
+        toolResultsMap: Map<string, string>;
+        toolArgsMap: Map<string, Record<string, unknown>>;
+        responsePrompt: string;
+        responseSchema?: Record<string, unknown>;
+        context: TContext;
+        signal?: AbortSignal;
+    }): Promise<{ finalMessage?: string; structured?: AgentStructuredResponse }> {
+        const { history, toolResultsMap, toolArgsMap, responsePrompt, responseSchema, context, signal } = params;
+
+        // Reconstruct assistant tool_call + tool result pairs so the follow-up
+        // call can see what the tools returned.
+        const finalToolResultHistoryItems: HistoryItem[] = [];
+        for (const [toolName, toolResult] of toolResultsMap) {
+            finalToolResultHistoryItems.push({
+                role: "assistant" as const,
+                content: null,
+                tool_calls: [{
+                    id: toolName,
+                    name: toolName,
+                    arguments: toolArgsMap.get(toolName) || {},
+                }],
+            });
+            finalToolResultHistoryItems.push({
+                role: "tool" as const,
+                tool_call_id: toolName,
+                name: toolName,
+                content: toolResult,
+            });
+        }
+
+        const finalHistory = [...history, ...finalToolResultHistoryItems];
+        const agentOptions = this.deps.getAgentOptions();
+
+        try {
+            const textResult = await agentOptions.provider.generateMessage({
+                prompt: responsePrompt + "\n\nProvide a text response to the user based on the tool results. Do not call any tools.",
+                history: finalHistory,
+                context,
+                tools: [], // No tools - force text response
+                parameters: responseSchema ? {
+                    jsonSchema: responseSchema,
+                    schemaName: "tool_final_text",
+                } : undefined,
+                signal,
+            });
+
+            const finalMessage = textResult.structured?.message || textResult.message;
+            logger.debug(`[ToolLoopExecutor] Generated final text response from tool results:`, {
+                hasMessage: !!finalMessage,
+                messageLength: finalMessage?.length || 0,
+            });
+            return { finalMessage, structured: textResult.structured };
+        } catch (error) {
+            logger.error(`[ToolLoopExecutor] Failed to generate final text response from tool results:`, error);
+            // Leave the caller to fall back to its prior message.
+            return {};
+        }
+    }
+
+    /**
      * Execute the streaming path's initial batch of tool calls concurrently
      * via ToolManager.executeWithConcurrency, yielding tool-progress chunks.
-     * Falls back to `runLoop()` when concurrent execution fails.
+     * When tools ran but the model produced no closing text, forces a final
+     * text response from the tool results (mirroring `runLoop()`). Falls back
+     * to `runLoop()` when concurrent execution fails.
      *
-     * Returns the updated session and the final tool calls.
+     * Returns the updated session, final tool calls, and any forced closing
+     * message/structured response.
      */
     async *runStreamingBatch(params: {
         toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }>;
@@ -407,6 +443,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
         {
             session: SessionState<TData>;
             toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined;
+            /** Closing message forced from the tool results, if one was generated. */
+            finalMessage?: string;
+            structured?: AgentStructuredResponse;
         }
     > {
         const { context, history, selectedFlow, step, accumulated, responsePrompt, availableTools, responseSchema, signal } = params;
@@ -419,8 +458,16 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             toolName: tc.toolName,
             arguments: tc.arguments,
         }));
+        // Map request id -> request so completed results can be attributed back
+        // to their tool name/arguments for the forced final-text call.
+        const requestById = new Map(toolCallRequests.map((r) => [r.id, r]));
+        const toolResultsMap = new Map<string, string>();
+        const toolArgsMap = new Map<string, Record<string, unknown>>();
 
         const historyEvents = historyToEvents(history);
+
+        let finalMessage: string | undefined;
+        let structured: AgentStructuredResponse | undefined;
 
         try {
             for await (const update of this.deps.toolManager.executeWithConcurrency({
@@ -450,6 +497,15 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                     }
                 }
 
+                // Capture tool results for the forced final-text call
+                if (update.result) {
+                    const req = requestById.get(update.toolCallId);
+                    if (req) {
+                        toolResultsMap.set(req.toolName, serializeToolResult(update.result));
+                        toolArgsMap.set(req.toolName, req.arguments);
+                    }
+                }
+
                 // Yield progress updates immediately
                 if (update.progress) {
                     yield {
@@ -465,6 +521,23 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             }
 
             logger.debug(`[ToolLoopExecutor] Concurrent tool execution completed for ${toolCallRequests.length} tools`);
+
+            // Tools ran but streaming produced no post-tool message — force one
+            // from the results, mirroring runLoop. (The streaming chunk only ever
+            // carries the pre-tool preamble, never a result-aware response.)
+            if (toolResultsMap.size > 0) {
+                const forced = await this.forceFinalTextFromTools({
+                    history,
+                    toolResultsMap,
+                    toolArgsMap,
+                    responsePrompt,
+                    responseSchema,
+                    context,
+                    signal,
+                });
+                finalMessage = forced.finalMessage;
+                structured = forced.structured;
+            }
         } catch (error) {
             logger.error(`[ToolLoopExecutor] Concurrent tool execution failed, falling back to sequential:`, error);
             // Fall back to the unified tool loop on failure
@@ -474,9 +547,11 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             });
             session = toolResult.session;
             toolCalls = toolResult.finalToolCalls;
+            finalMessage = toolResult.finalMessage;
+            structured = toolResult.structured;
         }
 
-        return { session, toolCalls };
+        return { session, toolCalls, finalMessage, structured };
     }
 
     /**
