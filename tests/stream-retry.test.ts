@@ -85,4 +85,57 @@ describe("withStreamRetry", () => {
     ).rejects.toThrow("fail 3"); // initial attempt + 2 retries
     expect(calls).toBe(3);
   });
+
+  test("times out waiting for the first chunk, then retries and succeeds", async () => {
+    let calls = 0;
+    const out = await collect(
+      withStreamRetry(
+        async function* () {
+          calls++;
+          if (calls < 3) {
+            // Stalls past the 20ms deadline, but settles so nothing leaks.
+            await new Promise((resolve) => setTimeout(resolve, 80));
+          }
+          yield "ok";
+        },
+        { maxRetries: 3, delay: () => 0, firstChunkTimeoutMs: 20 }
+      )
+    );
+    expect(out).toEqual(["ok"]);
+    expect(calls).toBe(3);
+  });
+
+  test("does not bound chunks after the first", async () => {
+    // First chunk is immediate; the second arrives after the first-chunk
+    // deadline and must NOT be cut off.
+    const out = await collect(
+      withStreamRetry(
+        async function* () {
+          yield "a";
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          yield "b";
+        },
+        { maxRetries: 0, delay: () => 0, firstChunkTimeoutMs: 20 }
+      )
+    );
+    expect(out).toEqual(["a", "b"]);
+  });
+
+  test("throws when the first chunk never arrives and retries are exhausted", async () => {
+    let calls = 0;
+    await expect(
+      collect(
+        withStreamRetry(
+          async function* () {
+            calls++;
+            // Stalls past the deadline on every attempt; settles so nothing leaks.
+            await new Promise((resolve) => setTimeout(resolve, 80));
+            yield "never";
+          },
+          { maxRetries: 1, delay: () => 0, firstChunkTimeoutMs: 20 }
+        )
+      )
+    ).rejects.toThrow(/no first chunk within 20ms/i);
+    expect(calls).toBe(2); // initial attempt + 1 retry
+  });
 });

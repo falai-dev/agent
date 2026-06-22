@@ -26,7 +26,7 @@ import type { Flow } from "./Flow";
 import type { Step } from "./Step";
 import type { ToolManager } from "./ToolManager";
 import { ResponseGenerationError } from "./ResponseGenerationError";
-import { historyToEvents, logger, serializeToolResult } from "../utils";
+import { historyToEvents, logger, serializeToolResult, assistantMessage, toolMessage } from "../utils";
 
 export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
     constructor(
@@ -364,21 +364,12 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
         // call can see what the tools returned.
         const finalToolResultHistoryItems: HistoryItem[] = [];
         for (const [toolName, toolResult] of toolResultsMap) {
-            finalToolResultHistoryItems.push({
-                role: "assistant" as const,
-                content: null,
-                tool_calls: [{
-                    id: toolName,
-                    name: toolName,
-                    arguments: toolArgsMap.get(toolName) || {},
-                }],
-            });
-            finalToolResultHistoryItems.push({
-                role: "tool" as const,
-                tool_call_id: toolName,
-                name: toolName,
-                content: toolResult,
-            });
+            finalToolResultHistoryItems.push(
+                assistantMessage(null, [
+                    { id: toolName, name: toolName, arguments: toolArgsMap.get(toolName) || {} },
+                ]),
+                toolMessage(toolName, toolName, toolResult),
+            );
         }
 
         const finalHistory = [...history, ...finalToolResultHistoryItems];
@@ -540,7 +531,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             }
         } catch (error) {
             logger.error(`[ToolLoopExecutor] Concurrent tool execution failed, falling back to sequential:`, error);
-            // Fall back to the unified tool loop on failure
+            // Fall back to the unified tool loop on failure. runLoop re-executes
+            // the tools from scratch, so any partial results collected above are
+            // intentionally discarded (it builds and forces its own).
             const toolResult = await this.runLoop({
                 toolCalls, context, session, history, selectedFlow,
                 responsePrompt, availableTools, responseSchema, signal,

@@ -27,7 +27,7 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
-import { withTimeoutAndRetry, withStreamRetry, logger } from "../utils";
+import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, logger, effectiveMessageText } from "../utils";
 import {
   classifyProviderError,
   getErrorMessage,
@@ -35,11 +35,6 @@ import {
   toProviderError,
   type ErrorClassificationOptions,
 } from "./errorClassification";
-
-const DEFAULT_RETRY_CONFIG = {
-  timeout: 60000,
-  retries: 3,
-};
 
 /**
  * Default request parameters shared by OpenAI-compatible providers
@@ -99,14 +94,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     this.primaryModel = init.model;
     this.backupModels = init.backupModels ?? [];
     this.config = init.config;
-    this.retryConfig = {
-      // `||` is intentional: a 0ms timeout is degenerate (aborts every call
-      // immediately), so fall back to the default.
-      timeout: init.retryConfig?.timeout || DEFAULT_RETRY_CONFIG.timeout,
-      // `??` so an explicit `retries: 0` (disable retries) is honored instead of
-      // being clobbered to the default by a falsy-zero check.
-      retries: init.retryConfig?.retries ?? DEFAULT_RETRY_CONFIG.retries,
-    };
+    this.retryConfig = resolveRetryConfig(init.retryConfig);
   }
 
   // ---------------------------------------------------------------------
@@ -414,7 +402,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     try {
       yield* withStreamRetry(
         () => this.generateStreamWithModel<TContext, TStructured>(this.primaryModel, input),
-        { maxRetries: this.retryConfig.retries, operationName: `${this.logLabel} ${this.primaryModel} stream` }
+        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${this.primaryModel} stream` }
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
@@ -441,7 +429,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
         try {
           yield* withStreamRetry(
             () => this.generateStreamWithModel<TContext, TStructured>(backupModel, input),
-            { maxRetries: this.retryConfig.retries, operationName: `${this.logLabel} ${backupModel} stream` }
+            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${backupModel} stream` }
           );
           logger.debug(`[${this.logLabel}] Backup model ${backupModel} succeeded`);
           return;
@@ -584,14 +572,10 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
       } as AgentStructuredResponse;
     }
 
-    // A parsed-but-blank structured message with no tool calls is just as empty
-    // as no text at all — throw so withTimeoutAndRetry retries instead of
-    // returning {"message":""}.
-    if (
-      toolCalls.length === 0 &&
-      typeof structured?.message === "string" &&
-      !structured.message.trim()
-    ) {
+    // A parsed-but-blank message with no tool calls is just as empty as no text
+    // at all — throw so withTimeoutAndRetry retries instead of returning
+    // {"message":""}. Same effective-message check as the streaming guard.
+    if (toolCalls.length === 0 && !effectiveMessageText(structured, message)) {
       throw new Error(`No response from ${this.displayName}`);
     }
 
@@ -737,14 +721,9 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
 
     // Empty-completion guard — mirror of the non-streaming path. A blank
     // effective message (structured message under a schema, else accumulated
-    // text) with no tool calls means the model produced nothing usable; throw
-    // so withStreamRetry/generateStreamWithBackup retry instead of silently
-    // emitting an empty message.
-    const structuredMessage = (structured as AgentStructuredResponse | undefined)?.message;
-    const messageText = (
-      typeof structuredMessage === "string" ? structuredMessage : accumulated
-    ).trim();
-    if (!messageText && toolCalls.length === 0) {
+    // text) with no tool calls means the model produced nothing usable; throw so
+    // withStreamRetry/generateStreamWithBackup retry instead of emitting empty.
+    if (!effectiveMessageText(structured, accumulated) && toolCalls.length === 0) {
       throw new Error(`No response from ${this.displayName}`);
     }
 

@@ -16,15 +16,18 @@ import { GeminiProvider } from "../src/providers/GeminiProvider";
  * test double injected after construction is the only way to drive the
  * empty-completion path without a live API. Production code never reassigns it.
  */
-function makeProvider(streamFactory: () => AsyncGenerator<unknown>): GeminiProvider {
+function makeProvider(
+  streamFactory: () => AsyncGenerator<unknown>,
+  timeoutMs = 5000
+): GeminiProvider {
   const provider = new GeminiProvider({
     apiKey: "test-key",
     model: "gemini-test",
     backupModels: [],
     // retries:0 disables retries (now honored — the provider uses `?? DEFAULT`,
     // no longer clobbering a falsy 0), so the empty completion throws at once
-    // with no backoff.
-    retryConfig: { retries: 0, timeout: 5000 },
+    // with no backoff. `timeout` is also the streaming first-chunk deadline.
+    retryConfig: { retries: 0, timeout: timeoutMs },
   });
   const fakeGenAI = {
     models: {
@@ -70,6 +73,17 @@ describe("GeminiProvider streaming empty-completion guard", () => {
         })
       )
     ).rejects.toThrow("No response from Gemini");
+  });
+
+  test("throws when the stream opens but stalls before the first chunk", async () => {
+    const provider = makeProvider(async function* () {
+      // Stream established, but the first token stalls past the 100ms deadline.
+      // Finite so the abandoned generator settles instead of leaking.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }, 100);
+    await expect(
+      drain(provider.generateMessageStream({ prompt: "hi", history: [] }))
+    ).rejects.toThrow(/timed out/i);
   });
 
   test("does NOT throw when the stream yields a real message", async () => {

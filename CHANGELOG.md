@@ -2,6 +2,16 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.5.0]
+
+### Added
+
+- **Streaming now has a first-chunk (time-to-first-token) timeout.** `respondStream()`/`stream()` previously had no bound on how long a provider could take to produce its first token — a provider that opened a stream and then stalled would hang the turn indefinitely, with no equivalent of the non-streaming per-attempt timeout. The shared streaming retry helper (`withStreamRetry`) now races the first chunk against a deadline (`firstChunkTimeoutMs`, wired to each provider's existing `retryConfig.timeout`, default 60s): a stall is treated as a failed attempt and retried on the same model, then falls through to backup models — exactly like an empty completion. Only the *first* chunk is bounded, so a long but healthy stream is never cut off, and the deadline reuses the existing config (no new public option). If every attempt is exhausted it surfaces as a `"Stream timed out"` error (classified as `timeout`).
+
+### Internal
+
+- **Provider retry/response plumbing consolidated** (no public API change). The `||`/`??` retry-config defaulting (the `retries: 0` honoring fix from 2.4.3) now lives in a single shared `resolveRetryConfig`, removing the byte-identical block and three local `DEFAULT_RETRY_CONFIG` copies from the providers; the capped-exponential backoff is a single `defaultBackoff`; the empty-completion "blank message" check is one shared `effectiveMessageText` used by both the streaming and non-streaming guards; and `forceFinalTextFromTools` reuses the existing `assistantMessage`/`toolMessage` history factories. Net ~60 fewer lines across the three providers. One behavior refinement falls out of unifying the guard: a whitespace-only completion with no tool calls is now treated as empty (throw + retry) on the non-streaming path too, matching the streaming path (previously such a response was passed through).
+
 ## [2.4.3]
 
 ### Security
