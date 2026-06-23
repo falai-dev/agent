@@ -189,13 +189,15 @@ export class GeminiProvider implements AiProvider {
    *
    * @private
    */
-  private safeExtractText(responseOrChunk: { text?: string; candidates?: Array<{ content?: { parts?: Array<{ text?: string; functionCall?: unknown }> } }> }): string {
+  private safeExtractText(responseOrChunk: { text?: string; candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean; functionCall?: unknown }> } }> }): string {
     // Always extract text parts manually to avoid SDK warnings about
     // non-text parts like "thoughtSignature" in the response.
     const parts = responseOrChunk.candidates?.[0]?.content?.parts;
     if (parts) {
+      // Exclude reasoning parts (thought: true) — with includeThoughts enabled
+      // they carry text but must never leak into the user-facing message.
       return parts
-        .filter((p) => p.text != null)
+        .filter((p) => p.text != null && !p.thought)
         .map((p) => p.text)
         .join("");
     }

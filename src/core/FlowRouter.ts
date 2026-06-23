@@ -366,20 +366,6 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
       }
     }
 
-    // No candidates means flow has no valid next steps (edge case)
-    if (candidates.length === 0) {
-      logger.debug(
-        `[FlowRouter] Single-flow: No valid candidate steps found`
-      );
-      return {
-        selectedFlow,
-        selectedStep: undefined,
-        session: updatedSession,
-        isFlowComplete: false,
-        completedFlows,
-      };
-    }
-
     // Multiple candidates - use AI to select best step
     const lastUserMessage = getLastMessageFromHistory(history);
 

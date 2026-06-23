@@ -13,6 +13,7 @@ import type {
     HistoryItem,
     Event,
     AgentStructuredResponse,
+    GenerateMessageStreamChunk,
     StoppedReason,
     ScopedInstructions,
     AppliedInstruction,
@@ -40,6 +41,7 @@ import { SignalCoordinator } from "./SignalCoordinator";
 import { ResponseGenerationError } from "./ResponseGenerationError";
 import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render } from "../utils";
 import { createTemplateContext } from "../utils/template";
+import { StreamingMessageDecoder } from "../utils/streamingMessage";
 import type { ToolManager } from "./ToolManager";
 
 /**
@@ -138,6 +140,34 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
     signalHalted?: boolean;
     /** Reply from a halt directive. */
     signalHaltReply?: string;
+}
+
+/**
+ * The terminal shape of a turn, decided once by {@link ResponseModal.planTurn}
+ * and rendered by either the streaming or non-streaming path. Abstracting the
+ * decision (rather than the rendering) is what keeps the two paths in lockstep.
+ */
+type TurnOutcome<TContext, TData> =
+    /** No LLM call — emit a verbatim message (signal halt or auto-chain halt). */
+    | { kind: 'halt'; message: string; stoppedReason: StoppedReason; runPostPhase: boolean }
+    /** Flow finished — pure state transition, no message of the framework's own. */
+    | { kind: 'flowComplete'; selectedFlow: Flow<TContext, TData>; stoppedReason: StoppedReason }
+    /** Render one interactive step via the LLM (the happy path). */
+    | { kind: 'flowStep'; selectedFlow: Flow<TContext, TData>; step?: Step<TContext, TData>; responseDirectives?: string[]; signalPreDirective?: Directive<TContext, TData> }
+    /** No flows defined — a simple unstructured response. */
+    | { kind: 'fallback' };
+
+/** The output of {@link ResponseModal.planTurn}: the outcome plus shared turn state. */
+interface TurnPlan<TContext, TData> {
+    outcome: TurnOutcome<TContext, TData>;
+    /** Session after any auto-chain mutation. */
+    session: SessionState<TData>;
+    /** Live firing accumulator, seeded with pre-signal phase firings. */
+    signalFirings: SignalFiring<TContext, TData>[];
+    effectiveContext: TContext;
+    history: HistoryItem[];
+    historyEvents: Event[];
+    signal?: AbortSignal;
 }
 
 /**
@@ -540,15 +570,24 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Unified response generation for non-streaming responses
+     * Plan a turn: run signal-halt detection, the auto-chain walk, and flow/step
+     * selection, collapsing them into a single {@link TurnOutcome}. This is the
+     * shared decision spine for both the streaming and non-streaming paths — the
+     * only logic that genuinely differs between them is how each *renders* the
+     * outcome (await a value vs. yield chunks) and the leaf provider primitive it
+     * uses. Centralizing the decision here is what keeps the two paths from
+     * drifting (the class of bug behind the 2.4.x retry/empty fixes).
+     *
+     * The returned `session` reflects any auto-chain mutation; `signalFirings`
+     * is seeded with the pre-signal phase firings and is the live accumulator the
+     * post-phase tail appends to.
      * @private
      */
-    private async generateUnifiedResponse(
+    private async planTurn(
         responseContext: ResponseContext<TContext, TData>
-    ): Promise<AgentResponse<TData>> {
+    ): Promise<TurnPlan<TContext, TData>> {
         const {
             effectiveContext,
-            session: initialSession,
             history,
             selectedFlow,
             selectedStep,
@@ -560,47 +599,29 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             signalHalted,
             signalHaltReply,
         } = responseContext;
-        let session = initialSession;
+        let session = responseContext.session;
 
         // Accumulator for signal firings across both phases (fire order)
         const signalFirings: SignalFiring<TContext, TData>[] = [...(preSignalFirings || [])];
-
-        // Get last user message (needed for both flow and completion handling)
         // Convert HistoryItem[] to Event[] for internal processing
         const historyEvents = historyToEvents(history);
 
+        const base = { effectiveContext, history, historyEvents, signal, signalFirings };
+
         // ── SIGNAL HALT (Requirement 8.2) ─────────────────────────────────────
-        // Pre-signal phase emitted halt → skip LLM call entirely.
+        // Pre-signal phase emitted halt → skip LLM call entirely. The post-signal
+        // phase still runs (it sees the complete turn context).
         if (signalHalted) {
             const haltMessage = signalHaltReply || '';
-            // Run post-signal phase even on halt (post-phase sees complete turn context)
-            const post = await this.signalCoordinator.applyPostPhase({
-                session, context: effectiveContext, historyEvents, message: haltMessage,
-            });
-            session = post.session;
-            signalFirings.push(...post.firings);
-            const message = post.message;
-
             return {
-                message,
-                session,
-                toolCalls: undefined,
-                isFlowComplete: false,
-                executedSteps: [],
-                stoppedReason: haltMessage ? 'reply' : 'halt',
-                triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
+                ...base, session,
+                outcome: { kind: 'halt', message: haltMessage, stoppedReason: haltMessage ? 'reply' : 'halt', runPostPhase: true },
             };
         }
 
-        let message: string;
-        let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
-        let executedSteps: StepRef[] | undefined;
-        let stoppedReason: StoppedReason | undefined;
-        let appliedInstructions: AppliedInstruction[] | undefined;
-
         if (selectedFlow && !isFlowComplete) {
-            // AUTO-CHAIN: Walk consecutive auto-steps before any LLM work.
-            // If the current step is auto, the executor advances through it (and any
+            // AUTO-CHAIN: Walk consecutive auto-steps before any LLM work. If the
+            // current step is auto, the executor advances through it (and any
             // subsequent auto-steps) until an interactive step or terminal condition.
             let resolvedStep = selectedStep;
             const currentStepInstance = session.currentStep
@@ -619,43 +640,24 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
                 session = autoResult.session;
 
-                // Handle halt: emit verbatim reply, return — no LLM call.
-                // respond() finalizes the returned session exactly once.
+                // Halt: emit the verbatim reply, no LLM call. Unlike signal halt,
+                // the auto-chain halt is a hard short-circuit that does NOT run the
+                // post-signal phase (preserved across both paths).
                 if (autoResult.stoppedReason === 'halt') {
-                    message = autoResult.mergedDirective?.reply || '';
-                    stoppedReason = 'halt';
-                    executedSteps = [];
-
                     return {
-                        message,
-                        session,
-                        toolCalls: undefined,
-                        isFlowComplete: false,
-                        executedSteps,
-                        stoppedReason,
+                        ...base, session,
+                        outcome: { kind: 'halt', message: autoResult.mergedDirective?.reply || '', stoppedReason: 'halt', runPostPhase: false },
                     };
                 }
 
-                // Handle flow completion or cross-flow redirect from auto-chain.
-                // The auto-chain ended without resolving to an interactive step.
-                // Possible reasons: last_step (no successor), completed (explicit
-                // complete directive), or goto (cross-flow redirect).
+                // Flow completion or cross-flow redirect from auto-chain: the chain
+                // ended without resolving to an interactive step (last_step: no
+                // successor; completed: explicit complete; goto: cross-flow redirect).
                 if (autoResult.stoppedReason === 'last_step' || autoResult.stoppedReason === 'completed' || autoResult.stoppedReason === 'goto') {
                     logger.debug(`[ResponseModal] Auto-chain ended with ${autoResult.stoppedReason}`);
-                    session = await this.applyFlowCompletion({
-                        selectedFlow,
-                        session,
-                        context: effectiveContext,
-                        history,
-                    });
-
                     return {
-                        message: '',
-                        session,
-                        toolCalls: undefined,
-                        isFlowComplete: true,
-                        executedSteps: [],
-                        stoppedReason: autoResult.stoppedReason,
+                        ...base, session,
+                        outcome: { kind: 'flowComplete', selectedFlow, stoppedReason: autoResult.stoppedReason },
                     };
                 }
 
@@ -663,101 +665,161 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 resolvedStep = autoResult.resolvedStep;
             }
 
-            // SINGLE STEP EXECUTION: Process the resolved interactive step.
-            // The auto-chain (if it ran) already walked auto-steps. Only the
-            // interactive step remains for the LLM call.
-            const result = await this.processFlowResponse({
-                selectedFlow,
-                selectedStep: resolvedStep,
-                responseDirectives,
-                session,
-                history,
-                context: effectiveContext,
-                historyEvents,
-                signal,
-                // Propagate signal pre-directive's appendPrompt for this turn's LLM call (Requirement 8.4)
-                transientAppendage: signalPreDirective?.appendPrompt,
-                // Merge signal pre-directive (halt/reply/injectTools) into the pre-LLM bus
-                mergedPreDirective: signalPreDirective,
-            });
-
-            message = result.message;
-            toolCalls = result.toolCalls;
-            session = result.session;
-            appliedInstructions = result.appliedInstructions;
-
-            // Track executed step for single-step execution
-            if (resolvedStep) {
-                executedSteps = [{
-                    id: resolvedStep.id,
-                    flowId: selectedFlow.id,
-                }];
-            }
-            // Use stoppedReason from processFlowResponse if set (halt/reply),
-            // otherwise default to 'needs_input' for normal LLM responses.
-            stoppedReason = result.stoppedReason || 'needs_input';
-
-        } else if (isFlowComplete && selectedFlow) {
-            // Flow completion path: pure state transition, no LLM call.
-            // The framework emits no message of its own.
-            // stoppedReason is 'last_step' because this completion was detected by
-            // implicit terminus (no successor or all successors skipped), not by an
-            // explicit `complete` directive.
-            logger.debug(`[ResponseModal] Releasing session to idle for completed flow: ${selectedFlow.title}`);
-
-            session = await this.applyFlowCompletion({
-                selectedFlow,
-                session,
-                context: effectiveContext,
-                history,
-            });
-            message = '';
-            stoppedReason = 'last_step';
-            executedSteps = [];
-
-        } else {
-            // Fallback: No flows defined, generate a simple response
-
-            const fallbackResult = await this.generateFallbackResponse({
-                history,
-                context: effectiveContext,
-                session,
-            });
-
-            message = fallbackResult.message;
-            appliedInstructions = fallbackResult.appliedInstructions;
-
-            // For fallback responses, set empty executedSteps and no stoppedReason
-            // since there's no flow/step execution happening
-            executedSteps = [];
-            stoppedReason = undefined;
+            return {
+                ...base, session,
+                outcome: { kind: 'flowStep', selectedFlow, step: resolvedStep, responseDirectives, signalPreDirective },
+            };
         }
 
-        // POST-SIGNAL PHASE (Requirement 9.1, 9.2, 9.3, 9.4)
-        // Runs after finalize/onComplete and before session persistence.
-        // Post-phase signals see the complete turn result: assistant message in
-        // history, collected data, tool results.
-        const post = await this.signalCoordinator.applyPostPhase({
-            session, context: effectiveContext, historyEvents, message,
-        });
-        session = post.session;
-        // Append post-phase firings to the accumulator (preserves fire order)
-        signalFirings.push(...post.firings);
-        message = post.message;
+        if (isFlowComplete && selectedFlow) {
+            // Flow completion path: pure state transition, no LLM call. The reason
+            // is 'last_step' (implicit terminus — no successor or all skipped).
+            logger.debug(`[ResponseModal] Releasing session to idle for completed flow: ${selectedFlow.title}`);
+            return {
+                ...base, session,
+                outcome: { kind: 'flowComplete', selectedFlow, stoppedReason: 'last_step' },
+            };
+        }
 
-        // Ensure response structure completeness (Requirement 8.1, 8.2, 8.3)
-        // - executedSteps: array of steps executed (empty array if none)
-        // - stoppedReason: why execution stopped (undefined for fallback)
-        // - session.currentStep: reflects final step position
+        // Fallback: no flows defined, generate a simple response.
+        return { ...base, session, outcome: { kind: 'fallback' } };
+    }
+
+    /**
+     * The shared post-signal phase tail (Requirement 9.1–9.4). Runs after the
+     * turn's message is known and before persistence, so post-phase signals see
+     * the complete turn result (assistant message, collected data, tool results)
+     * and can override the reply or wire a pendingDirective.
+     *
+     * `runPostPhase` is false only for the auto-chain halt short-circuit, which
+     * deliberately bypasses the post-phase in both paths; that branch still
+     * surfaces any pre-phase firings via `triggeredSignals`.
+     * @private
+     */
+    private async applyTurnPostPhase(params: {
+        session: SessionState<TData>;
+        context: TContext;
+        historyEvents: Event[];
+        message: string;
+        signalFirings: SignalFiring<TContext, TData>[];
+        runPostPhase: boolean;
+    }): Promise<{
+        session: SessionState<TData>;
+        message: string;
+        replyOverridden: boolean;
+        triggeredSignals?: SignalFiring<TContext, TData>[];
+    }> {
+        const { session, context, historyEvents, message, signalFirings, runPostPhase } = params;
+
+        if (!runPostPhase) {
+            return {
+                session, message, replyOverridden: false,
+                triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
+            };
+        }
+
+        const post = await this.signalCoordinator.applyPostPhase({ session, context, historyEvents, message });
+        signalFirings.push(...post.firings);
         return {
-            message,
-            session,
+            session: post.session,
+            message: post.message,
+            replyOverridden: post.replyOverridden ?? false,
+            triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
+        };
+    }
+
+    /**
+     * Unified response generation for non-streaming responses.
+     * Renders the shared {@link planTurn} outcome by awaiting the leaf primitive
+     * and running the shared post-phase tail; respond() owns the single finalize.
+     * @private
+     */
+    private async generateUnifiedResponse(
+        responseContext: ResponseContext<TContext, TData>
+    ): Promise<AgentResponse<TData>> {
+        const plan = await this.planTurn(responseContext);
+        const { effectiveContext, history, historyEvents, signal, signalFirings } = plan;
+        let session = plan.session;
+
+        let message = '';
+        let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
+        let executedSteps: StepRef[] = [];
+        let stoppedReason: StoppedReason | undefined;
+        let isFlowComplete = false;
+        let appliedInstructions: AppliedInstruction[] | undefined;
+        let runPostPhase = true;
+
+        switch (plan.outcome.kind) {
+            case 'halt': {
+                message = plan.outcome.message;
+                stoppedReason = plan.outcome.stoppedReason;
+                runPostPhase = plan.outcome.runPostPhase;
+                break;
+            }
+            case 'flowComplete': {
+                session = await this.applyFlowCompletion({
+                    selectedFlow: plan.outcome.selectedFlow,
+                    session,
+                    context: effectiveContext,
+                    history,
+                });
+                isFlowComplete = true;
+                stoppedReason = plan.outcome.stoppedReason;
+                break;
+            }
+            case 'flowStep': {
+                const result = await this.processFlowResponse({
+                    selectedFlow: plan.outcome.selectedFlow,
+                    selectedStep: plan.outcome.step,
+                    responseDirectives: plan.outcome.responseDirectives,
+                    session,
+                    history,
+                    context: effectiveContext,
+                    historyEvents,
+                    signal,
+                    // Propagate signal pre-directive's appendPrompt for this turn's LLM call (Requirement 8.4)
+                    transientAppendage: plan.outcome.signalPreDirective?.appendPrompt,
+                    // Merge signal pre-directive (halt/reply/injectTools) into the pre-LLM bus
+                    mergedPreDirective: plan.outcome.signalPreDirective,
+                });
+                message = result.message;
+                toolCalls = result.toolCalls;
+                session = result.session;
+                appliedInstructions = result.appliedInstructions;
+                if (plan.outcome.step) {
+                    executedSteps = [{ id: plan.outcome.step.id, flowId: plan.outcome.selectedFlow.id }];
+                }
+                // Use stoppedReason from processFlowResponse if set (halt/reply),
+                // otherwise default to 'needs_input' for normal LLM responses.
+                stoppedReason = result.stoppedReason || 'needs_input';
+                break;
+            }
+            case 'fallback': {
+                const fallbackResult = await this.generateFallbackResponse({
+                    history,
+                    context: effectiveContext,
+                    session,
+                    signal,
+                });
+                message = fallbackResult.message;
+                appliedInstructions = fallbackResult.appliedInstructions;
+                break;
+            }
+        }
+
+        const tail = await this.applyTurnPostPhase({
+            session, context: effectiveContext, historyEvents, message, signalFirings, runPostPhase,
+        });
+
+        return {
+            message: tail.message,
+            session: tail.session,
             toolCalls,
-            isFlowComplete: isFlowComplete,
-            executedSteps: executedSteps || [],
+            isFlowComplete,
+            executedSteps,
             stoppedReason,
             appliedInstructions,
-            triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
+            triggeredSignals: tail.triggeredSignals,
         };
     }
 
@@ -926,193 +988,146 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Unified streaming response generation
+     * Unified streaming response generation.
+     * Renders the shared {@link planTurn} outcome as a chunk stream and runs the
+     * shared post-phase tail on the final chunk (finalizing exactly once).
      * @private
      */
     private async *generateUnifiedStreamingResponse(
         responseContext: ResponseContext<TContext, TData>
     ): AsyncGenerator<AgentResponseStreamChunk<TData>> {
-        const {
-            effectiveContext,
-            session: initialSession,
-            history,
-            selectedFlow,
-            selectedStep,
-            responseDirectives,
-            isFlowComplete,
-            signal,
-            signalFirings: preSignalFirings,
-            signalPreDirective,
-            signalHalted,
-            signalHaltReply,
-        } = responseContext;
-        let session = initialSession;
+        const plan = await this.planTurn(responseContext);
+        const { effectiveContext, history, historyEvents, signal, signalFirings } = plan;
+        const session = plan.session;
 
-        // Accumulator for signal firings across both phases (fire order)
-        const signalFirings: SignalFiring<TContext, TData>[] = [...(preSignalFirings || [])];
-
-        // Convert HistoryItem[] to Event[] for internal processing
-        const historyEvents = historyToEvents(history);
-
-        // ── SIGNAL HALT (Requirement 8.2) ─────────────────────────────────────
-        if (signalHalted) {
-            const haltMessage = signalHaltReply || '';
-            // Run post-signal phase even on halt
-            const post = await this.signalCoordinator.applyPostPhase({
-                session, context: effectiveContext, historyEvents, message: haltMessage,
-            });
-            session = post.session;
-            signalFirings.push(...post.firings);
-            const message = post.message;
-
-            await this.sessionFinalizer.finalize(session, effectiveContext);
-            yield {
-                delta: message,
-                accumulated: message,
-                done: true,
-                session,
-                stoppedReason: haltMessage ? 'reply' : 'halt',
-                executedSteps: [],
-                triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
-            } as AgentResponseStreamChunk<TData>;
-            return;
-        }
-
-        // ── Determine the inner stream generator based on flow state ────────
+        // Build the inner chunk stream for the planned outcome. `runPostPhase` is
+        // the single post-phase gate (false only for auto-chain halt).
         let innerStream: AsyncGenerator<AgentResponseStreamChunk<TData>>;
+        let runPostPhase = true;
 
-        if (selectedFlow && !isFlowComplete) {
-            // AUTO-CHAIN: Walk consecutive auto-steps before any LLM work (streaming path).
-            let resolvedStep = selectedStep;
-            const currentStepInstance = session.currentStep
-                ? selectedFlow.getStep(session.currentStep.id)
-                : selectedStep;
-
-            if (currentStepInstance?.auto) {
-                const autoChainExecutor = new AutoChainExecutor<TContext, TData>({
-                    maxAutoStepsPerTurn: this.agent.maxAutoStepsPerTurn,
+        switch (plan.outcome.kind) {
+            case 'halt': {
+                runPostPhase = plan.outcome.runPostPhase;
+                innerStream = this.streamTerminalMessage({
+                    message: plan.outcome.message,
+                    stoppedReason: plan.outcome.stoppedReason,
+                    session,
                 });
-                const autoResult: AutoChainResult<TContext, TData> = await autoChainExecutor.run({
+                break;
+            }
+            case 'flowComplete': {
+                innerStream = this.streamFlowCompletion({
+                    selectedFlow: plan.outcome.selectedFlow,
                     session,
                     context: effectiveContext,
-                    flow: selectedFlow,
+                    history,
+                    historyEvents,
+                    stoppedReason: plan.outcome.stoppedReason,
                 });
-
-                session = autoResult.session;
-
-                // Handle halt: emit verbatim reply as a single chunk, done.
-                if (autoResult.stoppedReason === 'halt') {
-                    const reply = autoResult.mergedDirective?.reply || '';
-                    await this.sessionFinalizer.finalize(session, effectiveContext);
-                    yield {
-                        delta: reply,
-                        accumulated: reply,
-                        done: true,
-                        session,
-                        stoppedReason: 'halt',
-                        executedSteps: [],
-                        triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
-                    } as AgentResponseStreamChunk<TData>;
-                    return;
-                }
-
-                // Handle flow completion or cross-flow redirect from auto-chain.
-                if (autoResult.stoppedReason === 'last_step' || autoResult.stoppedReason === 'completed' || autoResult.stoppedReason === 'goto') {
-                    innerStream = this.streamFlowCompletion({
-                        selectedFlow,
-                        session,
-                        context: effectiveContext,
-                        history,
-                        historyEvents,
-                        stoppedReason: autoResult.stoppedReason,
-                    });
-                } else {
-                    // Normal case: resolved to an interactive step.
-                    resolvedStep = autoResult.resolvedStep;
-                    innerStream = this.processFlowStreamingResponse({
-                        selectedFlow,
-                        selectedStep: resolvedStep,
-                        responseDirectives,
-                        session,
-                        history,
-                        context: effectiveContext,
-                        historyEvents,
-                        signal,
-                        transientAppendage: signalPreDirective?.appendPrompt,
-                        mergedPreDirective: signalPreDirective,
-                    });
-                }
-            } else {
-                // No auto-step: directly stream the interactive step.
+                break;
+            }
+            case 'flowStep': {
                 innerStream = this.processFlowStreamingResponse({
-                    selectedFlow,
-                    selectedStep: resolvedStep,
-                    responseDirectives,
+                    selectedFlow: plan.outcome.selectedFlow,
+                    selectedStep: plan.outcome.step,
+                    responseDirectives: plan.outcome.responseDirectives,
                     session,
                     history,
                     context: effectiveContext,
                     historyEvents,
                     signal,
-                    // Propagate signal pre-directive's appendPrompt for this turn's LLM call
-                    transientAppendage: signalPreDirective?.appendPrompt,
-                    mergedPreDirective: signalPreDirective,
+                    transientAppendage: plan.outcome.signalPreDirective?.appendPrompt,
+                    mergedPreDirective: plan.outcome.signalPreDirective,
                 });
+                break;
             }
-
-        } else if (isFlowComplete && selectedFlow) {
-            // Handle flow completion streaming — implicit terminus (no successor
-            // or all successors skipped), so the reason is 'last_step'.
-            innerStream = this.streamFlowCompletion({
-                selectedFlow,
-                session,
-                context: effectiveContext,
-                history,
-                historyEvents,
-                stoppedReason: 'last_step',
-            });
-
-        } else {
-            // Fallback: No flows defined, stream a simple response
-            innerStream = this.streamFallbackResponse({
-                history,
-                context: effectiveContext,
-                session,
-            });
+            case 'fallback': {
+                innerStream = this.streamFallbackResponse({
+                    history,
+                    context: effectiveContext,
+                    session,
+                    signal,
+                });
+                break;
+            }
         }
 
         // ── Intercept the inner stream on the final chunk ──────────────────────
-        // Mirrors the non-streaming path: post-signal phase runs first, then the
-        // session (including post-phase mutations) is finalized exactly once,
-        // attaching triggeredSignals to the final chunk (Requirement 11.2).
-        for await (const chunk of innerStream!) {
+        // Mirrors the non-streaming tail: post-signal phase runs first (when
+        // applicable), then the session is finalized exactly once, attaching
+        // triggeredSignals to the final chunk (Requirement 11.2).
+        for await (const chunk of innerStream) {
             if (chunk.done) {
-                // Run post-signal phase on final chunk (Requirement 9.1, 9.2)
-                const post = await this.signalCoordinator.applyPostPhase({
+                const tail = await this.applyTurnPostPhase({
                     session: chunk.session || session,
                     context: effectiveContext,
                     historyEvents,
                     message: chunk.accumulated,
+                    signalFirings,
+                    runPostPhase,
                 });
-                const finalSession = post.session;
-                signalFirings.push(...post.firings);
 
-                const accumulated = post.message;
-                const delta = post.replyOverridden ? accumulated : chunk.delta;
+                const accumulated = tail.message;
+                const delta = tail.replyOverridden ? accumulated : chunk.delta;
 
                 // Single streaming exit: finalize the post-phase session so
-                // post-signal mutations (e.g. pendingDirective) are persisted
-                await this.sessionFinalizer.finalize(finalSession, effectiveContext);
+                // post-signal mutations (e.g. pendingDirective) are persisted.
+                await this.sessionFinalizer.finalize(tail.session, effectiveContext);
 
                 yield {
                     ...chunk,
                     delta,
                     accumulated,
-                    session: finalSession,
-                    triggeredSignals: signalFirings.length > 0 ? signalFirings : undefined,
+                    session: tail.session,
+                    triggeredSignals: tail.triggeredSignals,
                 } as AgentResponseStreamChunk<TData>;
             } else {
                 yield chunk;
             }
+        }
+    }
+
+    /**
+     * Emit a framework-authored message (a halt reply) as a single terminal
+     * chunk, to flow through the shared post-phase tail like any other inner
+     * stream. No LLM call, no provider text — so nothing to extract or finalize
+     * here; the caller's tail owns post-phase + finalize.
+     * @private
+     */
+    // eslint-disable-next-line @typescript-eslint/require-await -- yield-only async generator; must be `async *` to satisfy the AsyncGenerator return type the caller switches on
+    private async *streamTerminalMessage(params: {
+        message: string;
+        stoppedReason: StoppedReason;
+        session: SessionState<TData>;
+    }): AsyncGenerator<AgentResponseStreamChunk<TData>> {
+        yield {
+            delta: params.message,
+            accumulated: params.message,
+            done: true,
+            session: params.session,
+            toolCalls: undefined,
+            isFlowComplete: false,
+            stoppedReason: params.stoppedReason,
+            executedSteps: [],
+        } as AgentResponseStreamChunk<TData>;
+    }
+
+    /**
+     * Wrap a provider message stream so each chunk's `delta`/`accumulated` carry
+     * clean message text instead of the raw structured-JSON wrapper. The single
+     * point where streamed JSON is unwrapped — every streaming response variant
+     * (flow step, fallback) consumes provider chunks through here, so consumers
+     * and stored history never see `{"message":...}` fragments. `structured`,
+     * `done`, and `metadata` pass through untouched.
+     * @private
+     */
+    private async *decodeMessageStream(
+        stream: AsyncGenerator<GenerateMessageStreamChunk<AgentStructuredResponse>>
+    ): AsyncGenerator<GenerateMessageStreamChunk<AgentStructuredResponse>> {
+        const decoder = new StreamingMessageDecoder();
+        for await (const chunk of stream) {
+            const clean = decoder.push(chunk.accumulated);
+            yield { ...chunk, delta: clean.delta, accumulated: clean.message };
         }
     }
 
@@ -1240,11 +1255,16 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 parameters: { jsonSchema: responseSchema, schemaName: "response_stream_output" },
             });
 
-            // Stream chunks with unified tool handling
-            for await (const chunk of stream) {
+            // Stream chunks with unified tool handling. decodeMessageStream gives
+            // each chunk clean message text in delta/accumulated, so the non-done
+            // deltas, the final accumulated, the post-phase message input, and the
+            // assistant message stored by stream() are all clean — never the raw
+            // JSON wrapper (matching the non-streaming structured.message extraction).
+            for await (const chunk of this.decodeMessageStream(stream)) {
                 let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = undefined;
                 // Final message/structured may be replaced by a forced post-tool
                 // response (see runStreamingBatch / gap: tools-ran-but-no-text).
+                let finalDelta = chunk.delta;
                 let finalAccumulated = chunk.accumulated;
                 let finalStructured = chunk.structured;
 
@@ -1253,7 +1273,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     toolCalls = chunk.structured.toolCalls;
 
                     // Concurrent execution for the initial batch of tool calls,
-                    // yielding tool-progress chunks as they arrive
+                    // yielding tool-progress chunks as they arrive. The accumulated
+                    // preamble is already clean text.
                     const batchResult = yield* this.toolLoopExecutor.runStreamingBatch({
                         toolCalls,
                         context,
@@ -1270,20 +1291,31 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     session = batchResult.session;
                     toolCalls = batchResult.toolCalls;
 
+                    // Prefer the post-tool follow-up structured for collection and
+                    // emission whenever present — independent of whether a closing
+                    // message was forced — matching the non-streaming path's
+                    // `toolResult.structured ?? result` selection.
+                    finalStructured = batchResult.structured ?? finalStructured;
+
                     // Tools ran but the model produced no result-aware text — use
-                    // the forced closing message so we never emit the bare
-                    // preamble (or an empty message) as the final response.
+                    // the forced closing message (already clean) so we never emit the
+                    // bare preamble (or an empty message) as the final response. Its
+                    // delta is the portion not already streamed as the preamble.
                     if (batchResult.finalMessage) {
                         finalAccumulated = batchResult.finalMessage;
-                        finalStructured = batchResult.structured ?? finalStructured;
+                        finalDelta = batchResult.finalMessage.startsWith(chunk.accumulated)
+                            ? batchResult.finalMessage.slice(chunk.accumulated.length)
+                            : batchResult.finalMessage;
                     }
                 }
 
-                // Extract collected data on final chunk (from the model's own
-                // structured output for this step, not the forced follow-up)
-                if (chunk.done && chunk.structured && nextStep.collect) {
+                // Collect data on the final chunk for any flow step — flow
+                // required/optional fields are valid targets even without a step
+                // `collect` — preferring the post-tool follow-up structured so a
+                // tool-driven turn harvests fields the model produced after tools.
+                if (chunk.done && finalStructured) {
                     session = await this.collectDataFromResponse({
-                        result: { structured: chunk.structured },
+                        result: { structured: finalStructured },
                         selectedFlow,
                         nextStep,
                         session,
@@ -1295,7 +1327,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // - stoppedReason: 'needs_input' for single-step execution (waiting for user input)
                 // - session.currentStep: reflects the executed step
                 yield {
-                    delta: chunk.delta,
+                    delta: finalDelta,
                     accumulated: finalAccumulated,
                     done: chunk.done,
                     session,
@@ -1620,7 +1652,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             },
         });
 
-        for await (const chunk of stream) {
+        // Decode the JSON wrapper to clean message text (same as the flow path).
+        for await (const chunk of this.decodeMessageStream(stream)) {
             // Response structure completeness (Requirement 8.1, 8.2, 8.3)
             // - executedSteps: empty for fallback (no flow/step execution)
             // - stoppedReason: undefined for fallback (no flow context)

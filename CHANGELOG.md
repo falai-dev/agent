@@ -2,6 +2,21 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.6.0]
+
+### Changed (BREAKING)
+
+- **Streaming now emits clean message text, not the raw structured-JSON wrapper.** Under a JSON schema (every flow turn), providers stream the wrapper `{"message":"…"}` token by token; `respondStream()`/`stream()` previously forwarded those raw fragments as `delta`/`accumulated`, so every consumer had to re-implement partial-JSON unwrapping — and `stream()` even persisted the raw JSON as the assistant message, while `generate()`/`chat()` stored the clean text. The framework now extracts the top-level `message` field incrementally (a new internal `StreamingMessageDecoder` that tracks object depth and string/escape context, so a nested or decoy `"message"` is never mistaken for it and a half-decoded escape is never emitted): `delta` carries the message's token-delta, `accumulated` is the clean message-so-far, and the parsed object is still surfaced on the final chunk via `structured`. Plain-text (non-JSON) streams pass through unchanged. **Migration:** remove any app-side unwrapping (`unwrapLlmContent`/`parseMessageContent`-style) of streamed `delta`/`accumulated` — they now receive clean text and would double-process; read collected fields from the done chunk's `structured` as before.
+
+### Fixed
+
+- **Streaming data collection now matches the non-streaming path.** Two divergences are fixed: (1) collection was gated on the step declaring `collect`, so a flow's `requiredFields`/`optionalFields` were never harvested on the streaming path — it now collects for any flow step, like `generate()`; (2) a tool-driven streamed turn collected from the model's *first-pass* output instead of its *post-tool follow-up*, dropping fields the model produced only after seeing tool results — it now prefers the follow-up structured, matching `generate()`.
+- **The post-signal phase now runs on non-streaming auto-chain completion.** When an auto-step chain completed a flow (`last_step`/`completed`/`goto`), the non-streaming path returned early and skipped the post-signal phase — so `post`/`both` signals never fired and a post-phase `pendingDirective` was never wired (the streaming path already ran it). Both paths now run it. Auto-chain *halt* (a deliberate verbatim short-circuit) still skips the post-phase in both paths, but the non-streaming path now surfaces any pre-phase `triggeredSignals` too.
+
+### Internal
+
+- **The streaming and non-streaming response paths now share one decision spine.** `generateUnifiedResponse` and `generateUnifiedStreamingResponse` were parallel implementations ("unified" in name only) whose drift caused the 2.4.x retry/empty bugs and the divergences above. Signal-halt detection, the auto-chain walk, flow/step selection, and the post-signal phase are now a single `planTurn` + `applyTurnPostPhase`, used by both; each path only *renders* the shared `TurnOutcome` in its own idiom (await a value vs. yield chunks) and keeps its own leaf primitive (sequential `generateMessage` + `runLoop` vs. concurrent stream + `runStreamingBatch`). The two genuinely-different behaviors a full "drain the stream" collapse would have regressed — non-streaming's sequential tool execution and OpenAI's native `responses.parse` structured output — are deliberately kept distinct.
+
 ## [2.5.0]
 
 ### Added
@@ -16,6 +31,11 @@ All notable changes to `@falai/agent` will be documented in this file.
 - **Structured-output strategy lifted into the OpenAI-compatible base as config.** The choice between `responses.parse` and chat-completions `json_schema`/`json_object` is now a single `structuredOutput` field on `OpenAICompatibleProvider` instead of per-subclass `executeStructuredGenerate`/`structuredResponseFormat` overrides. `DeepSeekProvider` and the new generic provider set the field and drop the overrides, so "how this endpoint does structured output" has one definition; `OpenAIProvider`/`OpenRouterProvider` keep the default `responses.parse`.
 
 - **Provider retry/response plumbing consolidated** (no public API change). The `||`/`??` retry-config defaulting (the `retries: 0` honoring fix from 2.4.3) now lives in a single shared `resolveRetryConfig`, removing the byte-identical block and three local `DEFAULT_RETRY_CONFIG` copies from the providers; the capped-exponential backoff is a single `defaultBackoff`; the empty-completion "blank message" check is one shared `effectiveMessageText` used by both the streaming and non-streaming guards; and `forceFinalTextFromTools` reuses the existing `assistantMessage`/`toolMessage` history factories. Net ~60 fewer lines across the three providers. One behavior refinement falls out of unifying the guard: a whitespace-only completion with no tool calls is now treated as empty (throw + retry) on the non-streaming path too, matching the streaming path (previously such a response was passed through).
+
+### Fixed
+
+- **Gemini reasoning ("thought") parts can no longer leak into the message.** `safeExtractText` concatenated every part with `text != null`, but with `includeThoughts` enabled a reasoning part also carries `text` (alongside `thought: true`) — so the model's chain-of-thought would be prepended to the user-facing message. It now excludes parts flagged `thought`, keeping only the answer text.
+- **Removed an unreachable branch in single-flow step selection.** `FlowRouter.decideSingleFlowStep` had a second `if (candidates.length === 0)` guard after the `length === 1` block, which the earlier `length === 0` early-return already made dead. No behavior change.
 
 ## [2.4.3]
 
