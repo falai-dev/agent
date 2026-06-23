@@ -138,4 +138,51 @@ describe("withStreamRetry", () => {
     ).rejects.toThrow(/no first chunk within 20ms/i);
     expect(calls).toBe(2); // initial attempt + 1 retry
   });
+
+  test("aborts the abandoned attempt's signal on first-chunk timeout, fresh signal per attempt", async () => {
+    const signals: AbortSignal[] = [];
+    let calls = 0;
+    const out = await collect(
+      withStreamRetry(
+        async function* (signal) {
+          calls++;
+          signals.push(signal);
+          if (calls < 2) {
+            // Wait on the abort rather than a fixed sleep: a real provider
+            // stream is torn down the instant withStreamRetry abandons the
+            // attempt, so the abandoned upstream call can't keep running.
+            await new Promise<void>((resolve) =>
+              signal.addEventListener("abort", () => resolve(), { once: true })
+            );
+            return;
+          }
+          yield "ok";
+        },
+        { maxRetries: 2, delay: () => 0, firstChunkTimeoutMs: 20 }
+      )
+    );
+    expect(out).toEqual(["ok"]);
+    expect(calls).toBe(2);
+    // The abandoned attempt was actually cancelled; the committed one was not.
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+  });
+
+  test("aborts the in-flight signal when the consumer breaks early", async () => {
+    let signal: AbortSignal | undefined;
+    const gen = withStreamRetry(
+      async function* (s) {
+        signal = s;
+        yield "a";
+        yield "b";
+      },
+      { maxRetries: 0, delay: () => 0 }
+    );
+    // Take one chunk, then abandon the consumer mid-stream.
+    const first = await gen.next();
+    expect(first.value).toBe("a");
+    await gen.return(undefined);
+    // The upstream call is cancelled even though deltas had already flowed.
+    expect(signal?.aborted).toBe(true);
+  });
 });

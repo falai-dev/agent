@@ -22,7 +22,11 @@ export { OpenAICompatibleProvider } from "./OpenAICompatibleProvider";
 export type {
   OpenAICompatibleProviderInit,
   OpenAICompatibleRequestConfig,
+  StructuredOutputMode,
 } from "./OpenAICompatibleProvider";
+
+export { createOpenAICompatibleProvider } from "./GenericOpenAICompatibleProvider";
+export type { OpenAICompatibleOptions } from "./GenericOpenAICompatibleProvider";
 
 export {
   classifyProviderError,

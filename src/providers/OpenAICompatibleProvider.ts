@@ -27,7 +27,7 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
-import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, logger, effectiveMessageText } from "../utils";
+import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, logger, assertUsableCompletion, combineAbortSignals } from "../utils";
 import {
   classifyProviderError,
   getErrorMessage,
@@ -42,6 +42,17 @@ import {
 export type OpenAICompatibleRequestConfig = Partial<
   Omit<ChatCompletionCreateParamsNonStreaming, "model" | "messages">
 >;
+
+/**
+ * How structured (JSON-schema) output is requested from the endpoint:
+ * - `"responses_parse"` (default) — OpenAI's native `responses.parse` API
+ *   (OpenAI, OpenRouter). Most compatible endpoints do not implement it.
+ * - `"json_schema"` — chat completions with a `json_schema` response_format.
+ *   The broadest enforced mode (DeepSeek, Groq, Together, Fireworks, vLLM, Azure…).
+ * - `"json_object"` — chat completions with a `json_object` response_format,
+ *   for servers that lack json_schema enforcement (parsed at the end).
+ */
+export type StructuredOutputMode = "responses_parse" | "json_schema" | "json_object";
 
 /**
  * Initialization values supplied by subclasses
@@ -60,6 +71,11 @@ export interface OpenAICompatibleProviderInit {
     timeout?: number;
     retries?: number;
   };
+  /**
+   * How structured output is requested (default `"responses_parse"`). Lifts the
+   * strategy that used to be a per-subclass override into shared config.
+   */
+  structuredOutput?: StructuredOutputMode;
 }
 
 /**
@@ -80,6 +96,8 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
   protected readonly backupModels: string[];
   protected readonly config?: OpenAICompatibleRequestConfig;
   protected readonly retryConfig: { timeout: number; retries: number };
+  /** Structured-output strategy; see {@link StructuredOutputMode}. */
+  protected readonly structuredOutput: StructuredOutputMode;
 
   /**
    * Provider-specific error classification signals.
@@ -95,6 +113,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     this.backupModels = init.backupModels ?? [];
     this.config = init.config;
     this.retryConfig = resolveRetryConfig(init.retryConfig);
+    this.structuredOutput = init.structuredOutput ?? "responses_parse";
   }
 
   // ---------------------------------------------------------------------
@@ -134,22 +153,31 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     input: GenerateMessageInput<unknown>,
     jsonSchema: StructuredSchema
   ): Promise<GenerateMessageOutput> {
-    const response = await this.client.responses.parse({
-      model,
-      instructions: input.prompt,
-      input: "",
-      reasoning: {
-        effort: input.parameters?.reasoning?.effort || "low",
-      },
-      text: {
-        format: {
-          type: "json_schema",
-          name: input.parameters?.schemaName || "structured_output",
-          // Adapt common schema format to the provider's format
-          schema: this.adaptSchema(jsonSchema),
+    // Non-native modes go through chat completions, where
+    // `structuredResponseFormat` selects the response_format.
+    if (this.structuredOutput !== "responses_parse") {
+      return this.executeChatCompletion(model, input);
+    }
+
+    const response = await this.client.responses.parse(
+      {
+        model,
+        instructions: input.prompt,
+        input: "",
+        reasoning: {
+          effort: input.parameters?.reasoning?.effort || "low",
+        },
+        text: {
+          format: {
+            type: "json_schema",
+            name: input.parameters?.schemaName || "structured_output",
+            // Adapt common schema format to the provider's format
+            schema: this.adaptSchema(jsonSchema),
+          },
         },
       },
-    });
+      { signal: input.signal }
+    );
 
     if (!response.output_parsed) {
       throw new Error(`No parsed output returned from ${this.displayName}`);
@@ -171,15 +199,25 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
   }
 
   /**
-   * response_format applied to chat-completions requests when a JSON
-   * schema is present. Default requests a generic JSON object (parsed at
-   * the end); subclasses with native json_schema support in chat
-   * completions (e.g. DeepSeek) override this.
+   * response_format applied to chat-completions requests when a JSON schema is
+   * present, selected by {@link StructuredOutputMode}: `"json_schema"` for native
+   * enforcement, else a generic JSON object parsed at the end. (`"responses_parse"`
+   * never reaches chat completions for non-streaming, but streaming has no parse
+   * API, so it falls back to `json_object` here.)
    */
   protected structuredResponseFormat(
-    _jsonSchema: StructuredSchema,
-    _schemaName: string | undefined
+    jsonSchema: StructuredSchema,
+    schemaName: string | undefined
   ): ChatCompletionCreateParamsNonStreaming["response_format"] {
+    if (this.structuredOutput === "json_schema") {
+      return {
+        type: "json_schema" as const,
+        json_schema: {
+          name: schemaName || "structured_output",
+          schema: this.adaptSchema(jsonSchema),
+        },
+      };
+    }
     return { type: "json_object" };
   }
 
@@ -401,7 +439,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     // Try primary model first
     try {
       yield* withStreamRetry(
-        () => this.generateStreamWithModel<TContext, TStructured>(this.primaryModel, input),
+        (signal) => this.generateStreamWithModel<TContext, TStructured>(this.primaryModel, input, signal),
         { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${this.primaryModel} stream` }
       );
     } catch (primaryError: unknown) {
@@ -428,7 +466,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
 
         try {
           yield* withStreamRetry(
-            () => this.generateStreamWithModel<TContext, TStructured>(backupModel, input),
+            (signal) => this.generateStreamWithModel<TContext, TStructured>(backupModel, input, signal),
             { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${backupModel} stream` }
           );
           logger.debug(`[${this.logLabel}] Backup model ${backupModel} succeeded`);
@@ -471,16 +509,20 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     model: string,
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
-    const operation = async (): Promise<GenerateMessageOutput> => {
+    const operation = async (signal: AbortSignal): Promise<GenerateMessageOutput> => {
+      // Thread the per-attempt timeout signal through input.signal so whichever
+      // path runs — responses.parse (structured) or chat.completions — cancels
+      // its upstream call when the deadline fires.
+      const reqInput = { ...input, signal: combineAbortSignals(input.signal, signal) };
       // Use structured output path if JSON schema is provided
-      if (input.parameters?.jsonSchema) {
+      if (reqInput.parameters?.jsonSchema) {
         return this.executeStructuredGenerate(
           model,
-          input,
-          input.parameters.jsonSchema
+          reqInput,
+          reqInput.parameters.jsonSchema
         );
       }
-      return this.executeChatCompletion(model, input);
+      return this.executeChatCompletion(model, reqInput);
     };
 
     return withTimeoutAndRetry(
@@ -528,7 +570,9 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
       );
     }
 
-    const response = await this.client.chat.completions.create(params);
+    const response = await this.client.chat.completions.create(params, {
+      signal: input.signal,
+    });
 
     const message = response.choices[0]?.message?.content || "";
 
@@ -572,12 +616,10 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
       } as AgentStructuredResponse;
     }
 
-    // A parsed-but-blank message with no tool calls is just as empty as no text
-    // at all — throw so withTimeoutAndRetry retries instead of returning
-    // {"message":""}. Same effective-message check as the streaming guard.
-    if (toolCalls.length === 0 && !effectiveMessageText(structured, message)) {
-      throw new Error(`No response from ${this.displayName}`);
-    }
+    // A parsed-but-blank message with no tool calls is as empty as no text;
+    // the shared guard throws so withTimeoutAndRetry retries instead of
+    // returning {"message":""}.
+    assertUsableCompletion(structured, message, toolCalls.length, this.displayName);
 
     return {
       message,
@@ -601,7 +643,8 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     TStructured = AgentStructuredResponse
   >(
     model: string,
-    input: GenerateMessageInput<TContext>
+    input: GenerateMessageInput<TContext>,
+    attemptSignal?: AbortSignal
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Build messages from history and append prompt as final user message
     const historyMessages = this.buildChatMessages(input.history);
@@ -636,7 +679,9 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
       );
     }
 
-    const stream = await this.client.chat.completions.create(params);
+    const stream = await this.client.chat.completions.create(params, {
+      signal: combineAbortSignals(input.signal, attemptSignal),
+    });
 
     let accumulated = "";
     let currentModel = model;
@@ -719,13 +764,9 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
       } as TStructured;
     }
 
-    // Empty-completion guard — mirror of the non-streaming path. A blank
-    // effective message (structured message under a schema, else accumulated
-    // text) with no tool calls means the model produced nothing usable; throw so
-    // withStreamRetry/generateStreamWithBackup retry instead of emitting empty.
-    if (!effectiveMessageText(structured, accumulated) && toolCalls.length === 0) {
-      throw new Error(`No response from ${this.displayName}`);
-    }
+    // Empty-completion guard — same definition as the non-streaming path, so the
+    // stream retries / falls back to backup instead of emitting an empty message.
+    assertUsableCompletion(structured, accumulated, toolCalls.length, this.displayName);
 
     // Yield final chunk
     yield {

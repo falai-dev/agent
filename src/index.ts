@@ -32,6 +32,9 @@ export { DeepSeekProvider } from "./providers/DeepSeekProvider";
 export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider";
 // Base class for building OpenAI-compatible providers (Groq, Together, etc.)
 export { OpenAICompatibleProvider } from "./providers/OpenAICompatibleProvider";
+export type { StructuredOutputMode } from "./providers/OpenAICompatibleProvider";
+export { createOpenAICompatibleProvider } from "./providers/GenericOpenAICompatibleProvider";
+export type { OpenAICompatibleOptions } from "./providers/GenericOpenAICompatibleProvider";
 
 // Adapters
 export { PrismaAdapter } from "./adapters/PrismaAdapter";

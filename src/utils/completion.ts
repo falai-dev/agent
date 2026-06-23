@@ -17,3 +17,22 @@ export function effectiveMessageText(
       : undefined;
   return (typeof message === "string" ? message : fallbackText).trim();
 }
+
+/**
+ * The single definition of "the model produced nothing usable": a blank
+ * effective message ({@link effectiveMessageText}) and no tool calls. When that
+ * holds, throw `No response from <provider>` so the caller's retry/backup path
+ * runs instead of surfacing an empty turn. Lifting this above the providers
+ * keeps the streaming and non-streaming guards — six call sites across three
+ * providers — from drifting on what counts as empty.
+ */
+export function assertUsableCompletion(
+  structured: unknown,
+  fallbackText: string,
+  toolCallCount: number,
+  providerLabel: string
+): void {
+  if (toolCallCount === 0 && !effectiveMessageText(structured, fallbackText)) {
+    throw new Error(`No response from ${providerLabel}`);
+  }
+}

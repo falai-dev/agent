@@ -72,7 +72,10 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
     }> {
         try {
             const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal } = params;
-            let { toolCalls, session } = params;
+            // The follow-up loop (which reassigned toolCalls) now lives in
+            // runFollowUpLoop; here toolCalls is only read.
+            const { toolCalls } = params;
+            let { session } = params;
 
             // Convert HistoryItem[] to Event[] for internal processing
             const historyEvents = historyToEvents(history);
@@ -146,6 +149,66 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 }
             }
 
+            // Hand off to the multi-round follow-up loop shared with the
+            // streaming path. The initial batch above already executed
+            // sequentially and populated the result maps.
+            return await this.runFollowUpLoop({
+                toolCalls,
+                session,
+                toolResultsMap,
+                toolArgsMap,
+                context,
+                history,
+                selectedFlow,
+                responsePrompt,
+                availableTools,
+                responseSchema,
+                signal,
+            });
+        } catch (error) {
+            throw ResponseGenerationError.fromError(error, 'tool_execution', params, {
+                toolCallsCount: params.toolCalls?.length || 0,
+                availableToolsCount: params.availableTools.length
+            });
+        }
+    }
+
+    /**
+     * The multi-round follow-up loop shared by the non-streaming (`runLoop`) and
+     * streaming (`runStreamingBatch`) tool paths: re-prompt the model with the
+     * tool results (tools available on the first round so it can chain further
+     * calls), execute any further tool calls, repeat up to `maxToolLoops`, then
+     * force a result-aware closing message if the model never produced one.
+     * Callers run the *initial* batch — sequentially for `runLoop`, concurrently
+     * (with progress) for `runStreamingBatch` — and pass the populated result
+     * maps; from here both paths behave identically.
+     */
+    private async runFollowUpLoop(params: {
+        toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+        session: SessionState<TData>;
+        toolResultsMap: Map<string, string>;
+        toolArgsMap: Map<string, Record<string, unknown>>;
+        context: TContext;
+        history: HistoryItem[];
+        selectedFlow?: Flow<TContext, TData>;
+        responsePrompt: string;
+        availableTools: Array<{
+            id: string;
+            name: string;
+            description?: string;
+            parameters?: unknown;
+        }>;
+        responseSchema?: Record<string, unknown>;
+        signal?: AbortSignal;
+    }): Promise<{
+        session: SessionState<TData>;
+        finalToolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
+        finalMessage?: string;
+        structured?: AgentStructuredResponse;
+    }> {
+        const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal, toolResultsMap, toolArgsMap } = params;
+        let { toolCalls, session } = params;
+        try {
             // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution
             // `??` so an explicit `maxToolLoops: 0` is honored instead of being
             // clobbered to the default by a falsy-zero check.
@@ -164,24 +227,18 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 for (const toolCall of toolCalls || []) {
                     const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
                     if (tool) {
-                        // Create HistoryItem format for tool results
-                        // Add assistant message with tool_calls
-                        toolResultHistoryItems.push({
-                            role: "assistant" as const,
-                            content: null,
-                            tool_calls: [{
-                                id: toolCall.toolName,
-                                name: toolCall.toolName,
-                                arguments: toolCall.arguments,
-                            }],
-                        });
-                        // Add tool result
-                        toolResultHistoryItems.push({
-                            role: "tool" as const,
-                            tool_call_id: toolCall.toolName,
-                            name: toolCall.toolName,
-                            content: toolResultsMap.get(toolCall.toolName) || "Tool executed successfully",
-                        });
+                        // assistant tool_call + tool result pair, via the shared
+                        // history factories (same as forceFinalTextFromTools).
+                        toolResultHistoryItems.push(
+                            assistantMessage(null, [
+                                { id: toolCall.toolName, name: toolCall.toolName, arguments: toolCall.arguments },
+                            ]),
+                            toolMessage(
+                                toolCall.toolName,
+                                toolCall.toolName,
+                                toolResultsMap.get(toolCall.toolName) || "Tool executed successfully",
+                            ),
+                        );
                     }
                 }
 
@@ -513,22 +570,28 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
             logger.debug(`[ToolLoopExecutor] Concurrent tool execution completed for ${toolCallRequests.length} tools`);
 
-            // Tools ran but streaming produced no post-tool message — force one
-            // from the results, mirroring runLoop. (The streaming chunk only ever
-            // carries the pre-tool preamble, never a result-aware response.)
-            if (toolResultsMap.size > 0) {
-                const forced = await this.forceFinalTextFromTools({
-                    history,
-                    toolResultsMap,
-                    toolArgsMap,
-                    responsePrompt,
-                    responseSchema,
-                    context,
-                    signal,
-                });
-                finalMessage = forced.finalMessage;
-                structured = forced.structured;
-            }
+            // Multi-round follow-up shared with the non-streaming path: re-prompt
+            // with the tool results so the model can chain further tool calls,
+            // then produce result-aware closing text (forced if it never does).
+            // Previously a single forced-text call — streaming now loops to parity
+            // with runLoop, so a streamed turn can chain tools across rounds.
+            const followUp = await this.runFollowUpLoop({
+                toolCalls,
+                session,
+                toolResultsMap,
+                toolArgsMap,
+                context,
+                history,
+                selectedFlow,
+                responsePrompt,
+                availableTools,
+                responseSchema,
+                signal,
+            });
+            session = followUp.session;
+            toolCalls = followUp.finalToolCalls;
+            finalMessage = followUp.finalMessage;
+            structured = followUp.structured;
         } catch (error) {
             logger.error(`[ToolLoopExecutor] Concurrent tool execution failed, falling back to sequential:`, error);
             // Fall back to the unified tool loop on failure. runLoop re-executes

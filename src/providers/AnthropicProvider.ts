@@ -17,7 +17,7 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
-import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, logger, effectiveMessageText } from "../utils";
+import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, logger, assertUsableCompletion, combineAbortSignals } from "../utils";
 import {
   classifyProviderError,
   getErrorMessage,
@@ -256,7 +256,7 @@ export class AnthropicProvider implements AiProvider {
     model: string,
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
-    const operation = async (): Promise<GenerateMessageOutput> => {
+    const operation = async (signal: AbortSignal): Promise<GenerateMessageOutput> => {
       // Anthropic requires max_tokens to be specified
       const maxTokens = input.parameters?.maxOutputTokens || 4096;
 
@@ -320,7 +320,9 @@ export class AnthropicProvider implements AiProvider {
         }
       }
 
-      const response = await this.client.messages.create(params);
+      const response = await this.client.messages.create(params, {
+        signal: combineAbortSignals(input.signal, signal),
+      });
 
       // Extract text and tool calls from response
       const textContent = response.content.find(
@@ -369,12 +371,10 @@ export class AnthropicProvider implements AiProvider {
         } as AgentStructuredResponse;
       }
 
-      // A parsed-but-blank message with no tool calls is just as empty as no
-      // text at all — throw so withTimeoutAndRetry retries instead of returning
-      // {"message":""}. Same effective-message check as the streaming guard.
-      if (toolCalls.length === 0 && !effectiveMessageText(structured, message)) {
-        throw new Error("No response from Anthropic");
-      }
+      // A parsed-but-blank message with no tool calls is as empty as no text;
+      // the shared guard throws so withTimeoutAndRetry retries instead of
+      // returning {"message":""}.
+      assertUsableCompletion(structured, message, toolCalls.length, "Anthropic");
 
       return {
         message,
@@ -407,7 +407,7 @@ export class AnthropicProvider implements AiProvider {
     // Try primary model first
     try {
       yield* withStreamRetry(
-        () => this.generateStreamWithModel<TContext, TStructured>(this.primaryModel, input),
+        (signal) => this.generateStreamWithModel<TContext, TStructured>(this.primaryModel, input, signal),
         { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Anthropic ${this.primaryModel} stream` }
       );
     } catch (primaryError: unknown) {
@@ -433,7 +433,7 @@ export class AnthropicProvider implements AiProvider {
 
         try {
           yield* withStreamRetry(
-            () => this.generateStreamWithModel<TContext, TStructured>(backupModel, input),
+            (signal) => this.generateStreamWithModel<TContext, TStructured>(backupModel, input, signal),
             { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Anthropic ${backupModel} stream` }
           );
           logger.debug(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
@@ -470,7 +470,8 @@ export class AnthropicProvider implements AiProvider {
     TStructured = AgentStructuredResponse
   >(
     model: string,
-    input: GenerateMessageInput<TContext>
+    input: GenerateMessageInput<TContext>,
+    attemptSignal?: AbortSignal
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
     // Anthropic requires max_tokens to be specified
     const maxTokens = input.parameters?.maxOutputTokens || 4096;
@@ -535,7 +536,9 @@ export class AnthropicProvider implements AiProvider {
       }
     }
 
-    const stream = this.client.messages.stream(params);
+    const stream = this.client.messages.stream(params, {
+      signal: combineAbortSignals(input.signal, attemptSignal),
+    });
 
     let accumulated = "";
     let currentModel = model;
@@ -596,13 +599,9 @@ export class AnthropicProvider implements AiProvider {
       } as AgentStructuredResponse;
     }
 
-    // Empty-completion guard — mirror of the non-streaming path. A blank
-    // effective message (structured message under a schema, else accumulated
-    // text) with no tool calls means the model produced nothing usable; throw so
-    // withStreamRetry/generateStreamWithBackup retry instead of emitting empty.
-    if (!effectiveMessageText(structured, accumulated) && toolCalls.length === 0) {
-      throw new Error("No response from Anthropic");
-    }
+    // Empty-completion guard — same definition as the non-streaming path, so the
+    // stream retries / falls back to backup instead of emitting an empty message.
+    assertUsableCompletion(structured, accumulated, toolCalls.length, "Anthropic");
 
     // Yield final chunk
     yield {

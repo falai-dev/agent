@@ -7,15 +7,9 @@
 import OpenAI from "openai";
 import type {
   ChatCompletionChunk,
-  ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
 } from "openai/resources/chat/completions";
 
-import type {
-  GenerateMessageInput,
-  GenerateMessageOutput,
-  StructuredSchema,
-} from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import { logger } from "../utils";
 import {
@@ -96,36 +90,10 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
       backupModels,
       config,
       retryConfig,
+      // DeepSeek has no responses.parse API; structured output goes through
+      // chat completions with a native json_schema response_format.
+      structuredOutput: "json_schema",
     });
-  }
-
-  /**
-   * DeepSeek has no responses.parse API; structured output goes through
-   * chat completions with a json_schema response_format.
-   */
-  protected override async executeStructuredGenerate(
-    model: string,
-    input: GenerateMessageInput<unknown>,
-    _jsonSchema: StructuredSchema
-  ): Promise<GenerateMessageOutput> {
-    return this.executeChatCompletion(model, input);
-  }
-
-  /**
-   * DeepSeek supports native json_schema enforcement in chat completions
-   * (both streaming and non-streaming).
-   */
-  protected override structuredResponseFormat(
-    jsonSchema: StructuredSchema,
-    schemaName: string | undefined
-  ): ChatCompletionCreateParamsNonStreaming["response_format"] {
-    return {
-      type: "json_schema" as const,
-      json_schema: {
-        name: schemaName || "structured_output",
-        schema: this.adaptSchema(jsonSchema),
-      },
-    };
   }
 
   /**

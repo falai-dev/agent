@@ -75,8 +75,40 @@ export async function retry<T>(options: RetryOptions<T>): Promise<T> {
 const defaultBackoff = (attempt: number): number =>
   Math.min(1000 * Math.pow(2, attempt), 5000);
 
+/**
+ * Combine abort signals into one that aborts as soon as any input aborts.
+ * `undefined` inputs are skipped, so a caller can pass an optional caller-signal
+ * alongside a required per-attempt one. Returns the sole signal when only one is
+ * present (no wrapper), or `undefined` when none are.
+ *
+ * Prefers the platform `AbortSignal.any`, which cleans up its listeners via weak
+ * refs — so merging onto a long-lived caller signal that's reused across many
+ * calls can't accumulate listeners. Falls back to a manual controller on older
+ * runtimes (< Node 20.3); there the listeners live until a source aborts or is
+ * garbage-collected, which is fine for the usual per-request signal.
+ */
+export function combineAbortSignals(
+  ...signals: Array<AbortSignal | undefined>
+): AbortSignal | undefined {
+  const present = signals.filter((s): s is AbortSignal => s != null);
+  if (present.length <= 1) return present[0];
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(present);
+
+  const controller = new AbortController();
+  for (const signal of present) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), {
+      once: true,
+    });
+  }
+  return controller.signal;
+}
+
 export const withTimeoutAndRetry = async <T>(
-  operation: () => Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number = 60000,
   maxRetries: number = 3,
   operationName: string = "AI operation"
@@ -88,8 +120,11 @@ export const withTimeoutAndRetry = async <T>(
     }, timeoutMs);
 
     try {
+      // Hand the operation the timeout signal so the in-flight upstream call is
+      // actually cancelled when the deadline fires — otherwise the abandoned
+      // attempt keeps running while the retry stacks a second concurrent call.
       const result = await Promise.race([
-        operation(),
+        operation(controller.signal),
         new Promise<never>((_, reject) => {
           controller.signal.addEventListener("abort", () => {
             reject(new Error(`Operation timed out after ${timeoutMs}ms`));
@@ -178,7 +213,7 @@ function raceFirstChunk<T>(
  * before the caller falls through to backup models.
  */
 export async function* withStreamRetry<T>(
-  factory: () => AsyncGenerator<T>,
+  factory: (signal: AbortSignal) => AsyncGenerator<T>,
   options: StreamRetryOptions = {}
 ): AsyncGenerator<T> {
   const {
@@ -189,7 +224,10 @@ export async function* withStreamRetry<T>(
   } = options;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const iterator = factory();
+    // One controller per attempt: aborting it on abandon cancels the upstream
+    // SDK call so a retry can't stack a second concurrent stream.
+    const controller = new AbortController();
+    const iterator = factory(controller.signal);
     let yielded = false;
     let completed = false;
     try {
@@ -220,10 +258,15 @@ export async function* withStreamRetry<T>(
       );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     } finally {
-      // Dispose the iterator unless it completed on its own — covers the
-      // error/timeout path and a consumer that breaks early. Fire-and-forget:
-      // a stalled generator's return() may never settle, so we must not await it.
+      // Abandoning an attempt (first-chunk timeout, pre-yield error before a
+      // retry, or a consumer that breaks early): abort the upstream SDK call
+      // first so it's actually torn down — not left running while we retry —
+      // then dispose the iterator. Aborting also unblocks a stalled
+      // iterator.next() so return() can run the generator's cleanup. Both are
+      // fire-and-forget: a wedged generator's return() may never settle, so we
+      // must not await it.
       if (!completed) {
+        controller.abort();
         void iterator.return?.(undefined)?.catch(() => undefined);
       }
     }

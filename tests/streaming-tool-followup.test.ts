@@ -105,3 +105,112 @@ describe("runStreamingBatch tools-ran-but-no-text follow-up (gap a)", () => {
     expect(finalMessage).toBe(FORCED_TEXT);
   });
 });
+
+describe("runStreamingBatch multi-round tool loop", () => {
+  test("chains a second tool round when the follow-up requests one, then closes with text", async () => {
+    const SECOND_TEXT = "Booked: flight, then hotel.";
+    let genCalls = 0;
+    // Round 1 (tools provided): ask for another tool. Round 2 (no tools): close.
+    const provider: AiProvider = {
+      name: "stub",
+      capabilities: {
+        supportsTools: true,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: true,
+        supportsPromptCaching: false,
+      },
+      async generateMessage() {
+        genCalls++;
+        if (genCalls === 1) {
+          return {
+            message: "",
+            structured: { message: "", toolCalls: [{ toolName: "book_hotel", arguments: {} }] },
+          };
+        }
+        return { message: SECOND_TEXT, structured: { message: SECOND_TEXT } };
+      },
+      // eslint-disable-next-line require-yield
+      async *generateMessageStream() {
+        throw new Error("generateMessageStream is not exercised by this test");
+      },
+    };
+
+    const agent = new Agent<Ctx, Data>({
+      name: "MultiRoundAgent",
+      description: "Tests streaming multi-round tool loops",
+      context: { userId: "u1" },
+      provider,
+    });
+
+    let flightBooked = false;
+    let hotelBooked = false;
+    agent.addTool({
+      id: "book_flight",
+      description: "Books a flight",
+      handler: async () => {
+        flightBooked = true;
+        return { ok: true };
+      },
+    });
+    agent.addTool({
+      id: "book_hotel",
+      description: "Books a hotel",
+      handler: async () => {
+        hotelBooked = true;
+        return { ok: true };
+      },
+    });
+
+    const flow = agent.createFlow({
+      title: "Travel",
+      description: "Travel booking",
+      when: ["book travel"],
+      steps: [{ id: "ask", prompt: "What trip?" }],
+    });
+
+    const exec = new ToolLoopExecutor<Ctx, Data>({
+      toolManager: new ToolManager<Ctx, Data>(agent),
+      getAgentOptions: () => agent.getAgentOptions(),
+      updateContext: async () => {},
+      updateCollectedData: async () => {},
+      updateSessionData: async (session, dataUpdate) => ({
+        ...session,
+        data: { ...session.data, ...dataUpdate },
+      }),
+    });
+
+    const session = createSession<Data>("multi-round");
+    const gen = exec.runStreamingBatch({
+      toolCalls: [{ toolName: "book_flight", arguments: {} }],
+      context: { userId: "u1" },
+      session,
+      history: [{ role: "user", content: "book a flight and a hotel" }],
+      selectedFlow: flow,
+      step: flow.initialStep,
+      accumulated: "",
+      responsePrompt: "Respond to the user.",
+      availableTools: [
+        { id: "book_flight", name: "book_flight" },
+        { id: "book_hotel", name: "book_hotel" },
+      ],
+    });
+
+    let finalMessage: string | undefined;
+    while (true) {
+      const next = await gen.next();
+      if (next.done) {
+        finalMessage = next.value.finalMessage;
+        break;
+      }
+    }
+
+    // The initial batch booked the flight; the follow-up round booked the hotel
+    // (a second round — impossible before the streaming/non-streaming tool-engine
+    // unification), then the model closed with result-aware text.
+    expect(flightBooked).toBe(true);
+    expect(hotelBooked).toBe(true);
+    expect(finalMessage).toBe(SECOND_TEXT);
+    expect(genCalls).toBe(2); // round 1 requests the hotel; round 2 closes with text
+  });
+});

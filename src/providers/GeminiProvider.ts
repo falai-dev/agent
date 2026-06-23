@@ -21,8 +21,8 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
-import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig } from "../utils/retry";
-import { effectiveMessageText } from "../utils/completion";
+import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, combineAbortSignals } from "../utils/retry";
+import { assertUsableCompletion } from "../utils/completion";
 import { tryParseJSONResponse } from "../utils/json";
 import { logger } from "../utils/logger";
 import {
@@ -412,7 +412,7 @@ export class GeminiProvider implements AiProvider {
     model: string,
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
-    const operation = async (): Promise<GenerateMessageOutput> => {
+    const operation = async (signal: AbortSignal): Promise<GenerateMessageOutput> => {
       // Schema-required: configure response schema
       const configOverride: Partial<GenerateContentConfig> = { ...this.config };
 
@@ -457,12 +457,13 @@ export class GeminiProvider implements AiProvider {
           }
         }
 
+        const reqSignal = combineAbortSignals(input.signal, signal);
         response = await this.genAI.models.generateContent({
           model,
           contents: historyContents,
           config: {
             ...configOverride,
-            ...(input.signal ? { abortSignal: input.signal } : {}),
+            ...(reqSignal ? { abortSignal: reqSignal } : {}),
           },
         });
       } catch (error: unknown) {
@@ -531,12 +532,10 @@ export class GeminiProvider implements AiProvider {
         } as AgentStructuredResponse;
       }
 
-      // A parsed-but-blank message with no tool calls is just as empty as no
-      // text at all — throw so withTimeoutAndRetry retries instead of returning
-      // {"message":""}. Same effective-message check as the streaming guard.
-      if (toolCalls.length === 0 && !effectiveMessageText(structured, message)) {
-        throw new Error("No response from Gemini");
-      }
+      // A parsed-but-blank message with no tool calls is as empty as no text;
+      // the shared guard throws so withTimeoutAndRetry retries instead of
+      // returning {"message":""}.
+      assertUsableCompletion(structured, message, toolCalls.length, "Gemini");
 
       return {
         message,
@@ -567,7 +566,7 @@ export class GeminiProvider implements AiProvider {
     // Try primary model first
     try {
       yield* withStreamRetry(
-        () => this.generateStreamWithModel(this.primaryModel, input),
+        (signal) => this.generateStreamWithModel(this.primaryModel, input, signal),
         { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${this.primaryModel} stream` }
       );
     } catch (primaryError: unknown) {
@@ -593,7 +592,7 @@ export class GeminiProvider implements AiProvider {
 
         try {
           yield* withStreamRetry(
-            () => this.generateStreamWithModel(backupModel, input),
+            (signal) => this.generateStreamWithModel(backupModel, input, signal),
             { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${backupModel} stream` }
           );
           logger.debug(`[GEMINI] Backup model ${backupModel} succeeded`);
@@ -630,8 +629,11 @@ export class GeminiProvider implements AiProvider {
     TStructured = AgentStructuredResponse
   >(
     model: string,
-    input: GenerateMessageInput<TContext>
+    input: GenerateMessageInput<TContext>,
+    attemptSignal?: AbortSignal
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
+    // Caller cancellation + the retry helper's per-attempt deadline, as one.
+    const reqSignal = combineAbortSignals(input.signal, attemptSignal);
     // Streaming: request JSON if schema provided
     const configOverride: Partial<GenerateContentConfig> = { ...this.config };
 
@@ -681,7 +683,7 @@ export class GeminiProvider implements AiProvider {
         contents: historyContents,
         config: {
           ...configOverride,
-          ...(input.signal ? { abortSignal: input.signal } : {}),
+          ...(reqSignal ? { abortSignal: reqSignal } : {}),
         },
       });
     } catch (error: unknown) {
@@ -699,7 +701,7 @@ export class GeminiProvider implements AiProvider {
     }> = [];
 
     for await (const chunk of stream) {
-      if (input.signal?.aborted) break;
+      if (reqSignal?.aborted) break;
 
       // Safely extract text — chunk.text can throw when chunk has only function calls
       const delta = this.safeExtractText(chunk);
@@ -753,13 +755,9 @@ export class GeminiProvider implements AiProvider {
       } as AgentStructuredResponse;
     }
 
-    // Empty-completion guard — mirror of the non-streaming path. A blank
-    // effective message (structured message under a schema, else accumulated
-    // text) with no tool calls means the model produced nothing usable; throw so
-    // withStreamRetry/generateStreamWithBackup retry instead of emitting empty.
-    if (!effectiveMessageText(structured, accumulated) && toolCalls.length === 0) {
-      throw new Error("No response from Gemini");
-    }
+    // Empty-completion guard — same definition as the non-streaming path, so the
+    // stream retries / falls back to backup instead of emitting an empty message.
+    assertUsableCompletion(structured, accumulated, toolCalls.length, "Gemini");
 
     // Yield final chunk
     yield {
