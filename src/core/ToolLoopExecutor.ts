@@ -351,7 +351,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             }
 
             if (toolLoopCount >= MAX_TOOL_LOOPS) {
-                logger.warn(`[ResponseGenerationError] Tool loop limit reached: ${toolLoopCount} iterations hit the cap (${MAX_TOOL_LOOPS}). Stopping tool execution. Increase MAX_TOOL_LOOPS or reduce recursive tool calls.`);
+                logger.warn(`[ResponseGenerationError] Tool loop limit reached: ${toolLoopCount} iterations hit the cap (${MAX_TOOL_LOOPS}). Stopping tool execution. Increase the agent's maxToolLoops option or reduce recursive tool calls.`);
             }
 
             // If tools were executed but no final text message was produced,

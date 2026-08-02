@@ -188,6 +188,15 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
    */
   maxDirectiveChain?: number;
   /**
+   * Maximum number of tool loop iterations allowed within a single response
+   * generation before the pipeline stops executing further tool calls.
+   * Guards against runaway recursive tool calling. An explicit `0` is honored
+   * (no tool loops). Applies to both `respond()` and streaming paths.
+   *
+   * @default 5
+   */
+  maxToolLoops?: number;
+  /**
    * Optional compaction configuration for managing conversation history size.
    * When provided, the agent will validate the options and make them available
    * for use by the SessionManager/CompactionEngine.

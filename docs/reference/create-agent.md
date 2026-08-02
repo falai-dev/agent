@@ -44,6 +44,7 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
   flowSwitchMargin?: number;
   maxAutoStepsPerTurn?: number;
   maxDirectiveChain?: number;
+  maxToolLoops?: number;
   compaction?: AgentCompactionConfig;
   promptCache?: PromptCacheConfig;
   routerMode?: 'ai';
@@ -76,6 +77,7 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
 | `flowSwitchMargin` | `number` | no | `15` | Margin (0–100) the best alternative flow must exceed the current flow's score by before switching. Higher values make the agent stickier. |
 | `maxAutoStepsPerTurn` | `number` | no | `10` | Cap on consecutive `auto: true` steps per turn. Throws `FlowConfigurationError` when exceeded. |
 | `maxDirectiveChain` | `number` | no | `10` | Cap on chained directives per turn (e.g., `goTo` → `onEnter` emits `goTo` → …). Throws `FlowConfigurationError` when exceeded. |
+| `maxToolLoops` | `number` | no | `5` | Cap on tool-call follow-up rounds per turn, after the initial tool batch. Stops executing further tool calls when reached. Applies to both `respond()` and streaming. An explicit `0` disables tool loops. |
 | `compaction` | `AgentCompactionConfig` | no | — | History compaction config: `maxTokens`, `compactionThreshold`, `preserveRecentCount`, `maxToolResultChars`. |
 | `promptCache` | `PromptCacheConfig` | no | `{ enabled: true }` | Controls prompt-section memoization across turns. |
 | `debug` | `boolean` | no | `false` | Enables `loglevel` debug output. |

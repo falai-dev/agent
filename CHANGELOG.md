@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [2.6.1]
+
+### Added
+
+- **`AgentOptions.maxToolLoops` is now configurable.** The tool-loop cap was hardcoded to 5 inside `ToolLoopExecutor`; it is now exposed on `AgentOptions` and wired through `Agent` → `ResponseModal` → `ToolLoopExecutor`, so `createAgent({ maxToolLoops: N })` bounds how many follow-up tool rounds a single turn may run (the initial tool batch executes once before the loop, as before). Applies to both `respond()` and the streaming path, and an explicit `0` is honored. Default remains 5.
+
 ## [2.6.0]
 
 ### Changed (BREAKING)

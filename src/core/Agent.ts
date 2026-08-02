@@ -255,7 +255,9 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
     this.tool = new ToolManager<TContext, TData>(this);
 
     // Initialize ResponseModal for handling all response generation
-    this._responseModal = new ResponseModal<TContext, TData>(this);
+    this._responseModal = new ResponseModal<TContext, TData>(this, {
+      maxToolLoops: options.maxToolLoops,
+    });
 
     // Initialize persistence if configured
     if (options.persistence) {
