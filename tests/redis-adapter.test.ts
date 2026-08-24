@@ -5,9 +5,7 @@ import { MessageRole } from "../src/types/history";
 
 /**
  * In-memory Redis stub covering exactly the RedisClient surface RedisAdapter
- * uses. TTLs and persistence are intentionally ignored; cast through
- * `as unknown as` (permitted in tests) since the object is structurally a
- * client minus behaviors irrelevant here.
+ * uses. TTLs and persistence are intentionally ignored.
  */
 function createRedisStub(): RedisClient {
   const strings = new Map<string, string>();
@@ -55,7 +53,7 @@ function createRedisStub(): RedisClient {
     async quit() {
       return "OK";
     },
-  } as unknown as RedisClient;
+  };
 }
 
 describe("RedisMessageRepository.findBySessionId", () => {

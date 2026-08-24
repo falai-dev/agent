@@ -30,6 +30,13 @@ interface TestContext {
 
 class RoutingTrackingProvider implements AiProvider {
     public readonly name = "RoutingTrackingProvider";
+    public readonly capabilities = {
+        supportsTools: true,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: true,
+        supportsPromptCaching: false,
+    };
     public calls: { schemaName?: string; prompt: string }[] = [];
     /** Data to return when pre-extraction runs */
     public extractionData: Partial<TestData> = {};
@@ -122,7 +129,6 @@ class RoutingTrackingProvider implements AiProvider {
 function createCollectAgent(provider: RoutingTrackingProvider) {
     return new Agent<TestContext, TestData>({
         name: "RoutingSkipAgent",
-        description: "Agent to test routing skip optimization",
         goal: "Collect user data",
         context: { userId: "test-user" },
         provider,
@@ -187,7 +193,7 @@ describe("Routing skip optimization", () => {
             expect(provider.getRoutingCallCount()).toBe(0);
 
             // The session should retain the Registration flow
-            expect(response.session.currentFlow?.title).toBe("Registration");
+            expect(response.session?.currentFlow?.title).toBe("Registration");
         });
 
         test("pre-extraction must populate a NEW collect field (not one already filled)", async () => {
@@ -237,7 +243,7 @@ describe("Routing skip optimization", () => {
             });
 
             // Flow is retained
-            expect(response.session.currentFlow?.id).toBe(regFlow.id);
+            expect(response.session?.currentFlow?.id).toBe(regFlow.id);
         });
     });
 
@@ -265,7 +271,7 @@ describe("Routing skip optimization", () => {
 
             // Routing was skipped (tradeoff: off-topic intent lost this turn)
             expect(provider.getRoutingCallCount()).toBe(0);
-            expect(response.session.currentFlow?.title).toBe("Registration");
+            expect(response.session?.currentFlow?.title).toBe("Registration");
         });
 
         test("on the NEXT turn (no collect populated), normal routing runs", async () => {
@@ -318,7 +324,6 @@ describe("Routing skip optimization", () => {
             // Create an agent where a step has no collect
             const agent = new Agent<TestContext, TestData>({
                 name: "NoCollectAgent",
-                description: "Agent with steps that don't collect",
                 goal: "Test",
                 context: { userId: "test" },
                 provider,
@@ -386,7 +391,7 @@ describe("Routing skip optimization", () => {
             });
 
             // Pending directive should have fired — we should end up in Support, not Registration
-            expect(response.session.currentFlow?.title).toBe("Support");
+            expect(response.session?.currentFlow?.title).toBe("Support");
         });
     });
 });

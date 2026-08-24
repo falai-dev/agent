@@ -227,8 +227,10 @@ describe("Flow - Data Collection and Completion", () => {
       requiredFields: ["field1"],
     });
 
-    expect(flow.isComplete({ field1: null as any })).toBe(false);
-    expect(flow.getMissingRequiredFields({ field1: null as any })).toEqual(["field1"]);
+    // null is intentionally schema-invalid: asserts it counts as "missing".
+    const nullField = { field1: null } as unknown as Partial<TestData>;
+    expect(flow.isComplete(nullField)).toBe(false);
+    expect(flow.getMissingRequiredFields(nullField)).toEqual(["field1"]);
   });
 
   test("should handle undefined as missing field", () => {
@@ -795,12 +797,13 @@ describe("Flow - Tools Management", () => {
       title: "Validation Flow",
     });
 
+    // Both inputs are intentionally invalid Tool shapes, fed to assert the guard.
     expect(() => {
-      flow.createTool(null as any);
+      flow.createTool(null as unknown as Tool<unknown, TestData>);
     }).toThrow("Invalid tool");
 
     expect(() => {
-      flow.createTool({ id: "test" } as any);
+      flow.createTool({ id: "test" } as unknown as Tool<unknown, TestData>);
     }).toThrow("Invalid tool");
   });
 });
@@ -1407,14 +1410,14 @@ describe("Auto-step shape validation rejects forbidden fields", () => {
     }));
   });
 
-  test("auto-step with only allowed fields (prepare, requires, skipIf) does NOT throw", () => {
+  test("auto-step with only allowed fields (prepare, requires, skip) does NOT throw", () => {
     expect(() => {
       new Step<unknown, TestData>("test-flow", {
         id: "good-auto",
         auto: true,
         prepare: () => { },
         requires: ["field1"],
-        skipIf: () => false,
+        skip: () => false,
       });
     }).not.toThrow();
   });

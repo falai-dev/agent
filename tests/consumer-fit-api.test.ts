@@ -53,7 +53,7 @@ describe("respond({ message }) owns session history", () => {
         });
         const session = createSession<Data>("sess_hist");
 
-        const response = await agent.respond<Ctx, Data>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "earlier context" }],
             message: "I want the blue widget",
             session,
@@ -84,7 +84,7 @@ describe("allowedFlows restricts routing for the turn", () => {
             ],
         });
 
-        const response = await agent.respond<Ctx, Data>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "hi" }],
             allowedFlows: ["flowSecond"],
         });
@@ -111,7 +111,7 @@ describe("endedFlows surfaces flow exits", () => {
             }],
         });
 
-        const response = await agent.respond<Ctx, Data>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
 
@@ -137,10 +137,10 @@ describe("endedFlows surfaces flow exits", () => {
         });
 
         // Turn 1: tool queues { goTo: 'flowB' } as pendingDirective.
-        await agent.respond<Ctx, Data>({ history: [{ role: "user", content: "hi" }] });
+        await agent.respond({ history: [{ role: "user", content: "hi" }] });
 
         // Turn 2: the applier enters flowB; flowA must appear in endedFlows.
-        const response = await agent.respond<Ctx, Data>({ history: [{ role: "user", content: "continue" }] });
+        const response = await agent.respond({ history: [{ role: "user", content: "continue" }] });
         const exited = response.endedFlows?.find((f) => f.flowId === "flowA");
         expect(exited).toBeDefined();
         expect(exited?.reason).toBe("goto");
@@ -171,7 +171,7 @@ describe("typed errors propagate", () => {
         });
 
         try {
-            await agent.respond<Ctx, Data>({ history: [{ role: "user", content: "hi" }] });
+            await agent.respond({ history: [{ role: "user", content: "hi" }] });
             expect.unreachable();
         } catch (error) {
             // Bare rethrow: consumers can branch on the normalized code
@@ -198,7 +198,7 @@ describe("typed errors propagate", () => {
         });
 
         await expect(
-            agent.respond<Ctx, Data>({ history: [{ role: "user", content: "hi" }] })
+            agent.respond({ history: [{ role: "user", content: "hi" }] })
         ).rejects.toMatchObject({ cause: inner });
     });
 });

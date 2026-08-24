@@ -52,7 +52,6 @@ interface SupportTicketData {
 function createFlowTestAgent<TData = unknown>(): Agent<unknown, TData> {
   return new Agent<unknown, TData>({
     name: "FlowTestAgent",
-    description: "Agent for testing flow functionality",
     provider: MockProviderFactory.basic(),
   });
 }
@@ -60,7 +59,6 @@ function createFlowTestAgent<TData = unknown>(): Agent<unknown, TData> {
 function createOrderTestAgent<TContext = any>(): Agent<TContext, OrderData> {
   return new Agent<TContext, OrderData>({
     name: "OrderTestAgent",
-    description: "Agent for testing order functionality",
     provider: MockProviderFactory.basic(),
     schema: {
       type: "object",
@@ -238,7 +236,6 @@ describe("Flow Creation and Configuration", () => {
   test("should handle flow step requirements", () => {
     const agent = new Agent<unknown, SupportTicketData>({
       name: "RequirementTestAgent",
-      description: "Agent for testing step requirements",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -346,7 +343,6 @@ describe("Flow Execution and Step Progression", () => {
   test("should handle step prerequisites", () => {
     const agent = new Agent<any, SupportTicketData>({
       name: "PrerequisiteTestAgent",
-      description: "Agent for testing step prerequisites",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -389,7 +385,6 @@ describe("Flow Execution and Step Progression", () => {
 
     const agent = new Agent<unknown, QuickFlowData>({
       name: "QuickFlowAgent",
-      description: "Agent for testing quick flow completion",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -439,7 +434,6 @@ describe("Flow Branching and Conditional Logic", () => {
   test("should create branching flows", () => {
     const agent = new Agent<unknown, SupportTicketData>({
       name: "BranchingTestAgent",
-      description: "Agent for testing branching flows",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -500,7 +494,6 @@ describe("Flow Branching and Conditional Logic", () => {
   test("should handle conditional step skipping", async () => {
     const agent = new Agent<any, SupportTicketData>({
       name: "ConditionalTestAgent",
-      description: "Agent for testing conditional step skipping",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",

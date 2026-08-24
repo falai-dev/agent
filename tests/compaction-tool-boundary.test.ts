@@ -10,6 +10,14 @@ import type { AiProvider } from "../src/types/ai";
 function mockProvider(opts: { shouldFail?: boolean } = {}): AiProvider {
     return {
         name: "MockProvider",
+        // Engine only calls generateMessage for summaries; flags are inert here.
+        capabilities: {
+            supportsTools: false,
+            supportsNativeJsonSchema: false,
+            supportsStreaming: true,
+            supportsStreamingToolCalls: false,
+            supportsPromptCaching: false,
+        },
         async generateMessage() {
             if (opts.shouldFail) throw new Error("LLM failure");
             return {

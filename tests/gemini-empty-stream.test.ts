@@ -56,7 +56,7 @@ describe("GeminiProvider streaming empty-completion guard", () => {
       /* yields nothing — a genuinely empty completion */
     });
     await expect(
-      drain(provider.generateMessageStream({ prompt: "hi", history: [] }))
+      drain(provider.generateMessageStream({ prompt: "hi", history: [], context: {} }))
     ).rejects.toThrow("No response from Gemini");
   });
 
@@ -69,6 +69,7 @@ describe("GeminiProvider streaming empty-completion guard", () => {
         provider.generateMessageStream({
           prompt: "hi",
           history: [],
+          context: {},
           parameters: { jsonSchema },
         })
       )
@@ -82,7 +83,7 @@ describe("GeminiProvider streaming empty-completion guard", () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
     }, 100);
     await expect(
-      drain(provider.generateMessageStream({ prompt: "hi", history: [] }))
+      drain(provider.generateMessageStream({ prompt: "hi", history: [], context: {} }))
     ).rejects.toThrow(/timed out/i);
   });
 
@@ -94,6 +95,7 @@ describe("GeminiProvider streaming empty-completion guard", () => {
     for await (const chunk of provider.generateMessageStream({
       prompt: "hi",
       history: [],
+      context: {},
       parameters: { jsonSchema },
     })) {
       chunks.push(chunk);

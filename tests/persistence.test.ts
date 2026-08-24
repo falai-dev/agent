@@ -89,7 +89,6 @@ function createPersistenceTestAgent(
 ): Agent<unknown, TestSessionData> {
   return new Agent<unknown, TestSessionData>({
     name: "PersistenceTestAgent",
-    description: "Agent for testing persistence functionality",
     provider: MockProviderFactory.basic(),
     persistence: {
       adapter: adapter || new MemoryAdapter(),
@@ -348,8 +347,8 @@ describe("PersistenceManager Integration", () => {
 
     expect(persisted?.data?.userId).toBe("test-user");
     expect(persisted?.data?.step).toBe(2);
-    expect((persisted?.data?.preferences as any)?.theme).toBe("light");
-    expect((persisted?.data?.preferences as any)?.notifications).toBe(true);
+    expect(persisted?.data?.preferences?.theme).toBe("light");
+    expect(persisted?.data?.preferences?.notifications).toBe(true);
 
     // Verify agent's collected data is in sync
     const agentData = agent.getCollectedData();
@@ -385,7 +384,8 @@ describe("PersistenceManager Integration", () => {
     try {
       await agent.updateCollectedData({
         invalidField: "should not be allowed",
-      } as any);
+        // Intentionally schema-invalid payload to exercise the validation-error path.
+      } as unknown as Partial<TestSessionData>);
       throw new Error("Expected validation error was not thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(Error);

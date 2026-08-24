@@ -41,7 +41,6 @@ interface TestData {
 function createStreamingTestAgent(provider?: MockProvider): Agent<TestContext, TestData> {
   return new Agent<TestContext, TestData>({
     name: "StreamingTestAgent",
-    description: "Agent for testing modern streaming API",
     goal: "Test modern streaming functionality",
     context: {
       userId: "stream-test-user",

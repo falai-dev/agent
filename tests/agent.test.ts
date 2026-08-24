@@ -52,7 +52,6 @@ interface UserProfileData {
 function createTestAgent(provider?: MockProvider): Agent<TestContext> {
   return new Agent<TestContext>({
     name: "TestAgent",
-    description: "A test agent for unit testing",
     goal: "Test agent functionality",
     context: {
       userId: "test-user-123",
@@ -65,7 +64,6 @@ function createTestAgent(provider?: MockProvider): Agent<TestContext> {
 function createSupportAgent(): Agent<TestContext, SupportTicketData> {
   const agent = new Agent<TestContext, SupportTicketData>({
     name: "SupportAgent",
-    description: "Agent for testing agent-level data collection",
     context: {
       userId: "test-user-123",
       sessionCount: 0,
@@ -193,7 +191,6 @@ async function testAgentCreationAndConfiguration() {
   await runTest("should create agent with agent-level schema", () => {
     const agent = new Agent<TestContext, UserProfileData>({
       name: "SchemaAgent",
-      description: "Agent with schema",
       context: {
         userId: "schema-test-user",
         sessionCount: 0,
@@ -227,7 +224,6 @@ async function testAgentCreationAndConfiguration() {
   await runTest("should create agent with full configuration", () => {
     const agent = new Agent<TestContext>({
       name: "FullTestAgent",
-      description: "Fully configured test agent",
       goal: "Test all features",
       context: {
         userId: "full-test-user",

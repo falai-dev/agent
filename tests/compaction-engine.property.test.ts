@@ -187,6 +187,13 @@ import type { AiProvider } from "../src/types/ai";
  */
 const mockProvider: AiProvider = {
     name: "mock-provider",
+    capabilities: {
+        supportsTools: false,
+        supportsNativeJsonSchema: false,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: false,
+        supportsPromptCaching: false,
+    },
     async generateMessage() {
         return { message: "Summary of previous conversation." };
     },
@@ -350,13 +357,12 @@ describe("Property 9: Compaction Idempotency", () => {
     });
 
     test("applying checkAndCompact twice produces the same result as once (idempotency)", async () => {
-        // Use options with maxTokens large enough that the compacted result
-        // (summary message + preserved recent messages) fits under the threshold.
-        // The mock provider returns "Summary of previous conversation." (38 chars).
-        // Summary system message ≈ ceil((len("[Conversation Summary]\n") + 38 + 4) / 4) ≈ 17 tokens.
-        // Plus preserveRecentCount messages (each up to ~40 tokens with 150 char content).
-        // We need maxTokens * threshold > summary tokens + preserved tokens.
-        // Using maxTokens >= 500 ensures the compacted result fits comfortably.
+        // Options with maxTokens large enough that the compacted result
+        // (summary message + preserved recent messages) USUALLY fits under the
+        // threshold. The mock provider returns "Summary of previous conversation."
+        // (38 chars). Not sufficient on its own: a tool-heavy tail widens the
+        // preserved window past preserveRecentCount, so the property pre-filters
+        // cases where the first result still exceeds the threshold (see below).
         const idempotentOptionsArb: fc.Arbitrary<CompactionOptions> = fc.record({
             maxTokens: fc.integer({ min: 500, max: 5000 }),
             compactionThreshold: fc.double({ min: 0.5, max: 0.95, noNaN: true }),
@@ -373,6 +379,18 @@ describe("Property 9: Compaction Idempotency", () => {
                 async ({ history, opts }) => {
                     // First compaction
                     const first = await CompactionEngine.checkAndCompact(history, opts);
+
+                    // Idempotency is only guaranteed when the first result fits
+                    // under the threshold. The engine compacts TOWARD the budget
+                    // but never touches the preserved window — and that window
+                    // grows left past any run of tool messages (alignPreserveStart),
+                    // so a tool-heavy tail can legitimately leave the result over
+                    // threshold. In that case a second pass MUST compact again;
+                    // asserting 'none' there would be a false invariant.
+                    fc.pre(
+                        first.estimatedTokens < opts.maxTokens * opts.compactionThreshold
+                    );
+
                     // Second compaction on the already-compacted history
                     const second = await CompactionEngine.checkAndCompact(first.history, opts);
 

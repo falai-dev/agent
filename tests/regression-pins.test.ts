@@ -32,6 +32,7 @@ import { ToolLoopExecutor } from "../src/core/ToolLoopExecutor";
 import { MockProvider } from "./mock-provider";
 import { DEFAULT_MAX_HISTORY_MESSAGES } from "../src/utils/session";
 import type {
+    AgentStructuredResponse,
     AiProvider,
     GenerateMessageInput,
     GenerateMessageOutput,
@@ -136,8 +137,13 @@ const forcedTextProvider: AiProvider = {
         supportsStreamingToolCalls: true,
         supportsPromptCaching: false,
     },
-    async generateMessage() {
-        return { message: FORCED_TEXT, structured: { message: FORCED_TEXT } };
+    async generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>() {
+        return {
+            message: FORCED_TEXT,
+            // Cast justified (test stub): the runStreamingBatch fallback path
+            // this pin drives consumes only `message` from this response.
+            structured: { message: FORCED_TEXT },
+        } as GenerateMessageOutput<TStructured>;
     },
     // eslint-disable-next-line require-yield
     async *generateMessageStream() {
@@ -150,7 +156,6 @@ describe("runStreamingBatch transient failure closes from executed results", () 
         let charges = 0;
         const agent = new Agent<Ctx, Data>({
             name: "fallbackAgent",
-            description: "Pins the no-reexecution streaming fallback",
             context: { userId: "u1" },
             provider: forcedTextProvider,
         });
@@ -232,20 +237,35 @@ describe("runStreamingBatch transient failure closes from executed results", () 
 
 describe("Step hooks desugar composes both spellings", () => {
     test("shorthand runs first, hook second, returns merge via Algorithm 4", async () => {
+        // appendPrompt is a Directive-level pre-LLM field (not part of the
+        // PrepareResult subset), so handlers are typed at their real shape.
+        const shorthandPrepare = (): Directive<Ctx, Data> => ({ appendPrompt: ["shorthand"] });
+        const hookPrepare = (): Directive<Ctx, Data> => ({ appendPrompt: ["hook"] });
+
         const step = new Step<Ctx, Data>("desugarFlow", {
             id: "both_spellings",
-            prepare: () => ({ appendPrompt: ["shorthand"] }),
+            prepare: shorthandPrepare,
             finalize: () => ({ dataUpdate: { confirmed: true } }),
             hooks: {
-                prepare: () => ({ appendPrompt: ["hook"] }),
+                prepare: hookPrepare,
                 finalize: () => ({ dataUpdate: { item: "set-by-hook" } }),
             },
         });
 
-        const prepared = await step.prepare!({ userId: "u1" }, {});
-        expect(prepared?.appendPrompt).toEqual(["shorthand", "hook"]);
+        const prepareFn = step.prepare;
+        if (typeof prepareFn !== "function") {
+            throw new Error("setup: expected a composed prepare function");
+        }
+        // The composed result is typed as PrepareResult; read it back at the
+        // Directive surface that declares appendPrompt.
+        const prepared = (await prepareFn({ userId: "u1" }, {})) as Directive<Ctx, Data>;
+        expect(prepared.appendPrompt).toEqual(["shorthand", "hook"]);
 
-        const finalized = await step.finalize!({ userId: "u1" }, {});
+        const finalizeFn = step.finalize;
+        if (typeof finalizeFn !== "function") {
+            throw new Error("setup: expected a composed finalize function");
+        }
+        const finalized = await finalizeFn({ userId: "u1" }, {});
         expect(finalized?.dataUpdate).toEqual({
             confirmed: true,
             item: "set-by-hook",
@@ -295,7 +315,7 @@ describe("consumer-fit leftovers", () => {
             ],
         });
 
-        const response = await agent.respond<Ctx, Data>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "hi" }],
             session: createSession<Data>("sess_tokens"),
         });
@@ -321,7 +341,7 @@ describe("consumer-fit leftovers", () => {
         expect(restored.id).toBe("sess_restore");
         expect(restored.data).toEqual({ item: "widget" });
         expect(restored.flowHistory).toHaveLength(1);
-        expect(restored.flowHistory[0]?.completed).toBe(true);
+        expect(restored.flowHistory?.[0]?.completed).toBe(true);
         expect(restored.currentFlow).toBeUndefined();
     });
 });

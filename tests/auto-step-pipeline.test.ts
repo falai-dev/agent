@@ -29,6 +29,14 @@ import type {
 
 class CountingProvider implements AiProvider {
     readonly name = "CountingProvider";
+    // v2.4 made capabilities required on AiProvider — mirror MockProvider's flags.
+    readonly capabilities = {
+        supportsTools: true,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: true,
+        supportsPromptCaching: false,
+    };
     public callCount = 0;
 
     async generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>(
@@ -130,7 +138,6 @@ describe("Auto-step pipeline behavior", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "AutoStepTestAgent",
-            description: "Tests auto-step chain execution",
             goal: "Verify auto-steps cost zero LLM calls",
             context: { userId: "test-user" },
             provider,
@@ -233,7 +240,6 @@ describe("Auto-step pipeline behavior", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "BranchAutoStepAgent",
-            description: "Tests auto-step branching",
             goal: "Verify branch resolution costs zero LLM calls",
             context: { userId: "test-user" },
             provider,
@@ -256,9 +262,9 @@ describe("Auto-step pipeline behavior", () => {
                 {
                     id: "flow_by_plan",
                     auto: true,
-                    // The auto-step uses skipIf to simulate deterministic branching.
+                    // The auto-step uses skip to simulate deterministic branching.
                     // When branches are fully wired, this would use the `branches` field.
-                    skipIf: ({ data }: { data?: Partial<TestData> }) => {
+                    skip: ({ data }) => {
                         return data?.plan === "pro";
                     },
                 },
@@ -300,7 +306,6 @@ describe("Auto-step pipeline behavior", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "HaltAutoStepAgent",
-            description: "Tests auto-step halt+reply",
             goal: "Verify halt produces verbatim reply with zero LLM calls",
             context: { userId: "test-user" },
             provider,
@@ -370,7 +375,6 @@ describe("Auto-step pipeline behavior", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "CyclicAutoStepAgent",
-            description: "Tests auto-step cycle detection",
             goal: "Verify cyclic auto-chains throw FlowConfigurationError",
             context: { userId: "test-user" },
             provider,
@@ -491,7 +495,6 @@ describe("Auto-step pipeline behavior", () => {
                         const provider = new CountingProvider();
                         const agent = new Agent<TestContext, TestData>({
                             name: "PropertyTestAgent",
-                            description: "Property test",
                             goal: "test",
                             context: { userId: "test" },
                             provider,

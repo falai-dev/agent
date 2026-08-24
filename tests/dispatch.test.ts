@@ -34,7 +34,6 @@ function createTestAgent() {
     const provider = new MockProvider({ responseMessage: "OK" });
     const agent = new Agent<TestContext, TestData>({
         name: "DispatchTestAgent",
-        description: "Agent for testing dispatch/applyDirective",
         goal: "Test directive dispatch",
         context: { userId: "test-user" },
         provider,

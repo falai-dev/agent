@@ -67,7 +67,6 @@ interface Data {
 function buildAgent(structured: AgentStructuredResponse) {
   const agent = new Agent<Ctx, Data>({
     name: "SignupAgent",
-    description: "Collects an email",
     context: { userId: "u1" },
     provider: new JsonStreamProvider(structured),
   });

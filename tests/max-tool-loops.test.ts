@@ -87,7 +87,6 @@ function createAgentWithToolLoop(maxToolLoops?: number) {
 
   const agent = new Agent<unknown, TestData>({
     name: "MaxToolLoopsAgent",
-    description: "Tests the maxToolLoops option",
     provider,
     maxToolLoops,
   });

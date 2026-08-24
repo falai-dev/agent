@@ -18,7 +18,6 @@ import type { SignalProcessor } from "../src/core/SignalProcessor";
 import { Flow } from "../src/core/Flow";
 import { createSession, enterFlow, enterStep, historyToEvents } from "../src/utils";
 import type {
-    AgentOptions,
     SessionState,
     StructuredSchema,
     GenerateMessageInput,
@@ -51,6 +50,13 @@ interface RecordedCall {
 
 class PipelineProbeProvider implements AiProvider {
     public readonly name = "PipelineProbeProvider";
+    public readonly capabilities = {
+        supportsTools: true,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: true,
+        supportsPromptCaching: false,
+    };
     public calls: RecordedCall[] = [];
     /** Scores returned for routing_output calls, keyed by flow id. */
     public routingScores: Record<string, number> = {};
@@ -192,7 +198,7 @@ function makePipeline(
         signalProcessor: options?.signalProcessor,
     });
     const pipeline = new ResponsePipeline<TestContext, TestData>(
-        { name: "pipeline-test-agent", provider } as AgentOptions<TestContext, TestData>,
+        { name: "pipeline-test-agent", provider },
         () => flows,
         new FlowRouter<TestContext, TestData>(),
         signalCoordinator,

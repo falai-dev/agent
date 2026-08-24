@@ -41,7 +41,6 @@ describe("Bug 1: Session state sync after stream()/generate() completion", () =>
   test("generate() syncs finalized session with flow/step to agent.session.current", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "SessionSyncTestAgent",
-      description: "Tests session sync after generate",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -97,7 +96,6 @@ describe("Bug 1: Session state sync after stream()/generate() completion", () =>
   test("stream() syncs finalized session with flow/step to agent.session.current", async () => {
     const agent = new Agent<unknown, TestData>({
       name: "StreamSyncTestAgent",
-      description: "Tests session sync after stream",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -173,7 +171,6 @@ describe("Bug 2: AbortSignal not propagated to processFlowResponse/handleFlowCom
 
     const agent = new Agent<unknown, TestData>({
       name: "SignalTestAgent",
-      description: "Tests signal propagation",
       provider: signalCapturingProvider,
       schema: {
         type: "object",
@@ -309,7 +306,6 @@ describe("Bug 3: Tool follow-up structured data discarded", () => {
 
     const agent = new Agent<unknown, TestData>({
       name: "ToolDataTestAgent",
-      description: "Tests tool follow-up data collection",
       provider: toolLoopProvider,
       schema: {
         type: "object",
@@ -323,7 +319,6 @@ describe("Bug 3: Tool follow-up structured data discarded", () => {
     // Register a tool that the AI can call
     agent.addTool({
       id: "lookup_user",
-      name: "lookup_user",
       description: "Look up user information",
       parameters: {
         type: "object",
@@ -585,7 +580,6 @@ describe("Preservation: Legacy API does not modify agent.session.current", () =>
   test("respond() with explicit session does not modify agent.session.current", async () => {
     const agent = new Agent<unknown, Record<string, unknown>>({
       name: "LegacyAPITestAgent",
-      description: "Tests legacy API preservation",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -640,7 +634,6 @@ describe("Preservation: Override-history mode is fully stateless", () => {
   test("generate() with options.history does not modify agent.session.current", async () => {
     const agent = new Agent<unknown, Record<string, unknown>>({
       name: "OverrideHistoryTestAgent",
-      description: "Tests override-history preservation",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -677,7 +670,6 @@ describe("Preservation: Override-history mode is fully stateless", () => {
   test("stream() with options.history does not modify agent.session.current history", async () => {
     const agent = new Agent<unknown, Record<string, unknown>>({
       name: "StreamOverrideTestAgent",
-      description: "Tests stream override-history preservation",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -783,7 +775,6 @@ describe("Preservation: No-tool-loop uses original response for data collection"
 
     const agent = new Agent<unknown, { name?: string; email?: string }>({
       name: "NoToolLoopAgent",
-      description: "Tests no-tool-loop preservation",
       provider: noToolProvider,
       schema: {
         type: "object",
@@ -822,7 +813,6 @@ describe("Preservation: Non-aborted signal completes normally", () => {
   test("chat() with non-aborted signal completes successfully", async () => {
     const agent = new Agent<unknown, Record<string, unknown>>({
       name: "NonAbortedSignalAgent",
-      description: "Tests non-aborted signal preservation",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -855,7 +845,6 @@ describe("Preservation: Non-aborted signal completes normally", () => {
   test("stream() with non-aborted signal completes successfully", async () => {
     const agent = new Agent<unknown, Record<string, unknown>>({
       name: "StreamNonAbortedAgent",
-      description: "Tests stream non-aborted signal",
       provider: MockProviderFactory.basic(),
       schema: {
         type: "object",
@@ -902,7 +891,6 @@ describe("Preservation: Persistence auto-save after chat/stream", () => {
 
     const agent = new Agent<unknown, Record<string, unknown>>({
       name: "PersistenceTestAgent",
-      description: "Tests persistence auto-save",
       provider: MockProviderFactory.basic(),
       sessionId: "persist-auto-save-test",
       persistence: { adapter },

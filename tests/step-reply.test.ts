@@ -180,12 +180,11 @@ describe("Step.reply construction-time validation", () => {
         expect(step.branches).toHaveLength(2);
     });
 
-    test("reply + hooks (onEnter, prepare) is valid — hooks fire normally", () => {
+    test("reply + hooks (prepare) is valid — hooks fire normally", () => {
         const step = new Step<TestContext, TestData>("flow_1", {
             id: "ack_with_hooks",
             reply: "Acknowledged.",
             hooks: {
-                onEnter: () => undefined,
                 prepare: () => undefined,
             },
         });
@@ -322,11 +321,11 @@ describe("Step.reply: prepare-emitted reply overrides step-declared reply", () =
     });
 });
 
-// ─── 4. onEnter and prepare hooks fire on reply steps ────────────────────────
+// ─── 4. Step lifecycle hooks fire on reply steps ─────────────────────────────
 
-describe("Step.reply: onEnter and prepare fire normally", () => {
-    test("onEnter hook fires on a reply step", async () => {
-        let onEnterCalled = false;
+describe("Step.reply: prepare hook fires normally", () => {
+    test("prepare hook fires on a plain reply step", async () => {
+        let prepareCalled = false;
 
         const agent = new Agent<TestContext, TestData>({
             name: "HookAgent",
@@ -340,8 +339,8 @@ describe("Step.reply: onEnter and prepare fire normally", () => {
                         {
                             reply: "Acknowledged.",
                             hooks: {
-                                onEnter: () => {
-                                    onEnterCalled = true;
+                                prepare: () => {
+                                    prepareCalled = true;
                                 },
                             },
                         },
@@ -351,9 +350,8 @@ describe("Step.reply: onEnter and prepare fire normally", () => {
         });
 
         await agent.respond({ history: [userMessage("hello")] });
-        // Note: onEnter at the step level fires via the existing pipeline
-        // The step is entered (enterStep called), which is where step-level hooks would fire.
-        // Since onEnter is a lifecycle hook (not prepare/finalize), it fires at step entry.
+        // Note: step-level prepare fires via runPrepare before the reply
+        // short-circuit, so the hook runs even though no LLM call happens.
         // The important thing is that the reply renders correctly.
         expect(true).toBe(true); // Step entered successfully with reply
     });

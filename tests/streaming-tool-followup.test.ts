@@ -10,7 +10,12 @@ import { expect, test, describe } from "bun:test";
 
 import { Agent, ToolManager, createSession } from "../src/index";
 import { ToolLoopExecutor } from "../src/core/ToolLoopExecutor";
-import type { AiProvider } from "../src/types/ai";
+import type {
+    AiProvider,
+    AgentStructuredResponse,
+    GenerateMessageInput,
+    GenerateMessageOutput,
+} from "../src/types/ai";
 
 interface Ctx {
   userId: string;
@@ -32,8 +37,10 @@ const stubProvider: AiProvider = {
     supportsStreamingToolCalls: true,
     supportsPromptCaching: false,
   },
-  async generateMessage() {
-    return { message: FORCED_TEXT, structured: { message: FORCED_TEXT } };
+  async generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>(
+    _input: GenerateMessageInput<TContext>
+  ): Promise<GenerateMessageOutput<TStructured>> {
+    return { message: FORCED_TEXT, structured: { message: FORCED_TEXT } as TStructured };
   },
   // eslint-disable-next-line require-yield
   async *generateMessageStream() {
@@ -45,7 +52,6 @@ describe("runStreamingBatch tools-ran-but-no-text follow-up (gap a)", () => {
   test("forces a closing message from tool results when the model streamed none", async () => {
     const agent = new Agent<Ctx, Data>({
       name: "GapATestAgent",
-      description: "Tests the streaming forced-final-text path",
       context: { userId: "u1" },
       provider: stubProvider,
     });
@@ -120,15 +126,20 @@ describe("runStreamingBatch multi-round tool loop", () => {
         supportsStreamingToolCalls: true,
         supportsPromptCaching: false,
       },
-      async generateMessage() {
+      async generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>(
+        _input: GenerateMessageInput<TContext>
+      ): Promise<GenerateMessageOutput<TStructured>> {
         genCalls++;
         if (genCalls === 1) {
           return {
             message: "",
-            structured: { message: "", toolCalls: [{ toolName: "book_hotel", arguments: {} }] },
+            structured: {
+              message: "",
+              toolCalls: [{ toolName: "book_hotel", arguments: {} }],
+            } as TStructured,
           };
         }
-        return { message: SECOND_TEXT, structured: { message: SECOND_TEXT } };
+        return { message: SECOND_TEXT, structured: { message: SECOND_TEXT } as TStructured };
       },
       // eslint-disable-next-line require-yield
       async *generateMessageStream() {
@@ -138,7 +149,6 @@ describe("runStreamingBatch multi-round tool loop", () => {
 
     const agent = new Agent<Ctx, Data>({
       name: "MultiRoundAgent",
-      description: "Tests streaming multi-round tool loops",
       context: { userId: "u1" },
       provider,
     });

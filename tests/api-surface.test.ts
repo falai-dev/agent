@@ -46,6 +46,13 @@ interface TestContext {
 
 class CallTrackingProvider implements AiProvider {
     public readonly name = "CallTrackingProvider";
+    public readonly capabilities = {
+        supportsTools: true,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: true,
+        supportsPromptCaching: false,
+    };
     public calls: { schemaName?: string; prompt: string }[] = [];
     public extractionData: Partial<TestData> = {};
 
@@ -272,7 +279,7 @@ describe("API Surface Integration", () => {
         test("StepRef is importable from @falai/agent", () => {
             // This test validates that the StepRef type is accessible.
             // If this compiles and runs, StepRef is part of the public surface.
-            const ref: StepRef = { id: "step-1", description: "Test step" };
+            const ref: StepRef = { id: "step-1", flowId: "flow-1" };
             expect(ref.id).toBe("step-1");
         });
 
@@ -324,7 +331,6 @@ describe("API Surface Integration", () => {
 
             const agent = new Agent<TestContext, TestData>({
                 name: "RoutingSkipBot",
-                description: "Tests routing skip",
                 goal: "Collect data",
                 context: { userId: "u1" },
                 provider,
@@ -372,8 +378,8 @@ describe("API Surface Integration", () => {
 
             // Routing call count should be 0 — routing was skipped
             expect(provider.getRoutingCallCount()).toBe(0);
-            // Flow is retained
-            expect(response.session.currentFlow?.title).toBe("Registration");
+            // Flow is retained (session was passed in, respond echoes it back)
+            expect(response.session!.currentFlow?.title).toBe("Registration");
         });
     });
 });

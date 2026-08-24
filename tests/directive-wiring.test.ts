@@ -59,7 +59,7 @@ describe("tool-emitted directives reach the engine", () => {
             directive: { reply: "Handled by tool." } satisfies Directive<TestContext, TestData>,
         }));
 
-        const response = await agent.respond<TestContext, TestData>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
 
@@ -73,11 +73,12 @@ describe("tool-emitted directives reach the engine", () => {
             return { ok: true };
         });
 
-        const response = await agent.respond<TestContext, TestData>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
 
-        expect(response.session.pendingDirective).toBeDefined();
+        // Agent was constructed with a sessionId, so respond always resolves one
+        expect(response.session!.pendingDirective).toBeDefined();
     });
 });
 
@@ -112,7 +113,7 @@ describe("step hooks run through real machinery", () => {
         // race (a separate pre-existing issue) from polluting this assertion.
         const session = createSession<TestData>("sess_finalize_order");
 
-        await agent.respond<TestContext, TestData>({
+        await agent.respond({
             history: [{ role: "user", content: "yes please" }],
             session,
         });

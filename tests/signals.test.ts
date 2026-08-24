@@ -43,7 +43,6 @@ function createAgentWithSignals(
 ) {
     return new Agent({
         name: "SignalTestAgent",
-        description: "Testing signal construction validation",
         context: {},
         provider: MockProviderFactory.basic(),
         signals,
@@ -222,7 +221,6 @@ describe("Signals — Construction-time validation", () => {
         it("constructs OK with signals: undefined", () => {
             const agent = new Agent({
                 name: "NoSignals",
-                description: "No signals",
                 context: {},
                 provider: MockProviderFactory.basic(),
             });
@@ -296,7 +294,9 @@ function makeHistory(messages: { role: MessageRole; text: string }[]): Event[] {
     return messages.map((m, i) => ({
         kind: EventKind.MESSAGE,
         source: m.role,
-        data: { message: m.text, participant: m.role },
+        // MessageEventData.participant is a Participant ({ display_name });
+        // the role string doubles as the display name here.
+        data: { message: m.text, participant: { display_name: m.role } },
         timestamp: new Date(Date.now() + i).toISOString(),
         id: `evt-${i}`,
     }));
@@ -1666,6 +1666,7 @@ describe("Signals — SignalProcessor", () => {
                         handlerCalls.push(`${ctx.phase}-stopper`);
                         // Only stop in pre-phase
                         if (ctx.phase === "pre") return { stopOtherSignals: true } as SignalDirective;
+                        return undefined; // post-phase: let the other signals run
                     },
                 },
                 {
@@ -2206,6 +2207,7 @@ describe("Signals — SignalProcessor", () => {
                                     if (ctx.phase === stopPhase) {
                                         return { stopOtherSignals: true } as SignalDirective;
                                     }
+                                    return undefined; // other phase: no stop
                                 },
                             },
                             {
@@ -2352,7 +2354,8 @@ describe("Signals — SignalProcessor", () => {
                             if (i === 0) {
                                 firstTriggeredAt = trigger.firstTriggeredAt;
                             } else {
-                                expect(trigger.firstTriggeredAt).toEqual(firstTriggeredAt);
+                                // i === 0 always ran (numFires >= 2), so the baseline exists.
+                                expect(trigger.firstTriggeredAt).toEqual(firstTriggeredAt!);
                             }
                         }
                     },
@@ -2613,7 +2616,6 @@ describe("Signals — Pipeline Integration", () => {
     }) {
         const agent = new Agent({
             name: "PipelineTestAgent",
-            description: "Testing signal pipeline integration",
             context: {},
             provider: config.provider,
             signals: config.signals,

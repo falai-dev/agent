@@ -34,7 +34,6 @@ describe("DirectiveChainTracker", () => {
             const provider = new MockProvider({ responseMessage: "OK" });
             const agent = new Agent({
                 name: "TestAgent",
-                description: "Test",
                 provider,
                 flows: [{ title: "A", when: "test", steps: [{ prompt: "hi" }] }],
             });
@@ -61,7 +60,6 @@ describe("DirectiveChainTracker", () => {
             const provider = new MockProvider({ responseMessage: "OK" });
             const agent = new Agent({
                 name: "TestAgent",
-                description: "Test",
                 provider,
                 maxDirectiveChain: 5,
                 flows: [{ title: "A", when: "test", steps: [{ prompt: "hi" }] }],
@@ -276,7 +274,6 @@ describe("Agent.maxDirectiveChain integration", () => {
         const provider = new MockProvider({ responseMessage: "OK" });
         const agent = new Agent({
             name: "TestAgent",
-            description: "Test",
             provider,
             flows: [{ title: "A", when: "test", steps: [{ prompt: "hi" }] }],
         });
@@ -288,7 +285,6 @@ describe("Agent.maxDirectiveChain integration", () => {
         const provider = new MockProvider({ responseMessage: "OK" });
         const agent = new Agent({
             name: "TestAgent",
-            description: "Test",
             provider,
             maxDirectiveChain: 20,
             flows: [{ title: "A", when: "test", steps: [{ prompt: "hi" }] }],
@@ -301,7 +297,6 @@ describe("Agent.maxDirectiveChain integration", () => {
         const provider = new MockProvider({ responseMessage: "OK" });
         const agent = new Agent({
             name: "TestAgent",
-            description: "Test",
             provider,
             maxDirectiveChain: 3,
             flows: [{ title: "A", when: "test", steps: [{ prompt: "hi" }] }],

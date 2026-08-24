@@ -41,6 +41,17 @@ interface TestContext {
  */
 class FlowCompletionTrackingProvider implements AiProvider {
     public readonly name = "FlowCompletionTrackingProvider";
+
+    // Mirrors the canonical mock block; this provider exercises structured
+    // JSON-schema calls only, never tools.
+    public readonly capabilities = {
+        supportsTools: false,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: false,
+        supportsPromptCaching: false,
+    };
+
     public calls: { type: string; schemaName?: string; flowIds?: string[] }[] = [];
 
     /**
@@ -60,7 +71,14 @@ class FlowCompletionTrackingProvider implements AiProvider {
         input: GenerateMessageInput<TContext>
     ): Promise<GenerateMessageOutput<TStructured>> {
         const schemaName = input.parameters?.schemaName || "";
-        const schema = input.parameters?.jsonSchema as any;
+        // jsonSchema is an open-ended record; this structural view is all the
+        // routing/step-selection branches below inspect. Type-level only.
+        const schema = input.parameters?.jsonSchema as unknown as {
+            properties?: {
+                flows?: { properties?: Record<string, unknown> };
+                selectedStepId?: { enum?: string[] };
+            };
+        };
 
         // Routing call — has flows property
         if (schema?.properties?.flows?.properties) {
@@ -153,7 +171,6 @@ describe("6.1 Integration test: idle-state release without onComplete", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "IdleReleaseAgent",
-            description: "Test idle-state release on flow completion",
             goal: "Test flow completion",
             context: { userId: "user-1" },
             provider,
@@ -201,7 +218,8 @@ describe("6.1 Integration test: idle-state release without onComplete", () => {
         expect(response.session!.currentStep).toBeUndefined();
         expect(response.session!.flowHistory![0].completed).toBe(true);
         // stoppedReason is 'completed' or 'last_step' depending on detection path
-        expect(["completed", "last_step"]).toContain(response.stoppedReason);
+        // (always set on a finished respond() turn, hence the non-null assertion)
+        expect(["completed", "last_step"]).toContain(response.stoppedReason!);
     });
 
     test("second message after completion: completed flow is excluded from routing, fallback runs", async () => {
@@ -209,7 +227,6 @@ describe("6.1 Integration test: idle-state release without onComplete", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "IdleReleaseAgent",
-            description: "Test completed flow exclusion",
             goal: "Test flow completion",
             context: { userId: "user-1" },
             provider,
@@ -289,7 +306,6 @@ describe("6.2 Integration test: flow.reentrant: true re-selection", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "ReentrantAgent",
-            description: "Test reentrant flow behavior",
             goal: "Test reentrant",
             context: { userId: "user-1" },
             provider,
@@ -366,7 +382,6 @@ describe("6.2 Integration test: flow.reentrant: true re-selection", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "NonReentrantAgent",
-            description: "Test non-reentrant flow exclusion",
             goal: "Test non-reentrant",
             context: { userId: "user-1" },
             provider,
@@ -436,7 +451,6 @@ describe("6.3 Integration test: onComplete wins over reentrant", () => {
 
         const agent = new Agent<TestContext, TestData>({
             name: "OnCompleteWinsAgent",
-            description: "Test onComplete precedence over reentrant",
             goal: "Test onComplete vs reentrant",
             context: { userId: "user-1" },
             provider,
@@ -523,7 +537,6 @@ describe("6.4 Integration test: completed flow filtered from routing candidates"
 
         const agent = new Agent<TestContext, TestData>({
             name: "MultiFlowAgent",
-            description: "Test completed flow exclusion from routing",
             goal: "Test routing exclusion",
             context: { userId: "user-1" },
             provider,
@@ -617,7 +630,6 @@ describe("6.4 Integration test: completed flow filtered from routing candidates"
 
         const agent = new Agent<TestContext, TestData>({
             name: "AllCompletedAgent",
-            description: "Test all-flows-completed fallback",
             goal: "Test fallback",
             context: { userId: "user-1" },
             provider,

@@ -23,7 +23,6 @@ describe("FlowRouter Integration with Flexible Conditions", () => {
     beforeEach(() => {
         agent = new Agent<TestContext, TestData>({
             name: "RoutingEngineTestAgent",
-            description: "Agent for testing routing engine with flexible conditions",
             provider: MockProviderFactory.basic(),
             schema: {
                 type: "object",
@@ -380,7 +379,7 @@ describe("FlowRouter Integration with Flexible Conditions", () => {
             const complexAgent = new Agent<TestContext, TestData>({
                 name: "ComplexAgent",
                 provider: MockProviderFactory.basic(),
-                guidelines: [
+                instructions: [
                     {
                         id: "global-premium-guideline",
                         when: "premium user detected",
@@ -410,7 +409,7 @@ describe("FlowRouter Integration with Flexible Conditions", () => {
                     (ctx) => ctx.data?.hasPayment === true,
                     (ctx) => ctx.data?.isComplete !== true,
                 ],
-                guidelines: [
+                instructions: [
                     {
                         id: "flow-specific-guideline",
                         when: "high priority interaction",
@@ -425,7 +424,7 @@ describe("FlowRouter Integration with Flexible Conditions", () => {
                         when: "step activation required",
                         if: (ctx) => ctx.data?.userType === "premium",
                         skip: (ctx) => ctx.data?.issueType === "general",
-                        guidelines: [
+                        instructions: [
                             {
                                 id: "step-guideline",
                                 when: "step-specific guidance needed",

@@ -38,7 +38,6 @@ interface TestData {
 function createTestAgent(provider?: MockProvider): Agent<TestContext, TestData> {
   return new Agent<TestContext, TestData>({
     name: "TypeFixTestAgent",
-    description: "A test agent for ResponseModal type fix integration testing",
     goal: "Test ResponseModal type compatibility and history conversion",
     context: {
       userId: "type-test-user-123",

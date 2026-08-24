@@ -47,7 +47,6 @@ function createTestAgent(opts?: { maxDirectiveChain?: number }) {
     const provider = new MockProvider({ responseMessage: "OK" });
     return new Agent<TestContext, TestData>({
         name: "DirectiveIntegrationAgent",
-        description: "Integration test agent for directive pipeline",
         goal: "Test directive flow end-to-end",
         context: { userId: "user-123" },
         provider,

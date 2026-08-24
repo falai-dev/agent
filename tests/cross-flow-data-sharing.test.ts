@@ -71,7 +71,6 @@ interface ECommerceData {
 function createCustomerServiceAgent(): Agent<unknown, CustomerServiceData> {
   return new Agent<unknown, CustomerServiceData>({
     name: "CustomerServiceAgent",
-    description: "Comprehensive customer service agent",
     provider: MockProviderFactory.basic(),
     schema: {
       type: "object",
@@ -100,7 +99,6 @@ function createCustomerServiceAgent(): Agent<unknown, CustomerServiceData> {
 function createECommerceAgent(): Agent<unknown, ECommerceData> {
   return new Agent<unknown, ECommerceData>({
     name: "ECommerceAgent",
-    description: "E-commerce platform agent",
     provider: MockProviderFactory.basic(),
     schema: {
       type: "object",

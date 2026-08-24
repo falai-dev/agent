@@ -46,7 +46,6 @@ class TestableAnthropicProvider extends AnthropicProvider {
 
 class TestableOpenAIProvider extends OpenAIProvider {
     public testBuildMessages(history: HistoryItem[]) {
-        // @ts-expect-error - accessing private method for testing
         return this.buildChatMessages(history);
     }
 }
@@ -60,7 +59,6 @@ class TestableGeminiProvider extends GeminiProvider {
 
 class TestableOpenRouterProvider extends OpenRouterProvider {
     public testBuildMessages(history: HistoryItem[]) {
-        // @ts-expect-error - accessing private method for testing
         return this.buildChatMessages(history);
     }
 }

@@ -40,7 +40,6 @@ interface TestData {
 function createTestAgent(provider?: MockProvider): Agent<TestContext, TestData> {
   return new Agent<TestContext, TestData>({
     name: "TestAgent",
-    description: "A test agent for ResponseModal testing",
     goal: "Test ResponseModal functionality",
     context: {
       userId: "test-user-123",
@@ -742,6 +741,13 @@ describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
    */
   class ToolLoopEmptyMessageProvider implements AiProvider {
     readonly name = "ToolLoopEmptyMessageProvider";
+    readonly capabilities = {
+      supportsTools: true,
+      supportsNativeJsonSchema: true,
+      supportsStreaming: true,
+      supportsStreamingToolCalls: true,
+      supportsPromptCaching: false,
+    };
     private responseCallCount = 0;
 
     async generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>(
@@ -843,7 +849,6 @@ describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
 
     const agent = new Agent<TestContext, TestData>({
       name: "ToolLoopTestAgent",
-      description: "Tests tool loop empty message handling",
       goal: "Verify the agent retries when follow-up returns empty",
       context: { userId: "test-user", sessionCount: 0 },
       provider,
@@ -874,7 +879,6 @@ describe("ResponseModal Tool Loop - Empty Follow-Up Message Fix", () => {
       tools: [
         {
           id: "lookup_info",
-          name: "lookup_info",
           description: "Looks up information",
           parameters: { type: "object", properties: { query: { type: "string" } } },
           handler: async () => ({ success: true, data: { result: "Found info about your query" } }),

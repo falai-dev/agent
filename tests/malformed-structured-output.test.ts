@@ -55,7 +55,7 @@ describe("malformed schema-mandated output", () => {
     test("truncated JSON fragment fails the turn instead of leaking to the user", async () => {
         const agent = makeAgent('{"message": "Sure, I can boo');
         await expect(
-            agent.respond<TestContext, TestData>({
+            agent.respond({
                 history: [{ role: "user", content: "hi" }],
             })
         ).rejects.toThrow(/could not be parsed as JSON/);
@@ -63,7 +63,7 @@ describe("malformed schema-mandated output", () => {
 
     test("fence-wrapped valid JSON is salvaged into a clean reply", async () => {
         const agent = makeAgent('```json\n{"message": "Clean reply."}\n```');
-        const response = await agent.respond<TestContext, TestData>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
         expect(response.message).toBe("Clean reply.");
@@ -71,7 +71,7 @@ describe("malformed schema-mandated output", () => {
 
     test("plain prose without any JSON shape still passes through untouched", async () => {
         const agent = makeAgent("Just a plain sentence from the model.");
-        const response = await agent.respond<TestContext, TestData>({
+        const response = await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
         expect(response.message).toBe("Just a plain sentence from the model.");

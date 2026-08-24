@@ -17,7 +17,6 @@ import {
 function createStreamingTestAgent(provider?: MockProvider): Agent {
   return new Agent({
     name: "StreamingTestAgent",
-    description: "Agent for testing streaming functionality",
     provider: provider || MockProviderFactory.basic(),
   });
 }

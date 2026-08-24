@@ -1,7 +1,17 @@
 import { expect, test, describe, beforeEach } from "bun:test";
-import { ConditionTemplate, TemplateContext } from "../src/types/template";
+import { TemplateContext } from "../src/types/template";
 import { ConditionEvaluator, extractAIContextStrings, hasProgrammaticConditions, splitWhenConditions } from "../src/utils/condition";
 import { createTemplateContext } from "../src/utils";
+
+/**
+ * Test-local mirror of ConditionEvaluator's private condition shape —
+ * `ConditionTemplate` was removed from the public surface in v2
+ * (see src/utils/condition.ts).
+ */
+type ConditionTemplate<TContext = unknown, TData = unknown> =
+  | string
+  | ((params: TemplateContext<TContext, TData>) => boolean | Promise<boolean>)
+  | ConditionTemplate<TContext, TData>[];
 
 interface TestData {
   name?: string;

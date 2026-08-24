@@ -43,6 +43,13 @@ interface TestContext {
 
 class RouterProbeProvider implements AiProvider {
     public readonly name = "RouterProbeProvider";
+    public readonly capabilities = {
+        supportsTools: true,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: true,
+        supportsPromptCaching: false,
+    };
     /** When true, the routing call returns no structured payload (parse failure). */
     public unparseableRouting = false;
     public rawRoutingMessage = "";

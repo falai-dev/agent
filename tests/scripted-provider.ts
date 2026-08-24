@@ -306,10 +306,11 @@ export class ScriptedOpenAIClient {
         seq += 1;
         const message: ChatCompletion["choices"][number]["message"] =
           turn.kind === "content"
-            ? { role: "assistant", content: turn.text }
+            ? { role: "assistant", content: turn.text, refusal: null }
             : {
                 role: "assistant",
                 content: null,
+                refusal: null,
                 tool_calls: turn.calls.map((call) => ({
                   id: call.id,
                   type: "function" as const,
@@ -325,6 +326,7 @@ export class ScriptedOpenAIClient {
             {
               index: 0,
               message,
+              logprobs: null,
               finish_reason: turn.kind === "content" ? "stop" : "tool_calls",
             },
           ],
@@ -401,6 +403,12 @@ export class ScriptedProvider extends OpenAICompatibleProvider {
   };
   protected readonly logLabel = "SCRIPTED";
   protected readonly displayName = "Scripted";
+
+  // Public wrapper so tests can instantiate: the base constructor is
+  // protected (subclass-only by design).
+  constructor(init: OpenAICompatibleProviderInit) {
+    super(init);
+  }
 }
 
 /**

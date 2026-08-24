@@ -262,7 +262,6 @@ describe("Failed-Turn Rollback", () => {
 
     const agent = new Agent<TestContext, TestData>({
       name: "RollbackAgent",
-      description: "Agent for failed-turn rollback testing",
       context: { userId: "user-rollback" },
       provider,
       persistence: { adapter, userId: "user-rollback" },
@@ -314,7 +313,6 @@ describe("Pre-Session Staged Data", () => {
 
     const agent = new Agent<TestContext, TestData>({
       name: "StagedDataAgent",
-      description: "Agent for pre-session staged data testing",
       context: { userId: "user-staged" },
       provider,
       initialData: { name: "Initial" },
@@ -346,7 +344,6 @@ describe("Pre-Session Staged Data", () => {
 
     const agent = new Agent<TestContext, TestData>({
       name: "StagedUpdatesAgent",
-      description: "Agent for pre-session update staging",
       context: { userId: "user-staged-2" },
       provider,
       initialData: { name: "Initial" },

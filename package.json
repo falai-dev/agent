@@ -43,7 +43,7 @@
     "build:cjs": "tsc --project tsconfig.cjs.json",
     "fix:cjs": "echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "typecheck:examples": "tsc --noEmit --project examples/tsconfig.json",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",

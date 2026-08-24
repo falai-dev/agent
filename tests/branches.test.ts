@@ -641,6 +641,13 @@ describe("createAiConditionEvaluator", () => {
         let prompt = "";
         const provider: AiProvider = {
             name: "RecordingProvider",
+            capabilities: {
+                supportsTools: true,
+                supportsNativeJsonSchema: true,
+                supportsStreaming: true,
+                supportsStreamingToolCalls: true,
+                supportsPromptCaching: false,
+            },
             async generateMessage(input) {
                 prompt = input.prompt;
                 return { message: "" };
@@ -665,6 +672,13 @@ describe("createAiConditionEvaluator", () => {
         let prompt = "";
         const provider: AiProvider = {
             name: "RecordingProvider",
+            capabilities: {
+                supportsTools: true,
+                supportsNativeJsonSchema: true,
+                supportsStreaming: true,
+                supportsStreamingToolCalls: true,
+                supportsPromptCaching: false,
+            },
             async generateMessage(input) {
                 prompt = input.prompt;
                 return { message: "" };

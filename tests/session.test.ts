@@ -58,7 +58,6 @@ interface ShoppingCartData {
 function createSessionTestAgent(): Agent<unknown, SupportTicketData> {
   return new Agent<unknown, SupportTicketData>({
     name: "SessionTestAgent",
-    description: "Agent for testing session functionality",
     provider: MockProviderFactory.basic(),
     persistence: {
       adapter: new MemoryAdapter(),

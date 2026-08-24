@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
 import { StreamingToolExecutor } from "../src/core/StreamingToolExecutor";
 import type {
-    EnhancedTool,
+    Tool,
     ToolCallRequest,
     ToolContext,
     ToolExecutionUpdate,
@@ -28,7 +28,7 @@ function makeToolContext<TContext = Record<string, unknown>, TData = Record<stri
     };
 }
 
-/** Create an EnhancedTool that resolves after `delayMs` with a given value */
+/** Create an Tool that resolves after `delayMs` with a given value */
 function makeTool(opts: {
     id: string;
     concurrencySafe?: boolean;
@@ -38,11 +38,13 @@ function makeTool(opts: {
     shouldFail?: boolean;
     maxResultSizeChars?: number;
     onExecute?: (signal?: AbortSignal) => void;
-}): EnhancedTool {
+}): Tool {
     return {
         id: opts.id,
-        name: opts.id,
-        handler: async (_ctx, _args) => {
+        handler: async (
+            _ctx: ToolContext<unknown, unknown>,
+            _args?: Record<string, unknown>
+        ) => {
             if (opts.delayMs) {
                 await new Promise((r) => setTimeout(r, opts.delayMs));
             }
@@ -115,9 +117,9 @@ describe("Property 1: Concurrency Safety Invariant", () => {
                     let resolveExec: () => void;
                     const execPromise = new Promise<void>((r) => { resolveExec = r; });
 
-                    const tool: EnhancedTool = {
+                    const tool: Tool = {
                         id,
-                        name: id,
+
                         handler: async () => {
                             // Record a snapshot of what's currently executing
                             // We access the executor's internal state indirectly:
@@ -156,9 +158,9 @@ describe("Property 1: Concurrency Safety Invariant", () => {
         const toolContext = makeToolContext();
         const executor = new StreamingToolExecutor(toolContext);
 
-        const makeTrackedTool = (id: string, safe: boolean, delayMs: number): EnhancedTool => ({
+        const makeTrackedTool = (id: string, safe: boolean, delayMs: number): Tool => ({
             id,
-            name: id,
+
             handler: async () => {
                 executionLog.push({ id, event: "start" });
                 await new Promise((r) => setTimeout(r, delayMs));
@@ -272,12 +274,12 @@ describe("Property 3: Backward Compatibility Defaults", () => {
     /**
      * **Validates: Requirements 2.2, 3.4, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6**
      *
-     * For any valid Tool without EnhancedTool methods, system defaults:
+     * For any valid Tool without Tool methods, system defaults:
      * isConcurrencySafe → false, isReadOnly → false, isDestructive → false,
      * interruptBehavior → 'block'; handler executes without validation/permission gates.
      */
 
-    test("plain Tool without EnhancedTool methods defaults to non-concurrent and executes", async () => {
+    test("plain Tool without Tool methods defaults to non-concurrent and executes", async () => {
         await fc.assert(
             fc.asyncProperty(
                 fc.array(fc.string({ minLength: 1, maxLength: 20 }), { minLength: 1, maxLength: 10 }),
@@ -293,9 +295,9 @@ describe("Property 3: Backward Compatibility Defaults", () => {
 
                     for (const id of uniqueIds) {
                         // Plain Tool — no isConcurrencySafe, no interruptBehavior, etc.
-                        const plainTool: EnhancedTool = {
+                        const plainTool: Tool = {
                             id,
-                            name: id,
+
                             handler: async () => {
                                 handlerCalled.add(id);
                                 return { data: `result-${id}`, success: true };
@@ -328,9 +330,9 @@ describe("Property 3: Backward Compatibility Defaults", () => {
 
         for (let i = 0; i < 3; i++) {
             const id = `plain-${i}`;
-            const tool: EnhancedTool = {
+            const tool: Tool = {
                 id,
-                name: id,
+
                 handler: async () => {
                     executionLog.push({ id, event: "start" });
                     await new Promise((r) => setTimeout(r, 5));
@@ -374,9 +376,8 @@ describe("Property 4: Sibling Abort Propagation", () => {
         let cancelToolCompleted = false;
 
         // Tool that will fail quickly
-        const failingTool: EnhancedTool = {
+        const failingTool: Tool = {
             id: "failer",
-            name: "failer",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 1));
                 throw new Error("intentional failure");
@@ -385,9 +386,8 @@ describe("Property 4: Sibling Abort Propagation", () => {
         };
 
         // Sibling tool with 'cancel' behavior — takes longer
-        const cancelTool: EnhancedTool = {
+        const cancelTool: Tool = {
             id: "cancel-sibling",
-            name: "cancel-sibling",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 200));
                 cancelToolCompleted = true;
@@ -417,9 +417,8 @@ describe("Property 4: Sibling Abort Propagation", () => {
 
         let blockToolCompleted = false;
 
-        const failingTool: EnhancedTool = {
+        const failingTool: Tool = {
             id: "failer",
-            name: "failer",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 1));
                 throw new Error("intentional failure");
@@ -428,9 +427,8 @@ describe("Property 4: Sibling Abort Propagation", () => {
         };
 
         // Sibling tool with 'block' behavior (default) — should complete
-        const blockTool: EnhancedTool = {
+        const blockTool: Tool = {
             id: "block-sibling",
-            name: "block-sibling",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 15));
                 blockToolCompleted = true;
@@ -468,9 +466,8 @@ describe("Property 5: Progress Immediacy", () => {
         const executor = new StreamingToolExecutor(toolContext);
 
         // Tool 0: slow, blocks result ordering
-        const slowTool: EnhancedTool = {
+        const slowTool: Tool = {
             id: "slow",
-            name: "slow",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 50));
                 return { data: "slow-result", success: true };
@@ -480,9 +477,8 @@ describe("Property 5: Progress Immediacy", () => {
 
         // Tool 1: fast, emits progress
         // We simulate progress by directly pushing to pendingProgress
-        const fastTool: EnhancedTool = {
+        const fastTool: Tool = {
             id: "fast",
-            name: "fast",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 1));
                 return { data: "fast-result", success: true };
@@ -521,9 +517,8 @@ describe("Property 5: Progress Immediacy", () => {
         const executor = new StreamingToolExecutor(toolContext);
 
         // Add two tools — first one still executing, second has progress
-        const tool1: EnhancedTool = {
+        const tool1: Tool = {
             id: "t1",
-            name: "t1",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 1000));
                 return { data: "t1", success: true };
@@ -576,9 +571,9 @@ describe("Property 14: Concurrency Limit Enforcement", () => {
 
                     for (let i = 0; i < toolCount; i++) {
                         const id = `t-${i}`;
-                        const tool: EnhancedTool = {
+                        const tool: Tool = {
                             id,
-                            name: id,
+
                             handler: async () => {
                                 currentConcurrency++;
                                 peakConcurrency = Math.max(peakConcurrency, currentConcurrency);
@@ -610,9 +605,9 @@ describe("Property 14: Concurrency Limit Enforcement", () => {
 
         for (let i = 0; i < 15; i++) {
             const id = `t-${i}`;
-            const tool: EnhancedTool = {
+            const tool: Tool = {
                 id,
-                name: id,
+
                 handler: async () => {
                     currentConcurrency++;
                     peakConcurrency = Math.max(peakConcurrency, currentConcurrency);
@@ -651,9 +646,8 @@ describe("Property 13: Abort Signal Propagation", () => {
 
         let blockToolCompleted = false;
 
-        const blockTool: EnhancedTool = {
+        const blockTool: Tool = {
             id: "block-tool",
-            name: "block-tool",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 30));
                 blockToolCompleted = true;
@@ -665,9 +659,8 @@ describe("Property 13: Abort Signal Propagation", () => {
 
         // Cancel tool: the handler still runs (no cooperative cancellation),
         // but the executor marks the result as cancelled after the handler returns.
-        const cancelTool: EnhancedTool = {
+        const cancelTool: Tool = {
             id: "cancel-tool",
-            name: "cancel-tool",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 30));
                 return { data: "cancel-done", success: true };
@@ -705,9 +698,8 @@ describe("Property 13: Abort Signal Propagation", () => {
         let queuedToolStarted = false;
 
         // First tool: non-concurrent, takes some time
-        const firstTool: EnhancedTool = {
+        const firstTool: Tool = {
             id: "first",
-            name: "first",
             handler: async () => {
                 await new Promise((r) => setTimeout(r, 20));
                 return { data: "first-done", success: true };
@@ -715,9 +707,8 @@ describe("Property 13: Abort Signal Propagation", () => {
         };
 
         // Second tool: queued behind first (non-concurrent default)
-        const queuedTool: EnhancedTool = {
+        const queuedTool: Tool = {
             id: "queued",
-            name: "queued",
             handler: async () => {
                 queuedToolStarted = true;
                 return { data: "queued-done", success: true };
@@ -751,9 +742,8 @@ describe("Pre-execution gates enforced on the streaming path", () => {
     test("denied checkPermissions does NOT invoke the handler", async () => {
         let handlerRan = false;
         const executor = new StreamingToolExecutor(makeToolContext());
-        const gatedTool: EnhancedTool = {
+        const gatedTool: Tool = {
             id: "privileged",
-            name: "privileged",
             handler: async () => {
                 handlerRan = true;
                 return { data: "should-not-run", success: true };
@@ -774,9 +764,8 @@ describe("Pre-execution gates enforced on the streaming path", () => {
     test("failed validateInput does NOT invoke the handler", async () => {
         let handlerRan = false;
         const executor = new StreamingToolExecutor(makeToolContext());
-        const gatedTool: EnhancedTool = {
+        const gatedTool: Tool = {
             id: "validated",
-            name: "validated",
             handler: async () => {
                 handlerRan = true;
                 return { data: "should-not-run", success: true };
@@ -797,9 +786,8 @@ describe("Pre-execution gates enforced on the streaming path", () => {
     test("passing gates let the handler run normally", async () => {
         let handlerRan = false;
         const executor = new StreamingToolExecutor(makeToolContext());
-        const allowedTool: EnhancedTool = {
+        const allowedTool: Tool = {
             id: "allowed",
-            name: "allowed",
             handler: async () => {
                 handlerRan = true;
                 return { data: "ran", success: true };

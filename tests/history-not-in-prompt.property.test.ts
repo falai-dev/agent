@@ -77,8 +77,7 @@ describe("Property 16: History Not In System Prompt", () => {
                     // but NOT addInteractionHistory or addLastMessage
                     await pc.addAgentMeta({
                         name: "TestAgent",
-                        identity: "A test agent",
-                        personality: "Friendly",
+                        persona: "A test agent — Friendly",
                     });
                     await pc.addInstruction("Flow: TestFlow — A test flow");
                     await pc.addDirectives(directives.length > 0 ? directives : undefined);
@@ -159,12 +158,8 @@ describe("Property 16: History Not In System Prompt", () => {
                     // Build a full prompt like ResponseEngine does
                     await pc.addAgentMeta({
                         name: "FullAgent",
-                        identity: "A comprehensive agent",
-                        personality: "Professional",
+                        persona: "A comprehensive agent — Professional",
                         goal: "Help users",
-                        description: "An agent for testing",
-                        rules: ["Be helpful"],
-                        prohibitions: ["Never lie"],
                     });
                     await pc.addInstruction("Flow: Main — Primary flow");
                     await pc.addInstruction("Rules:\n- Follow instructions");
