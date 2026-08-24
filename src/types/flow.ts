@@ -74,6 +74,17 @@ export interface PrepareResult<TContext = unknown, TData = unknown> {
   goTo?: string | { flow?: string; step?: string; data?: Partial<TData>; reason?: string; carry?: 'preserve' | 'reset'; };
   /** Mark the current flow as complete */
   complete?: true | { next?: Directive<unknown, unknown>; reason?: string; };
+  /**
+   * Prompt lines appended to this turn's generation prompt. Pre-LLM
+   * augmentation: honored by auto steps' prepare; other step kinds drop it
+   * with a loud warning rather than silently ignoring it.
+   */
+  appendPrompt?: string[];
+  /**
+   * Extra tools made available for this turn only. Same auto-step-only
+   * honoring as {@link appendPrompt}.
+   */
+  injectTools?: Tool[];
 }
 
 

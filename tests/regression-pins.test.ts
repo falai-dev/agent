@@ -38,7 +38,7 @@ import type {
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
 } from "../src/types/ai";
-import type { Directive } from "../src/types";
+import type { Directive, PrepareResult } from "../src/types";
 import type { ToolExecutionUpdate } from "../src/types/tool";
 
 interface Ctx { userId: string }
@@ -237,10 +237,8 @@ describe("runStreamingBatch transient failure closes from executed results", () 
 
 describe("Step hooks desugar composes both spellings", () => {
     test("shorthand runs first, hook second, returns merge via Algorithm 4", async () => {
-        // appendPrompt is a Directive-level pre-LLM field (not part of the
-        // PrepareResult subset), so handlers are typed at their real shape.
-        const shorthandPrepare = (): Directive<Ctx, Data> => ({ appendPrompt: ["shorthand"] });
-        const hookPrepare = (): Directive<Ctx, Data> => ({ appendPrompt: ["hook"] });
+        const shorthandPrepare = (): PrepareResult<Ctx, Data> => ({ appendPrompt: ["shorthand"] });
+        const hookPrepare = (): PrepareResult<Ctx, Data> => ({ appendPrompt: ["hook"] });
 
         const step = new Step<Ctx, Data>("desugarFlow", {
             id: "both_spellings",
@@ -256,10 +254,8 @@ describe("Step hooks desugar composes both spellings", () => {
         if (typeof prepareFn !== "function") {
             throw new Error("setup: expected a composed prepare function");
         }
-        // The composed result is typed as PrepareResult; read it back at the
-        // Directive surface that declares appendPrompt.
-        const prepared = (await prepareFn({ userId: "u1" }, {})) as Directive<Ctx, Data>;
-        expect(prepared.appendPrompt).toEqual(["shorthand", "hook"]);
+        const prepared = await prepareFn({ userId: "u1" }, {});
+        expect(prepared?.appendPrompt).toEqual(["shorthand", "hook"]);
 
         const finalizeFn = step.finalize;
         if (typeof finalizeFn !== "function") {
