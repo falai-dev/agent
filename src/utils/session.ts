@@ -70,6 +70,18 @@ export function createSession<TData = Record<string, unknown>>(
 /**
  * Helper to create a new session ID
  */
+/**
+ * Restore a session from a persisted blob (the named inverse of
+ * `createPersistedState`). Restores data + flowHistory verbatim — including a
+ * completed-flow blob, whose collected state MUST survive the round trip.
+ * Prefer this over the ambiguous `createSession(state)` overload.
+ */
+export function restoreSession<TData = Record<string, unknown>>(
+  state: Partial<SessionState<TData>>
+): SessionState<TData> {
+  return createSession<TData>(state);
+}
+
 export function createSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

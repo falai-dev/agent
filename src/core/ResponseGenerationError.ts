@@ -21,13 +21,10 @@ export class ResponseGenerationError extends Error {
         message: string,
         public readonly details?: ResponseGenerationErrorDetails
     ) {
-        super(message);
+        // Native `cause` chain: `err.cause` is the original error, so
+        // consumers can reach ProviderError.code etc. without string matching.
+        super(message, { cause: details?.originalError });
         this.name = 'ResponseGenerationError';
-
-        // Preserve stack trace from original error if available
-        if (details?.originalError instanceof Error && details.originalError.stack) {
-            this.stack = `${this.stack}\nCaused by: ${details.originalError.stack}`;
-        }
     }
 
     /**

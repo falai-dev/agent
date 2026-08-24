@@ -2,7 +2,7 @@
  * Response processing utilities shared between respond() and respondStream() methods
  */
 
-import type {
+import type { EndedFlow,
   AgentOptions,
   Event,
   SessionState,
@@ -86,6 +86,8 @@ export interface RoutingResult<TContext, TData = unknown> {
   session: SessionState<TData>;
   isFlowComplete: boolean;
   completedFlows?: Flow<TContext, TData>[];
+  /** Flows exited via pendingDirective redirects/resets this turn. */
+  endedFlows?: EndedFlow[];
 }
 
 /**
@@ -175,8 +177,10 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     history: Event[];
     context: TContext;
     signal?: AbortSignal;
+    /** Restrict ROUTING candidates; directive targets still use the full registry. */
+    allowedFlows?: string[];
   }): Promise<RoutingResult<TContext, TData>> {
-    const { session, history, context, signal } = params;
+    const { session, history, context, signal, allowedFlows } = params;
 
     // PHASE 2: ROUTING + STEP SELECTION - Determine which flow and step to use (combined)
     let selectedFlow: Flow<TContext, TData> | undefined;
@@ -185,9 +189,23 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     let isFlowComplete = false;
     let completedFlows: Flow<TContext, TData>[] = [];
     let targetSession = session;
+    // Flows exited this turn via pendingDirective redirect/reset
+    const endedFlows: EndedFlow[] = [];
+    let exitPrevFlowId: string | undefined;
+    let exitPrevFlowTitle: string | undefined;
+    let exitReason: EndedFlow['reason'] | undefined;
 
     // Get flows early since we need them for pending directives
     const flows = this.getFlows();
+    // Routing candidates may be narrowed for this turn (entry pins); the
+    // pendingDirective applier below still resolves targets against the FULL
+    // registry so declared redirects always resolve.
+    const routingFlows =
+      allowedFlows && allowedFlows.length > 0
+        ? flows.filter(
+            (f) => allowedFlows.includes(f.id) || allowedFlows.includes(f.title),
+          )
+        : flows;
 
     // Check for pending directive from previous flow completion or external dispatch
     if (targetSession.pendingDirective) {
@@ -216,8 +234,16 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         pendingDirective: nextDirective,
       };
 
+      // Capture the flow we're leaving so directive-driven exits surface on
+      // the response (endedFlows).
+      exitPrevFlowId = targetSession.currentFlow?.id;
+      exitPrevFlowTitle = exitPrevFlowId
+        ? flows.find((f) => f.id === exitPrevFlowId)?.title
+        : undefined;
+
       // Apply the directive: resolve position field to a flow/step
       if (directive.goTo) {
+        exitReason = 'goto';
         const flowTarget = typeof directive.goTo === 'string'
           ? directive.goTo
           : directive.goTo.flow;
@@ -304,6 +330,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           }
         }
       } else if (directive.reset) {
+        exitReason = 'reset';
         // Reset current flow
         if (targetSession.currentFlow) {
           const currentFlow = flows.find(r => r.id === targetSession.currentFlow?.id);
@@ -337,10 +364,19 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       // Skip FlowRouter.decideFlowAndStep — the directive resolved the position
     }
 
-    // If no pending transition or transition handled, do normal routing
-    if (flows.length > 0 && !selectedFlow) {
+    if (
+      exitReason &&
+      exitPrevFlowId &&
+      (!selectedFlow || selectedFlow.id !== exitPrevFlowId)
+    ) {
+      endedFlows.push({ flowId: exitPrevFlowId, title: exitPrevFlowTitle, reason: exitReason });
+    }
+
+    // If no pending transition or transition handled, do normal routing.
+    // Candidates honor allowedFlows; completion scoring runs over the same set.
+    if (routingFlows.length > 0 && !selectedFlow) {
       const orchestration = await this.flowRouter.decideFlowAndStep({
-        flows: flows,
+        flows: routingFlows,
         session: targetSession,
         history,
         agentOptions: this.options,
@@ -371,6 +407,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       session: targetSession,
       isFlowComplete,
       completedFlows,
+      ...(endedFlows.length > 0 ? { endedFlows } : {}),
     };
   }
 
@@ -731,6 +768,8 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     history: Event[]; // Use Event[] for internal processing
     context: TContext;
     signal?: AbortSignal;
+    /** Restrict this turn's routing candidates (entry pins). */
+    allowedFlows?: string[];
   }): Promise<{
     selectedFlow?: Flow<TContext, TData>;
     selectedStep?: Step<TContext, TData>;
@@ -745,6 +784,8 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     signalHalted?: boolean;
     /** Reply text from the halt directive. */
     signalHaltReply?: string;
+    /** Flows exited via pendingDirective redirects/resets this turn. */
+    endedFlows?: EndedFlow[];
   }> {
     try {
       // Create a fresh chain tracker for this turn (Requirement 22.1)
@@ -807,6 +848,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
             history: params.history,
             context: params.context,
             signal: params.signal,
+            allowedFlows: params.allowedFlows,
           }),
         ]);
 
@@ -889,6 +931,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
           signalFirings: signalResult.firings,
           signalPreDirective: signalResult.mergedDirective || undefined,
+          endedFlows: routingResult.endedFlows,
         };
       }
 
@@ -898,6 +941,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         history: params.history,
         context: params.context,
         signal: params.signal,
+        allowedFlows: params.allowedFlows,
       });
 
       let updatedSession = routingResult.session;
@@ -955,6 +999,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         session: stepResult.session,
         // If a branch changed the flow, the original isFlowComplete no longer applies
         isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
+        endedFlows: routingResult.endedFlows,
       };
     } catch (error) {
       throw ResponseGenerationError.fromError(error, 'routing_optimization', params);

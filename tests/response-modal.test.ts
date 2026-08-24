@@ -646,7 +646,9 @@ describe("ResponseModal Error Handling", () => {
     });
 
     expect(responseError.stack).toContain("Wrapped error");
-    expect(responseError.stack).toContain("Caused by:");
+    // Native cause chain: err.cause IS the original error (replaces the old
+    // hand-appended "Caused by:" stack suffix).
+    expect(responseError.cause).toBe(originalError);
   });
 });
 

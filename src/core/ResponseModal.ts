@@ -7,6 +7,7 @@ import type {
     AgentOptions,
     AgentResponse,
     AgentResponseStreamChunk,
+    EndedFlow,
     History,
     SessionState,
     StepRef,
@@ -40,7 +41,8 @@ import { ToolLoopExecutor } from "./ToolLoopExecutor";
 import { flow } from "./flow-namespace";
 import { SignalCoordinator } from "./SignalCoordinator";
 import { ResponseGenerationError } from "./ResponseGenerationError";
-import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render } from "../utils";
+import { ProviderError, SessionConflictError } from "../types/errors";
+import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render, userMessage, assistantMessage } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import { StreamingMessageDecoder } from "../utils/streamingMessage";
 import { tryParseJSONResponse } from "../utils/json";
@@ -97,6 +99,19 @@ export interface ResponseModalOptions {
  */
 export interface RespondParams<TContext = unknown, TData = unknown> extends Record<string, unknown> {
     history: History;
+    /**
+     * The user's message for this turn. When set, the engine appends it to the
+     * generation history AND to the returned session's history, then appends
+     * the assistant reply on top — callers who hold sessions no longer need to
+     * maintain history arrays by hand.
+     */
+    message?: string;
+    /**
+     * Restrict this turn's ROUTING candidates to these flow ids/titles.
+     * Directive targets (goTo etc.) still resolve against the full registry.
+     * Use for entry-pin funnels instead of cloning/filtering agents.
+     */
+    allowedFlows?: string[];
     step?: StepRef;
     session?: SessionState<TData>;
     contextOverride?: Partial<TContext>;
@@ -142,6 +157,10 @@ interface ResponseContext<TContext = unknown, TData = unknown> {
     signalHalted?: boolean;
     /** Reply from a halt directive. */
     signalHaltReply?: string;
+    /** Flows exited via pendingDirective redirects/resets during routing. */
+    endedFlows?: EndedFlow[];
+    /** The user turn supplied via params.message (drives history ownership). */
+    turnMessage?: string;
 }
 
 /**
@@ -262,6 +281,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         } catch (error) {
             if (preTurnSession) {
                 this.agent.session.syncSession(preTurnSession);
+            }
+            // Typed library errors carry their own semantics (ProviderError.code,
+            // SessionConflictError) — rethrow bare so consumers can branch on
+            // them instead of string-matching. Everything else wraps with the
+            // original attached as `cause`.
+            if (error instanceof ProviderError || error instanceof SessionConflictError) {
+                throw error;
             }
             throw new ResponseGenerationError(
                 `[ResponseGenerationError] Response generation failed: ${error instanceof Error ? error.message : String(error)}. ` +
@@ -457,21 +483,25 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
      */
     private async prepareUnifiedResponseContext(params: RespondParams<TContext, TData>): Promise<ResponseContext<TContext, TData>> {
         try {
-            const { history: simpleHistory, contextOverride, signal } = params;
+            const { history: simpleHistory, contextOverride, signal, message: turnMessage, allowedFlows } = params;
 
             // Validate input parameters
             if (!simpleHistory) {
                 throw new ResponseGenerationError(
                     '[ResponseGenerationError] Missing history: history is required for response generation. ' +
-                    'Pass a valid history array to the respond/stream method.',
+                    'Pass a valid history array (or pass `message` alongside an existing history base).',
                     { params, phase: 'validation' }
                 );
             }
 
+            // `message` is the user turn: appended to what the model sees this
+            // turn AND recorded on the returned session's history.
+            const history = turnMessage
+                ? [...simpleHistory, userMessage(turnMessage)]
+                : simpleHistory;
+
             // Convert HistoryItem[] to Event[] for internal processing
-            const historyEvents = historyToEvents(simpleHistory);
-            // Keep original HistoryItem[] format for external APIs
-            const history = simpleHistory;
+            const historyEvents = historyToEvents(history);
 
             // Use ResponsePipeline for context and session preparation; context
             // and session are passed explicitly — the pipeline holds no state
@@ -517,6 +547,13 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 }
             }
 
+            // Record the user turn on the session's own history so the returned
+            // session carries the full exchange (respond owns session.history
+            // when `message` is used).
+            if (turnMessage) {
+                session.history = [...(session.history ?? []), userMessage(turnMessage)];
+            }
+
             // PHASE 1: PREPARE - Execute prepare function if current step has one
             try {
                 const prepareDirective = await this.stepLifecycle.runPrepare(session, effectiveContext);
@@ -545,6 +582,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 signalPreDirective?: Directive<TContext, TData>;
                 signalHalted?: boolean;
                 signalHaltReply?: string;
+                endedFlows?: EndedFlow[];
             };
             try {
                 routingResult = await this.responsePipeline.routeAndSelectStep({
@@ -552,6 +590,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     history: historyEvents,
                     context: effectiveContext,
                     signal,
+                    allowedFlows,
                 });
             } catch (error) {
                 throw ResponseGenerationError.fromError(error, 'routing_and_step_selection', params, { session, effectiveContext });
@@ -561,6 +600,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 effectiveContext,
                 session: routingResult.session,
                 history,
+                turnMessage,
                 selectedFlow: routingResult.selectedFlow,
                 selectedStep: routingResult.selectedStep,
                 responseDirectives: routingResult.responseDirectives,
@@ -570,6 +610,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 signalPreDirective: routingResult.signalPreDirective,
                 signalHalted: routingResult.signalHalted,
                 signalHaltReply: routingResult.signalHaltReply,
+                endedFlows: routingResult.endedFlows,
             };
         } catch (error) {
             // Re-throw ResponseGenerationError as-is, wrap others
@@ -759,6 +800,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         let isFlowComplete = false;
         let appliedInstructions: AppliedInstruction[] | undefined;
         let runPostPhase = true;
+        let tokensUsed: number | undefined;
+        const endedFlows: EndedFlow[] = [...(responseContext.endedFlows ?? [])];
 
         switch (plan.outcome.kind) {
             case 'halt': {
@@ -776,6 +819,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 });
                 isFlowComplete = true;
                 stoppedReason = plan.outcome.stoppedReason;
+                endedFlows.push({
+                    flowId: plan.outcome.selectedFlow.id,
+                    title: plan.outcome.selectedFlow.title,
+                    reason: plan.outcome.stoppedReason,
+                });
                 break;
             }
             case 'flowStep': {
@@ -797,6 +845,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 toolCalls = result.toolCalls;
                 session = result.session;
                 appliedInstructions = result.appliedInstructions;
+                tokensUsed = result.tokensUsed;
                 if (plan.outcome.step) {
                     executedSteps = [{ id: plan.outcome.step.id, flowId: plan.outcome.selectedFlow.id }];
                 }
@@ -822,6 +871,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             session, context: effectiveContext, historyEvents, message, signalFirings, runPostPhase,
         });
 
+        // History ownership: with params.message the returned session carries
+        // the full exchange — the user turn was recorded pre-routing, the
+        // assistant tail lands here (post-phase, so overridden replies are the
+        // ones recorded). Empty tails are skipped.
+        if (responseContext.turnMessage && tail.message) {
+            tail.session.history = [...(tail.session.history ?? []), assistantMessage(tail.message)];
+        }
+
         return {
             message: tail.message,
             session: tail.session,
@@ -831,6 +888,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             stoppedReason,
             appliedInstructions,
             triggeredSignals: tail.triggeredSignals,
+            ...(tokensUsed !== undefined ? { metadata: { tokensUsed } } : {}),
+            ...(endedFlows.length > 0 ? { endedFlows } : {}),
         };
     }
 
@@ -863,6 +922,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
         session: SessionState<TData>;
         appliedInstructions?: AppliedInstruction[];
         stoppedReason?: StoppedReason;
+        /** Provider-reported usage for the primary generation call. */
+        tokensUsed?: number;
     }> {
         const { selectedFlow, selectedStep, responseDirectives, history, context, historyEvents, signal, transientAppendage, mergedPreDirective } = params;
         let session = params.session;
@@ -953,6 +1014,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             let structuredData = result.structured;
             let message = structuredData?.message || result.message;
+            const tokensUsed = result.metadata?.tokensUsed;
 
             // A schema was requested but the provider failed to parse the model's
             // JSON (truncated output, fence-wrapped fragments). Raw protocol
@@ -1029,7 +1091,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 : effectiveResult;
             session = await this.collectDataFromResponse({ result: dataSource, selectedFlow, nextStep, session });
 
-            return { message, toolCalls, session, appliedInstructions };
+            return { message, toolCalls, session, appliedInstructions, tokensUsed };
         } finally {
             // Drain the transient appendage at end of turn.
             // This ensures Directive.appendPrompt does not leak to subsequent

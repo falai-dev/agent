@@ -205,8 +205,14 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
       this.signalProcessor = undefined;
     }
 
-    // Set log level based on debug option
+    // Set log level based on debug option. NOTE: loglevel's default logger is
+    // process-global — one agent enabling debug turns on DEBUG for every agent
+    // in the process. Warned so multi-tenant embedders aren't surprised.
     if (options.debug) {
+      logger.warn(
+        `[Agent] "${options.name}" enabled debug logging via the PROCESS-GLOBAL loglevel level. ` +
+        `Every agent in this process now logs at DEBUG. Scope logging in your host if needed.`
+      );
       logger.setLevel(LoggerLevel.DEBUG);
     }
 

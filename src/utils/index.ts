@@ -16,6 +16,7 @@ export {
   createSession,
   createSessionId,
   createPersistedState,
+  restoreSession,
   enterFlow,
   enterStep,
   completeCurrentFlow,

@@ -7,6 +7,8 @@
 // Core
 export { Agent } from "./core/Agent";
 export type { RespondParams, StreamOptions, GenerateOptions } from "./core/ResponseModal";
+export { ResponseGenerationError } from "./core/ResponseGenerationError";
+export type { EndedFlow } from "./types/agent";
 export { createAgent } from "./core/createAgent";
 export { Flow } from "./core/Flow";
 export { Step, FlowConfigurationError } from "./core/Step";
@@ -189,4 +191,4 @@ export type {
   ConditionWhen,
 } from "./types";
 export { EventKind, MessageRole } from "./types";
-export { createSession, createSessionId, createPersistedState, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils";
+export { restoreSession, createSession, createSessionId, createPersistedState, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils";

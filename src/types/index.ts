@@ -12,6 +12,7 @@ export type {
   AppliedInstruction,
   AgentResponseStreamChunk,
   AgentResponse,
+  EndedFlow,
   ContextLifecycleHooks,
   ContextProvider,
   ValidationError,

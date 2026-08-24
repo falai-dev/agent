@@ -330,6 +330,13 @@ export interface AppliedInstruction {
   scopeRef?: string;
 }
 
+/** A flow that left its active position during a turn. */
+export interface EndedFlow {
+  flowId: string;
+  title?: string;
+  reason: StoppedReason;
+}
+
 export interface AgentResponse<TData = Record<string, unknown>> {
   message: string;
   session?: SessionState<TData>;
@@ -350,6 +357,17 @@ export interface AgentResponse<TData = Record<string, unknown>> {
    * Mirrors the observability framing of `executedSteps` and `appliedInstructions`.
    */
   triggeredSignals?: SignalFiring<unknown, TData>[];
+  /**
+   * Provider-reported usage for this turn's primary generation (routing and
+   * extraction sub-calls are not included).
+   */
+  metadata?: { tokensUsed?: number };
+  /**
+   * Flows that LEFT their active position this turn — completions, redirects,
+   * resets. planTurn knows these internally; surfaced so consumers stop
+   * re-deriving them from executedSteps + session cursor inspection.
+   */
+  endedFlows?: EndedFlow[];
 }
 
 export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
