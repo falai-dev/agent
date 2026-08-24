@@ -180,11 +180,56 @@ export class PostgreSQLAdapter<TData = Record<string, unknown>> implements Persi
 }
 
 /**
+ * Coerce a raw DB value into a Date. node-postgres already returns Dates for
+ * timestamptz columns, but plain `timestamp` columns and other drivers hand
+ * back strings — accept both.
+ */
+function toDate(value: unknown): Date | undefined {
+  if (value == null) return undefined;
+  return value instanceof Date ? value : new Date(value as string);
+}
+
+/**
+ * Map a raw snake_case row onto the camelCase SessionData interface.
+ * `collected_data` is JSONB (already parsed by node-postgres); parse
+ * defensively if a driver hands back the raw string. Exported for tests.
+ */
+export function deserializeSessionRow<TData = Record<string, unknown>>(
+  row: Record<string, unknown>
+): SessionData<TData> {
+  const collected = row.collected_data;
+  return {
+    id: row.id as string,
+    userId: (row.user_id as string) || undefined,
+    agentName: (row.agent_name as string) || undefined,
+    status: row.status as SessionStatus,
+    currentFlow: (row.current_flow as string) || undefined,
+    currentStep: (row.current_step as string) || undefined,
+    collectedData:
+      collected == null
+        ? undefined
+        : typeof collected === "string"
+          ? (JSON.parse(collected) as CollectedStateData<TData>)
+          : (collected as CollectedStateData<TData>),
+    messageCount: (row.message_count as number) || 0,
+    lastMessageAt: toDate(row.last_message_at),
+    completedAt: toDate(row.completed_at),
+    version: (row.version as number | null) ?? undefined,
+    createdAt: toDate(row.created_at) ?? new Date(),
+    updatedAt: toDate(row.updated_at) ?? new Date(),
+  };
+}
+
+/**
  * PostgreSQL Session Repository
  */
 class PostgreSQLSessionRepository<TData = Record<string, unknown>>
   implements SessionRepository<TData> {
   constructor(private client: PgClient, private tableName: string) { }
+
+  private deserializeSession(row: Record<string, unknown>): SessionData<TData> {
+    return deserializeSessionRow<TData>(row);
+  }
 
   async create(
     data: Omit<SessionData<TData>, "createdAt" | "updatedAt"> & {
@@ -195,7 +240,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       data.id || createSessionId();
     const now = new Date();
 
-    const result = await this.client.query<SessionData<TData>>(
+    const result = await this.client.query<Record<string, unknown>>(
       `INSERT INTO ${this.tableName}
        (id, user_id, agent_name, status, collected_data, message_count, version, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -213,43 +258,43 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       ]
     );
 
-    return result.rows[0];
+    return this.deserializeSession(result.rows[0]);
   }
 
   async findById(id: string): Promise<SessionData<TData> | null> {
-    const result = await this.client.query<SessionData<TData>>(
+    const result = await this.client.query<Record<string, unknown>>(
       `SELECT * FROM ${this.tableName} WHERE id = $1`,
       [id]
     );
 
-    return result.rows[0] || null;
+    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
   }
 
   async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
-    const result = await this.client.query<SessionData<TData>>(
-      `SELECT * FROM ${this.tableName} 
+    const result = await this.client.query<Record<string, unknown>>(
+      `SELECT * FROM ${this.tableName}
        WHERE user_id = $1 AND status = 'active'
        ORDER BY created_at DESC
        LIMIT 1`,
       [userId]
     );
 
-    return result.rows[0] || null;
+    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
   }
 
   async findByUserId(
     userId: string,
     limit = 100
   ): Promise<SessionData<TData>[]> {
-    const result = await this.client.query<SessionData<TData>>(
-      `SELECT * FROM ${this.tableName} 
+    const result = await this.client.query<Record<string, unknown>>(
+      `SELECT * FROM ${this.tableName}
        WHERE user_id = $1
        ORDER BY created_at DESC
        LIMIT $2`,
       [userId, limit]
     );
 
-    return result.rows;
+    return result.rows.map((row) => this.deserializeSession(row));
   }
 
   async update(
@@ -306,7 +351,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       const versionParam = paramIndex++;
       values.push(expectedVersion);
 
-      const result = await this.client.query<SessionData<TData>>(
+      const result = await this.client.query<Record<string, unknown>>(
         `UPDATE ${this.tableName}
          SET ${fields.join(", ")}
          WHERE id = $${idParam} AND (version IS NULL OR version = $${versionParam})
@@ -314,7 +359,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
         values
       );
 
-      if (result.rows[0]) return result.rows[0];
+      if (result.rows[0]) return this.deserializeSession(result.rows[0]);
 
       const existing = await this.findById(id);
       if (!existing) return null;
@@ -324,7 +369,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
     fields.push(`version = COALESCE(version, 0) + 1`);
     values.push(id);
 
-    const result = await this.client.query<SessionData<TData>>(
+    const result = await this.client.query<Record<string, unknown>>(
       `UPDATE ${this.tableName}
        SET ${fields.join(", ")}
        WHERE id = $${paramIndex}
@@ -332,7 +377,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       values
     );
 
-    return result.rows[0] || null;
+    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
   }
 
   async updateStatus(
@@ -362,7 +407,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
   }
 
   async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
-    const result = await this.client.query<SessionData<TData>>(
+    const result = await this.client.query<Record<string, unknown>>(
       `UPDATE ${this.tableName}
        SET message_count = message_count + 1,
            last_message_at = NOW(),
@@ -372,7 +417,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       [id]
     );
 
-    return result.rows[0] || null;
+    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
   }
 
   async delete(id: string): Promise<boolean> {

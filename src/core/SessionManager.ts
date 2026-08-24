@@ -79,27 +79,25 @@ export class SessionManager<TData = unknown> {
       return this.currentSession;
     }
 
-    // If sessionId provided, try to load it first
+    // If sessionId provided, try to load it first. A missing row returns
+    // `null` (→ create below); a FAILED load throws — swallowing it here used
+    // to fall through to create(), which saved a blank session over the
+    // existing row and erased the user's conversation on a transient DB error.
     if (effectiveSessionId && this.persistenceManager) {
-      try {
-        const session = await this.persistenceManager.loadSessionState(
-          effectiveSessionId
-        );
-        if (session) {
-          // Loaded session data wins over anything staged before it existed
-          const pending = this.agent?.consumePendingData();
-          if (pending && Object.keys(pending).length > 0) {
-            log.debug(
-              "SessionManager: discarding pre-session staged data in favor of loaded session state",
-              pending
-            );
-          }
-          this.currentSession = session;
-          return session;
+      const session = await this.persistenceManager.loadSessionState(
+        effectiveSessionId
+      );
+      if (session) {
+        // Loaded session data wins over anything staged before it existed
+        const pending = this.agent?.consumePendingData();
+        if (pending && Object.keys(pending).length > 0) {
+          log.debug(
+            "SessionManager: discarding pre-session staged data in favor of loaded session state",
+            pending
+          );
         }
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      } catch (_error) {
-        // Session doesn't exist, will create new one with this ID
+        this.currentSession = session;
+        return session;
       }
     }
 

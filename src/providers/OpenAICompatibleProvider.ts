@@ -27,11 +27,13 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
+import type { ResponseInput } from "openai/resources/responses/responses";
 import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, logger, assertUsableCompletion, combineAbortSignals } from "../utils";
 import {
   classifyProviderError,
   getErrorMessage,
   isBackupEligible,
+  isRetriableProviderError,
   toProviderError,
   type ErrorClassificationOptions,
 } from "./errorClassification";
@@ -143,6 +145,56 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
   // ---------------------------------------------------------------------
 
   /**
+   * Map interaction history onto Responses-API input items so structured
+   * generations carry the same context as chat completions: plain messages
+   * pass through as easy-input messages, and tool exchanges map to
+   * function_call / function_call_output pairs keyed by the original ids.
+   * The prompt is appended as the final user turn, mirroring how the
+   * chat-completions path builds its messages array.
+   */
+  private buildResponsesInput(history: HistoryItem[], prompt: string): ResponseInput {
+    const items: ResponseInput = [];
+
+    for (const item of history) {
+      switch (item.role) {
+        case "system":
+          items.push({ role: "system", content: item.content });
+          break;
+        case "user":
+          items.push({ role: "user", content: item.content });
+          break;
+        case "assistant": {
+          if (item.content) {
+            items.push({ role: "assistant", content: item.content });
+          }
+          for (const toolCall of item.tool_calls ?? []) {
+            items.push({
+              type: "function_call",
+              call_id: toolCall.id,
+              name: toolCall.name,
+              arguments: JSON.stringify(toolCall.arguments),
+            });
+          }
+          break;
+        }
+        case "tool":
+          items.push({
+            type: "function_call_output",
+            call_id: item.tool_call_id,
+            output:
+              typeof item.content === "string"
+                ? item.content
+                : JSON.stringify(item.content),
+          });
+          break;
+      }
+    }
+
+    items.push({ role: "user", content: prompt });
+    return items;
+  }
+
+  /**
    * Generate a structured (JSON schema) response. Default uses the
    * responses.parse API (OpenAI, OpenRouter). Subclasses whose API lacks
    * responses.parse (e.g. DeepSeek) override this to use chat completions
@@ -162,8 +214,10 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     const response = await this.client.responses.parse(
       {
         model,
-        instructions: input.prompt,
-        input: "",
+        // Full conversation context: mapped history plus the prompt as the
+        // final user turn. This used to send only `instructions` with an empty
+        // `input`, leaving every structured turn without conversation memory.
+        input: this.buildResponsesInput(input.history, input.prompt),
         reasoning: {
           effort: input.parameters?.reasoning?.effort || "low",
         },
@@ -440,7 +494,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     try {
       yield* withStreamRetry(
         (signal) => this.generateStreamWithModel<TContext, TStructured>(this.primaryModel, input, signal),
-        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${this.primaryModel} stream` }
+        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${this.primaryModel} stream`, isRetriable: (error) => isRetriableProviderError(error, this.classificationOptions) }
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
@@ -467,7 +521,7 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
         try {
           yield* withStreamRetry(
             (signal) => this.generateStreamWithModel<TContext, TStructured>(backupModel, input, signal),
-            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${backupModel} stream` }
+            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${backupModel} stream`, isRetriable: (error) => isRetriableProviderError(error, this.classificationOptions) }
           );
           logger.debug(`[${this.logLabel}] Backup model ${backupModel} succeeded`);
           return;
@@ -529,7 +583,8 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
       operation,
       this.retryConfig.timeout,
       this.retryConfig.retries,
-      `${this.displayName} ${model}`
+      `${this.displayName} ${model}`,
+      (error) => isRetriableProviderError(error, this.classificationOptions)
     ) as Promise<GenerateMessageOutput<TStructured>>;
   }
 
@@ -689,10 +744,15 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
     let totalTokens: number | undefined;
-    const toolCalls: Array<{
-      toolName: string;
-      arguments: Record<string, unknown>;
-    }> = [];
+    // Tool calls arrive across MANY deltas: the first carries the id/name,
+    // later ones carry argument-string fragments that must be concatenated.
+    // Accumulate per call (keyed by `index`) and parse once at stream end —
+    // parsing per fragment produced N broken entries for one real call.
+    const pendingToolCalls = new Map<
+      number,
+      { toolName: string; argumentsBuffer: string }
+    >();
+    let lastSlot = 0;
 
     for await (const chunk of stream) {
       currentModel = chunk.model;
@@ -707,18 +767,25 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
       const choice = chunk.choices?.[0];
       if (!choice) continue;
 
-      // Extract tool calls from delta
+      // Accumulate streamed tool-call fragments by index
       if (choice.delta?.tool_calls) {
         for (const toolCall of choice.delta.tool_calls) {
-          if (toolCall.function) {
-            toolCalls.push({
-              toolName: toolCall.function.name || "",
-              arguments: this.parseToolCallArguments(
-                toolCall.function.arguments,
-                true
-              ),
-            });
+          // Spec-compliant chunks carry `index`; servers that omit it send
+          // one call's fragments sequentially, so keep appending to lastSlot.
+          const slot =
+            typeof toolCall.index === "number" ? toolCall.index : lastSlot;
+          lastSlot = slot;
+          const entry = pendingToolCalls.get(slot) ?? {
+            toolName: "",
+            argumentsBuffer: "",
+          };
+          if (toolCall.function?.name) {
+            entry.toolName = toolCall.function.name;
           }
+          if (toolCall.function?.arguments) {
+            entry.argumentsBuffer += toolCall.function.arguments;
+          }
+          pendingToolCalls.set(slot, entry);
         }
       }
 
@@ -751,6 +818,20 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
           error
         );
       }
+    }
+
+    const toolCalls: Array<{
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }> = [];
+    for (const [, entry] of [...pendingToolCalls.entries()].sort(
+      ([a], [b]) => a - b
+    )) {
+      if (!entry.toolName) continue;
+      toolCalls.push({
+        toolName: entry.toolName,
+        arguments: this.parseToolCallArguments(entry.argumentsBuffer, true),
+      });
     }
 
     // Include tool calls in structured response (even without JSON schema)

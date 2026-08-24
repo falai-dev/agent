@@ -150,6 +150,40 @@ export function isBackupEligible(code: ProviderErrorCode): boolean {
   return code === "rate_limited" || code === "overloaded";
 }
 
+/** Errors whose name marks them as caller- or SDK-initiated aborts. */
+function isAbortLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  // OpenAI SDK: APIUserAbortError. Generic fetch/DOM: AbortError / TimeoutError
+  // handled below via classification (a timeout IS retriable; a caller abort is not).
+  return (
+    error.name === "AbortError" ||
+    error.name === "APIUserAbortError" ||
+    /abort/i.test(error.message)
+  );
+}
+
+/**
+ * Whether an error is worth retrying with backoff: transient availability,
+ * rate-limiting, timeouts and network faults only. Deterministic failures —
+ * auth (401/403), invalid request (400/404/422) and caller aborts — must fail
+ * fast instead of burning the retry budget on the same outcome.
+ */
+export function isRetriableProviderError(
+  error: unknown,
+  options?: ErrorClassificationOptions
+): boolean {
+  if (isAbortLikeError(error)) {
+    return false;
+  }
+  const code = classifyProviderError(error, options);
+  return (
+    code === "rate_limited" ||
+    code === "overloaded" ||
+    code === "timeout" ||
+    code === "network"
+  );
+}
+
 /**
  * Wrap a terminal failure (after retries/backup exhaustion) in a
  * normalized ProviderError, preserving the original error as `cause`.

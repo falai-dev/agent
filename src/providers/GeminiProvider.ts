@@ -29,6 +29,7 @@ import {
   classifyProviderError,
   getErrorMessage,
   isBackupEligible,
+  isRetriableProviderError,
   toProviderError,
   type ErrorClassificationOptions,
 } from "./errorClassification";
@@ -555,7 +556,8 @@ export class GeminiProvider implements AiProvider {
       operation,
       this.retryConfig.timeout,
       this.retryConfig.retries,
-      `Gemini ${model}`
+      `Gemini ${model}`,
+      (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS)
     ) as Promise<GenerateMessageOutput<TStructured>>;
   }
 
@@ -569,7 +571,7 @@ export class GeminiProvider implements AiProvider {
     try {
       yield* withStreamRetry(
         (signal) => this.generateStreamWithModel(this.primaryModel, input, signal),
-        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${this.primaryModel} stream` }
+        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${this.primaryModel} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
@@ -595,7 +597,7 @@ export class GeminiProvider implements AiProvider {
         try {
           yield* withStreamRetry(
             (signal) => this.generateStreamWithModel(backupModel, input, signal),
-            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${backupModel} stream` }
+            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${backupModel} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
           );
           logger.debug(`[GEMINI] Backup model ${backupModel} succeeded`);
           return;

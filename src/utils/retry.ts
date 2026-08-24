@@ -9,6 +9,13 @@ export interface RetryOptions<T> {
   delay: (attempt: number) => number;
   onRetry?: (attempt: number, error: unknown) => void;
   onFailure?: (error: unknown) => boolean;
+  /**
+   * Predicate deciding whether an error may be retried at all. When it returns
+   * `false` the error is rethrown immediately — no backoff, no further attempts.
+   * Providers pass a classifier here so deterministic failures (401, 400,
+   * caller aborts) fail fast instead of burning the full retry budget.
+   */
+  isRetriable?: (error: unknown) => boolean;
 }
 
 /** Provider timeout (ms) + retry count, after defaults are applied. */
@@ -40,7 +47,7 @@ export function resolveRetryConfig(input?: {
 }
 
 export async function retry<T>(options: RetryOptions<T>): Promise<T> {
-  const { operation, maxRetries, delay, onRetry, onFailure } = options;
+  const { operation, maxRetries, delay, onRetry, onFailure, isRetriable } = options;
 
   let lastError: unknown;
 
@@ -49,6 +56,12 @@ export async function retry<T>(options: RetryOptions<T>): Promise<T> {
       return await operation();
     } catch (error: unknown) {
       lastError = error;
+
+      // Unretriable errors (auth, invalid request, caller aborts) fail fast —
+      // retrying a deterministic failure only adds latency to the same outcome.
+      if (isRetriable && !isRetriable(error)) {
+        throw error;
+      }
 
       if (attempt === maxRetries) {
         const shouldRethrow = onFailure ? onFailure(lastError) : true;
@@ -111,7 +124,8 @@ export const withTimeoutAndRetry = async <T>(
   operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number = 60000,
   maxRetries: number = 3,
-  operationName: string = "AI operation"
+  operationName: string = "AI operation",
+  isRetriable?: (error: unknown) => boolean
 ): Promise<T> => {
   const createTimeoutOperation = () => async (): Promise<T> => {
     const controller = new AbortController();
@@ -144,6 +158,7 @@ export const withTimeoutAndRetry = async <T>(
     operation: createTimeoutOperation(),
     maxRetries,
     delay: defaultBackoff,
+    isRetriable,
     onRetry: (attempt: number, error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(
@@ -170,6 +185,12 @@ export interface StreamRetryOptions {
   delay?: (attempt: number) => number;
   /** Label used in retry logs. */
   operationName?: string;
+  /**
+   * Predicate deciding whether a pre-first-chunk failure may be retried.
+   * When it returns `false` the error propagates immediately. Post-first-chunk
+   * failures are never retried regardless (the stream is already committed).
+   */
+  isRetriable?: (error: unknown) => boolean;
   /**
    * Max ms to wait for the *first* chunk (time-to-first-token) before treating
    * the attempt as failed. Guards a provider that opens a stream and then
@@ -221,6 +242,7 @@ export async function* withStreamRetry<T>(
     delay = defaultBackoff,
     operationName = "AI stream",
     firstChunkTimeoutMs,
+    isRetriable,
   } = options;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -246,6 +268,11 @@ export async function* withStreamRetry<T>(
         yield result.value;
       }
     } catch (error: unknown) {
+      // Unretriable errors (auth, invalid request, caller aborts) propagate
+      // immediately — no backoff for a deterministic failure.
+      if (isRetriable && !isRetriable(error)) {
+        throw error;
+      }
       // Can't retry once deltas are out, and don't retry past the budget.
       if (yielded || attempt === maxRetries) {
         throw error;

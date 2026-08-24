@@ -22,6 +22,7 @@ import {
   classifyProviderError,
   getErrorMessage,
   isBackupEligible,
+  isRetriableProviderError,
   toProviderError,
   type ErrorClassificationOptions,
 } from "./errorClassification";
@@ -394,7 +395,8 @@ export class AnthropicProvider implements AiProvider {
       operation,
       this.retryConfig.timeout,
       this.retryConfig.retries,
-      `Anthropic ${model}`
+      `Anthropic ${model}`,
+      (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS)
     ) as Promise<GenerateMessageOutput<TStructured>>;
   }
 
@@ -408,7 +410,7 @@ export class AnthropicProvider implements AiProvider {
     try {
       yield* withStreamRetry(
         (signal) => this.generateStreamWithModel<TContext, TStructured>(this.primaryModel, input, signal),
-        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Anthropic ${this.primaryModel} stream` }
+        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Anthropic ${this.primaryModel} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
       );
     } catch (primaryError: unknown) {
       const primaryErrMsg = getErrorMessage(primaryError);
@@ -434,7 +436,7 @@ export class AnthropicProvider implements AiProvider {
         try {
           yield* withStreamRetry(
             (signal) => this.generateStreamWithModel<TContext, TStructured>(backupModel, input, signal),
-            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Anthropic ${backupModel} stream` }
+            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Anthropic ${backupModel} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
           );
           logger.debug(`[ANTHROPIC] Backup model ${backupModel} succeeded`);
           return;
@@ -545,10 +547,13 @@ export class AnthropicProvider implements AiProvider {
     let stopReason: string | undefined;
     let inputTokens = 0;
     let outputTokens = 0;
-    const toolCalls: Array<{
-      toolName: string;
-      arguments: Record<string, unknown>;
-    }> = [];
+    // Tool_use blocks arrive empty: content_block_start carries `input: {}`,
+    // the real arguments stream in later as input_json_delta partial_json
+    // fragments. Accumulate per block index and parse once at stream end.
+    const pendingToolBlocks = new Map<
+      number,
+      { toolName: string; argumentsBuffer: string }
+    >();
 
     for await (const chunk of stream) {
       if (chunk.type === "message_start") {
@@ -556,9 +561,9 @@ export class AnthropicProvider implements AiProvider {
         inputTokens = chunk.message.usage.input_tokens;
       } else if (chunk.type === "content_block_start") {
         if (chunk.content_block.type === "tool_use") {
-          toolCalls.push({
+          pendingToolBlocks.set(chunk.index, {
             toolName: chunk.content_block.name,
-            arguments: chunk.content_block.input as Record<string, unknown>,
+            argumentsBuffer: "",
           });
         }
       } else if (chunk.type === "content_block_delta") {
@@ -570,11 +575,37 @@ export class AnthropicProvider implements AiProvider {
             accumulated,
             done: false,
           } as GenerateMessageStreamChunk<TStructured>;
+        } else if (chunk.delta.type === "input_json_delta") {
+          const block = pendingToolBlocks.get(chunk.index);
+          if (block) {
+            block.argumentsBuffer += chunk.delta.partial_json;
+          }
         }
       } else if (chunk.type === "message_delta") {
         stopReason = chunk.delta.stop_reason || undefined;
         outputTokens = chunk.usage.output_tokens;
       }
+    }
+
+    const toolCalls: Array<{
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }> = [];
+    for (const [, block] of [...pendingToolBlocks.entries()].sort(
+      ([a], [b]) => a - b
+    )) {
+      let args: Record<string, unknown> = {};
+      if (block.argumentsBuffer) {
+        try {
+          args = JSON.parse(block.argumentsBuffer) as Record<string, unknown>;
+        } catch (error) {
+          logger.warn(
+            "[ANTHROPIC] Failed to parse streamed tool call arguments:",
+            error
+          );
+        }
+      }
+      toolCalls.push({ toolName: block.toolName, arguments: args });
     }
 
     // Parse JSON response if schema was provided

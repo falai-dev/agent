@@ -560,10 +560,10 @@ describe("SessionManager Error Handling", () => {
     expect(sessionManager.getData()?.name).toBe("TestData");
   });
 
-  test("should handle persistence load failures gracefully", async () => {
+  test("should propagate persistence load failures (never clobber with a blank session)", async () => {
     const adapter = new MemoryAdapter();
 
-    // Create a custom failing manager that only fails on load, not save
+    // Create a custom failing manager that only fails on load, not save.
     class LoadFailingManager extends PersistenceManager {
       async loadSessionState<TData>(
         sessionId: string
@@ -575,12 +575,13 @@ describe("SessionManager Error Handling", () => {
     const failingManager = new LoadFailingManager({ adapter });
     const sessionManager = new SessionManager<TestData>(failingManager);
 
-    // Should create new session when load fails
-    const session = await sessionManager.getOrCreate("load-failure-test");
-
-    expect(session.id).toBe("load-failure-test");
-    expect(session.data).toEqual({});
-    expect(session.history).toEqual([]);
+    // A FAILED load must reject — swallowing it here used to fall through to
+    // create(), which saved a blank session over the existing row and erased
+    // the user's conversation on a transient DB error. Only a MISSING session
+    // (null) falls through to creation.
+    await expect(sessionManager.getOrCreate("load-failure-test")).rejects.toThrow(
+      "Load operation failed"
+    );
   });
 
   test("should handle persistence delete failures", async () => {
