@@ -29,6 +29,7 @@ import type {
 } from "../types";
 import { SessionConflictError } from "../types/errors";
 import { createSessionId } from "../utils";
+import { deserializeSessionRow } from "./sessionRow";
 
 /**
  * PostgreSQL query result interface
@@ -180,56 +181,11 @@ export class PostgreSQLAdapter<TData = Record<string, unknown>> implements Persi
 }
 
 /**
- * Coerce a raw DB value into a Date. node-postgres already returns Dates for
- * timestamptz columns, but plain `timestamp` columns and other drivers hand
- * back strings — accept both.
- */
-function toDate(value: unknown): Date | undefined {
-  if (value == null) return undefined;
-  return value instanceof Date ? value : new Date(value as string);
-}
-
-/**
- * Map a raw snake_case row onto the camelCase SessionData interface.
- * `collected_data` is JSONB (already parsed by node-postgres); parse
- * defensively if a driver hands back the raw string. Exported for tests.
- */
-export function deserializeSessionRow<TData = Record<string, unknown>>(
-  row: Record<string, unknown>
-): SessionData<TData> {
-  const collected = row.collected_data;
-  return {
-    id: row.id as string,
-    userId: (row.user_id as string) || undefined,
-    agentName: (row.agent_name as string) || undefined,
-    status: row.status as SessionStatus,
-    currentFlow: (row.current_flow as string) || undefined,
-    currentStep: (row.current_step as string) || undefined,
-    collectedData:
-      collected == null
-        ? undefined
-        : typeof collected === "string"
-          ? (JSON.parse(collected) as CollectedStateData<TData>)
-          : (collected as CollectedStateData<TData>),
-    messageCount: (row.message_count as number) || 0,
-    lastMessageAt: toDate(row.last_message_at),
-    completedAt: toDate(row.completed_at),
-    version: (row.version as number | null) ?? undefined,
-    createdAt: toDate(row.created_at) ?? new Date(),
-    updatedAt: toDate(row.updated_at) ?? new Date(),
-  };
-}
-
-/**
  * PostgreSQL Session Repository
  */
 class PostgreSQLSessionRepository<TData = Record<string, unknown>>
   implements SessionRepository<TData> {
   constructor(private client: PgClient, private tableName: string) { }
-
-  private deserializeSession(row: Record<string, unknown>): SessionData<TData> {
-    return deserializeSessionRow<TData>(row);
-  }
 
   async create(
     data: Omit<SessionData<TData>, "createdAt" | "updatedAt"> & {
@@ -262,7 +218,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       ]
     );
 
-    return this.deserializeSession(result.rows[0]);
+    return deserializeSessionRow(result.rows[0]);
   }
 
   async findById(id: string): Promise<SessionData<TData> | null> {
@@ -271,7 +227,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       [id]
     );
 
-    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
+    return result.rows[0] ? deserializeSessionRow(result.rows[0]) : null;
   }
 
   async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
@@ -283,7 +239,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       [userId]
     );
 
-    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
+    return result.rows[0] ? deserializeSessionRow(result.rows[0]) : null;
   }
 
   async findByUserId(
@@ -298,7 +254,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       [userId, limit]
     );
 
-    return result.rows.map((row) => this.deserializeSession(row));
+    return result.rows.map((row) => deserializeSessionRow(row));
   }
 
   async update(
@@ -363,7 +319,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
         values
       );
 
-      if (result.rows[0]) return this.deserializeSession(result.rows[0]);
+      if (result.rows[0]) return deserializeSessionRow(result.rows[0]);
 
       const existing = await this.findById(id);
       if (!existing) return null;
@@ -381,7 +337,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       values
     );
 
-    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
+    return result.rows[0] ? deserializeSessionRow(result.rows[0]) : null;
   }
 
   async updateStatus(
@@ -421,7 +377,7 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
       [id]
     );
 
-    return result.rows[0] ? this.deserializeSession(result.rows[0]) : null;
+    return result.rows[0] ? deserializeSessionRow(result.rows[0]) : null;
   }
 
   async delete(id: string): Promise<boolean> {

@@ -18,6 +18,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
 import { MemoryAdapter } from "../src/adapters/MemoryAdapter";
+import { RedisAdapter } from "../src/adapters/RedisAdapter";
+import { createRedisStub } from "./redis-stub";
 import {
   SQLiteAdapter,
   type SqliteDatabase,
@@ -93,6 +95,23 @@ async function makeSQLiteHarness(): Promise<AdapterUnderTest> {
       await db
         .prepare("UPDATE agent_sessions SET version = NULL WHERE id = ?")
         .run(id);
+    },
+  };
+}
+
+async function makeRedisHarness(): Promise<AdapterUnderTest> {
+  const redis = createRedisStub();
+  const adapter = new RedisAdapter<TestData>({ redis });
+  return {
+    adapter,
+    stripStoredVersion: async (id) => {
+      // Rewrite the stored blob without its version field (pre-2.4 row).
+      const key = `agent:session:${id}`;
+      const raw = await redis.get(key);
+      if (!raw) throw new Error(`no stored session ${id}`);
+      const blob = JSON.parse(raw) as Record<string, unknown>;
+      delete blob.version;
+      await redis.set(key, JSON.stringify(blob));
     },
   };
 }
@@ -610,3 +629,4 @@ async function withHarness(
 
 runAdapterContract("MemoryAdapter contract", makeMemoryHarness);
 runAdapterContract("SQLiteAdapter contract", makeSQLiteHarness);
+runAdapterContract("RedisAdapter contract", makeRedisHarness);

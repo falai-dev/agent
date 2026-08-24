@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { deserializeSessionRow } from "../src/adapters/PostgreSQLAdapter";
+import { deserializeSessionRow } from "../src/adapters/sessionRow";
 
 const baseRow = {
   id: "sess_1",

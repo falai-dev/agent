@@ -15,14 +15,7 @@ import type {
 } from "../types";
 import { SessionConflictError } from "../types/errors";
 import { createSessionId, logger } from "../utils";
-
-/**
- * Coerce a stored value into a Date. JSON round-trips turn Date fields into
- * ISO strings — same pattern as PostgreSQLAdapter.toDate.
- */
-function toDate(value: unknown): Date {
-  return value instanceof Date ? value : new Date(value as string);
-}
+import { coerceDate } from "./sessionRow";
 
 /**
  * Redis client interface - matches ioredis/redis clients
@@ -171,7 +164,16 @@ class RedisSessionRepository<TData = Record<string, unknown>>
     const data = await this.redis.get(this.getKey(id));
     if (!data) return null;
     try {
-      return JSON.parse(data) as SessionData<TData>;
+      const parsed = JSON.parse(data) as SessionData<TData>;
+      // JSON round-trips turn Dates into ISO strings — coerce on read so
+      // callers always get Date instances (parity with the SQL adapters).
+      return {
+        ...parsed,
+        lastMessageAt: coerceDate(parsed.lastMessageAt),
+        completedAt: coerceDate(parsed.completedAt),
+        createdAt: coerceDate(parsed.createdAt) ?? new Date(),
+        updatedAt: coerceDate(parsed.updatedAt) ?? new Date(),
+      };
     } catch (error) {
       logger.error(`Error parsing session data for id ${id}:`, error);
       return null;
@@ -181,7 +183,13 @@ class RedisSessionRepository<TData = Record<string, unknown>>
   async findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
     const sessionIds = await this.redis.hgetall(this.getUserKey(userId));
 
-    for (const sessionId of Object.keys(sessionIds)) {
+    // Newest-first: the hash values ARE the sessions' createdAt ISO strings,
+    // which sort lexicographically. Iterating hash order instead would return
+    // an arbitrary active session, not the most recent one.
+    const newestFirst = Object.keys(sessionIds).sort((a, b) =>
+      sessionIds[b].localeCompare(sessionIds[a])
+    );
+    for (const sessionId of newestFirst) {
       const session = await this.findById(sessionId);
       if (session && session.status === "active") {
         return session;
@@ -196,19 +204,21 @@ class RedisSessionRepository<TData = Record<string, unknown>>
     limit = 100
   ): Promise<SessionData<TData>[]> {
     const sessionIds = await this.redis.hgetall(this.getUserKey(userId));
-    const sessions: SessionData<TData>[] = [];
 
-    for (const sessionId of Object.keys(sessionIds).slice(0, limit)) {
+    // Sort BEFORE limiting (hash values are the createdAt ISO strings) —
+    // limiting first would keep an arbitrary hash-order subset.
+    const newestFirst = Object.keys(sessionIds)
+      .sort((a, b) => sessionIds[b].localeCompare(sessionIds[a]))
+      .slice(0, limit);
+    const sessions: SessionData<TData>[] = [];
+    for (const sessionId of newestFirst) {
       const session = await this.findById(sessionId);
       if (session) {
         sessions.push(session);
       }
     }
 
-    return sessions.sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    return sessions;
   }
 
   async update(
@@ -249,7 +259,9 @@ class RedisSessionRepository<TData = Record<string, unknown>>
     status: SessionStatus,
     completedAt?: Date
   ): Promise<SessionData<TData> | null> {
-    return this.update(id, { status, completedAt });
+    // An undefined completedAt must be omitted, not spread — update() writes
+    // whatever keys it receives, and SQL skips undefined columns.
+    return this.update(id, completedAt ? { status, completedAt } : { status });
   }
 
   async updateCollectedData(
@@ -264,17 +276,28 @@ class RedisSessionRepository<TData = Record<string, unknown>>
     flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
-    return this.update(id, { currentFlow: flow, currentStep: step });
+    // Mirror SQL's conditional column assembly: only defined values are written.
+    return this.update(id, {
+      ...(flow !== undefined && { currentFlow: flow }),
+      ...(step !== undefined && { currentStep: step }),
+    });
   }
 
   async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
     const session = await this.findById(id);
     if (!session) return null;
 
-    return this.update(id, {
+    // Bookkeeping write, deliberately NOT routed through update(): count bumps
+    // run alongside saveSessionState's version CAS every turn, so they must
+    // not move `version` (matches the SQL adapters' dedicated statement).
+    const updated: SessionData<TData> = {
+      ...session,
       messageCount: (session.messageCount || 0) + 1,
       lastMessageAt: new Date(),
-    });
+      updatedAt: new Date(),
+    };
+    await this.redis.setex(this.getKey(id), this.ttl, JSON.stringify(updated));
+    return updated;
   }
 
   async delete(id: string): Promise<boolean> {
@@ -334,7 +357,7 @@ class RedisMessageRepository implements MessageRepository {
     if (!data) return null;
     try {
       const message = JSON.parse(data) as MessageData;
-      return { ...message, createdAt: toDate(message.createdAt) };
+      return { ...message, createdAt: coerceDate(message.createdAt) ?? new Date() };
     } catch (error) {
       logger.error(`Error parsing message data for id ${id}:`, error);
       return null;
@@ -346,16 +369,15 @@ class RedisMessageRepository implements MessageRepository {
     limit = 1000
   ): Promise<MessageData[]> {
     const messageIds = await this.redis.hgetall(this.getSessionKey(sessionId));
-    const messages: MessageData[] = [];
 
     // Fetch ALL candidates first — limiting before sorting would keep an
-    // arbitrary hash-order subset instead of the oldest messages.
-    for (const messageId of Object.keys(messageIds)) {
-      const message = await this.findById(messageId);
-      if (message) {
-        messages.push(message);
-      }
-    }
+    // arbitrary hash-order subset instead of the oldest messages. The fetches
+    // are independent, so run them concurrently instead of N serialized
+    // round trips.
+    const fetched = await Promise.all(
+      Object.keys(messageIds).map((messageId) => this.findById(messageId))
+    );
+    const messages = fetched.filter((m): m is MessageData => m !== null);
 
     // Chronological order (matches PostgreSQL/Mongo adapters); limit applies
     // only after sorting is meaningful.
@@ -369,21 +391,24 @@ class RedisMessageRepository implements MessageRepository {
     // This would require additional indexing
     const pattern = `${this.keyPrefix}message:*`;
     const keys = await this.redis.keys(pattern);
-    const messages: MessageData[] = [];
 
-    for (const key of keys.slice(0, limit)) {
-      const data = await this.redis.get(key);
-      if (data) {
-        const parsed: MessageData = JSON.parse(data);
-        if (parsed.userId === userId) {
-          messages.push({ ...parsed, createdAt: toDate(parsed.createdAt) });
-        }
+    // Filter by userId BEFORE limiting — slicing keys first would drop
+    // matching messages that happen to sort after unrelated users' keys.
+    // ponytail: full keyspace scan per user query (pre-existing ceiling of
+    // this adapter); the upgrade path is a per-user message index.
+    const fetched = await Promise.all(keys.map((key) => this.redis.get(key)));
+    const messages: MessageData[] = [];
+    for (const data of fetched) {
+      if (!data) continue;
+      const parsed: MessageData = JSON.parse(data);
+      if (parsed.userId === userId) {
+        messages.push({ ...parsed, createdAt: coerceDate(parsed.createdAt) ?? new Date() });
       }
     }
 
-    return messages.sort(
-      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-    );
+    return messages
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit);
   }
 
   async delete(id: string): Promise<boolean> {

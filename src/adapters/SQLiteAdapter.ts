@@ -33,6 +33,7 @@ import type {
 } from "../types";
 import { SessionConflictError } from "../types/errors";
 import { createSessionId } from "../utils";
+import { deserializeSessionRow } from "./sessionRow";
 
 /**
  * SQLite database interface - matches better-sqlite3
@@ -230,7 +231,7 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       `SELECT * FROM ${this.tableName} WHERE id = ?`
     );
     const row = stmt.get(id);
-    return Promise.resolve(row ? this.deserializeSession(row) : null);
+    return Promise.resolve(row ? deserializeSessionRow(row) : null);
   }
 
   findActiveByUserId(userId: string): Promise<SessionData<TData> | null> {
@@ -241,7 +242,7 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
        LIMIT 1`
     );
     const row = stmt.get(userId);
-    return Promise.resolve(row ? this.deserializeSession(row) : null);
+    return Promise.resolve(row ? deserializeSessionRow(row) : null);
   }
 
   findByUserId(userId: string, limit = 100): Promise<SessionData<TData>[]> {
@@ -252,7 +253,7 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
        LIMIT ?`
     );
     const rows = stmt.all(userId, limit);
-    return Promise.resolve(rows.map((row) => this.deserializeSession(row)));
+    return Promise.resolve(rows.map((row) => deserializeSessionRow(row)));
   }
 
   async update(
@@ -381,32 +382,6 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
     const stmt = this.db.prepare(`DELETE FROM ${this.tableName} WHERE id = ?`);
     const result = stmt.run(id);
     return Promise.resolve(result.changes > 0);
-  }
-
-  private deserializeSession(row: Record<string, unknown>): SessionData<TData> {
-    return {
-      id: row.id as string,
-      userId: (row.user_id as string) || undefined,
-      agentName: (row.agent_name as string) || undefined,
-      status: row.status as SessionStatus,
-      currentFlow: (row.current_flow as string) || undefined,
-      currentStep: (row.current_step as string) || undefined,
-      collectedData: row.collected_data
-        ? (JSON.parse(
-          row.collected_data as string
-        ) as CollectedStateData<TData>)
-        : undefined,
-      messageCount: (row.message_count as number) || 0,
-      lastMessageAt: row.last_message_at
-        ? new Date(row.last_message_at as string)
-        : undefined,
-      completedAt: row.completed_at
-        ? new Date(row.completed_at as string)
-        : undefined,
-      version: (row.version as number | null) ?? undefined,
-      createdAt: new Date(row.created_at as string),
-      updatedAt: new Date(row.updated_at as string),
-    };
   }
 }
 
