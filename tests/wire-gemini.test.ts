@@ -25,6 +25,13 @@ import type {
   GenerateMessageInput,
   GenerateMessageStreamChunk,
 } from "../src/types/ai";
+import {
+  baseInput,
+  collectChunks,
+  rejectionOf,
+  replayChunks,
+  splitFragments,
+} from "./scripted-provider";
 
 // ---------------------------------------------------------------------------
 // Script model
@@ -78,16 +85,6 @@ function functionCallResponse(
     ],
     usageMetadata: USAGE,
   };
-}
-
-/** Split text into roughly `n` fragments (always ≥ 1 piece). */
-function splitFragments(text: string, n: number): string[] {
-  const size = Math.ceil(text.length / Math.max(n, 1));
-  const pieces: string[] = [];
-  for (let i = 0; i < text.length; i += size) {
-    pieces.push(text.slice(i, i + size));
-  }
-  return pieces;
 }
 
 /** Text split across `n` streamed chunks; the terminator carries usageMetadata. */
@@ -191,21 +188,9 @@ class ScriptedGeminiClient {
   }
 }
 
-// Hoisted to module scope because Bun 1.3.x miscompiles an `async function*`
-// expression written inline inside a class property (see scripted-provider.ts).
-function replayChunks(chunks: unknown[]): AsyncGenerator<unknown> {
-  return async function* () {
-    for (const chunk of chunks) yield chunk;
-  }();
-}
-
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
-
-function baseInput(): GenerateMessageInput<undefined> {
-  return { prompt: "hi", history: [], context: undefined };
-}
 
 function wiredProvider(
   client: ScriptedGeminiClient,
@@ -217,24 +202,6 @@ function wiredProvider(
     ...overrides,
     client: client.asGenAI(),
   });
-}
-
-/** Resolve to the thrown value (undefined when the promise resolves). */
-async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
-  try {
-    await promise;
-    return undefined;
-  } catch (error: unknown) {
-    return error;
-  }
-}
-
-async function collectChunks(
-  stream: AsyncGenerator<GenerateMessageStreamChunk>
-): Promise<Array<GenerateMessageStreamChunk>> {
-  const chunks: Array<GenerateMessageStreamChunk> = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return chunks;
 }
 
 const CITY_SCHEMA = {

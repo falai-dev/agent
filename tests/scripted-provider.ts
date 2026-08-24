@@ -25,7 +25,7 @@ import {
   OpenAICompatibleProvider,
   type OpenAICompatibleProviderInit,
 } from "../src/providers/OpenAICompatibleProvider";
-import type { ProviderCapabilities } from "../src/types/ai";
+import type { GenerateMessageInput, GenerateMessageStreamChunk, ProviderCapabilities } from "../src/types/ai";
 
 // ---------------------------------------------------------------------------
 // Script model
@@ -89,10 +89,10 @@ export function apiError(status: number, message: string): Error & { status: num
  * `async function*` expression written inline inside an async-arrow class
  * property (its Symbol.asyncIterator ends up undefined).
  */
-function replayChunks(
-  chunks: ChatCompletionChunk[],
+export function replayChunks<T>(
+  chunks: T[],
   failAfter?: unknown
-): AsyncGenerator<ChatCompletionChunk> {
+): AsyncGenerator<T> {
   return async function* () {
     for (const chunk of chunks) yield chunk;
     if (failAfter !== undefined) throw failAfter;
@@ -104,7 +104,7 @@ function replayChunks(
 // ---------------------------------------------------------------------------
 
 /** Split text into roughly `n` fragments (always ≥ 1 piece). */
-function splitFragments(text: string, n: number): string[] {
+export function splitFragments(text: string, n: number): string[] {
   const size = Math.ceil(text.length / Math.max(n, 1));
   const pieces: string[] = [];
   for (let i = 0; i < text.length; i += size) {
@@ -426,4 +426,32 @@ export function scriptedProvider(
     retryConfig: { timeout: 2000, retries: 0 },
     ...overrides,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Shared wire-test harness helpers (vendor-neutral)
+// ---------------------------------------------------------------------------
+
+/** Minimal provider input shared by the wire-transcript suites. */
+export function baseInput(): GenerateMessageInput<undefined> {
+  return { prompt: "hi", history: [], context: undefined };
+}
+
+/** Resolve to the thrown value (undefined when the promise resolves). */
+export async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+    return undefined;
+  } catch (error: unknown) {
+    return error;
+  }
+}
+
+/** Drain a stream into an array. */
+export async function collectChunks(
+  stream: AsyncGenerator<GenerateMessageStreamChunk>
+): Promise<Array<GenerateMessageStreamChunk>> {
+  const chunks: Array<GenerateMessageStreamChunk> = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return chunks;
 }
