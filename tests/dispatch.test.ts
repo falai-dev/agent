@@ -16,6 +16,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { Agent, FlowConfigurationError, createSession } from "../src/index";
+import { MemoryAdapter } from "../src/adapters/MemoryAdapter";
 import type { SessionState, Directive } from "../src/types";
 import { MockProvider } from "./mock-provider";
 
@@ -414,5 +415,91 @@ describe("Agent surface: removed methods (Requirement 9.9)", () => {
     test("9.9: Agent does NOT expose transitionTo", () => {
         const agent = createTestAgent();
         expect((agent as any).transitionTo).toBeUndefined();
+    });
+});
+
+// ─── Dispatch durability: persist-on-dispatch under autoSave ─────────────────
+
+describe("Agent.dispatch persistence", () => {
+    test("with an adapter + autoSave (default), the queued directive reaches the store immediately", async () => {
+        const adapter = new MemoryAdapter<TestData>();
+        const agent = new Agent<TestContext, TestData>({
+            name: "DurableDispatchAgent",
+            provider: new MockProvider({ responseMessage: "OK" }),
+            context: { userId: "u1" },
+            flows: [
+                { title: "Booking", steps: [{ prompt: "book" }] },
+                { title: "Feedback", steps: [{ prompt: "feedback" }] },
+            ],
+            persistence: { adapter, userId: "u1" },
+        });
+
+        const session = await agent.session.getOrCreate();
+        const versionBefore = session.version;
+
+        const updated = await agent.dispatch("Feedback", session);
+
+        // Read the STORE (not the in-memory object): the row must already
+        // carry the queued directive and a bumped version.
+        const stored = await adapter.sessionRepository.findById(session.id);
+        expect(stored).not.toBeNull();
+        expect(stored?.collectedData?.pendingDirective).toEqual({ goTo: "Feedback" });
+        expect(stored?.version ?? 0).toBeGreaterThan(versionBefore ?? 0);
+
+        // The RETURNED session carries the stamped version so the next
+        // turn's auto-save CAS stays clean.
+        expect(updated.version).toBe(stored?.version);
+    });
+
+    test("persistence.autoSave: false keeps dispatch memory-only", async () => {
+        const adapter = new MemoryAdapter<TestData>();
+        const agent = new Agent<TestContext, TestData>({
+            name: "ManualSaveAgent",
+            provider: new MockProvider({ responseMessage: "OK" }),
+            context: { userId: "u1" },
+            flows: [
+                { title: "Booking", steps: [{ prompt: "book" }] },
+                { title: "Feedback", steps: [{ prompt: "feedback" }] },
+            ],
+            persistence: { adapter, userId: "u1", autoSave: false },
+        });
+
+        const session = await agent.session.getOrCreate();
+        await agent.dispatch("Feedback", session);
+
+        const stored = await adapter.sessionRepository.findById(session.id);
+        expect(stored?.collectedData?.pendingDirective).toBeUndefined();
+    });
+
+    test("cross-process parity: a fresh load sees the dispatched directive", async () => {
+        const adapter = new MemoryAdapter<TestData>();
+        const shared = { provider: new MockProvider({ responseMessage: "OK" }) };
+        const webhookAgent = new Agent<TestContext, TestData>({
+            name: "WebhookAgent",
+            ...shared,
+            context: { userId: "u1" },
+            flows: [
+                { title: "Booking", steps: [{ prompt: "book" }] },
+                { title: "Feedback", steps: [{ prompt: "feedback" }] },
+            ],
+            persistence: { adapter, userId: "u1" },
+        });
+        const apiAgent = new Agent<TestContext, TestData>({
+            name: "ApiAgent",
+            ...shared,
+            context: { userId: "u1" },
+            flows: [
+                { title: "Booking", steps: [{ prompt: "book" }] },
+                { title: "Feedback", steps: [{ prompt: "feedback" }] },
+            ],
+            persistence: { adapter, userId: "u1" },
+        });
+
+        const session = await webhookAgent.session.getOrCreate();
+        await webhookAgent.dispatch("Feedback", session);
+
+        // The API process loads through its OWN manager and finds the queue.
+        const loaded = await apiAgent.getPersistenceManager()?.loadSessionState(session.id);
+        expect(loaded?.pendingDirective).toEqual({ goTo: "Feedback" });
     });
 });

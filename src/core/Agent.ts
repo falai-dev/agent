@@ -1177,12 +1177,20 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
    *
    * String form desugars to `{ goTo: target }`.
    *
+   * Durability: with a persistence adapter and autoSave configured (the
+   * defaults), the queued directive is persisted immediately — safe for
+   * out-of-process callers like webhooks or cron. Without an adapter it is
+   * memory-only, as is `persistence.autoSave: false` (then persisting before
+   * the next turn is the caller's job).
+   *
    * @param target - Flow ID/title string (desugars to `{ goTo: target }`) or a full Directive
    * @param session - Session to update (uses current session if not provided)
    * @returns Updated session with `pendingDirective` set
    *
    * @throws FlowConfigurationError if the string target doesn't match any flow
    * @throws FlowConfigurationError if the directive fails validation
+   * @throws SessionConflictError when persistence is enabled and another writer
+   * moved the stored session since this copy was loaded
    *
    * @example
    * // String shorthand — desugars to { goTo: 'Feedback' }
@@ -1192,7 +1200,6 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
    * // Full directive
    * const updated = await agent.dispatch({ goTo: 'Billing', reply: 'Transferring you now.' }, session);
    */
-  // eslint-disable-next-line @typescript-eslint/require-await
   async dispatch(
     target: string | Directive<TContext, TData>,
     session?: SessionState<TData>
@@ -1250,6 +1257,19 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
         lastUpdatedAt: new Date(),
       },
     };
+
+    // Durability: with an adapter + autoSave configured, dispatch persists
+    // immediately — webhooks/cron run out-of-process from the responder, and a
+    // memory-only queue would evaporate with this process. The save stamps the
+    // new version back onto updatedSession, so the next turn's auto-save CAS
+    // stays clean. Persisting BEFORE the in-memory sync keeps the existing
+    // invariant: a throwing dispatch leaves the session untouched.
+    if (this._persistenceManager && this.options.persistence?.autoSave !== false) {
+      await this._persistenceManager.saveSessionState(updatedSession.id, updatedSession);
+      logger.debug(
+        `[Agent] Dispatched directive persisted to adapter for session ${updatedSession.id}`
+      );
+    }
 
     // Update current session in place if no explicit session was passed
     if (!session && this.session.current) {

@@ -351,11 +351,14 @@ await agent.dispatch({ goTo: "Billing", reply: "Transferring you now." }, sessio
 The call validates the directive (`flow.validate`), confirms any
 `goTo`-named flow exists (throws `FlowConfigurationError` if not),
 strips pre-LLM-only fields, writes `pendingDirective` onto the
-session, and returns the updated session. Dispatch itself does not
-write through the adapter — the directive lives in memory and reaches
-disk on the next turn's auto-save. Call `await agent.session.save()`
-to flush it immediately, and in a multi-process setup where the next
-turn may run elsewhere, pass the returned session onward yourself.
+session, and returns the updated session. With a persistence adapter
+configured (and `autoSave` on — the default), dispatch also persists
+immediately, so a webhook's redirect survives even if the next turn
+runs in a different process; the save compare-and-swaps on the session
+version, so a stale copy throws `SessionConflictError` rather than
+clobbering another writer. Without an adapter (or with
+`autoSave: false`) the directive is memory-only until the next turn's
+auto-save — persisting sooner is then the caller's job.
 
 `pendingDirective` is **single-shot** — consumed exactly once and
 cleared. Calling `dispatch` again before the next turn overwrites the

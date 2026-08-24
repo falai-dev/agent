@@ -137,7 +137,7 @@ The factory is the recommended construction path for application code. The class
 
 ### `Agent.dispatch`
 
-`agent.dispatch(target, session)` is the imperative entry point for redirecting a session from outside a turn — typically from a webhook, a cron job, or a UI button that jumps the user into a different flow. It accepts either a string shorthand (`"Feedback"` desugars to `{ goTo: "Feedback" }`) or a full `Directive`. Internally, it writes `session.pendingDirective`; the directive is consumed at the start of the next `respond` call before any other resolution runs. Dispatch does not write through the persistence adapter itself — the next turn's auto-save does — so call `agent.session.save()` if the write must reach disk immediately.
+`agent.dispatch(target, session)` is the imperative entry point for redirecting a session from outside a turn — typically from a webhook, a cron job, or a UI button that jumps the user into a different flow. It accepts either a string shorthand (`"Feedback"` desugars to `{ goTo: "Feedback" }`) or a full `Directive`. Internally, it writes `session.pendingDirective`; the directive is consumed at the start of the next `respond` call before any other resolution runs. With a persistence adapter configured (and `autoSave` on — the default), dispatch persists immediately, so the queued directive survives process boundaries; without an adapter it is memory-only, and with `autoSave: false` persisting before the next turn is the caller's job. Because the save compare-and-swaps on the session version, a dispatch from a stale copy throws `SessionConflictError` instead of clobbering another writer.
 
 ```typescript
 const updated = await agent.dispatch(
