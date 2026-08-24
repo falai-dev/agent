@@ -327,10 +327,17 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
         result: unknown,
         tool: Tool<TContext, TData>
     ): ToolExecutionResult {
+        // Only SEMANTIC markers identify a ToolResult — bare `{data}` / `{error}`
+        // shapes are indistinguishable from ordinary business payloads and are
+        // wrapped as raw results instead (mirrors ToolManager.executeTool).
         if (
             result &&
             typeof result === "object" &&
-            ("data" in result || "success" in result || "error" in result || "directive" in result || "directives" in result)
+            ("success" in result && typeof (result as Record<string, unknown>).success === "boolean" ||
+                "directive" in result ||
+                "directives" in result ||
+                "dataUpdate" in result ||
+                "contextUpdate" in result)
         ) {
             const r = result as Record<string, unknown>;
             // A handler may return `{ directive }` (singular shorthand) or

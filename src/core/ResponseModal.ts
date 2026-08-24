@@ -43,6 +43,7 @@ import { ResponseGenerationError } from "./ResponseGenerationError";
 import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import { StreamingMessageDecoder } from "../utils/streamingMessage";
+import { tryParseJSONResponse } from "../utils/json";
 import type { ToolManager } from "./ToolManager";
 
 /**
@@ -950,17 +951,36 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 parameters: responseSchema ? { jsonSchema: responseSchema, schemaName: "response_output" } : undefined,
             });
 
-            let message = result.structured?.message || result.message;
-            let toolCalls = result.structured?.toolCalls;
+            let structuredData = result.structured;
+            let message = structuredData?.message || result.message;
 
-            // Debug: Log initial AI response
-            logger.debug(`[ResponseModal] Initial AI response:`, {
-                hasMessage: !!message,
-                messageLength: message?.length || 0,
-                hasToolCalls: !!toolCalls,
-                toolCallsCount: toolCalls?.length || 0,
-                toolNames: toolCalls?.map(tc => tc.toolName) || [],
-            });
+            // A schema was requested but the provider failed to parse the model's
+            // JSON (truncated output, fence-wrapped fragments). Raw protocol
+            // fragments must never surface as the user-visible reply: attempt one
+            // repair-parse, and if that fails fail the turn LOUDLY so the caller's
+            // rollback/retry path engages instead of leaking `{"message": "…` to
+            // an end user. Plain prose (not JSON-shaped at all) still passes
+            // through — it is not a protocol fragment.
+            if (!structuredData && responseSchema && message && /^\s*(```|{)/.test(message)) {
+                const salvaged = tryParseJSONResponse(message) as Partial<AgentStructuredResponse> | undefined;
+                if (salvaged && typeof salvaged.message === "string") {
+                    logger.warn("[ResponseModal] Salvaged malformed structured output via JSON repair parse.");
+                    structuredData = { ...salvaged, message: salvaged.message };
+                    message = salvaged.message;
+                } else {
+                    throw ResponseGenerationError.fromError(
+                        new Error(
+                            "Model returned a schema-mandated response that could not be parsed as JSON. " +
+                            "The turn was failed instead of delivering raw protocol output to the user."
+                        ),
+                        'structured_output_malformed',
+                        { responseSchemaName: 'response_output' }
+                    );
+                }
+            }
+
+            const effectiveResult = structuredData ? { ...result, structured: structuredData } : result;
+            let toolCalls = structuredData?.toolCalls;
 
             // Execute tools with unified loop handling
             const toolResult = await this.toolLoopExecutor.runLoop({
@@ -1006,7 +1026,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // Use follow-up structured data from tool loop when available, fall back to original result
             const dataSource = toolResult.structured
                 ? { structured: toolResult.structured }
-                : result;
+                : effectiveResult;
             session = await this.collectDataFromResponse({ result: dataSource, selectedFlow, nextStep, session });
 
             return { message, toolCalls, session, appliedInstructions };
@@ -1360,6 +1380,30 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                         finalDelta = batchResult.finalMessage.startsWith(chunk.accumulated)
                             ? batchResult.finalMessage.slice(chunk.accumulated.length)
                             : batchResult.finalMessage;
+                    }
+                }
+
+                // Streaming twin of the non-streaming salvage guard: a schema was
+                // requested but no structured payload arrived, and the accumulated
+                // text is JSON-shaped (a protocol fragment) — repair-parse it or
+                // fail the turn rather than leaking raw output to the user.
+                if (chunk.done && !finalStructured && responseSchema && finalAccumulated && /^\s*(```|{)/.test(finalAccumulated)) {
+                    const salvaged = tryParseJSONResponse(finalAccumulated) as Partial<AgentStructuredResponse> | undefined;
+                    if (salvaged && typeof salvaged.message === "string") {
+                        logger.warn("[ResponseModal] Salvaged malformed structured output from stream via JSON repair parse.");
+                        finalStructured = { ...salvaged, message: salvaged.message };
+                        finalDelta = salvaged.message.startsWith(finalAccumulated)
+                            ? salvaged.message.slice(finalAccumulated.length)
+                            : salvaged.message;
+                    } else {
+                        throw ResponseGenerationError.fromError(
+                            new Error(
+                                "Model returned a schema-mandated response that could not be parsed as JSON. " +
+                                "The stream was failed instead of delivering raw protocol output to the user."
+                            ),
+                            'structured_output_malformed',
+                            { responseSchemaName: 'response_output' }
+                        );
                     }
                 }
 

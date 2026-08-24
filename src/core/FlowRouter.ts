@@ -919,6 +919,18 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
         logger.debug(`[FlowRouter] Selected route: ${selectedFlow.title}`);
         updatedSession = this.enterFlowIfNeeded(updatedSession, selectedFlow);
       }
+    } else {
+      // Routing LLM output could not be parsed into the expected structured
+      // shape (no `flows` payload). The turn degrades to a fallback response
+      // with the flow position untouched — surface that loudly instead of
+      // failing silently.
+      const rawSnippet = (routingResult.message ?? "").trim().slice(0, 120);
+      logger.warn(
+        `[FlowRouter] Routing output unparseable: routing LLM returned no structured "flows" payload` +
+          `${rawSnippet ? `; raw output: "${rawSnippet}"` : ""}. ` +
+          `This turn degrades to a generic fallback response and the flow position is left unchanged. ` +
+          `Check the provider's structured-output/JSON support or inspect the routing prompt for schema violations.`
+      );
     }
 
     return {
@@ -1041,25 +1053,39 @@ export class FlowRouter<TContext = unknown, TData = unknown> {
     }
 
     // Apply sticky routing: if there's a current route, only switch if the
-    // best alternative exceeds the current flow's score by the configured margin
+    // best alternative exceeds the current flow's score by the configured margin.
+    // The margin applies symmetrically: even when the current flow has no
+    // weighted entry (the AI scored it 0 or omitted it), switching away
+    // requires clearing the margin over a zero baseline — shared agent-level
+    // data can otherwise zero out a mid-conversation flow.
     if (currentRouteId) {
       const currentEntry = weightedScores.find(e => e.route.id === currentRouteId);
       const bestEntry = weightedScores[0];
 
-      if (currentEntry && bestEntry.route.id !== currentRouteId) {
-        if (bestEntry.score < currentEntry.score + switchMargin) {
+      if (bestEntry && bestEntry.route.id !== currentRouteId) {
+        const currentScore = currentEntry ? currentEntry.score : 0;
+
+        if (bestEntry.score < currentScore + switchMargin) {
+          const currentRoute =
+            currentEntry?.route ?? routes.find(r => r.id === currentRouteId);
+          if (currentRoute) {
+            logger.debug(
+              `[FlowRouter] Staying on current flow: ${currentRoute.title} ` +
+              `(current: ${currentScore}, best alternative: ${bestEntry.score}, ` +
+              `margin required: ${switchMargin})`
+            );
+            return currentRoute;
+          }
           logger.debug(
-            `[FlowRouter] Staying on current flow: ${currentEntry.route.title} ` +
-            `(current: ${currentEntry.score}, best alternative: ${bestEntry.score}, ` +
-            `margin required: ${switchMargin})`
+            `[FlowRouter] Current flow ${currentRouteId} is no longer routable — selecting best alternative: ${bestEntry.route.title}`
           );
-          return currentEntry.route;
+        } else {
+          logger.debug(
+            `[FlowRouter] Switching flow: ${currentEntry?.route.title ?? currentRouteId} → ${bestEntry.route.title} ` +
+            `(current: ${currentScore}, alternative: ${bestEntry.score}, ` +
+            `margin: ${switchMargin})`
+          );
         }
-        logger.debug(
-          `[FlowRouter] Switching flow: ${currentEntry.route.title} → ${bestEntry.route.title} ` +
-          `(current: ${currentEntry.score}, alternative: ${bestEntry.score}, ` +
-          `margin: ${switchMargin})`
-        );
       }
     }
 

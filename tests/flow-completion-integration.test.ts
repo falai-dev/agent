@@ -483,15 +483,17 @@ describe("6.3 Integration test: onComplete wins over reentrant", () => {
         const lastStep = regFlow.getStep("ask_email")!;
         session = enterStep(session, lastStep.id, lastStep.description);
 
-        // Drive respond — completion should trigger onComplete → Feedback
+        // Drive respond — Registration is data-complete, so the turn completes it.
         const response = await agent.respond({
             history: [{ role: "user", content: "alice@example.com" }],
             session,
         });
 
-        // The runtime applies onComplete within the same turn. Registration completes
-        // and the session transitions into Feedback. The key assertion:
-        // Feedback was entered (not Registration re-entered despite reentrant: true).
+        // Sticky-flow conservatism: the weakly-scored Feedback alternative
+        // (provider default 10 < switch margin) does not pull routing away
+        // from the completing current flow mid-turn. onComplete therefore
+        // lands through its designed seam — a pendingDirective the NEXT
+        // turn's pipeline applies before any routing (see applyFlowCompletion).
         const flowHistory = response.session!.flowHistory!;
 
         // Registration must appear in history with exitedAt set (it transitioned out)
@@ -499,13 +501,15 @@ describe("6.3 Integration test: onComplete wins over reentrant", () => {
         expect(regEntry).toBeDefined();
         expect(regEntry!.exitedAt).toBeDefined();
 
-        // Feedback must appear in history (was entered via onComplete)
-        const feedbackEntry = flowHistory.find((h) => h.flowId === feedbackFlow.id);
-        expect(feedbackEntry).toBeDefined();
-        expect(feedbackEntry!.enteredAt).toBeDefined();
+        // onComplete target is queued as a pendingDirective (next-turn application)
+        expect(response.session!.pendingDirective).toBeDefined();
+        expect(response.session!.pendingDirective!.goTo).toBe(feedbackFlow.id);
+
+        // Session released to idle after completion
+        expect(response.session!.currentFlow).toBeUndefined();
 
         // The critical assertion: Registration was NOT re-entered despite reentrant: true.
-        // onComplete takes priority — the session goes to Feedback, not back to Registration.
+        // onComplete takes priority — the next turn goes to Feedback, not back to Registration.
         const regEntries = flowHistory.filter((h) => h.flowId === regFlow.id);
         expect(regEntries.length).toBe(1); // Only one entry — no re-entry
     });

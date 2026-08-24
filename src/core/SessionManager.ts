@@ -24,6 +24,9 @@ export class SessionManager<TData = unknown> {
   private agent?: Agent<any, TData>;
   private defaultSessionId?: string;
 
+  /** Coalesces concurrent getOrCreate calls for the same session id. */
+  private inflightGets = new Map<string, Promise<SessionState<TData>>>();
+
   constructor(
     persistenceManagerOrAdapter?:
       | PersistenceManager<TData>
@@ -56,7 +59,13 @@ export class SessionManager<TData = unknown> {
 
   /**
    * Core method: getOrCreate handles both existing and new sessions
-   * Works for sessionIds that exist, don't exist, or auto-generated IDs
+   * Works for sessionIds that exist, don't exist, or auto-generated IDs.
+   *
+   * Concurrent calls for the same id are COALESCED into one in-flight load:
+   * the Agent constructor fires an un-awaited getOrCreate while a first turn
+   * may already be starting — without coalescing, both calls can observe a
+   * missing row and create two competing sessions (one blanking the other's
+   * persisted state).
    */
   async getOrCreate(sessionId?: string): Promise<SessionState<TData>> {
     // SECURITY: a non-string sessionId (e.g. `{ $ne: null }` from an HTTP body
@@ -68,6 +77,23 @@ export class SessionManager<TData = unknown> {
     }
     // Use provided sessionId or fall back to default
     const effectiveSessionId = sessionId || this.defaultSessionId;
+
+    const inflightKey = effectiveSessionId || "__auto__";
+    const inflight = this.inflightGets.get(inflightKey);
+    if (inflight) {
+      return inflight;
+    }
+
+    const promise = this.getOrCreateInner(effectiveSessionId).finally(() => {
+      this.inflightGets.delete(inflightKey);
+    });
+    this.inflightGets.set(inflightKey, promise);
+    return promise;
+  }
+
+  private async getOrCreateInner(
+    effectiveSessionId: string | undefined
+  ): Promise<SessionState<TData>> {
 
     // If we already have a session and no sessionId specified, return it
     if (this.currentSession && !effectiveSessionId) {

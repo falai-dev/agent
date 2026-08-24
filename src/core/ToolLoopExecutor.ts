@@ -42,6 +42,30 @@ export function mergeCollectedDirectives<TContext, TData>(
     return collected.reduce((a, b) => flow.merge(a, b));
 }
 
+/**
+ * One attempted tool execution, keyed by CALL (not tool name): parallel or
+ * repeated calls to the same tool in one turn keep their own results instead
+ * of overwriting each other.
+ */
+interface ToolExecutionRecord {
+    requestId: string;
+    toolName: string;
+    arguments: Record<string, unknown>;
+    /** Which loop round produced this call (0 = the initial streamed batch). */
+    round: number;
+    /** Serialized result fed back to the model; set EVEN on failure. */
+    result?: string;
+}
+
+const executionFailure = (toolName: string, error: unknown): string =>
+    JSON.stringify({
+        success: false,
+        error: `${toolName}: ${error instanceof Error ? error.message : String(error)}`,
+    });
+
+const toolNotFoundFailure = (toolName: string): string =>
+    JSON.stringify({ success: false, error: `Tool "${toolName}" is not registered in any scope.` });
+
 export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
     constructor(
         private readonly deps: {
@@ -99,19 +123,27 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             // Convert HistoryItem[] to Event[] for internal processing
             const historyEvents = historyToEvents(history);
 
-            // Map to store tool execution results for history
-            const toolResultsMap = new Map<string, string>();
-            // Map to store tool call arguments for history reconstruction
-            const toolArgsMap = new Map<string, Record<string, unknown>>();
+            // Execution records keyed by call — shared with the follow-up loop
+            const records: ToolExecutionRecord[] = [];
+            void records;
 
             // Execute initial dynamic tool calls
             if (toolCalls && toolCalls.length > 0) {
                 logger.debug(`[ToolLoopExecutor] Executing ${toolCalls.length} dynamic tool calls:`, toolCalls.map(tc => tc.toolName));
 
-                for (const toolCall of toolCalls) {
+                for (const [callIndex, toolCall] of toolCalls.entries()) {
+                    const record: ToolExecutionRecord = {
+                        requestId: `init-${callIndex}-${toolCall.toolName}`,
+                        toolName: toolCall.toolName,
+                        arguments: toolCall.arguments,
+                        round: 0,
+                    };
+                    records.push(record);
+
                     const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
                     if (!tool) {
-                        logger.warn(`[ToolExecutionError] Tool not found: "${toolCall.toolName}" is not registered in any scope. Skipping this tool call. Register the tool or check the tool name.`);
+                        logger.warn(`[ToolExecutionError] Tool not found: "${toolCall.toolName}" is not registered in any scope. Register the tool or check the tool name.`);
+                        record.result = toolNotFoundFailure(toolCall.toolName);
                         continue;
                     }
 
@@ -128,8 +160,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                         });
 
                         // Store the actual tool result data for history
-                        toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
-                        toolArgsMap.set(toolCall.toolName, toolCall.arguments);
+                        record.result = serializeToolResult(toolResult);
 
                         // Collect tool-emitted directives (ctx.dispatch / {directive})
                         if (toolResult.directives?.length) {
@@ -167,7 +198,10 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                         logger.debug(`[ToolLoopExecutor] Executed dynamic tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                     } catch (error) {
                         logger.error(`[ToolLoopExecutor] Tool execution error for ${toolCall.toolName}:`, error);
-                        // Continue with other tools rather than failing the entire response
+                        // A thrown handler must be visible to the model as a FAILED
+                        // tool call — reporting success makes it confirm actions
+                        // that never happened.
+                        record.result = executionFailure(toolCall.toolName, error);
                         continue;
                     }
                 }
@@ -193,8 +227,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             return await this.runFollowUpLoop({
                 toolCalls,
                 session,
-                toolResultsMap,
-                toolArgsMap,
+                records,
                 collectedDirectives,
                 context,
                 history,
@@ -225,8 +258,8 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
     private async runFollowUpLoop(params: {
         toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         session: SessionState<TData>;
-        toolResultsMap: Map<string, string>;
-        toolArgsMap: Map<string, Record<string, unknown>>;
+        /** Execution records from prior rounds (initial batch = round 0). */
+        records: ToolExecutionRecord[];
         /** Shared directive collector — initial-batch emissions land here too. */
         collectedDirectives?: Directive<TContext, TData>[];
         context: TContext;
@@ -248,7 +281,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
         structured?: AgentStructuredResponse;
         directives?: Directive<TContext, TData>;
     }> {
-        const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal, toolResultsMap, toolArgsMap, collectedDirectives = [] } = params;
+        const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal, records, collectedDirectives = [] } = params;
         let { toolCalls, session } = params;
         try {
             // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution
@@ -264,45 +297,43 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 toolLoopCount++;
                 logger.debug(`[ToolLoopExecutor] Starting tool loop ${toolLoopCount}/${MAX_TOOL_LOOPS} with ${toolCalls?.length || 0} tool calls`);
 
-                // Create tool result history items
+                // Create tool result history items for the PREVIOUS round's
+                // calls. Failures are reported as failures — never as success.
+                const previousRound = toolLoopCount - 1;
+                const roundRecords = records.filter((r) => r.round === previousRound);
                 const toolResultHistoryItems: HistoryItem[] = [];
-                for (const toolCall of toolCalls || []) {
-                    const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
-                    if (tool) {
-                        // assistant tool_call + tool result pair, via the shared
-                        // history factories (same as forceFinalTextFromTools).
-                        toolResultHistoryItems.push(
-                            assistantMessage(null, [
-                                { id: toolCall.toolName, name: toolCall.toolName, arguments: toolCall.arguments },
-                            ]),
-                            toolMessage(
-                                toolCall.toolName,
-                                toolCall.toolName,
-                                toolResultsMap.get(toolCall.toolName) || "Tool executed successfully",
-                            ),
-                        );
-                    }
+                for (const record of roundRecords) {
+                    toolResultHistoryItems.push(
+                        assistantMessage(null, [
+                            { id: record.requestId, name: record.toolName, arguments: record.arguments },
+                        ]),
+                        toolMessage(
+                            record.toolName,
+                            record.requestId,
+                            record.result ?? toolNotFoundFailure(record.toolName),
+                        ),
+                    );
                 }
 
                 // Create updated history with tool results
                 const updatedHistory = [...history, ...toolResultHistoryItems];
 
-                // Make follow-up AI call to see if more tools are needed
-                // After first iteration, don't provide tools to force a text response
+                // Make follow-up AI call to see if more tools are needed.
+                // Tools are offered EVERY iteration — the loop is already bounded
+                // by MAX_TOOL_LOOPS, so withholding them after round  only made
+                // maxToolLoops values above 2 unreachable.
                 const agentOptions = this.deps.getAgentOptions();
-                const shouldProvideTools = toolLoopCount === 1;
 
                 logger.debug(`[ToolLoopExecutor] Making follow-up AI call (loop ${toolLoopCount}):`, {
-                    providingTools: shouldProvideTools,
-                    toolsCount: shouldProvideTools ? availableTools.length : 0,
-                    addingTextInstruction: toolLoopCount > 1,
+                    providingTools: true,
+                    toolsCount: availableTools.length,
                 });
 
                 const followUpResult = await agentOptions.provider.generateMessage({
-                    prompt: responsePrompt + (toolLoopCount > 1 ? "\n\nProvide a text response to the user based on the tool results." : ""),
+                    prompt: responsePrompt,
                     history: updatedHistory, // Use HistoryItem[] for AI provider
                     context,
-                    tools: shouldProvideTools ? availableTools : [], // Only provide tools on first iteration
+                    tools: availableTools,
                     parameters: responseSchema ? {
                         jsonSchema: responseSchema,
                         schemaName: "tool_followup",
@@ -326,10 +357,19 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                     logger.debug(`[ToolLoopExecutor] Follow-up call produced ${followUpToolCalls!.length} additional tool calls`);
 
                     // Execute the follow-up tool calls
-                    for (const toolCall of followUpToolCalls!) {
+                    for (const [callIndex, toolCall] of followUpToolCalls!.entries()) {
+                        const record: ToolExecutionRecord = {
+                            requestId: `fup-${toolLoopCount}-${callIndex}-${toolCall.toolName}`,
+                            toolName: toolCall.toolName,
+                            arguments: toolCall.arguments,
+                            round: toolLoopCount,
+                        };
+                        records.push(record);
+
                         const tool = this.findAvailableTool(toolCall.toolName, selectedFlow);
                         if (!tool) {
-                            logger.warn(`[ToolExecutionError] Tool not found in follow-up: "${toolCall.toolName}" is not registered in any scope. Skipping this tool call. Register the tool or check the tool name.`);
+                            logger.warn(`[ToolExecutionError] Tool not found in follow-up: "${toolCall.toolName}" is not registered in any scope. Register the tool or check the tool name.`);
+                            record.result = toolNotFoundFailure(toolCall.toolName);
                             continue;
                         }
 
@@ -370,8 +410,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                             }
 
                             // Store the follow-up tool result for potential next loop iteration
-                            toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
-                            toolArgsMap.set(toolCall.toolName, toolCall.arguments);
+                            record.result = serializeToolResult(toolResult);
 
                             // Collect tool-emitted directives (ctx.dispatch / {directive})
                             if (toolResult.directives?.length) {
@@ -381,6 +420,8 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                             logger.debug(`[ToolLoopExecutor] Executed follow-up tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                         } catch (error) {
                             logger.error(`[ToolLoopExecutor] Follow-up tool execution error for ${toolCall.toolName}:`, error);
+                            // Visible failure beats a fabricated success.
+                            record.result = executionFailure(toolCall.toolName, error);
                             continue;
                         }
                     }
@@ -422,8 +463,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 logger.debug(`[ToolLoopExecutor] No final message after tool loop, making additional LLM call for text response`);
                 const forced = await this.forceFinalTextFromTools({
                     history,
-                    toolResultsMap,
-                    toolArgsMap,
+                    records,
                     responsePrompt,
                     responseSchema,
                     context,
@@ -468,24 +508,25 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
      */
     private async forceFinalTextFromTools(params: {
         history: HistoryItem[];
-        toolResultsMap: Map<string, string>;
-        toolArgsMap: Map<string, Record<string, unknown>>;
+        records: ToolExecutionRecord[];
         responsePrompt: string;
         responseSchema?: Record<string, unknown>;
         context: TContext;
         signal?: AbortSignal;
     }): Promise<{ finalMessage?: string; structured?: AgentStructuredResponse }> {
-        const { history, toolResultsMap, toolArgsMap, responsePrompt, responseSchema, context, signal } = params;
+        const { history, records, responsePrompt, responseSchema, context, signal } = params;
 
         // Reconstruct assistant tool_call + tool result pairs so the follow-up
-        // call can see what the tools returned.
+        // call can see what the tools returned — every executed call, keyed by
+        // its own request id.
         const finalToolResultHistoryItems: HistoryItem[] = [];
-        for (const [toolName, toolResult] of toolResultsMap) {
+        for (const record of records) {
+            if (!record.result) continue;
             finalToolResultHistoryItems.push(
                 assistantMessage(null, [
-                    { id: toolName, name: toolName, arguments: toolArgsMap.get(toolName) || {} },
+                    { id: record.requestId, name: record.toolName, arguments: record.arguments },
                 ]),
-                toolMessage(toolName, toolName, toolResult),
+                toolMessage(record.toolName, record.requestId, record.result),
             );
         }
 
@@ -573,9 +614,15 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
         }));
         // Map request id -> request so completed results can be attributed back
         // to their tool name/arguments for the forced final-text call.
-        const requestById = new Map(toolCallRequests.map((r) => [r.id, r]));
-        const toolResultsMap = new Map<string, string>();
-        const toolArgsMap = new Map<string, Record<string, unknown>>();
+        // Execution records keyed by call id — seeded at queue time so results
+        // (and failures) attach to the right call even for same-name calls.
+        const records: ToolExecutionRecord[] = toolCallRequests.map((req) => ({
+            requestId: req.id,
+            toolName: req.toolName,
+            arguments: req.arguments,
+            round: 0,
+        }));
+        const recordById = new Map(records.map((r) => [r.requestId, r]));
 
         const historyEvents = historyToEvents(history);
 
@@ -612,10 +659,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
                 // Capture tool results for the forced final-text call
                 if (update.result) {
-                    const req = requestById.get(update.toolCallId);
-                    if (req) {
-                        toolResultsMap.set(req.toolName, serializeToolResult(update.result));
-                        toolArgsMap.set(req.toolName, req.arguments);
+                    const record = recordById.get(update.toolCallId);
+                    if (record) {
+                        record.result = serializeToolResult(update.result);
                     }
                     // Collect tool-emitted directives (ctx.dispatch / {directive})
                     if (update.result.directives?.length) {
@@ -647,8 +693,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             const followUp = await this.runFollowUpLoop({
                 toolCalls,
                 session,
-                toolResultsMap,
-                toolArgsMap,
+                records,
                 collectedDirectives,
                 context,
                 history,
@@ -663,21 +708,41 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             finalMessage = followUp.finalMessage;
             structured = followUp.structured;
         } catch (error) {
-            logger.error(`[ToolLoopExecutor] Concurrent tool execution failed, falling back to sequential:`, error);
-            // Fall back to the unified tool loop on failure. runLoop re-executes
-            // the tools from scratch, so any partial results collected above are
-            // intentionally discarded (it builds and forces its own).
-            const toolResult = await this.runLoop({
-                toolCalls, context, session, history, selectedFlow,
-                responsePrompt, availableTools, responseSchema, signal,
-            });
-            session = toolResult.session;
-            toolCalls = toolResult.finalToolCalls;
-            finalMessage = toolResult.finalMessage;
-            structured = toolResult.structured;
-            if (toolResult.directives) {
-                collectedDirectives.length = 0;
-                collectedDirectives.push(toolResult.directives);
+            logger.error(`[ToolLoopExecutor] Concurrent batch failed:`, error);
+            const executedRecords = records.filter((r) => r.result !== undefined);
+            if (executedRecords.length > 0) {
+                // Some tools already executed — re-running them would duplicate
+                // real-world side effects (sends, writes, charges). Close the
+                // turn from the results we have instead.
+                logger.warn(
+                    `[ToolLoopExecutor] ${executedRecords.length} tool(s) already executed; closing the turn from their results rather than re-executing.`
+                );
+                const forced = await this.forceFinalTextFromTools({
+                    history,
+                    records,
+                    responsePrompt,
+                    responseSchema,
+                    context,
+                    signal,
+                });
+                if (forced.finalMessage) {
+                    finalMessage = forced.finalMessage;
+                }
+                structured = structured ?? forced.structured;
+            } else {
+                // Nothing executed — safe to fall back to the unified loop.
+                const toolResult = await this.runLoop({
+                    toolCalls, context, session, history, selectedFlow,
+                    responsePrompt, availableTools, responseSchema, signal,
+                });
+                session = toolResult.session;
+                toolCalls = toolResult.finalToolCalls;
+                finalMessage = toolResult.finalMessage;
+                structured = toolResult.structured;
+                if (toolResult.directives) {
+                    collectedDirectives.length = 0;
+                    collectedDirectives.push(toolResult.directives);
+                }
             }
         }
 

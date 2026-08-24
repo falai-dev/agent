@@ -50,4 +50,29 @@ describe("SessionManager.getOrCreate load-error handling", () => {
     expect(session.id).toBe("sess_new");
     expect(savedIds).toEqual(["sess_new"]);
   });
+
+  test("concurrent getOrCreate calls for one id are coalesced into ONE load", async () => {
+    let loads = 0;
+    // Slow-ish load so both calls genuinely overlap.
+    const counting = {
+      async loadSessionState(): Promise<SessionState<Record<string, unknown>> | null> {
+        loads++;
+        await new Promise((r) => setTimeout(r, 5));
+        return null;
+      },
+      async saveSessionState(): Promise<void> {},
+    };
+
+    const manager = new SessionManager(
+      counting as unknown as PersistenceManager<Record<string, unknown>>
+    );
+
+    const [a, b] = await Promise.all([
+      manager.getOrCreate("sess_race"),
+      manager.getOrCreate("sess_race"),
+    ]);
+
+    expect(loads).toBe(1);
+    expect(a).toBe(b); // same object — no competing sessions
+  });
 });

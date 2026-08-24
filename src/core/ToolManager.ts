@@ -678,6 +678,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
   }): Promise<ToolExecutionResult> {
     const { tool, context, updateContext, updateData, history, data, toolArguments } = params;
     const startTime = Date.now();
+      const executionTimeout = 30000; // 30 seconds default timeout
 
     try {
       // Validate tool before execution
@@ -725,24 +726,48 @@ export class ToolManager<TContext = unknown, TData = unknown> {
         return gateDenial;
       }
 
-      // Execute tool with timeout protection
-      const executionTimeout = 30000; // 30 seconds default timeout
+      // Execute tool with timeout protection. The timer is cleared when the
+      // race settles AND unref'd so a pending timer never delays process
+      // shutdown; a handler that loses the race keeps running detached (its
+      // result is discarded), which we surface in a warn.
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(`Tool execution timeout after ${executionTimeout}ms`)), executionTimeout);
+        timeoutTimer = setTimeout(
+          () => reject(new Error(`Tool execution timeout after ${executionTimeout}ms`)),
+          executionTimeout
+        );
+        timeoutTimer.unref?.();
       });
 
-      const result = await Promise.race([
-        tool.handler(toolContext, toolArguments),
-        timeoutPromise
-      ]);
+      let result: unknown;
+      try {
+        // Attach a no-op catch to the losing handler promise so a post-timeout
+        // rejection can't surface as an unhandled rejection and crash the process.
+        const handlerPromise = Promise.resolve(tool.handler(toolContext, toolArguments));
+        handlerPromise.catch(() => undefined);
+        result = await Promise.race([handlerPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutTimer);
+      }
 
       const executionTime = Date.now() - startTime;
       logger.debug(`[ToolManager] Tool ${tool.id} completed in ${executionTime}ms`);
 
-      // Handle different result types
+      // Handle different result types. Only SEMANTIC markers identify a
+      // ToolResult — bare `{data}` / `{error}` shapes are indistinguishable
+      // from ordinary business payloads (e.g. upstream API envelopes) and are
+      // wrapped as raw results instead.
       let toolResult: ToolResult<unknown, TContext, TData>;
 
-      if (result && typeof result === 'object' && ('data' in result || 'success' in result || 'error' in result || 'directive' in result)) {
+      if (
+        result &&
+        typeof result === 'object' &&
+        ('success' in result && typeof (result as Record<string, unknown>).success === 'boolean' ||
+          'directive' in result ||
+          'directives' in result ||
+          'dataUpdate' in result ||
+          'contextUpdate' in result)
+      ) {
         // It's already a ToolResult-like object
         toolResult = result as ToolResult<unknown, TContext, TData>;
       } else {
@@ -813,6 +838,15 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       const executionTime = Date.now() - startTime;
 
       logger.error(`[ToolManager] Tool execution error for ${tool.id} after ${executionTime}ms:`, error);
+      if (error instanceof Error && error.message.includes("Tool execution timeout")) {
+        // The losing handler may still be running with captured callbacks.
+        // Its writes are NOT rolled back here — tools should stay idempotent
+        // or accept their own cancellation via interruptBehavior/abort.
+        logger.warn(
+          `[ToolManager] Handler for "${tool.id}" exceeded ${executionTimeout}ms and was abandoned while still running. ` +
+          `Its eventual side effects are not cancelled or rolled back.`
+        );
+      }
 
       // Re-throw the error so callers can handle it
       throw error;

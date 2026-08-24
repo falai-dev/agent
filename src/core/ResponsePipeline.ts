@@ -51,6 +51,27 @@ export function hasDirectivePositionField<TContext = unknown, TData = unknown>(
   );
 }
 
+/**
+ * Compute the per-key data writes the signal phase applied to a session.
+ * The signal phase and routing start from the same input session, so any
+ * key whose value differs between the input and the signal output was
+ * written by the signal phase alone (handler `updateData` calls).
+ */
+function diffSignalDataWrites<TData>(
+  before: Partial<TData> | undefined,
+  after: Partial<TData> | undefined,
+): Partial<TData> {
+  const beforeData = (before ?? {}) as Record<string, unknown>;
+  const afterData = (after ?? {}) as Record<string, unknown>;
+  const writes: Record<string, unknown> = {};
+  for (const key of Object.keys(afterData)) {
+    if (afterData[key] !== beforeData[key]) {
+      writes[key] = afterData[key];
+    }
+  }
+  return writes as Partial<TData>;
+}
+
 export interface ResponsePreparationResult<TContext, TData = unknown> {
   effectiveContext: TContext;
   session: SessionState<TData>;
@@ -351,6 +372,37 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       isFlowComplete,
       completedFlows,
     };
+  }
+
+  /**
+   * Combine a routing-derived session with the signal phase's non-position
+   * mutations. The routing session is the base — it owns position state AND
+   * data merges such as flow initialData and directive-carried writes; the
+   * signal phase's mutations (trigger recording under `signals`, handler
+   * data writes) are re-applied on top. Both phases start from the same
+   * input session, so their mutations cannot silently collide.
+   */
+  private combineRoutingAndSignalSessions(params: {
+    inputSession: SessionState<TData>;
+    signalSession: SessionState<TData>;
+    routingSession: SessionState<TData>;
+  }): SessionState<TData> {
+    const { inputSession, signalSession, routingSession } = params;
+    let combined = routingSession;
+
+    if (signalSession.signals !== inputSession.signals) {
+      combined = { ...combined, signals: signalSession.signals };
+    }
+
+    const signalWrites = diffSignalDataWrites(
+      inputSession.data,
+      signalSession.data,
+    );
+    if (Object.keys(signalWrites).length > 0) {
+      combined = mergeCollected(combined, signalWrites);
+    }
+
+    return combined;
   }
 
   /**
@@ -699,10 +751,13 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       this.createChainTracker();
 
       // ROUTING SKIP OPTIMIZATION (Requirements 20.1, 20.2, 20.3):
-      // When the current step has collect fields AND pre-extraction populates at least
-      // one of those fields, skip FlowRouter.decideFlowAndStep for this turn.
-      const routingSkipResult = await this.attemptRoutingSkipForCollect(params);
-      if (routingSkipResult) {
+      // When the current step has collect fields AND step-scoped pre-extraction
+      // populates at least one of those fields, skip FlowRouter.decideFlowAndStep
+      // for this turn. The check's extraction result is reused by the fallthrough
+      // paths below so a turn costs at most ONE extraction LLM call.
+      const routingSkipCheck = await this.attemptRoutingSkipForCollect(params);
+      if (routingSkipCheck.skipResult) {
+        const skipResult = routingSkipCheck.skipResult;
         // Even when routing is skipped, run pre-signal phase if processor is present
         if (this.signalCoordinator.enabled) {
           const signalResult = await this.signalCoordinator.runPrePhase(
@@ -711,7 +766,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           // If signal halts, override the routing skip result
           if (signalResult.mergedDirective?.halt) {
             return {
-              ...routingSkipResult,
+              ...skipResult,
               session: signalResult.updatedSession,
               signalFirings: signalResult.firings,
               signalHalted: true,
@@ -722,15 +777,20 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           if (hasDirectivePositionField(signalResult.mergedDirective)) {
             return this.signalCoordinator.applyPositionDirective(signalResult);
           }
-          // Non-position directive: propagate for pre-LLM augmentation
+          // Non-position directive: keep the skip result (extraction merges,
+          // step entry) and re-apply the signal phase's non-position mutations
           return {
-            ...routingSkipResult,
-            session: signalResult.updatedSession,
+            ...skipResult,
+            session: this.combineRoutingAndSignalSessions({
+              inputSession: params.session,
+              signalSession: signalResult.updatedSession,
+              routingSession: skipResult.session,
+            }),
             signalFirings: signalResult.firings,
             signalPreDirective: signalResult.mergedDirective || undefined,
           };
         }
-        return routingSkipResult;
+        return skipResult;
       }
 
       // ── PARALLEL PRE-SIGNAL PHASE + ROUTING (Algorithm 5) ────────────────
@@ -770,44 +830,45 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
         // ── Requirement 8.4: non-position directive → use routing, propagate augmentation ──
         // ── Requirement 8.5: no directive → use routing as-is ─────────────
-        let updatedSession = signalResult.updatedSession;
+        // Base = routed session (position state AND router data merges such as
+        // flow initialData survive); the signal phase's non-position mutations
+        // (trigger state, handler data writes) are re-applied on top.
+        let updatedSession = this.combineRoutingAndSignalSessions({
+          inputSession: params.session,
+          signalSession: signalResult.updatedSession,
+          routingSession: routingResult.session,
+        });
 
-        // Apply data/context updates from signal to the routed session
+        // Explicit dataUpdate from the signal's merged directive lands last
         if (signalResult.mergedDirective?.dataUpdate) {
           updatedSession = mergeCollected(updatedSession, signalResult.mergedDirective.dataUpdate);
         }
 
-        // Use routing result for flow/step, but carry signal session state
-        // Merge routing session changes on top of signal session
-        const routingSession = routingResult.session;
-        updatedSession = {
-          ...updatedSession,
-          currentFlow: routingSession.currentFlow,
-          currentStep: routingSession.currentStep,
-          flowHistory: routingSession.flowHistory,
-          pendingDirective: routingSession.pendingDirective,
-        };
-
         const isFlowComplete = routingResult.isFlowComplete;
 
-        // PRE-EXTRACTION: same logic as below — extract data from user message
+        // PRE-EXTRACTION: same logic as below — extract data from user message.
+        // Reuses the routing-skip check's step-scoped extraction when it already
+        // ran this turn (at most ONE extraction LLM call per turn).
         if (routingResult.selectedFlow && !isFlowComplete) {
-          if (this.shouldPreExtractData(routingResult.selectedFlow)) {
+          let extractedData: Partial<TData> | undefined;
+          if (routingSkipCheck.extractionRan) {
+            extractedData = routingSkipCheck.extractedData;
+          } else if (this.shouldPreExtractData(routingResult.selectedFlow)) {
             logger.debug(
               `[ResponsePipeline] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
             );
-            const extractedData = await this.preExtractFlowData({
+            extractedData = await this.preExtractFlowData({
               route: routingResult.selectedFlow,
               history: params.history,
               context: params.context,
               session: updatedSession,
               signal: params.signal,
             });
-            if (extractedData && Object.keys(extractedData).length > 0) {
-              logger.debug(`[ResponsePipeline] Pre-extracted data:`, extractedData);
-              updatedSession = mergeCollected(updatedSession, extractedData);
-              await this.updateCollectedData(extractedData);
-            }
+          }
+          if (extractedData && Object.keys(extractedData).length > 0) {
+            logger.debug(`[ResponsePipeline] Pre-extracted data:`, extractedData);
+            updatedSession = mergeCollected(updatedSession, extractedData);
+            await this.updateCollectedData(extractedData);
           }
         }
 
@@ -843,33 +904,38 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       const isFlowComplete = routingResult.isFlowComplete;
 
       // PRE-EXTRACTION: If entering a flow that collects data, extract data from user message first
-      // This allows us to skip steps whose data is already provided
+      // This allows us to skip steps whose data is already provided.
+      // Reuses the routing-skip check's step-scoped extraction when it already
+      // ran this turn — at most ONE extraction LLM call per turn.
       if (routingResult.selectedFlow && !isFlowComplete) {
         // Always pre-extract when flow collects data (not just on new flow entry)
         // This ensures step selection has the most up-to-date data
-        if (this.shouldPreExtractData(routingResult.selectedFlow)) {
+        let extractedData: Partial<TData> | undefined;
+        if (routingSkipCheck.extractionRan) {
+          extractedData = routingSkipCheck.extractedData;
+        } else if (this.shouldPreExtractData(routingResult.selectedFlow)) {
           logger.debug(
             `[ResponsePipeline] Pre-extracting data for flow: ${routingResult.selectedFlow.title}`
           );
 
-          const extractedData = await this.preExtractFlowData({
+          extractedData = await this.preExtractFlowData({
             route: routingResult.selectedFlow,
             history: params.history,
             context: params.context,
             session: updatedSession,
             signal: params.signal,
           });
+        }
 
-          if (extractedData && Object.keys(extractedData).length > 0) {
-            logger.debug(
-              `[ResponsePipeline] Pre-extracted data:`,
-              extractedData
-            );
-            // Merge pre-extracted data into session before step selection
-            updatedSession = mergeCollected(updatedSession, extractedData);
-            // Also update agent's collected data
-            await this.updateCollectedData(extractedData);
-          }
+        if (extractedData && Object.keys(extractedData).length > 0) {
+          logger.debug(
+            `[ResponsePipeline] Pre-extracted data:`,
+            extractedData
+          );
+          // Merge pre-extracted data into session before step selection
+          updatedSession = mergeCollected(updatedSession, extractedData);
+          // Also update agent's collected data
+          await this.updateCollectedData(extractedData);
         }
       }
 
@@ -1003,12 +1069,19 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
-   * Routing skip optimization (Requirements 20.1, 20.2, 20.3):
-   * When the current step declares `collect` fields AND pre-extraction populates
-   * at least one of those fields from the user's message, skip routing for this turn.
+   * Routing skip check (Requirements 20.1, 20.2, 20.3):
+   * When the current step declares `collect` fields AND step-scoped extraction
+   * populates at least one of those fields from the user's message, the caller
+   * skips routing for this turn (`skipResult`).
    *
-   * Returns the routing result if the skip applies, or undefined to fall through
-   * to normal routing.
+   * The extraction is scoped to EXACTLY this step's collect fields — incidental
+   * mentions of other (e.g. other-flow) fields cannot pin the routing decision.
+   * It is skipped entirely when every collect field is already populated.
+   *
+   * Always returns what the check did so the caller can reuse the single
+   * extraction result in its normal path instead of extracting twice:
+   * - `extractionRan` — whether an extraction LLM call was made this turn.
+   * - `extractedData` — that call's result (empty when nothing found / not run).
    */
   private async attemptRoutingSkipForCollect(params: {
     session: SessionState<TData>;
@@ -1016,22 +1089,27 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     context: TContext;
     signal?: AbortSignal;
   }): Promise<{
-    selectedFlow?: Flow<TContext, TData>;
-    selectedStep?: Step<TContext, TData>;
-    responseDirectives?: string[];
-    session: SessionState<TData>;
-    isFlowComplete: boolean;
-  } | undefined> {
+    extractionRan: boolean;
+    extractedData: Partial<TData>;
+    skipResult?: {
+      selectedFlow?: Flow<TContext, TData>;
+      selectedStep?: Step<TContext, TData>;
+      responseDirectives?: string[];
+      session: SessionState<TData>;
+      isFlowComplete: boolean;
+    };
+  }> {
     const { session } = params;
+    const notApplicable = { extractionRan: false, extractedData: {} as Partial<TData> };
 
     // Only applies when we already have a current flow and step
     if (!session.currentFlow || !session.currentStep) {
-      return undefined;
+      return notApplicable;
     }
 
     // Also skip this optimization if there's a pending directive (it takes priority)
     if (session.pendingDirective) {
-      return undefined;
+      return notApplicable;
     }
 
     // Look up the actual Flow and Step objects to access `collect`
@@ -1039,40 +1117,54 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       (f) => f.id === session.currentFlow?.id
     );
     if (!currentFlow) {
-      return undefined;
+      return notApplicable;
     }
 
     const currentStep = currentFlow.getStep(session.currentStep.id);
     if (!currentStep || !currentStep.collect || currentStep.collect.length === 0) {
-      return undefined;
+      return notApplicable;
     }
 
-    // We have a step with collect fields. Run pre-extraction to see if the
-    // user's message populates any of them.
     const collectFields = currentStep.collect;
 
-    // Snapshot current data for comparison
-    const dataBefore = { ...session.data };
+    // Every relevant field already set — the skip cannot fire; don't spend
+    // an extraction LLM call probing for it.
+    const sessionRecord = (session.data ?? {}) as Record<string, unknown>;
+    const allPopulated = collectFields.every((field) => {
+      const value = sessionRecord[String(field)];
+      return value !== undefined && value !== null;
+    });
+    if (allPopulated) {
+      return notApplicable;
+    }
 
-    // Run pre-extraction against the current flow
+    // Snapshot current data for comparison
+    const dataBefore = { ...sessionRecord } as Record<string, unknown>;
+
+    // Step-scoped pre-extraction: see if the user's message populates any of
+    // THIS step's collect fields.
     const extractedData = await this.preExtractFlowData({
       route: currentFlow,
       history: params.history,
       context: params.context,
       session,
       signal: params.signal,
+      restrictToFields: collectFields.map(String),
     });
 
     if (!extractedData || Object.keys(extractedData).length === 0) {
-      return undefined;
+      return { extractionRan: true, extractedData: {} };
     }
 
     // Determine which collect fields were newly populated by pre-extraction
+    const extractedRecord = extractedData as Record<string, unknown>;
     const populatedCollectFields: string[] = [];
     for (const field of collectFields) {
-      const key = field as string;
-      const hadValue = dataBefore[field] !== undefined && dataBefore[field] !== null;
-      const hasNewValue = extractedData[field] !== undefined && extractedData[field] !== null;
+      const key = String(field);
+      const hadValue =
+        dataBefore[key] !== undefined && dataBefore[key] !== null;
+      const hasNewValue =
+        extractedRecord[key] !== undefined && extractedRecord[key] !== null;
       if (hasNewValue && !hadValue) {
         populatedCollectFields.push(key);
       }
@@ -1080,7 +1172,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
 
     if (populatedCollectFields.length === 0) {
       // Pre-extraction didn't populate any declared collect field — no skip
-      return undefined;
+      return { extractionRan: true, extractedData };
     }
 
     // ROUTING SKIP: pre-extraction populated collect fields → retain current flow/step
@@ -1103,11 +1195,15 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     });
 
     return {
-      selectedFlow: stepResult.flowChanged || currentFlow,
-      selectedStep: stepResult.nextStep,
-      responseDirectives: undefined,
-      session: stepResult.session,
-      isFlowComplete: false,
+      extractionRan: true,
+      extractedData,
+      skipResult: {
+        selectedFlow: stepResult.flowChanged || currentFlow,
+        selectedStep: stepResult.nextStep,
+        responseDirectives: undefined,
+        session: stepResult.session,
+        isFlowComplete: false,
+      },
     };
   }
 
@@ -1133,6 +1229,30 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
   }
 
   /**
+   * Build an extraction schema limited to the given subset of agent schema
+   * fields. Used by the routing-skip probe so only the current step's collect
+   * fields are visible to the extractor.
+   */
+  private buildFieldRestrictedSchema(
+    agentSchema: StructuredSchema,
+    fields: string[],
+  ): StructuredSchema {
+    const properties: Record<string, StructuredSchema> = {};
+    for (const field of fields) {
+      const prop = agentSchema.properties?.[field];
+      if (prop) {
+        properties[field] = prop;
+      }
+    }
+    return {
+      type: "object",
+      description: `Extraction restricted to these fields: ${fields.join(', ')}`,
+      properties,
+      additionalProperties: false,
+    };
+  }
+
+  /**
    * Pre-extract data from user message when entering a flow
    * This allows skipping steps whose data is already provided
    */
@@ -1142,15 +1262,20 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     context: TContext;
     session: SessionState<TData>;
     signal?: AbortSignal;
+    /** When set, extraction is restricted to exactly these schema fields (step-scoped routing-skip probe). */
+    restrictToFields?: string[];
   }): Promise<Partial<TData>> {
-    const { route: flow, history, signal } = params;
+    const { route: flow, history, signal, restrictToFields } = params;
 
     // Build a schema for data extraction based on flow's fields
-    const extractionSchema = this.getSchema();
-    if (!extractionSchema) {
+    const agentSchema = this.getSchema();
+    if (!agentSchema) {
       logger.warn(`[ResponsePipeline] No schema available for pre-extraction`);
       return {};
     }
+    const extractionSchema = restrictToFields
+      ? this.buildFieldRestrictedSchema(agentSchema, restrictToFields)
+      : agentSchema;
 
     // Get last user message
     const lastMessage = getLastMessageFromHistory(history);
@@ -1166,11 +1291,15 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     ];
 
     // Add field descriptions
-    if (flow.requiredFields) {
-      extractionPrompt.push(`Required fields: ${flow.requiredFields.join(', ')}`);
-    }
-    if (flow.optionalFields) {
-      extractionPrompt.push(`Optional fields: ${flow.optionalFields.join(', ')}`);
+    if (restrictToFields) {
+      extractionPrompt.push(`Only these fields: ${restrictToFields.join(', ')}`);
+    } else {
+      if (flow.requiredFields) {
+        extractionPrompt.push(`Required fields: ${flow.requiredFields.join(', ')}`);
+      }
+      if (flow.optionalFields) {
+        extractionPrompt.push(`Optional fields: ${flow.optionalFields.join(', ')}`);
+      }
     }
 
     extractionPrompt.push(

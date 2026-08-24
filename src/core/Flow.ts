@@ -25,6 +25,44 @@ import { Step, FlowConfigurationError } from "./Step";
 import { Agent } from './Agent'
 
 /**
+ * Per-agent registry of declared `requiredFields`, used to warn at
+ * construction time when two registered flows declare overlapping required
+ * fields. The schema is agent-level, so shared required fields make flows
+ * complete together — silently excluding one of them from routing.
+ * Keyed by parent agent so independent agents never cross-warn.
+ */
+const requiredFieldsRegistry = new WeakMap<
+  object,
+  Array<{ title: string; fields: Set<string> }>
+>();
+
+function warnOnOverlappingRequiredFields(
+  parentAgent: object,
+  title: string,
+  fields: string[],
+): void {
+  let registered = requiredFieldsRegistry.get(parentAgent);
+  if (!registered) {
+    registered = [];
+    requiredFieldsRegistry.set(parentAgent, registered);
+  }
+
+  const fieldSet = new Set(fields);
+  for (const existing of registered) {
+    const shared = [...fieldSet].filter((f) => existing.fields.has(f));
+    if (shared.length > 0) {
+      logger.warn(
+        `[FlowConfigurationError] Overlapping requiredFields: flows "${existing.title}" and "${title}" share [${shared.join(', ')}]. ` +
+        `The schema is agent-level, so data collected for one flow marks the other complete and excludes it from routing. ` +
+        `Give each flow distinct requiredFields, or set \`reentrant: true\` on flows that legitimately share fields.`
+      );
+    }
+  }
+
+  registered.push({ title, fields: fieldSet });
+}
+
+/**
  * Represents a conversational flow/journey
  */
 export class Flow<TContext = unknown, TData = unknown> {
@@ -110,6 +148,17 @@ export class Flow<TContext = unknown, TData = unknown> {
     this.onComplete = options.onComplete;
     this.reentrant = options.reentrant ?? false;
     this.hooks = options.hooks;
+
+    // Construction-time overlap detection: warn (don't throw) when this
+    // flow's requiredFields intersect with another flow registered on the
+    // same agent — agent-level schema means both complete together.
+    if (parentAgent && this.requiredFields && this.requiredFields.length > 0) {
+      warnOnOverlappingRequiredFields(
+        parentAgent,
+        this.title,
+        this.requiredFields.map(String),
+      );
+    }
 
     // ─── onComplete cleanup: validate no conflict and desugar ─────────────
     // If both top-level `onComplete` and `hooks.onComplete` are set, throw.

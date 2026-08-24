@@ -17,6 +17,14 @@ import { SessionConflictError } from "../types/errors";
 import { createSessionId, logger } from "../utils";
 
 /**
+ * Coerce a stored value into a Date. JSON round-trips turn Date fields into
+ * ISO strings — same pattern as PostgreSQLAdapter.toDate.
+ */
+function toDate(value: unknown): Date {
+  return value instanceof Date ? value : new Date(value as string);
+}
+
+/**
  * Redis client interface - matches ioredis/redis clients
  */
 export interface RedisClient {
@@ -27,6 +35,7 @@ export interface RedisClient {
   keys(pattern: string): Promise<string[]>;
   hgetall(key: string): Promise<Record<string, string>>;
   hset(key: string, field: string, value: string): Promise<number>;
+  hdel(key: string, field: string): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
   quit(): Promise<string>;
 }
@@ -269,7 +278,15 @@ class RedisSessionRepository<TData = Record<string, unknown>>
   }
 
   async delete(id: string): Promise<boolean> {
+    // Look up first so the user index can be cleaned too — otherwise
+    // findActiveByUserId/findByUserId chase dead ids forever.
+    const existing = await this.findById(id);
+    if (!existing) return false;
+
     const result = await this.redis.del(this.getKey(id));
+    if (existing.userId) {
+      await this.redis.hdel(this.getUserKey(existing.userId), id);
+    }
     return result > 0;
   }
 }
@@ -316,7 +333,8 @@ class RedisMessageRepository implements MessageRepository {
     const data = await this.redis.get(this.getKey(id));
     if (!data) return null;
     try {
-      return JSON.parse(data) as MessageData;
+      const message = JSON.parse(data) as MessageData;
+      return { ...message, createdAt: toDate(message.createdAt) };
     } catch (error) {
       logger.error(`Error parsing message data for id ${id}:`, error);
       return null;
@@ -330,16 +348,20 @@ class RedisMessageRepository implements MessageRepository {
     const messageIds = await this.redis.hgetall(this.getSessionKey(sessionId));
     const messages: MessageData[] = [];
 
-    for (const messageId of Object.keys(messageIds).slice(0, limit)) {
+    // Fetch ALL candidates first — limiting before sorting would keep an
+    // arbitrary hash-order subset instead of the oldest messages.
+    for (const messageId of Object.keys(messageIds)) {
       const message = await this.findById(messageId);
       if (message) {
         messages.push(message);
       }
     }
 
-    return messages.sort(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
-    );
+    // Chronological order (matches PostgreSQL/Mongo adapters); limit applies
+    // only after sorting is meaningful.
+    return messages
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .slice(0, limit);
   }
 
   async findByUserId(userId: string, limit = 100): Promise<MessageData[]> {
@@ -352,9 +374,9 @@ class RedisMessageRepository implements MessageRepository {
     for (const key of keys.slice(0, limit)) {
       const data = await this.redis.get(key);
       if (data) {
-        const message: MessageData = JSON.parse(data) as MessageData;
-        if (message.userId === userId) {
-          messages.push(message);
+        const parsed: MessageData = JSON.parse(data);
+        if (parsed.userId === userId) {
+          messages.push({ ...parsed, createdAt: toDate(parsed.createdAt) });
         }
       }
     }

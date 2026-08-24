@@ -181,6 +181,27 @@ export class CompactionEngine {
     }
 
     /**
+     * Adjust the left edge of a preserved window so it never begins with an
+     * orphaned tool result — a role:'tool' message whose assistant tool_calls
+     * parent lies outside the window. Providers reject such histories at the
+     * next request.
+     *
+     * The preserve count is a target, not a hard guarantee: when the naive
+     * message-count boundary would split an assistant/tool pair, the window
+     * grows left just enough to keep the pair together.
+     */
+    private static alignPreserveStart(
+        history: HistoryItem[],
+        start: number
+    ): number {
+        let aligned = Math.max(0, Math.min(start, history.length));
+        while (aligned > 0 && history[aligned].role === "tool") {
+            aligned--;
+        }
+        return aligned;
+    }
+
+    /**
      * Aggressive truncation fallback: remove oldest messages (no LLM needed).
      * Keeps only the most recent messages that fit within the token budget.
      */
@@ -191,11 +212,16 @@ export class CompactionEngine {
         const threshold = options.maxTokens * options.compactionThreshold;
         const preserveCount = options.preserveRecentCount;
 
-        // Always preserve the last preserveRecentCount messages
-        const preserved = history.slice(-preserveCount);
+        // Always preserve the last ~preserveRecentCount messages (aligned so
+        // the window never opens on an orphaned tool result)
+        const preserveStart = CompactionEngine.alignPreserveStart(
+            history,
+            Math.max(0, history.length - preserveCount)
+        );
+        const preserved = history.slice(preserveStart);
 
         // Try to keep as many older messages as fit within budget
-        const older = history.slice(0, -preserveCount);
+        const older = history.slice(0, preserveStart);
         const result: HistoryItem[] = [];
 
         // Add older messages from most recent backwards until we'd exceed budget
@@ -219,7 +245,9 @@ export class CompactionEngine {
      * Layer 3 (micro_compact): Compress verbose tool outputs inline
      * Layer 4 (auto_compact): Summarize old messages via LLM provider
      *
-     * The last `preserveRecentCount` messages are NEVER modified or removed.
+     * The last `preserveRecentCount` messages are NEVER modified or removed
+     * (the preserved window may extend slightly further left so it never
+     * splits an assistant/tool pair at its boundary).
      */
     static async checkAndCompact(
         history: HistoryItem[],
@@ -277,8 +305,14 @@ export class CompactionEngine {
         }
 
         // Layer 4: Auto-compact (summarize old messages via LLM)
-        const oldMessages = microCompacted.slice(0, -preserveCount);
-        const recentMessages = microCompacted.slice(-preserveCount);
+        // preserveRecentCount is a target, not a hard guarantee: the window's
+        // left edge is aligned so it never opens on an orphaned tool result.
+        const preserveStart = CompactionEngine.alignPreserveStart(
+            microCompacted,
+            Math.max(0, microCompacted.length - preserveCount)
+        );
+        const oldMessages = microCompacted.slice(0, preserveStart);
+        const recentMessages = microCompacted.slice(preserveStart);
 
         const summary = await CompactionEngine.summarizeMessages(
             oldMessages,
