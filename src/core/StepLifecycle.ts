@@ -206,11 +206,10 @@ export class StepLifecycle<TContext = unknown, TData = unknown> {
 
         // Canonical merge + validation — one algorithm shared with tools,
         // signals, and auto-steps.
-        let merged: Directive<TContext, TData> | undefined;
         for (const directive of collected) {
             flow.validate(directive);
-            merged = merged ? flow.merge(merged, directive) : directive;
         }
+        const merged = flow.mergeAll(collected);
         if (!merged) return undefined;
 
         // Apply state writes immediately; they are not control flow.

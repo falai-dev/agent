@@ -126,7 +126,6 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
    * Rendered into the system prompt as "who you are and how you communicate."
    */
   persona?: Template<TContext>;
-  /** Enable debug logging */
   /**
    * Hard bound on session.history length (default: 400). The oldest entries
    * are trimmed — never splitting an assistant/tool pair — when the bound is
@@ -134,6 +133,7 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
    * disable bounding entirely.
    */
   maxHistoryMessages?: number;
+  /** Enable debug logging */
   debug?: boolean;
   /** Default context data available to the agent */
   context?: TContext;

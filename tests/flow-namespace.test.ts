@@ -332,9 +332,9 @@ describe("flow.merge", () => {
 // ─── Requirement 1.5 / 1.15: No builder constructors on namespace ────────────
 
 describe("flow namespace surface", () => {
-    test("only exposes isDirective, merge, validate", () => {
+    test("only exposes isDirective, merge, mergeAll, queuePending, validate", () => {
         const keys = Object.keys(flow).sort();
-        expect(keys).toEqual(["isDirective", "merge", "validate"]);
+        expect(keys).toEqual(["isDirective", "merge", "mergeAll", "queuePending", "validate"]);
     });
 
     test("does not expose goTo, complete, abort, reset, goToStep constructors", () => {

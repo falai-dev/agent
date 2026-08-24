@@ -28,7 +28,7 @@ import type {
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
 import type { ResponseInput } from "openai/resources/responses/responses";
-import { withTimeoutAndRetry, withStreamRetry, withBackupFallback, streamWithBackupFallback, resolveRetryConfig, logger, assertUsableCompletion, combineAbortSignals } from "../utils";
+import { withTimeoutAndRetry, withStreamRetry, withBackupFallback, streamWithBackupFallback, backupFallbackLogging, resolveRetryConfig, logger, assertUsableCompletion, combineAbortSignals } from "../utils";
 import {
   classifyProviderError,
   getErrorMessage,
@@ -422,11 +422,10 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
   >(
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
-    // `tryingBackups` records that the primary failed but qualified for
-    // backups — the only path that reaches the "All models failed" terminal
-    // log below; an ineligible primary rethrows directly.
-    let primaryErrMsg = "";
-    let tryingBackups = false;
+    const observer = backupFallbackLogging(
+      `[${this.logLabel}]`,
+      (error) => this.shouldUseBackupModel(error)
+    );
 
     try {
       return await withBackupFallback({
@@ -434,43 +433,10 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
         attempt: (model) =>
           this.generateWithModel<TContext, TStructured>(model, input),
         shouldTryBackup: (error) => this.shouldUseBackupModel(error),
-        onModelFailed: (model, error, attemptNo, total) => {
-          const errMsg = getErrorMessage(error);
-          if (attemptNo === 1) {
-            primaryErrMsg = errMsg;
-            logger.warn(
-              `[${this.logLabel}] Primary model ${model} failed: ${errMsg}`
-            );
-            if (this.shouldUseBackupModel(error)) {
-              tryingBackups = true;
-              logger.debug(`[${this.logLabel}] Trying backup models`);
-            }
-            return;
-          }
-          logger.warn(
-            `[${this.logLabel}] Backup model ${model} failed: ${errMsg}`
-          );
-          if (!this.shouldUseBackupModel(error) && attemptNo < total) {
-            logger.debug(
-              `[${this.logLabel}] Backup model error doesn't qualify for further attempts`
-            );
-          }
-        },
-        onBackupStart: (model, backupNo, backupTotal) => {
-          logger.debug(
-            `[${this.logLabel}] Trying backup model ${backupNo}/${backupTotal}: ${model}`
-          );
-        },
-        onBackupSucceeded: (model) => {
-          logger.debug(`[${this.logLabel}] Backup model ${model} succeeded`);
-        },
+        ...observer.callbacks,
       });
     } catch (error: unknown) {
-      if (tryingBackups) {
-        logger.error(
-          `[${this.logLabel}] All models failed. Primary: ${primaryErrMsg}, Last backup: ${getErrorMessage(error)}`
-        );
-      }
+      observer.logExhausted(error);
       throw this.wrapTerminalError(error);
     }
   }
@@ -481,9 +447,11 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
   >(
     input: GenerateMessageInput<TContext>
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
-    // Same flag semantics as the non-streaming twin above.
-    let primaryErrMsg = "";
-    let tryingBackups = false;
+    const observer = backupFallbackLogging(
+      `[${this.logLabel}]`,
+      (error) => this.shouldUseBackupModel(error),
+      { streaming: true }
+    );
 
     try {
       yield* streamWithBackupFallback({
@@ -494,43 +462,10 @@ export abstract class OpenAICompatibleProvider implements AiProvider {
             { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `${this.logLabel} ${model} stream`, isRetriable: (error) => isRetriableProviderError(error, this.classificationOptions) }
           ),
         shouldTryBackup: (error) => this.shouldUseBackupModel(error),
-        onModelFailed: (model, error, attemptNo, total) => {
-          const errMsg = getErrorMessage(error);
-          if (attemptNo === 1) {
-            primaryErrMsg = errMsg;
-            logger.warn(
-              `[${this.logLabel}] Primary model ${model} failed: ${errMsg}`
-            );
-            if (this.shouldUseBackupModel(error)) {
-              tryingBackups = true;
-              logger.debug(`[${this.logLabel}] Trying backup models for streaming`);
-            }
-            return;
-          }
-          logger.warn(
-            `[${this.logLabel}] Backup model ${model} failed: ${errMsg}`
-          );
-          if (!this.shouldUseBackupModel(error) && attemptNo < total) {
-            logger.debug(
-              `[${this.logLabel}] Backup model error doesn't qualify for further attempts`
-            );
-          }
-        },
-        onBackupStart: (model, backupNo, backupTotal) => {
-          logger.debug(
-            `[${this.logLabel}] Trying backup model ${backupNo}/${backupTotal}: ${model}`
-          );
-        },
-        onBackupSucceeded: (model) => {
-          logger.debug(`[${this.logLabel}] Backup model ${model} succeeded`);
-        },
+        ...observer.callbacks,
       });
     } catch (error: unknown) {
-      if (tryingBackups) {
-        logger.error(
-          `[${this.logLabel}] All models failed. Primary: ${primaryErrMsg}, Last backup: ${getErrorMessage(error)}`
-        );
-      }
+      observer.logExhausted(error);
       throw this.wrapTerminalError(error);
     }
   }

@@ -874,6 +874,26 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
       }
     }
 
+    // Overlap detection: warn (don't throw) when the incoming flow's
+    // requiredFields intersect another registered flow's — the schema is
+    // agent-level, so both flows complete together and one is silently
+    // excluded from routing.
+    if (options.requiredFields && options.requiredFields.length > 0) {
+      const incoming = new Set(options.requiredFields.map(String));
+      for (const existing of this._flows) {
+        const shared = (existing.requiredFields ?? [])
+          .map(String)
+          .filter((f) => incoming.has(f));
+        if (shared.length > 0) {
+          logger.warn(
+            `[FlowConfigurationError] Overlapping requiredFields: flows "${existing.title}" and "${options.title}" share [${shared.join(', ')}]. ` +
+            `The schema is agent-level, so data collected for one flow marks the other complete and excludes it from routing. ` +
+            `Give each flow distinct requiredFields, or set \`reentrant: true\` on flows that legitimately share fields.`
+          );
+        }
+      }
+    }
+
     const flow = new Flow<TContext, TData>(options, this);
 
     // Validate that step collect fields reference valid schema keys

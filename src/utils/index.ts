@@ -74,6 +74,7 @@ export {
   combineAbortSignals,
   withBackupFallback,
   streamWithBackupFallback,
+  backupFallbackLogging,
 } from "./retry";
 
 // Completion helpers
@@ -91,4 +92,4 @@ export {
 export { parseJSONResponse, tryParseJSONResponse } from "./json";
 
 // Serialization utilities
-export { serializeToolResult } from "./serialize";
+export { serializeToolResult, isToolResultLike, extractResultDirectives } from "./serialize";

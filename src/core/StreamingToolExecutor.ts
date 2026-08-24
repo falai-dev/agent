@@ -21,6 +21,7 @@ import type {
     TrackedTool,
 } from "../types/tool";
 import { evaluateToolGates } from "./toolGates";
+import { isToolResultLike, extractResultDirectives } from "../utils";
 
 /** Options for the StreamingToolExecutor */
 interface StreamingToolExecutorOptions {
@@ -348,24 +349,13 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
     ): ToolExecutionResult {
         // Only SEMANTIC markers identify a ToolResult — bare `{data}` / `{error}`
         // shapes are indistinguishable from ordinary business payloads and are
-        // wrapped as raw results instead (mirrors ToolManager.executeTool).
-        if (
-            result &&
-            typeof result === "object" &&
-            ("success" in result && typeof (result as Record<string, unknown>).success === "boolean" ||
-                "directive" in result ||
-                "directives" in result ||
-                "dataUpdate" in result ||
-                "contextUpdate" in result)
-        ) {
+        // wrapped as raw results instead (shared guard with ToolManager).
+        if (isToolResultLike(result)) {
             const r = result as Record<string, unknown>;
             // A handler may return `{ directive }` (singular shorthand) or
-            // `{ directives }` — normalize both into the collected array so the
+            // `{ directives }` — normalized via the shared extractor so the
             // concurrent path honors them identically to sequential execution.
-            const directives: Directive[] = [
-                ...(Array.isArray(r.directives) ? r.directives as Directive[] : []),
-                ...('directive' in r && r.directive != null ? [r.directive as Directive] : []),
-            ];
+            const directives = extractResultDirectives(result);
             return {
                 success: r.success !== false,
                 data: r.data,

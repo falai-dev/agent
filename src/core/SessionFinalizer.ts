@@ -37,11 +37,12 @@ export class SessionFinalizer<TContext = unknown, TData = unknown> {
      * Handle session persistence and finalization.
      */
     async finalize(session: SessionState<TData>, context: TContext): Promise<void> {
+        const agentOptions = this.deps.getAgentOptions();
+
         // Hard history bound — backstop when no compaction is configured (or
         // after it ran). Unbounded growth eventually bricks the thread at the
         // provider context limit.
-        const agentOptionsEarly = this.deps.getAgentOptions();
-        const historyCap = agentOptionsEarly.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
+        const historyCap = agentOptions.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
         if (historyCap > 0 && session.history && session.history.length > historyCap) {
             const bounded = boundConversationHistory(session.history, historyCap);
             if (bounded !== session.history) {
@@ -84,14 +85,11 @@ export class SessionFinalizer<TContext = unknown, TData = unknown> {
             throw error;
         }
         if (finalizeDirective) {
-            session.pendingDirective = session.pendingDirective
-                ? flow.merge(session.pendingDirective, finalizeDirective)
-                : finalizeDirective;
+            flow.queuePending(session, finalizeDirective);
         }
 
         // Auto-save session step to persistence if configured
         const persistenceManager = this.deps.getPersistenceManager();
-        const agentOptions = this.deps.getAgentOptions();
         if (
             persistenceManager &&
             session.id &&

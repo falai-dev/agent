@@ -2,6 +2,44 @@
  * Serialization utilities for tool results and other data
  */
 
+import type { Directive } from "../types/flow";
+import type { ToolResult } from "../types/tool";
+
+/**
+ * Decide whether a tool handler's return value is a ToolResult-shaped object.
+ * Only SEMANTIC markers identify one — bare `{data}` / `{error}` shapes are
+ * indistinguishable from ordinary business payloads (e.g. upstream API
+ * envelopes) and must be wrapped as raw results instead. Shared by the
+ * sequential (ToolManager) and concurrent (StreamingToolExecutor) paths so the
+ * definition of "is a ToolResult" can't drift between them.
+ */
+export function isToolResultLike(result: unknown): result is ToolResult {
+  return (
+    result !== null &&
+    typeof result === "object" &&
+    (("success" in result &&
+      typeof (result as Record<string, unknown>).success === "boolean") ||
+      "directive" in result ||
+      "directives" in result ||
+      "dataUpdate" in result ||
+      "contextUpdate" in result)
+  );
+}
+
+/**
+ * Collect a ToolResult's directives — `{directive}` (singular shorthand) and
+ * `{directives}` both count. Singular merges FIRST so plural entries win reply
+ * ties (last-wins merge), identical on both executor paths.
+ */
+export function extractResultDirectives<TContext = unknown, TData = unknown>(
+  result: ToolResult<unknown, TContext, TData>
+): Directive<TContext, TData>[] {
+  const directives: Directive<TContext, TData>[] = [];
+  if (result.directive) directives.push(result.directive);
+  if (Array.isArray(result.directives)) directives.push(...result.directives);
+  return directives;
+}
+
 /**
  * Serialize a tool execution result into a string suitable for conversation history.
  *

@@ -657,10 +657,7 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
     ): Directive<TContext, TData> {
         // Canonical Algorithm 4 merge — one algorithm shared with tools and
         // step hooks (position precedence, reply last-wins, state shallow-merge,
-        // halt OR).
-        return directives.reduce<Directive<TContext, TData>>(
-            (a, b) => flow.merge(a, b),
-            {}
-        );
+        // halt OR). Empty in, empty ({}) out.
+        return flow.mergeAll(directives) ?? {};
     }
 }

@@ -31,18 +31,6 @@ import { flow } from "./flow-namespace";
 import { historyToEvents, logger, serializeToolResult, assistantMessage, toolMessage } from "../utils";
 
 /**
- * Reduce directives collected across a turn's tool executions into one via the
- * canonical Algorithm 4 merge (`flow.merge`) — position precedence, reply
- * last-wins, state shallow-merge, halt OR.
- */
-export function mergeCollectedDirectives<TContext, TData>(
-    collected: Directive<TContext, TData>[]
-): Directive<TContext, TData> | undefined {
-    if (collected.length === 0) return undefined;
-    return collected.reduce((a, b) => flow.merge(a, b));
-}
-
-/**
  * One attempted tool execution, keyed by CALL (not tool name): parallel or
  * repeated calls to the same tool in one turn keep their own results instead
  * of overwriting each other.
@@ -125,7 +113,6 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
             // Execution records keyed by call — shared with the follow-up loop
             const records: ToolExecutionRecord[] = [];
-            void records;
 
             // Execute initial dynamic tool calls
             if (toolCalls && toolCalls.length > 0) {
@@ -209,7 +196,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
             // A tool spoke verbatim this turn: its reply IS the final message —
             // skip the follow-up LLM call (documented dispatch semantics).
-            const preLoopDirectives = mergeCollectedDirectives(collectedDirectives);
+            const preLoopDirectives = flow.mergeAll(collectedDirectives);
             if (preLoopDirectives?.reply) {
                 logger.debug("[ToolLoopExecutor] Tool directive reply short-circuits follow-up LLM call");
                 return {
@@ -428,7 +415,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
 
                     // A tool emitted a verbatim reply this round: it IS the final
                     // message — stop looping and skip any further LLM call.
-                    const roundDirectives = mergeCollectedDirectives(collectedDirectives ?? []);
+                    const roundDirectives = flow.mergeAll(collectedDirectives);
                     if (roundDirectives?.reply) {
                         logger.debug("[ToolLoopExecutor] Tool directive reply short-circuits remaining tool loop");
                         finalMessage = roundDirectives.reply;
@@ -489,7 +476,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 finalToolCalls: toolCalls,
                 finalMessage,
                 structured: followUpStructured,
-                directives: mergeCollectedDirectives(collectedDirectives ?? []),
+                directives: flow.mergeAll(collectedDirectives),
             };
         } catch (error) {
             throw ResponseGenerationError.fromError(error, 'tool_execution', params, {
@@ -746,7 +733,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             }
         }
 
-        return { session, toolCalls, finalMessage, structured, directives: mergeCollectedDirectives(collectedDirectives) };
+        return { session, toolCalls, finalMessage, structured, directives: flow.mergeAll(collectedDirectives) };
     }
 
     /**

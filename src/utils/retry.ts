@@ -2,6 +2,7 @@
  * Retry utility with exponential backoff
  */
 import {logger} from './logger'
+import { getErrorMessage } from '../providers/errorClassification'
 
 export interface RetryOptions<T> {
   operation: () => Promise<T>;
@@ -446,4 +447,77 @@ export async function* streamWithBackupFallback<T>(
   }
 
   throw lastError;
+}
+
+/**
+ * Standard logging observer for the backup-fallback walkers. Holds the
+ * per-walk state (primary error message, whether backups were tried) that the
+ * terminal "All models failed" log needs, so each provider call site is just
+ * `attempt` + `shouldTryBackup` + its own terminal error wrap.
+ *
+ * ```ts
+ * const observer = backupFallbackLogging("[OPENAI]", shouldUseBackupModel);
+ * try {
+ *   return await withBackupFallback({ models, attempt, shouldTryBackup, ...observer.callbacks });
+ * } catch (error) {
+ *   observer.logExhausted(error);
+ *   throw wrap(error);
+ * }
+ * ```
+ */
+export function backupFallbackLogging(
+  label: string,
+  shouldTryBackup: (error: unknown) => boolean,
+  options?: { streaming?: boolean }
+): {
+  callbacks: Pick<
+    BackupFallbackBase,
+    "onModelFailed" | "onBackupStart" | "onBackupSucceeded"
+  >;
+  logExhausted: (lastError: unknown) => void;
+} {
+  let primaryErrMsg = "";
+  // Records that the primary failed but qualified for backups — the only path
+  // that reaches the "All models failed" terminal log; an ineligible primary
+  // rethrows directly.
+  let tryingBackups = false;
+  const streamSuffix = options?.streaming ? " for streaming" : "";
+
+  return {
+    callbacks: {
+      onModelFailed: (model, error, attemptNo, total) => {
+        const errMsg = getErrorMessage(error);
+        if (attemptNo === 1) {
+          primaryErrMsg = errMsg;
+          logger.warn(`${label} Primary model ${model} failed: ${errMsg}`);
+          if (shouldTryBackup(error)) {
+            tryingBackups = true;
+            logger.debug(`${label} Trying backup models${streamSuffix}`);
+          }
+          return;
+        }
+        logger.warn(`${label} Backup model ${model} failed: ${errMsg}`);
+        if (!shouldTryBackup(error) && attemptNo < total) {
+          logger.debug(
+            `${label} Backup model error doesn't qualify for further attempts`
+          );
+        }
+      },
+      onBackupStart: (model, backupNo, backupTotal) => {
+        logger.debug(
+          `${label} Trying backup model ${backupNo}/${backupTotal}: ${model}`
+        );
+      },
+      onBackupSucceeded: (model) => {
+        logger.debug(`${label} Backup model ${model} succeeded`);
+      },
+    },
+    logExhausted: (lastError) => {
+      if (tryingBackups) {
+        logger.error(
+          `${label} All models failed. Primary: ${primaryErrMsg}, Last backup: ${getErrorMessage(lastError)}`
+        );
+      }
+    },
+  };
 }

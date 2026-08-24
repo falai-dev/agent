@@ -17,10 +17,9 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
-import { withTimeoutAndRetry, withStreamRetry, withBackupFallback, streamWithBackupFallback, resolveRetryConfig, logger, assertUsableCompletion, combineAbortSignals } from "../utils";
+import { withTimeoutAndRetry, withStreamRetry, withBackupFallback, streamWithBackupFallback, backupFallbackLogging, resolveRetryConfig, logger, assertUsableCompletion, combineAbortSignals } from "../utils";
 import {
   classifyProviderError,
-  getErrorMessage,
   isBackupEligible,
   isRetriableProviderError,
   toProviderError,
@@ -198,11 +197,7 @@ export class AnthropicProvider implements AiProvider {
   >(
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
-    // `tryingBackups` records that the primary failed but qualified for
-    // backups — the only path that reaches the "All models failed" terminal
-    // log below; an ineligible primary rethrows directly.
-    let primaryErrMsg = "";
-    let tryingBackups = false;
+    const observer = backupFallbackLogging("[ANTHROPIC]", shouldUseBackupModel);
 
     try {
       return await withBackupFallback({
@@ -210,41 +205,10 @@ export class AnthropicProvider implements AiProvider {
         attempt: (model) =>
           this.generateWithModel<TContext, TStructured>(model, input),
         shouldTryBackup: shouldUseBackupModel,
-        onModelFailed: (model, error, attemptNo, total) => {
-          const errMsg = getErrorMessage(error);
-          if (attemptNo === 1) {
-            primaryErrMsg = errMsg;
-            logger.warn(
-              `[ANTHROPIC] Primary model ${model} failed: ${errMsg}`
-            );
-            if (shouldUseBackupModel(error)) {
-              tryingBackups = true;
-              logger.debug(`[ANTHROPIC] Trying backup models`);
-            }
-            return;
-          }
-          logger.warn(`[ANTHROPIC] Backup model ${model} failed: ${errMsg}`);
-          if (!shouldUseBackupModel(error) && attemptNo < total) {
-            logger.debug(
-              `[ANTHROPIC] Backup model error doesn't qualify for further attempts`
-            );
-          }
-        },
-        onBackupStart: (model, backupNo, backupTotal) => {
-          logger.debug(
-            `[ANTHROPIC] Trying backup model ${backupNo}/${backupTotal}: ${model}`
-          );
-        },
-        onBackupSucceeded: (model) => {
-          logger.debug(`[ANTHROPIC] Backup model ${model} succeeded`);
-        },
+        ...observer.callbacks,
       });
     } catch (error: unknown) {
-      if (tryingBackups) {
-        logger.error(
-          `[ANTHROPIC] All models failed. Primary: ${primaryErrMsg}, Last backup: ${getErrorMessage(error)}`
-        );
-      }
+      observer.logExhausted(error);
       throw toProviderError(error, this.name, CLASSIFICATION_OPTIONS);
     }
   }
@@ -405,9 +369,7 @@ export class AnthropicProvider implements AiProvider {
   >(
     input: GenerateMessageInput<TContext>
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
-    // Same flag semantics as the non-streaming twin above.
-    let primaryErrMsg = "";
-    let tryingBackups = false;
+    const observer = backupFallbackLogging("[ANTHROPIC]", shouldUseBackupModel, { streaming: true });
 
     try {
       yield* streamWithBackupFallback({
@@ -418,41 +380,10 @@ export class AnthropicProvider implements AiProvider {
             { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Anthropic ${model} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
           ),
         shouldTryBackup: shouldUseBackupModel,
-        onModelFailed: (model, error, attemptNo, total) => {
-          const errMsg = getErrorMessage(error);
-          if (attemptNo === 1) {
-            primaryErrMsg = errMsg;
-            logger.warn(
-              `[ANTHROPIC] Primary model ${model} failed: ${errMsg}`
-            );
-            if (shouldUseBackupModel(error)) {
-              tryingBackups = true;
-              logger.debug(`[ANTHROPIC] Trying backup models for streaming`);
-            }
-            return;
-          }
-          logger.warn(`[ANTHROPIC] Backup model ${model} failed: ${errMsg}`);
-          if (!shouldUseBackupModel(error) && attemptNo < total) {
-            logger.debug(
-              `[ANTHROPIC] Backup model error doesn't qualify for further attempts`
-            );
-          }
-        },
-        onBackupStart: (model, backupNo, backupTotal) => {
-          logger.debug(
-            `[ANTHROPIC] Trying backup model ${backupNo}/${backupTotal}: ${model}`
-          );
-        },
-        onBackupSucceeded: (model) => {
-          logger.debug(`[ANTHROPIC] Backup model ${model} succeeded`);
-        },
+        ...observer.callbacks,
       });
     } catch (error: unknown) {
-      if (tryingBackups) {
-        logger.error(
-          `[ANTHROPIC] All models failed. Primary: ${primaryErrMsg}, Last backup: ${getErrorMessage(error)}`
-        );
-      }
+      observer.logExhausted(error);
       throw toProviderError(error, this.name, CLASSIFICATION_OPTIONS);
     }
   }

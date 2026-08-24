@@ -69,9 +69,6 @@ export function createSession<TData = Record<string, unknown>>(
 }
 
 /**
- * Helper to create a new session ID
- */
-/**
  * Default conversation-history bound applied when the agent configures neither
  * `maxHistoryMessages` nor compaction: generous enough to never bite a real
  * thread, finite so a long-running chat()/stream() session can't grow until
@@ -109,6 +106,7 @@ export function restoreSession<TData = Record<string, unknown>>(
   return createSession<TData>(state);
 }
 
+/** Helper to create a new session ID */
 export function createSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

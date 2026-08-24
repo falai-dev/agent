@@ -459,6 +459,58 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
+     * Repair-parse a JSON-shaped protocol fragment (truncated output,
+     * fence-wrapped JSON) into a structured payload. Raw protocol fragments
+     * must never surface as the user-visible reply: if the repair parse fails,
+     * fail the turn LOUDLY so the caller's rollback/retry path engages instead
+     * of leaking `{"message": "…` to an end user. Plain prose (not JSON-shaped
+     * at all) never reaches this helper — the call sites gate on the fragment
+     * shape and pass it through untouched.
+     */
+    private salvageStructuredOutput(
+        raw: string,
+        surface: "turn" | "stream"
+    ): AgentStructuredResponse {
+        const salvaged = tryParseJSONResponse(raw) as Partial<AgentStructuredResponse> | undefined;
+        if (salvaged && typeof salvaged.message === "string") {
+            logger.warn(`[ResponseModal] Salvaged malformed structured output from ${surface} via JSON repair parse.`);
+            return { ...salvaged, message: salvaged.message };
+        }
+        throw ResponseGenerationError.fromError(
+            new Error(
+                "Model returned a schema-mandated response that could not be parsed as JSON. " +
+                `The ${surface} was failed instead of delivering raw protocol output to the user.`
+            ),
+            'structured_output_malformed',
+            { responseSchemaName: 'response_output' }
+        );
+    }
+
+    /**
+     * Tool-emitted directives (ctx.dispatch / `{directive}` returns): state
+     * writes apply now; control flow queues for the next turn's
+     * pendingDirective applier (same deferred semantics as dispatch()).
+     */
+    private async applyToolEmittedDirectives(
+        session: SessionState<TData>,
+        d: Directive<TContext, TData>
+    ): Promise<SessionState<TData>> {
+        if (d.dataUpdate) {
+            session = mergeCollected(session, d.dataUpdate);
+        }
+        if (d.contextUpdate) {
+            await this.agent.updateContext(d.contextUpdate);
+        }
+        const control = { ...d };
+        delete control.dataUpdate;
+        delete control.contextUpdate;
+        if (Object.keys(control).length > 0) {
+            flow.queuePending(session, control);
+        }
+        return session;
+    }
+
+    /**
      * Collect scoped instructions from agent, flow, and step into a ScopedInstructions value.
      * @private
      */
@@ -562,9 +614,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // before deciding flow/step, so a prepare-phase goTo/goToStep/
                 // reset steers the current turn.
                 if (prepareDirective) {
-                    session.pendingDirective = session.pendingDirective
-                        ? flow.merge(session.pendingDirective, prepareDirective)
-                        : prepareDirective;
+                    flow.queuePending(session, prepareDirective);
                 }
             } catch (error) {
                 throw ResponseGenerationError.fromError(error, 'step_preparation', params, { session, effectiveContext });
@@ -1024,21 +1074,9 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // an end user. Plain prose (not JSON-shaped at all) still passes
             // through — it is not a protocol fragment.
             if (!structuredData && responseSchema && message && /^\s*(```|{)/.test(message)) {
-                const salvaged = tryParseJSONResponse(message) as Partial<AgentStructuredResponse> | undefined;
-                if (salvaged && typeof salvaged.message === "string") {
-                    logger.warn("[ResponseModal] Salvaged malformed structured output via JSON repair parse.");
-                    structuredData = { ...salvaged, message: salvaged.message };
-                    message = salvaged.message;
-                } else {
-                    throw ResponseGenerationError.fromError(
-                        new Error(
-                            "Model returned a schema-mandated response that could not be parsed as JSON. " +
-                            "The turn was failed instead of delivering raw protocol output to the user."
-                        ),
-                        'structured_output_malformed',
-                        { responseSchemaName: 'response_output' }
-                    );
-                }
+                const salvaged = this.salvageStructuredOutput(message, "turn");
+                structuredData = salvaged;
+                message = salvaged.message;
             }
 
             const effectiveResult = structuredData ? { ...result, structured: structuredData } : result;
@@ -1067,21 +1105,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // state writes apply now; control flow queues for the next turn's
             // pendingDirective applier (same deferred semantics as dispatch()).
             if (toolResult.directives) {
-                const d = toolResult.directives;
-                if (d.dataUpdate) {
-                    session = mergeCollected(session, d.dataUpdate);
-                }
-                if (d.contextUpdate) {
-                    await this.agent.updateContext(d.contextUpdate);
-                }
-                const control = { ...d };
-                delete control.dataUpdate;
-                delete control.contextUpdate;
-                if (Object.keys(control).length > 0) {
-                    session.pendingDirective = session.pendingDirective
-                        ? flow.merge(session.pendingDirective, control)
-                        : control;
-                }
+                session = await this.applyToolEmittedDirectives(session, toolResult.directives);
             }
 
             // Collect data from response
@@ -1418,21 +1442,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     // as dispatch()). A verbatim tool reply already replaced the
                     // closing message inside runStreamingBatch.
                     if (batchResult.directives) {
-                        const d = batchResult.directives;
-                        if (d.dataUpdate) {
-                            session = mergeCollected(session, d.dataUpdate);
-                        }
-                        if (d.contextUpdate) {
-                            await this.agent.updateContext(d.contextUpdate);
-                        }
-                        const control = { ...d };
-                        delete control.dataUpdate;
-                        delete control.contextUpdate;
-                        if (Object.keys(control).length > 0) {
-                            session.pendingDirective = session.pendingDirective
-                                ? flow.merge(session.pendingDirective, control)
-                                : control;
-                        }
+                        session = await this.applyToolEmittedDirectives(session, batchResult.directives);
                     }
 
                     // Prefer the post-tool follow-up structured for collection and
@@ -1458,23 +1468,11 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // text is JSON-shaped (a protocol fragment) — repair-parse it or
                 // fail the turn rather than leaking raw output to the user.
                 if (chunk.done && !finalStructured && responseSchema && finalAccumulated && /^\s*(```|{)/.test(finalAccumulated)) {
-                    const salvaged = tryParseJSONResponse(finalAccumulated) as Partial<AgentStructuredResponse> | undefined;
-                    if (salvaged && typeof salvaged.message === "string") {
-                        logger.warn("[ResponseModal] Salvaged malformed structured output from stream via JSON repair parse.");
-                        finalStructured = { ...salvaged, message: salvaged.message };
-                        finalDelta = salvaged.message.startsWith(finalAccumulated)
-                            ? salvaged.message.slice(finalAccumulated.length)
-                            : salvaged.message;
-                    } else {
-                        throw ResponseGenerationError.fromError(
-                            new Error(
-                                "Model returned a schema-mandated response that could not be parsed as JSON. " +
-                                "The stream was failed instead of delivering raw protocol output to the user."
-                            ),
-                            'structured_output_malformed',
-                            { responseSchemaName: 'response_output' }
-                        );
-                    }
+                    const salvaged = this.salvageStructuredOutput(finalAccumulated, "stream");
+                    finalStructured = salvaged;
+                    finalDelta = salvaged.message.startsWith(finalAccumulated)
+                        ? salvaged.message.slice(finalAccumulated.length)
+                        : salvaged.message;
                 }
 
                 // Collect data on the final chunk for any flow step — flow

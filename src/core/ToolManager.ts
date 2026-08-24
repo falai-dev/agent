@@ -18,7 +18,7 @@ import type {
 } from "../types";
 import type { Directive } from "../types/flow";
 import { ToolScope } from "../types";
-import { logger } from "../utils";
+import { logger, isToolResultLike, extractResultDirectives } from "../utils";
 // Type-only import: ToolManager must not create a runtime cycle with Agent
 import type { Agent } from "./Agent";
 import { Flow } from "./Flow";
@@ -759,15 +759,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       // wrapped as raw results instead.
       let toolResult: ToolResult<unknown, TContext, TData>;
 
-      if (
-        result &&
-        typeof result === 'object' &&
-        ('success' in result && typeof (result as Record<string, unknown>).success === 'boolean' ||
-          'directive' in result ||
-          'directives' in result ||
-          'dataUpdate' in result ||
-          'contextUpdate' in result)
-      ) {
+      if (isToolResultLike(result)) {
         // It's already a ToolResult-like object
         toolResult = result as ToolResult<unknown, TContext, TData>;
       } else {
@@ -779,13 +771,8 @@ export class ToolManager<TContext = unknown, TData = unknown> {
       }
 
       // Collect directives from the result — singular and plural forms both
-      // count, matching StreamingToolExecutor's normalization.
-      if (toolResult.directive) {
-        collectedDirectives.push(toolResult.directive);
-      }
-      if (Array.isArray(toolResult.directives)) {
-        collectedDirectives.push(...toolResult.directives);
-      }
+      // count, ordered identically to the concurrent executor.
+      collectedDirectives.push(...extractResultDirectives(toolResult));
 
       // Apply data updates from tool result with validation
       if (toolResult.dataUpdate) {

@@ -6,6 +6,7 @@
  */
 
 import type { Directive } from "../types/flow";
+import type { SessionState } from "../types/session";
 import { FlowConfigurationError } from "./Step";
 
 // ─── Position field metadata ─────────────────────────────────────────────────
@@ -182,6 +183,32 @@ function validate<TContext, TData>(d: Directive<TContext, TData>): void {
 }
 
 /**
+ * Reduce an array of directives into one via the canonical Algorithm 4 merge
+ * (position precedence, reply last-wins, state shallow-merge, halt OR).
+ * Empty arrays yield undefined.
+ */
+function mergeAll<TContext, TData>(
+    directives: Directive<TContext, TData>[]
+): Directive<TContext, TData> | undefined {
+    if (directives.length === 0) return undefined;
+    return directives.reduce((a, b) => merge(a, b));
+}
+
+/**
+ * Queue a control directive on the session for the pendingDirective applier at
+ * the START of the next turn, merging with anything already queued via the
+ * canonical Algorithm 4 merge.
+ */
+function queuePending<TData>(
+    session: SessionState<TData>,
+    directive: Directive<unknown, TData>
+): void {
+    session.pendingDirective = session.pendingDirective
+        ? merge(session.pendingDirective, directive)
+        : directive;
+}
+
+/**
  * The `flow` namespace object. Exported as a single const for ergonomic usage:
  *
  * ```ts
@@ -194,5 +221,7 @@ function validate<TContext, TData>(d: Directive<TContext, TData>): void {
 export const flow = {
     isDirective,
     merge,
+    mergeAll,
+    queuePending,
     validate,
 } as const;
