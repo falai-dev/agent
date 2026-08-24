@@ -155,34 +155,25 @@ class MemorySessionRepository<TData = Record<string, unknown>>
     return Promise.resolve(cloneDeep(updated));
   }
 
+  // Derived updaters route through update() so every state write shares one
+  // semantic across adapters: version bump + updatedAt refresh (the SQL
+  // adapters delegate to their update() the same way).
+
   async updateStatus(
     id: string,
     status: SessionStatus,
     completedAt?: Date
   ): Promise<SessionData<TData> | null> {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.status = status;
-      if (completedAt) {
-        session.completedAt = completedAt;
-      }
-      this.sessions.set(id, cloneDeep(session));
-      return Promise.resolve(cloneDeep(session));
-    }
-    return Promise.resolve(null);
+    // An undefined completedAt must be omitted, not spread — update() writes
+    // whatever keys it receives, and SQL skips undefined columns.
+    return this.update(id, completedAt ? { status, completedAt } : { status });
   }
 
   async updateCollectedData(
     id: string,
     collectedData: CollectedStateData<TData>
   ): Promise<SessionData<TData> | null> {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.collectedData = collectedData;
-      this.sessions.set(id, cloneDeep(session));
-      return Promise.resolve(cloneDeep(session));
-    }
-    return Promise.resolve(null);
+    return this.update(id, { collectedData });
   }
 
   async updateFlowStep(
@@ -190,24 +181,27 @@ class MemorySessionRepository<TData = Record<string, unknown>>
     flow?: string,
     step?: string
   ): Promise<SessionData<TData> | null> {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.currentFlow = flow;
-      session.currentStep = step;
-      this.sessions.set(id, cloneDeep(session));
-      return Promise.resolve(cloneDeep(session));
-    }
-    return Promise.resolve(null);
+    // Mirror SQL's conditional column assembly: only defined values are written.
+    return this.update(id, {
+      ...(flow !== undefined && { currentFlow: flow }),
+      ...(step !== undefined && { currentStep: step }),
+    });
   }
 
   async incrementMessageCount(id: string): Promise<SessionData<TData> | null> {
+    // Bookkeeping write, deliberately NOT routed through update(): count bumps
+    // run alongside saveSessionState's version CAS every turn, so they must not
+    // move `version` (matches the SQL adapters' dedicated statement).
     const session = this.sessions.get(id);
-    if (session) {
-      session.messageCount = (session.messageCount || 0) + 1;
-      this.sessions.set(id, cloneDeep(session));
-      return Promise.resolve(cloneDeep(session));
-    }
-    return Promise.resolve(null);
+    if (!session) return Promise.resolve(null);
+    const updated: SessionData<TData> = {
+      ...session,
+      messageCount: (session.messageCount || 0) + 1,
+      lastMessageAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.sessions.set(id, cloneDeep(updated));
+    return Promise.resolve(cloneDeep(updated));
   }
 
   async delete(id: string): Promise<boolean> {
@@ -232,8 +226,10 @@ class MemoryMessageRepository implements MessageRepository {
       createdAt: new Date(),
     };
 
-    this.messages.set(id, message);
-    return Promise.resolve(message);
+    // Clone on store and on return so callers can't mutate the stored row —
+    // same isolation the session repository provides.
+    this.messages.set(id, cloneDeep(message));
+    return Promise.resolve(cloneDeep(message));
   }
 
   async findById(id: string): Promise<MessageData | null> {

@@ -29,8 +29,8 @@ import type {
   CollectedStateData,
   PersistenceAdapter,
   SessionData,
-  SessionState,
 } from "../src/types/persistence";
+import type { SessionState } from "../src/types/session";
 
 /** Complex TData shape used across the contract (nested objects/arrays/nulls). */
 interface TestData {
@@ -504,6 +504,91 @@ function runAdapterContract(label: string, make: MakeAdapter): void {
 
           const limited = await messages.findBySessionId("sess_msg", 2);
           expect(limited.map((m) => m.id)).toEqual([m1.id, m2.id]);
+        });
+      }
+    );
+
+    test(
+      "contract #8 state-writer methods (updateStatus/updateCollectedData/updateFlowStep) share update()'s version semantics",
+      async () => {
+        await withHarness(make, async ({ adapter }) => {
+          const repo = adapter.sessionRepository;
+          await repo.create({
+            id: "sess_state",
+            userId: "user_s",
+            status: "active",
+          });
+
+          const afterCollected = expectFound(
+            await repo.updateCollectedData("sess_state", {
+              data: { name: "Nina" },
+              flowHistory: [],
+              metadata: {},
+            }),
+            "updateCollectedData"
+          );
+          expect(afterCollected.version).toBe(2);
+
+          const afterFlow = expectFound(
+            await repo.updateFlowStep("sess_state", "support", "ask_email"),
+            "updateFlowStep"
+          );
+          expect(afterFlow.version).toBe(3);
+          expect(afterFlow.currentFlow).toBe("support");
+          expect(afterFlow.currentStep).toBe("ask_email");
+
+          const afterStatus = expectFound(
+            await repo.updateStatus("sess_state", "completed", new Date()),
+            "updateStatus"
+          );
+          expect(afterStatus.version).toBe(4);
+          expect(afterStatus.status).toBe("completed");
+          expect(afterStatus.completedAt).toBeInstanceOf(Date);
+
+          // Undefined optional fields are omitted, not cleared (SQL skips the
+          // column; Memory must not overwrite with undefined).
+          const partialFlow = expectFound(
+            await repo.updateFlowStep("sess_state", "next_flow"),
+            "updateFlowStep without step"
+          );
+          expect(partialFlow.currentFlow).toBe("next_flow");
+          expect(partialFlow.currentStep).toBe("ask_email");
+        });
+      }
+    );
+
+    test(
+      "contract #9 incrementMessageCount is bookkeeping: bumps count + timestamps, never version",
+      async () => {
+        await withHarness(make, async ({ adapter }) => {
+          const repo = adapter.sessionRepository;
+          await repo.create({
+            id: "sess_count",
+            userId: "user_n",
+            status: "active",
+            messageCount: 1,
+          });
+          const before = expectFound(
+            await repo.findById("sess_count"),
+            "created session"
+          );
+          const versionBefore = before.version;
+
+          await tick(); // ensure updatedAt strictly increases across the write
+          const after = expectFound(
+            await repo.incrementMessageCount("sess_count"),
+            "incremented session"
+          );
+          expect(after.messageCount).toBe(2);
+          // Count bumps run alongside saveSessionState's version CAS every
+          // turn — moving `version` here would manufacture false conflicts.
+          expect(after.version).toBe(versionBefore);
+          expect(after.updatedAt.getTime()).toBeGreaterThan(
+            before.updatedAt.getTime()
+          );
+          expect(after.lastMessageAt).toBeInstanceOf(Date);
+
+          expect(await repo.incrementMessageCount("sess_missing")).toBeNull();
         });
       }
     );

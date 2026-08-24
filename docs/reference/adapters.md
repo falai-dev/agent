@@ -73,7 +73,7 @@ Both are **required columns** on every adapter's session schema. v1 schemas had 
 
 ## Optimistic locking
 
-Every session row carries a `version: number` (on `SessionData` / `SessionState`), incremented by the repository on every update. `SessionRepository.update()` takes an optional compare-and-swap guard:
+Every session row carries a `version: number` (on `SessionData` / `SessionState`), incremented by the repository on every update. One deliberate exception: `incrementMessageCount` is bookkeeping — it refreshes the timestamps but never moves `version`, because count bumps run alongside `saveSessionState`'s compare-and-swap on every turn and would otherwise manufacture false conflicts. The state-writer helpers (`updateStatus`, `updateCollectedData`, `updateFlowStep`) go through `update()` and do bump it, identically on every built-in adapter. `SessionRepository.update()` takes an optional compare-and-swap guard:
 
 ```typescript
 interface SessionUpdateOptions {
