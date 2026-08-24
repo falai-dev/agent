@@ -98,7 +98,9 @@ The format is fixed. The kind prefix is always present (defaulting to `[should]`
 Every `respond()` call returns an `appliedInstructions` array listing exactly which instructions were rendered into that turn's prompt. The set is deterministic — it comes from the prompt composer, not the model — so you can use it for observability, audits, and tests. For an instruction with `when`, inclusion means the conditional instruction reached the model; it does not claim that the model judged the condition true:
 
 ```typescript
-const response = await agent.respond("I want to book a room.");
+const response = await agent.respond({
+  history: [{ role: "user", content: "I want to book a room." }],
+});
 
 for (const a of response.appliedInstructions ?? []) {
   console.log(`${a.scope}${a.scopeRef ? `:${a.scopeRef}` : ""} → ${a.id}`);
@@ -113,7 +115,9 @@ Each `AppliedInstruction` carries the firing instruction's `id`, the originating
 The same array lands on the final chunk of `respondStream`:
 
 ```typescript
-for await (const chunk of agent.respondStream("I want to book a room.")) {
+for await (const chunk of agent.respondStream({
+  history: [{ role: "user", content: "I want to book a room." }],
+})) {
   if (chunk.done) {
     console.log("rendered:", chunk.appliedInstructions);
   }
@@ -189,11 +193,16 @@ Because the set is deterministic, you can assert against it directly:
 ```typescript
 import { test, expect } from "bun:test";
 
+// Seed the condition state at construction — `initialData` pre-populates
+// session.data before the first turn.
+const agent = createAgent({
+  /* ...same scaffold, with the payment step configured as above... */
+  initialData: { lastChargeStatus: "declined" },
+});
+
 test("payment step renders the no-retry rule when the card was declined", async () => {
-  const response = await agent.respond("Try again.", {
-    sessionId: "s_1",
-    initialContext: {},
-    initialData: { lastChargeStatus: "declined" },
+  const response = await agent.respond({
+    history: [{ role: "user", content: "Try again." }],
   });
 
   const ids = response.appliedInstructions?.map(a => a.id) ?? [];

@@ -68,7 +68,7 @@ Five of the six primitives appear by name in that block. The remaining one — `
 
 An `Agent<TContext, TData>` is the top-level handle. It binds the four ingredients of a conversational system: a **schema** (what to collect), a **provider** (which LLM to call), a set of **flows** (what goals to pursue), and an optional **persistence** adapter (where to keep sessions). Anything ambient — auth, feature flags, services — rides on `TContext`. Anything collected — names, dates, choices — lives in `TData`. Both type parameters are inferred once at the agent boundary and propagate through every flow, step, tool, and hook beneath it.
 
-The agent owns the registry. It assigns a deterministic id to every flow, step, and tool; it enforces a single `schema` at every `collect` site; it holds the chosen provider and the session lifecycle. It exposes `respond(message)` and `respondStream(message)` for handling user input, plus `dispatch(target, session)` for redirecting from outside a turn. One agent serves many concurrent conversations — a session id keys into the persistence adapter, and `respond` is otherwise stateless from the caller's perspective.
+The agent owns the registry. It assigns a deterministic id to every flow, step, and tool; it enforces a single `schema` at every `collect` site; it holds the chosen provider and the session lifecycle. It exposes `respond(params)` and `respondStream(params)` for handling user input, plus `dispatch(target, session)` for redirecting from outside a turn. One agent serves many concurrent conversations — a session id keys into the persistence adapter, and `respond` is otherwise stateless from the caller's perspective.
 
 ### Flow
 
@@ -137,7 +137,7 @@ The factory is the recommended construction path for application code. The class
 
 ### `Agent.dispatch`
 
-`agent.dispatch(target, session)` is the imperative entry point for redirecting a session from outside a turn — typically from a webhook, a cron job, or a UI button that jumps the user into a different flow. It accepts either a string shorthand (`"Feedback"` desugars to `{ goTo: "Feedback" }`) or a full `Directive`. Internally, it writes `session.pendingDirective` and persists; the directive is consumed at the start of the next `respond` call before any other resolution runs.
+`agent.dispatch(target, session)` is the imperative entry point for redirecting a session from outside a turn — typically from a webhook, a cron job, or a UI button that jumps the user into a different flow. It accepts either a string shorthand (`"Feedback"` desugars to `{ goTo: "Feedback" }`) or a full `Directive`. Internally, it writes `session.pendingDirective`; the directive is consumed at the start of the next `respond` call before any other resolution runs. Dispatch does not write through the persistence adapter itself — the next turn's auto-save does — so call `agent.session.save()` if the write must reach disk immediately.
 
 ```typescript
 const updated = await agent.dispatch(
@@ -267,7 +267,7 @@ The construction shape encodes the ownership tree: an agent owns flows, tools, a
 
 ## What's next
 
-The next page walks through what happens when `agent.respond(message)` is called: the per-turn pipeline, resolution precedence (`pendingDirective` first, then signals + routing in parallel, then auto-step chains, then branches, then linear succession), the directive bus, and how `flow.merge` collapses simultaneous emissions into a single applied directive. After that, the [Directives](./directives.md) page goes deeper into the directive shape itself — why it is flat, how `SignalDirective` extends it for signals, and what each field does.
+The next page walks through what happens when `agent.respond(params)` is called: the per-turn pipeline, resolution precedence (`pendingDirective` first, then signals + routing in parallel, then auto-step chains, then branches, then linear succession), the directive bus, and how `flow.merge` collapses simultaneous emissions into a single applied directive. After that, the [Directives](./directives.md) page goes deeper into the directive shape itself — why it is flat, how `SignalDirective` extends it for signals, and what each field does.
 
 If the goal right now is to write code, the [tutorial](../start/01-install.md) starts from a one-line install and arrives at a working agent in five short pages. If the goal is to look up an exact contract, every primitive on this page has a [reference](../reference/create-agent.md) page with the full TypeScript declaration, a fields table, two short examples, and the typed errors it can throw.
 

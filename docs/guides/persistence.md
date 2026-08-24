@@ -120,6 +120,14 @@ const response = await agent.respond({
 
 `getOrCreate` returns the stored `SessionState` (collected data, flow position, `pendingDirective`, signals state) — or creates a fresh session with that id if nothing exists yet. Unknown ids are not an error path; they are the start of a new conversation pinned to that id.
 
+If you load a persisted session blob yourself — a custom cache, a queue payload, a row fetched outside the adapter's normal path — pass it through [`restoreSession`](../reference/adapters.md) instead of hand-shaping a `SessionState`. It is the named inverse of `createPersistedState`: it takes the persisted slice and returns a fully-shaped `SessionState`, including a completed-flow blob whose collected state must survive the round trip.
+
+```typescript
+import { restoreSession } from "@falai/agent";
+
+const session = restoreSession(await myCache.get(sessionId));
+```
+
 A practical id shape: `<userId>:<threadId>`. Keep it stable across restarts and replicas. The adapter does the rest.
 
 ## Recipe 3: Redis for fast, ephemeral sessions
@@ -162,13 +170,12 @@ If you need an archive of every session and message (audit logs, search, analyti
 Once sessions span processes, two writers can race on one id — parallel webhooks, a double-send from a chat widget, two browser tabs. Every save is a compare-and-swap on the session's `version` (incremented on each save): the loser's save throws `SessionConflictError` instead of silently overwriting the winner's state. The error carries `sessionId`, `expectedVersion`, and `actualVersion`; the recovery is mechanical — reload, retry.
 
 ```typescript
-import { SessionConflictError } from "@falai/agent";
+import { ResponseGenerationError, SessionConflictError } from "@falai/agent";
 
 function isSessionConflict(err: unknown): boolean {
-  if (err instanceof SessionConflictError) return true;
-  if (err instanceof Error && err.name === "ResponseGenerationError") {
-    const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
-    return original instanceof SessionConflictError;
+  if (err instanceof SessionConflictError) return true; // bare from respond()
+  if (err instanceof ResponseGenerationError) {
+    return err.cause instanceof SessionConflictError; // wrapped on the stream path
   }
   return false;
 }

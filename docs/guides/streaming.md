@@ -136,4 +136,14 @@ For a Stop button, store the `controller` reference for the active stream on the
 
 If the turn fails — the generator surfaces an error chunk — it has no lasting effect: the in-memory session rolls back to its pre-turn snapshot (the user message added by `stream()` before the turn is retained), and persisted state is whatever the previous turn saved. Retrying is always safe.
 
+## Reliability: retries, backups, and the first-chunk deadline
+
+Streaming inherits the same resilience machinery as non-streaming calls — provider `retryConfig` and `backupModels` — with stream-specific rules:
+
+- **Retry only before the first chunk.** A stream that fails before yielding anything (a connection error, an empty completion, a stalled open) is retried on the same model up to `retryConfig.retries` times. Once a delta has reached your renderer, the stream is committed: any later failure propagates instead of retrying, so a retry can never emit a token your consumer has already seen.
+- **First-chunk deadline.** `retryConfig.timeout` doubles as the time-to-first-token budget. If the provider opens a stream but produces no first chunk within it, the attempt counts as failed and the retry and backup machinery takes over. Only the first chunk is bounded — later chunks are unbounded, so a long-but-healthy stream is never cut off.
+- **Transparent backup-model switch.** With `backupModels` configured, a model that fails mid-stream — even after deltas were delivered — falls through to the next model, whose chunks flow through unchanged. The switchover happens between chunks; no error reaches the consumer unless every model fails.
+
+These knobs live on the provider constructor, not on `respondStream` — see [Providers](../reference/providers.md) for `retryConfig` and `backupModels`.
+
 **Next:** [Errors](./error-handling.md)

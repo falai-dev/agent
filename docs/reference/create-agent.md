@@ -42,6 +42,7 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
   persistence?: PersistenceConfig<TData>;
   knowledgeBase?: Record<string, unknown>;
   flowSwitchMargin?: number;
+  maxHistoryMessages?: number;
   maxAutoStepsPerTurn?: number;
   maxDirectiveChain?: number;
   maxToolLoops?: number;
@@ -75,6 +76,7 @@ interface AgentOptions<TContext = unknown, TData = unknown> {
 | `persistence` | `PersistenceConfig<TData>` | no | in-memory | Session storage: `adapter`, `autoSave`, `userId`, plus `schemaVersion` / `migrateSession` for upgrading state written by older deployments. Omit for `MemoryAdapter`. |
 | `knowledgeBase` | `Record<string, unknown>` | no | — | Arbitrary JSON inlined into the prompt as background knowledge. |
 | `flowSwitchMargin` | `number` | no | `15` | Margin (0–100) the best alternative flow must exceed the current flow's score by before switching. Higher values make the agent stickier. |
+| `maxHistoryMessages` | `number` | no | `400` | Hard bound on `session.history`. Applied at end-of-turn finalize (and on interim auto-saves): the oldest entries are trimmed — never splitting an assistant/tool pair — and a warning is logged. Use `compaction` for summarization instead of truncation; set `0` to disable bounding entirely. |
 | `maxAutoStepsPerTurn` | `number` | no | `10` | Cap on consecutive `auto: true` steps per turn. Throws `FlowConfigurationError` when exceeded. |
 | `maxDirectiveChain` | `number` | no | `10` | Cap on chained directives per turn (e.g., `goTo` → `onEnter` emits `goTo` → …). Throws `FlowConfigurationError` when exceeded. |
 | `maxToolLoops` | `number` | no | `5` | Cap on tool-call follow-up rounds per turn, after the initial tool batch. Stops executing further tool calls when reached. Applies to both `respond()` and streaming. An explicit `0` disables tool loops. |
@@ -164,6 +166,32 @@ const agent = createAgent({
   ],
   persistence: { adapter: new MemoryAdapter() },
 });
+```
+
+## Turn parameters and response surface
+
+`respond()` / `respondStream()` share one params object (`RespondParams`). Beyond the required `history`, two per-turn knobs matter:
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `message` | `string` | The user's message for this turn. When set, the engine appends it to the history the model sees **and** to the returned session's history, then appends the assistant reply on top — callers who hold sessions no longer maintain history arrays by hand. Empty replies are not recorded. |
+| `allowedFlows` | `string[]` | Restricts this turn's **routing** candidates to these flow ids/titles. Directive targets (`goTo` etc.) still resolve against the full registry. Use for entry-pin funnels instead of cloning/filtering agents. |
+
+On the result side, `AgentResponse` carries:
+
+- `endedFlows?: EndedFlow[]` — flows that left their active position this turn (completions, redirects, resets), each as `{ flowId, title?, reason }`. Lets consumers stop re-deriving exits from `executedSteps` + cursor inspection. Streaming chunks do not carry `endedFlows`.
+- `metadata.tokensUsed?` — provider-reported usage for the turn's primary generation call (routing and extraction sub-calls are not included); present only when the provider reports usage. On streaming turns the same value rides on chunk `metadata`.
+
+```typescript
+const response = await agent.respond({
+  history,
+  message: "I'd like the vegetarian menu",
+  allowedFlows: ["order"],
+});
+
+for (const ended of response.endedFlows ?? []) {
+  console.log(`flow "${ended.title ?? ended.flowId}" ended (${ended.reason})`);
+}
 ```
 
 ## Errors

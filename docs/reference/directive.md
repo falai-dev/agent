@@ -74,7 +74,7 @@ Exactly **zero or one** position field may be set per directive. Setting two or 
 | `abort` | `string` (reason) | `{ reason, clearSession? }` | End the conversation. The string form is sugar for `{ reason: <string> }`. When `clearSession: true`, the session is cleared at the next persistence write. `reply` cannot co-exist with `abort` — an aborted conversation cannot deliver a reply. |
 | `reset` | `true` | `{ step?, clearData?, reason? }` | Restart the current flow. `step` re-enters at a specific step (default: initial). `clearData: true` clears every field declared in the flow's `requiredFields` and `optionalFields`. |
 
-Each object form carries an optional `reason: string`. The reason is **observability-only** — it appears in the per-turn directive chain log and `AgentResponse.directiveChain` so traces are self-explaining, and it is stored on the corresponding event so post-mortems can read it. It does not influence routing, merging, or any pipeline decision.
+Each object form carries an optional `reason: string`. The reason is **observability-only** — it appears in the per-turn directive-chain debug log so traces are self-explaining. It does not influence routing, merging, or any pipeline decision.
 
 ### State writes
 

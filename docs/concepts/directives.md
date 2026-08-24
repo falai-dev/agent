@@ -41,7 +41,7 @@ returns `{}` with whichever fields it needs. Authors learn one shape
 and reach for it from tools, from prepare hooks, from finalize hooks,
 from signal handlers, from branch `then` targets. The framework's
 control-flow vocabulary is one type wide. The same object literal is
-also persistable verbatim as `session.pendingDirective`, so the shape
+also persistable as `session.pendingDirective`, so the shape
 that sits in source code is the same shape that crosses the
 persistence boundary.
 

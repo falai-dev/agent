@@ -63,11 +63,11 @@ import {
 
 const provider =
   process.env.PROVIDER === "openai"
-    ? new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY!, model: "gpt-5.5" })
+    ? new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY!, model: "gpt-5.6" })
     : process.env.PROVIDER === "anthropic"
-    ? new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY!, model: "claude-sonnet-4-6" })
+    ? new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY!, model: "claude-sonnet-5" })
     : process.env.PROVIDER === "openrouter"
-    ? new OpenRouterProvider({ apiKey: process.env.OPENROUTER_API_KEY!, model: "anthropic/claude-sonnet-4.6" })
+    ? new OpenRouterProvider({ apiKey: process.env.OPENROUTER_API_KEY!, model: "anthropic/claude-sonnet-5" })
     : process.env.PROVIDER === "deepseek"
     ? new DeepSeekProvider({ apiKey: process.env.DEEPSEEK_API_KEY!, model: "deepseek-chat" })
     : new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY!, model: "gemini-3.1-pro-preview" });
@@ -88,6 +88,7 @@ interface GeminiProviderOptions {
   backupModels?: string[];
   config?: Partial<GenerateContentConfig>; // from @google/genai
   retryConfig?: { timeout?: number; retries?: number };
+  client?: GoogleGenAI;                    // pre-configured SDK client override
 }
 ```
 
@@ -95,12 +96,13 @@ interface GeminiProviderOptions {
 
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
-| `apiKey` | `string` | yes | — | Throws if empty. |
+| `apiKey` | `string` | yes* | — | Throws if empty (unless `client` is set). |
 | `model` | `string` | yes | — | Use the model id, e.g. `"gemini-3.1-pro-preview"`. |
-| `backupModels` | `string[]` | no | `[]` | Tried in order on 429/500/503/overload errors. |
+| `backupModels` | `string[]` | no | `[]` | Tried in order on retriable failures (rate limits, overload, timeouts, network). |
 | `config` | `Partial<GenerateContentConfig>` | no | — | Vendor-typed defaults (e.g. `temperature`, `systemInstruction`). |
-| `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
+| `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. On streams it also bounds time-to-first-token. |
 | `retryConfig.retries` | `number` | no | `3` | Total attempts before giving up. |
+| `client` | `GoogleGenAI` | no | — | Pre-configured SDK client; overrides the internally-constructed one. Intended for tests injecting scripted transports; production callers should pass `apiKey`. |
 
 ### Example
 
@@ -136,7 +138,7 @@ interface OpenAIProviderOptions {
 |-------|------|----------|---------|-------|
 | `apiKey` | `string` | yes | — | Throws if empty. |
 | `organization` | `string` | no | — | Forwarded as `OpenAI-Organization`. |
-| `model` | `string` | yes | — | e.g. `"gpt-5.5"`, `"gpt-5.4"`. |
+| `model` | `string` | yes | — | e.g. `"gpt-5.6"`, `"gpt-5.4-mini"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on overload/rate-limit errors. |
 | `config` | OpenAI params | no | — | Defaults for `temperature`, `top_p`, etc. |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
@@ -147,7 +149,7 @@ interface OpenAIProviderOptions {
 ```typescript
 const openai = new OpenAIProvider({
   apiKey: process.env.OPENAI_API_KEY!,
-  model: "gpt-5.5",
+  model: "gpt-5.6",
   organization: "org_abc",
   config: { temperature: 0.2 },
 });
@@ -166,6 +168,7 @@ interface AnthropicProviderOptions {
   backupModels?: string[];
   config?: Partial<Omit<MessageCreateParamsNonStreaming, "model" | "messages">>;
   retryConfig?: { timeout?: number; retries?: number };
+  client?: Anthropic;                      // pre-configured SDK client override
 }
 ```
 
@@ -173,19 +176,20 @@ interface AnthropicProviderOptions {
 
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
-| `apiKey` | `string` | yes | — | Throws if empty. |
-| `model` | `string` | yes | — | e.g. `"claude-sonnet-4-6"`, `"claude-opus-4-7"`. |
-| `backupModels` | `string[]` | no | `[]` | Tried in order on 429/500/503/529/overload. |
+| `apiKey` | `string` | yes* | — | Throws if empty (unless `client` is set). |
+| `model` | `string` | yes | — | e.g. `"claude-sonnet-5"`, `"claude-opus-5"`. |
+| `backupModels` | `string[]` | no | `[]` | Tried in order on retriable failures (rate limits, overload incl. 529, timeouts, network). |
 | `config` | Anthropic params | no | — | Defaults for `max_tokens`, `system`, etc. The provider sets `max_tokens=4096` if neither `config.max_tokens` nor `parameters.maxOutputTokens` is set. |
-| `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
+| `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. On streams it also bounds time-to-first-token. |
 | `retryConfig.retries` | `number` | no | `3` | Total attempts. |
+| `client` | `Anthropic` | no | — | Pre-configured SDK client; overrides the internally-constructed one. Intended for tests injecting scripted transports; production callers should pass `apiKey`. |
 
 ### Example
 
 ```typescript
 const anthropic = new AnthropicProvider({
   apiKey: process.env.ANTHROPIC_API_KEY!,
-  model: "claude-sonnet-4-6",
+  model: "claude-sonnet-5",
   config: { max_tokens: 8192 },
 });
 ```
@@ -215,7 +219,7 @@ interface OpenRouterProviderOptions {
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
 | `apiKey` | `string` | yes | — | Throws if empty. |
-| `model` | `string` | yes | — | OpenRouter model id, e.g. `"anthropic/claude-sonnet-4.6"`. See [openrouter.ai/models](https://openrouter.ai/models). |
+| `model` | `string` | yes | — | OpenRouter model id, e.g. `"anthropic/claude-sonnet-5"`. See [openrouter.ai/models](https://openrouter.ai/models). |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on overload/capacity errors. |
 | `siteUrl` | `string` | no | `""` | Sent as `HTTP-Referer` for OpenRouter rankings. |
 | `siteName` | `string` | no | `""` | Sent as `X-Title` for OpenRouter rankings. |
@@ -228,8 +232,8 @@ interface OpenRouterProviderOptions {
 ```typescript
 const openrouter = new OpenRouterProvider({
   apiKey: process.env.OPENROUTER_API_KEY!,
-  model: "anthropic/claude-sonnet-4.6",
-  backupModels: ["openai/gpt-5.5", "google/gemini-3.1-pro-preview"],
+  model: "anthropic/claude-sonnet-5",
+  backupModels: ["openai/gpt-5.6", "google/gemini-3.1-pro-preview"],
   siteName: "My App",
 });
 ```
@@ -326,10 +330,10 @@ All five providers share the same construction-time guards and runtime failure m
 | `apiKey` is empty or missing | `Error("<vendor> API key is required")` | Thrown from the constructor. |
 | `model` is empty or missing | `Error("Model is required. ...")` | Thrown from the constructor. |
 | Vendor returns no text and no tool calls | `Error("No response from <vendor>")` | Surfaces as a `ResponseGenerationError` once it bubbles through the agent. |
-| Primary and every backup model fail | `ProviderError` with a normalized `code` | After exhausting retries and `backupModels`. The agent wraps it in `ResponseGenerationError`. |
+| Primary and every backup model fail | `ProviderError` with a normalized `code` | After exhausting retries and `backupModels`. Propagates bare out of `respond()`. |
 | Anthropic streaming with `system: undefined` | Vendor 400 | Set `config.system` or rely on history-derived system messages. |
 
-The retry/backup logic only kicks in for transient errors: HTTP 429 / 500 / 503 (and 529 for Anthropic), `overloaded`-style codes, or messages containing `overloaded`, `unavailable`, `internal error`, or (OpenRouter only) `capacity`. Other errors fail fast.
+The retry/backup logic only kicks in for **transient** errors: rate limits (429), overload/availability (500/503, Anthropic's 529, `overloaded`-style codes and messages such as `overloaded`, `unavailable`, `internal error`, or OpenRouter's `capacity`), timeouts, and network faults. Deterministic failures — auth (401/403), invalid requests (400/404/422), and caller aborts — fail fast without burning the retry budget. On streaming calls, only failures *before the first chunk* are retried; `retryConfig.timeout` doubles as the time-to-first-token deadline so a stream that opens and stalls is treated as failed.
 
 ### `ProviderError`
 
@@ -358,7 +362,7 @@ try {
 }
 ```
 
-When the failure bubbles through `agent.respond(...)`, it is wrapped in `ResponseGenerationError` like every other turn failure — the `ProviderError` is then on `details.originalError`. See [Errors](./errors.md).
+When the failure surfaces through `agent.respond(...)`, the `ProviderError` propagates **bare** — catch it with `instanceof`, no unwrapping. (On streaming turns, errors arrive wrapped as `ResponseGenerationError` on the final chunk's `error` field, with the original on `.cause`.) See [Errors](./errors.md).
 
 ## Related
 

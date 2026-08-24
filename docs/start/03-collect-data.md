@@ -154,8 +154,8 @@ const response = await agent.respond({
 });
 
 console.log(response.message);
-console.log(response.data);
-console.log(response.currentStep?.id);
+console.log(response.session?.data);
+console.log(response.session?.currentStep?.id);
 ```
 
 The output is roughly:

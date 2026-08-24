@@ -126,6 +126,20 @@ await agent.respond({ history: [{ role: "user", content: "Hi again" }] });
 
 The engine looks the id up via `sessionRepository.findById`, hydrates the full `SessionState` (including `pendingDirective` and `signals`), and continues the turn against the restored state. Unknown ids create a new session with that id — there's no "not found" error path.
 
+### Session helpers for custom persistence code
+
+When you read or write session rows outside the agent (admin tooling, batch jobs), two exported helpers keep the round trip lossless:
+
+- `createPersistedState(session)` — strips transient pre-LLM directive fields (`appendPrompt`, `injectTools`, `halt`) before writing; call it (or an adapter that already does) before serializing.
+- `restoreSession<TData>(state)` — the canonical inverse: rebuilds a `SessionState` from a persisted blob verbatim, so collected data and completed-flow history survive the round trip. Prefer it over the ambiguous `createSession(state)` overload.
+
+```typescript
+import { createPersistedState, restoreSession } from "@falai/agent";
+
+await store.put(id, JSON.stringify(createPersistedState(session)));
+const session = restoreSession<MyData>(JSON.parse(await store.get(id)));
+```
+
 ## MemoryAdapter
 
 The implicit default. Omit `persistence` entirely to use it; instantiate explicitly only when you want to inspect or clear the store from tests.

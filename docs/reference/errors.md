@@ -9,7 +9,7 @@ order: 12
 
 > **Where this is introduced:** [Errors](../guides/error-handling.md)
 
-`@falai/agent` throws typed `Error` subclasses for every failure mode the framework owns. Catch them by class to discriminate construction errors from runtime errors, and by `error.name` when classes that are not exported (e.g. `DataValidationError`, `ResponseGenerationError`) need to be matched.
+`@falai/agent` throws typed `Error` subclasses for every failure mode the framework owns. Catch them by class to discriminate construction errors from runtime errors, and by `error.name` when a class that is not exported (`DataValidationError`) needs to be matched.
 
 Every thrown message follows the same format contract:
 
@@ -42,10 +42,8 @@ class SessionConflictError    extends Error {
   expectedVersion: number;
   actualVersion: number | undefined;
 }
-
-// Internal — match by `error.name` (not exported from the package barrel)
-class DataValidationError     extends Error { errors: ValidationError[] }
 class ResponseGenerationError extends Error {
+  cause?: unknown;           // native `cause` — the original error
   details?: {
     originalError?: unknown;
     params?: Record<string, unknown>;
@@ -53,6 +51,9 @@ class ResponseGenerationError extends Error {
     context?: Record<string, unknown>;
   };
 }
+
+// Internal — match by `error.name` (not exported from the package barrel)
+class DataValidationError     extends Error { errors: ValidationError[] }
 ```
 
 ## Fields
@@ -63,8 +64,8 @@ class ResponseGenerationError extends Error {
 | `ToolCreationError` | A `Tool` fails registration (invalid schema, duplicate id, builder threw). | `toolId`, `cause` | Repair the tool definition. Not user-facing. |
 | `ToolExecutionError` | A handler throws, all retries fail, or `validateInput` cannot correct invalid args. | `toolId`, `executionContext`, `cause` | Surface a user-friendly message; optionally `agent.dispatch({ goTo: '<recovery-flow>' })`. |
 | `DataValidationError` | `agent.respond(...)` collects values that violate the declared `schema`. | `errors: ValidationError[]` | Re-prompt for the offending fields, then retry. |
-| `ResponseGenerationError` | The provider call fails or the response cannot be parsed. | `details.phase`, `details.originalError` | Retry with backoff, fall back to a different provider, or surface a soft failure to the user. |
-| `ProviderError` | A provider call fails terminally — retries and `backupModels` exhausted. Normalized across all vendors. | `code`, `provider`, `cause` (original SDK error) | Match on `code`: backoff for `rate_limited`/`overloaded`, fix credentials for `auth`, fail fast otherwise. Inside a turn it surfaces on `ResponseGenerationError.details.originalError`. |
+| `ResponseGenerationError` | A turn fails for any reason other than a typed error the framework rethrows bare (see `ProviderError` below) — provider call failure, malformed structured output, hook failure. Exported; also carries the original error on the native `.cause`. | `cause`, `details.phase`, `details.originalError` | Retry with backoff, fall back to a different provider, or surface a soft failure to the user. |
+| `ProviderError` | A provider call fails terminally — retries and `backupModels` exhausted. Normalized across all vendors. Propagates **bare** out of `respond()` (`instanceof` survives — no unwrapping needed). Streaming turns surface it wrapped on the final chunk's `error`. | `code`, `provider`, `cause` (original SDK error) | Match on `code`: backoff for `rate_limited`/`overloaded`, fix credentials for `auth`, fail fast otherwise. |
 | `SessionConflictError` | A session save carries a stale `version` — another writer persisted the session after this one loaded it (concurrent `respond()` calls, parallel webhooks, two tabs). | `sessionId`, `expectedVersion`, `actualVersion` | Reload the session and retry the operation, or surface the conflict. |
 | `NotImplementedError` | A reserved option is set to a value this version does not support (e.g. `routerMode: 'embedding'` in v2.0). | `message` | Use a supported value. |
 
@@ -75,6 +76,7 @@ class ResponseGenerationError extends Error {
 ```typescript
 import {
   FlowConfigurationError,
+  ResponseGenerationError,
   ToolExecutionError,
   NotImplementedError,
 } from "@falai/agent";
@@ -93,7 +95,9 @@ try {
   if (err instanceof Error && err.name === "DataValidationError") {
     return "I need you to clarify a few details — let's try that again.";
   }
-  if (err instanceof Error && err.name === "ResponseGenerationError") {
+  if (err instanceof ResponseGenerationError) {
+    // err.cause is the original error — e.g. a provider SDK failure.
+    log.warn({ cause: err.cause, phase: err.details?.phase }, err.message);
     return "I'm having trouble reaching the model. Please retry.";
   }
   throw err;
@@ -102,38 +106,33 @@ try {
 
 ### 2. Matching provider failures by normalized code
 
-Terminal provider failures throw `ProviderError` with a vendor-agnostic `code`. Inside a turn, the agent wraps it in `ResponseGenerationError` — unwrap via `details.originalError`.
+`ProviderError` propagates **bare** out of `respond()` — catch it with `instanceof`, no unwrapping. The original SDK/HTTP error is on `.cause`.
 
 ```typescript
 import { ProviderError } from "@falai/agent";
 
-function asProviderError(err: unknown): ProviderError | undefined {
-  if (err instanceof ProviderError) return err;
-  if (err instanceof Error && err.name === "ResponseGenerationError") {
-    const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
-    if (original instanceof ProviderError) return original;
+try {
+  const response = await agent.respond({ history });
+} catch (err) {
+  if (err instanceof ProviderError) {
+    switch (err.code) {
+      case "rate_limited":
+      case "overloaded":
+        return retryWithBackoff();         // transient — wait and retry
+      case "auth":
+        throw err;                          // config bug — crash loudly
+      default:
+        log.error({ cause: err.cause }, err.message);
+        return "I'm having trouble reaching the model. Please retry.";
+    }
   }
-  return undefined;
-}
-
-const providerError = asProviderError(err);
-if (providerError) {
-  switch (providerError.code) {
-    case "rate_limited":
-    case "overloaded":
-      return retryWithBackoff();         // transient — wait and retry
-    case "auth":
-      throw providerError;               // config bug — crash loudly
-    default:
-      log.error({ cause: providerError.cause }, providerError.message);
-      return "I'm having trouble reaching the model. Please retry.";
-  }
+  throw err;
 }
 ```
 
 ### 3. Recovering from a session conflict
 
-`SessionConflictError` means another writer persisted the session between your load and your save. Reload, then retry.
+`SessionConflictError` means another writer persisted the session between your load and your save. Like `ProviderError`, it propagates bare out of `respond()`. Reload, then retry.
 
 ```typescript
 import { SessionConflictError } from "@falai/agent";
@@ -141,8 +140,7 @@ import { SessionConflictError } from "@falai/agent";
 try {
   await agent.respond({ history, session });
 } catch (err) {
-  const original = (err as { details?: { originalError?: unknown } }).details?.originalError;
-  if (err instanceof SessionConflictError || original instanceof SessionConflictError) {
+  if (err instanceof SessionConflictError) {
     const fresh = await agent.session.getOrCreate(sessionId);
     return agent.respond({ history, session: fresh });
   }

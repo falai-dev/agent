@@ -320,6 +320,10 @@ following are thrown synchronously when the agent is built:
   `reset`).
 - `FlowConfigurationError` — a `branches[i].then` Directive contains
   an empty `goTo: {}`.
+- `FlowConfigurationError` — a tool-based `prepare`/`finalize` (tool id
+  or `Tool` object) is combined with `hooks.prepare`/`hooks.finalize`.
+  A step can only have one handler per position — remove one or inline
+  the tool call inside a function.
 
 Runtime errors that surface from a step's hook execution include
 `DataValidationError` (invalid collected data), `ToolExecutionError`

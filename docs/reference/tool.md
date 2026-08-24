@@ -251,15 +251,24 @@ export const bookHotel: Tool<Ctx, Data, { id: string }> = {
 };
 ```
 
+## Directive wiring and turn semantics
+
+Tool-emitted directives work end-to-end: both `ctx.dispatch(directive)` calls and `{ directive }` returns are collected during execution, merged via Algorithm 4, and delivered to the engine in the same turn.
+
+- **State fields** (`dataUpdate`, `contextUpdate`) apply immediately.
+- **A `reply` directive short-circuits the tool loop** — its verbatim text becomes the final assistant message with no follow-up LLM call.
+- **Control-flow fields** (`goTo`, `goToStep`, `reset`, …) queue on `session.pendingDirective` and steer the *next* turn (same deferred semantics as `agent.dispatch()`).
+
+A handler that **throws** (or a call to an unregistered tool) never crashes the turn: the executor reports a failure result *to the model* — a `role: "tool"` message shaped `{"success":false,"error":"…"}` — so it can react to the failed call instead of the framework fabricating a success.
+
 ## Errors
 
-Misuse surfaces as typed errors from the executor:
+Misuse surfaces as typed errors from registration-time validation; execution-time problems degrade to failed tool results rather than thrown errors:
 
-- `ToolExecutionError` — handler threw, returned `success: false`, exceeded `maxResultSizeChars` after compaction, or the tool was invoked with arguments that fail `validateInput` and cannot be corrected.
+- `ToolCreationError` — invalid tool definition at registration (missing id/handler, duplicate id, bad schema).
 - `FlowConfigurationError` — a returned `directive` is malformed (e.g., two position fields set, or `goTo` references an unknown flow/step).
-- `DataValidationError` — `dataUpdate` violates the agent schema.
-
-Permission denials (`checkPermissions` returning `allowed: false`) are surfaced as a structured tool result with `success: false` and `error: <reason>` rather than a thrown error — this keeps the AI's reasoning loop intact.
+- Execution failures — a thrown handler, `success: false` return, permission denial, failed `validateInput`, timeout, or unknown tool name all become structured `success: false` tool results surfaced to the model, keeping the AI's reasoning loop intact.
+- `DataValidationError` — `dataUpdate` violates the agent schema (logged; the call reports failure instead of applying the write).
 
 ## Related
 
