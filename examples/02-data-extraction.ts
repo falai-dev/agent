@@ -40,7 +40,7 @@ const agent = createAgent<Record<string, never>, BookingData>({
     name: "Booking Agent",
     provider: new GeminiProvider({
         apiKey: process.env.GEMINI_API_KEY!,
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-3.5-flash-lite",
     }),
     schema,
     flows: [

@@ -19,7 +19,7 @@ export interface OpenAIProviderOptions {
   apiKey: string;
   /** Organization ID (optional) */
   organization?: string;
-  /** Model to use (required) - e.g., "gpt-5.5", "gpt-5.4" */
+  /** Model to use (required) - e.g., "gpt-5.6", "gpt-5.4-mini" */
   model: string;
   /** Backup models to try if primary fails (default: []) */
   backupModels?: string[];
@@ -64,7 +64,7 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
     }
 
     if (!model) {
-      throw new Error("Model is required. Example: 'gpt-5.5' or 'gpt-5.4'");
+      throw new Error("Model is required. Example: 'gpt-5.6' or 'gpt-5.5'");
     }
 
     super({
