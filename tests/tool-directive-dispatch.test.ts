@@ -28,7 +28,6 @@ const provider = new MockProvider();
 function createTestAgent() {
     return new Agent<TestContext, TestData>({
         name: "DirectiveToolTestAgent",
-        description: "Agent for testing tool directive dispatch",
         context: { userId: "test-user" },
         provider,
     });

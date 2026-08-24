@@ -48,12 +48,14 @@ function makeRecordingProvider(inner: AiProvider) {
     };
 }
 
+// FlowOptions.requiredFields is mutable (keyof TData)[] — annotate so the literal
+// does not need `as const` (whose readonly arrays would not be assignable).
 const FLOW = [{
     id: "flowA",
     title: "A",
-    requiredFields: ["item"],
+    requiredFields: ["item"] as (keyof TestData)[],
     steps: [{ id: "ask", prompt: "ask" }],
-}] as const;
+}];
 
 describe("thrown tool errors are visible to the model", () => {
     test("a crashing handler yields a success:false tool result in follow-up history", async () => {
@@ -79,7 +81,7 @@ describe("thrown tool errors are visible to the model", () => {
             ],
         });
 
-        await agent.respond<TestContext, TestData>({
+        await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
 
@@ -121,7 +123,7 @@ describe("same-tool parallel calls keep distinct results", () => {
             ],
         });
 
-        await agent.respond<TestContext, TestData>({
+        await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
 
@@ -169,7 +171,7 @@ describe("maxToolLoops is reachable", () => {
             tools: [{ id: "noop", description: "noop", parameters: {}, handler: () => ({ ok: true }) }],
         });
 
-        await agent.respond<TestContext, TestData>({
+        await agent.respond({
             history: [{ role: "user", content: "hi" }],
         });
 

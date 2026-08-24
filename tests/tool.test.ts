@@ -63,7 +63,6 @@ interface OrderData {
 function createToolTestAgent(): Agent<UserProfile, OrderData> {
   return new Agent<UserProfile, OrderData>({
     name: "ToolTestAgent",
-    description: "Agent for testing tool functionality",
     context: {
       userId: "test-user-123",
       name: "Test User",
@@ -412,7 +411,8 @@ describe("Tool Execution", () => {
     // Execute via ToolManager
     const result = await agent.tool.executeTool({
       tool,
-      context: await agent.getContext(),
+      // getContext() is optional-typed; this agent is constructed with a static context, so it is always defined here.
+      context: (await agent.getContext())!,
       updateContext: async () => { },
       updateData: async () => { },
       history: [],
@@ -438,7 +438,8 @@ describe("Tool Execution", () => {
     await expect(
       agent.tool.executeTool({
         tool,
-        context: await agent.getContext(),
+        // getContext() is optional-typed; this agent is constructed with a static context, so it is always defined here.
+        context: (await agent.getContext())!,
         updateContext: async () => { },
         updateData: async () => { },
         history: [],
@@ -807,7 +808,8 @@ describe("Tool Parameter Handling", () => {
 
     const result = await executeToolForTest(tool, { items: ["apple", "banana", "cherry"] });
     expect((result as ToolResult<string>).data).toBe("Processed 3 items");
-    expect((result as ToolResult<string>).dataUpdate?.processedItems).toEqual(["APPLE", "BANANA", "CHERRY"]);
+    // The handler writes ad-hoc keys beyond the OrderData schema; read them as a record.
+    expect(((result as ToolResult<string>).dataUpdate as Record<string, unknown>)?.processedItems).toEqual(["APPLE", "BANANA", "CHERRY"]);
   });
 
   test("should handle enum parameters with type safety", async () => {
@@ -847,7 +849,8 @@ describe("Tool Parameter Handling", () => {
 
     const result = await executeToolForTest(tool, { priority: "high", status: "processing" });
     expect((result as ToolResult<string>).data).toBe("Priority: high, Status: processing");
-    expect((result as ToolResult<string>).dataUpdate?.currentPriority).toBe("high");
+    // The handler writes ad-hoc keys beyond the OrderData schema; read them as a record.
+    expect(((result as ToolResult<string>).dataUpdate as Record<string, unknown>)?.currentPriority).toBe("high");
   });
 
   test("should handle optional parameters with defaults", async () => {
