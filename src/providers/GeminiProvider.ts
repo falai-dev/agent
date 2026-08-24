@@ -39,8 +39,8 @@ import {
  * Uses types from @google/genai package
  */
 export interface GeminiProviderOptions {
-  /** Gemini API key */
-  apiKey: string;
+  /** Gemini API key. Optional when `client` is injected (tests). */
+  apiKey?: string;
   /** Model to use (required) - e.g., "gemini-3.1-pro-preview" */
   model: string;
   /** Backup models to try if primary fails (default: []) */
@@ -52,6 +52,12 @@ export interface GeminiProviderOptions {
     timeout?: number;
     retries?: number;
   };
+  /**
+   * Pre-configured SDK client. Overrides the internally-constructed one.
+   * Intended for tests injecting scripted transports; production callers
+   * should pass `apiKey` instead.
+   */
+  client?: GoogleGenAIType;
 }
 
 /**
@@ -89,9 +95,9 @@ export class GeminiProvider implements AiProvider {
   private retryConfig: { timeout: number; retries: number };
 
   constructor(options: GeminiProviderOptions) {
-    const { apiKey, model, backupModels = [], config, retryConfig } = options;
+    const { apiKey, model, backupModels = [], config, retryConfig, client } = options;
 
-    if (!apiKey) {
+    if (!client && !apiKey) {
       throw new Error("Gemini API key is required");
     }
 
@@ -99,7 +105,7 @@ export class GeminiProvider implements AiProvider {
       throw new Error("Model is required. Example: 'gemini-3.1-pro-preview'");
     }
 
-    this.genAI = new GoogleGenAI({ apiKey });
+    this.genAI = client ?? new GoogleGenAI({ apiKey });
     this.primaryModel = model;
     this.backupModels = backupModels;
     this.config = config;

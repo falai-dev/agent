@@ -778,9 +778,13 @@ export class ToolManager<TContext = unknown, TData = unknown> {
         };
       }
 
-      // Collect directive from ToolResult.directive (if present)
+      // Collect directives from the result — singular and plural forms both
+      // count, matching StreamingToolExecutor's normalization.
       if (toolResult.directive) {
         collectedDirectives.push(toolResult.directive);
+      }
+      if (Array.isArray(toolResult.directives)) {
+        collectedDirectives.push(...toolResult.directives);
       }
 
       // Apply data updates from tool result with validation
@@ -905,9 +909,11 @@ export class ToolManager<TContext = unknown, TData = unknown> {
         return data != null && key in (data as Record<string, unknown>);
       },
       dispatch: (_directive: Directive<TContext, TData>): void => {
-        // Directives from concurrent execution are collected by the StreamingToolExecutor
-        // and surfaced via ToolExecutionUpdate. This is a no-op placeholder;
-        // full directive bus integration happens in ResponsePipeline (task 1.6).
+        // Handlers never see THIS context — StreamingToolExecutor.executeTool
+        // wraps each call in a per-call context whose dispatch attributes the
+        // directive to that tool. Reaching here means a gate or future caller
+        // dispatched outside a tool execution; surface it instead of dropping.
+        logger.warn("[ToolManager] ctx.dispatch called outside tool execution has no turn to attach to; directive dropped.");
       },
     };
 

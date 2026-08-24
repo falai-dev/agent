@@ -258,8 +258,18 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
                 this.parentSignal.addEventListener("abort", parentAbortHandler, { once: true });
             }
 
+            // Per-call context so ctx.dispatch() emissions attribute to THIS
+            // tool even while siblings run concurrently on the shared context.
+            const dispatchedDirectives: Directive[] = [];
+            const callContext: ToolContext<TContext, TData> = {
+                ...this.toolContext,
+                dispatch: (directive) => {
+                    dispatchedDirectives.push(directive);
+                },
+            };
+
             // Execute the tool handler
-            const result = await tool.handler(this.toolContext, toolCall.arguments);
+            const result = await tool.handler(callContext, toolCall.arguments);
 
             // Clean up abort listeners
             if (batchAbortController) {
@@ -282,6 +292,15 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
 
             // Normalize the result
             const executionResult = this.normalizeResult(result, tool);
+
+            // Merge ctx.dispatch() emissions with result-carried directives —
+            // the same collection the sequential ToolManager.executeTool does.
+            if (dispatchedDirectives.length > 0) {
+                executionResult.directives = [
+                    ...(executionResult.directives ?? []),
+                    ...dispatchedDirectives,
+                ];
+            }
 
             // Apply per-tool maxResultSizeChars truncation (Req 9.4)
             const truncatedResult = this.applyResultTruncation(executionResult, tool);

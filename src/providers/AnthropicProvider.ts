@@ -32,9 +32,9 @@ import {
  * Uses types from @anthropic-ai/sdk package
  */
 export interface AnthropicProviderOptions {
-  /** Anthropic API key */
-  apiKey: string;
-  /** Model to use (required) - e.g., "claude-sonnet-4-6", "claude-opus-4-7" */
+  /** Anthropic API key. Optional when `client` is injected (tests). */
+  apiKey?: string;
+  /** Model to use (required) - e.g., "claude-sonnet-5", "claude-opus-5" */
   model: string;
   /** Backup models to try if primary fails (default: []) */
   backupModels?: string[];
@@ -45,6 +45,12 @@ export interface AnthropicProviderOptions {
     timeout?: number;
     retries?: number;
   };
+  /**
+   * Pre-configured SDK client. Overrides the internally-constructed one.
+   * Intended for tests injecting scripted transports; production callers
+   * should pass `apiKey` instead.
+   */
+  client?: Anthropic;
 }
 
 /**
@@ -88,17 +94,17 @@ export class AnthropicProvider implements AiProvider {
   private retryConfig: { timeout: number; retries: number };
 
   constructor(options: AnthropicProviderOptions) {
-    const { apiKey, model, backupModels = [], config, retryConfig } = options;
+    const { apiKey, model, backupModels = [], config, retryConfig, client } = options;
 
-    if (!apiKey) {
+    if (!client && !apiKey) {
       throw new Error("Anthropic API key is required");
     }
 
     if (!model) {
-      throw new Error("Model is required. Example: 'claude-sonnet-4-6'");
+      throw new Error("Model is required. Example: 'claude-sonnet-5'");
     }
 
-    this.client = new Anthropic({
+    this.client = client ?? new Anthropic({
       apiKey,
     });
     this.primaryModel = model;

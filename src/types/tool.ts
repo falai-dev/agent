@@ -65,6 +65,8 @@ export interface ToolResult<
   meta?: Record<string, unknown>;
   /** Emit a directive declaratively (alternative to ctx.dispatch). */
   directive?: Directive<TContext, TData>;
+  /** Emit multiple directives at once (alternative to repeated dispatch calls). */
+  directives?: Directive<TContext, TData>[];
 }
 
 /**

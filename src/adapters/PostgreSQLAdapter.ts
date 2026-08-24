@@ -242,16 +242,20 @@ class PostgreSQLSessionRepository<TData = Record<string, unknown>>
 
     const result = await this.client.query<Record<string, unknown>>(
       `INSERT INTO ${this.tableName}
-       (id, user_id, agent_name, status, collected_data, message_count, version, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (id, user_id, agent_name, status, current_flow, current_step, collected_data, message_count, last_message_at, completed_at, version, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
         id,
         data.userId || null,
         data.agentName || null,
         data.status || "active",
+        data.currentFlow || null,
+        data.currentStep || null,
         JSON.stringify(data.collectedData || {}),
         data.messageCount || 0,
+        data.lastMessageAt ?? null,
+        data.completedAt ?? null,
         data.version ?? 1,
         now,
         now,

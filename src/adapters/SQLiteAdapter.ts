@@ -202,8 +202,8 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
 
     const stmt = this.db.prepare(`
       INSERT INTO ${this.tableName}
-      (id, user_id, agent_name, status, collected_data, message_count, version, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, user_id, agent_name, status, current_flow, current_step, collected_data, message_count, last_message_at, completed_at, version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -211,8 +211,12 @@ class SQLiteSessionRepository<TData = Record<string, unknown>>
       data.userId || null,
       data.agentName || null,
       session.status,
+      data.currentFlow || null,
+      data.currentStep || null,
       JSON.stringify(data.collectedData || {}),
       session.messageCount,
+      data.lastMessageAt ? data.lastMessageAt.toISOString() : null,
+      data.completedAt ? data.completedAt.toISOString() : null,
       session.version,
       now.toISOString(),
       now.toISOString()
