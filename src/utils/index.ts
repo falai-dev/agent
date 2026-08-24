@@ -15,6 +15,8 @@ export {
 export {
   createSession,
   createSessionId,
+  boundConversationHistory,
+  DEFAULT_MAX_HISTORY_MESSAGES,
   createPersistedState,
   restoreSession,
   enterFlow,
@@ -56,8 +58,23 @@ export {
 export { LoggerLevel, logger } from "./logger";
 
 // Retry utilities
-export type { RetryOptions, StreamRetryOptions, RetryConfig } from "./retry";
-export { retry, withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, combineAbortSignals } from "./retry";
+export type {
+  RetryOptions,
+  StreamRetryOptions,
+  RetryConfig,
+  BackupFallbackBase,
+  BackupFallbackOptions,
+  StreamBackupFallbackOptions,
+} from "./retry";
+export {
+  retry,
+  withTimeoutAndRetry,
+  withStreamRetry,
+  resolveRetryConfig,
+  combineAbortSignals,
+  withBackupFallback,
+  streamWithBackupFallback,
+} from "./retry";
 
 // Completion helpers
 export { effectiveMessageText, assertUsableCompletion } from "./completion";

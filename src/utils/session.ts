@@ -1,5 +1,6 @@
 import { cloneDeep } from "./clone";
 import type { SessionState } from "../types/session";
+import type { History } from "../types/history";
 import type { Directive } from "../types/flow";
 import type { CollectedStateData } from "../types/persistence";
 import { logger } from "./logger";
@@ -70,6 +71,32 @@ export function createSession<TData = Record<string, unknown>>(
 /**
  * Helper to create a new session ID
  */
+/**
+ * Default conversation-history bound applied when the agent configures neither
+ * `maxHistoryMessages` nor compaction: generous enough to never bite a real
+ * thread, finite so a long-running chat()/stream() session can't grow until
+ * the provider context limit bricks it.
+ */
+export const DEFAULT_MAX_HISTORY_MESSAGES = 400;
+
+/**
+ * Bound a conversation history to its most recent `max` entries. The left
+ * edge never opens on an orphaned role:'tool' message (whose assistant
+ * tool_calls parent was cut) — providers reject such histories. Returns the
+ * SAME array reference when no truncation is needed.
+ */
+export function boundConversationHistory(
+  history: History,
+  max: number
+): History {
+  if (!history || history.length <= max || max <= 0) return history;
+  let start = history.length - max;
+  while (start < history.length && (history[start] as { role?: string }).role === "tool") {
+    start++;
+  }
+  return history.slice(start);
+}
+
 /**
  * Restore a session from a persisted blob (the named inverse of
  * `createPersistedState`). Restores data + flowHistory verbatim — including a

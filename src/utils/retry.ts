@@ -299,3 +299,151 @@ export async function* withStreamRetry<T>(
     }
   }
 }
+
+/**
+ * Inputs shared by {@link withBackupFallback} and {@link streamWithBackupFallback}.
+ *
+ * The walkers own only control flow: which model runs next and when the walk
+ * gives up. Logging and terminal-error wrapping stay with the caller (via the
+ * callbacks and a try/catch around the call), so each provider keeps its exact
+ * log prefixes, classification options and error normalization.
+ */
+export interface BackupFallbackBase {
+  /**
+   * Models to try in order: `[primaryModel, ...backupModels]`. The first
+   * successful attempt wins; every failure advances (or stops) the walk.
+   */
+  models: string[];
+  /**
+   * Predicate deciding whether a failure may fall through to the remaining
+   * models. Returning `false` stops the walk and rethrows the error — a
+   * deterministic failure (auth, invalid request) would hit identically on
+   * every backup. Must be a pure classifier: it may be evaluated more than
+   * once per error (the failure callback recomputes it to annotate logs).
+   */
+  shouldTryBackup: (error: unknown) => boolean;
+  /**
+   * Called once per failed model, before the backup decision is applied.
+   * `attemptNo` is the 1-based position in `models` (`1` = primary) and
+   * `total` is `models.length`, so callers can distinguish the primary
+   * failure and tell whether any model remains after this one
+   * (`attemptNo < total`).
+   */
+  onModelFailed?: (
+    model: string,
+    error: unknown,
+    attemptNo: number,
+    total: number
+  ) => void;
+  /**
+   * Called before each *backup* attempt (position > 0). `backupNo` and
+   * `backupTotal` count backups only (`1..models.length - 1`), matching the
+   * historical "Trying backup model 1/2: …" log shape.
+   */
+  onBackupStart?: (
+    model: string,
+    backupNo: number,
+    backupTotal: number
+  ) => void;
+  /** Called when a backup succeeds, just before its result is returned/yielded. */
+  onBackupSucceeded?: (model: string) => void;
+}
+
+export interface BackupFallbackOptions<T> extends BackupFallbackBase {
+  /** Run one model. A rejection marks the model failed; the resolved value wins. */
+  attempt: (model: string) => Promise<T>;
+}
+
+export interface StreamBackupFallbackOptions<T> extends BackupFallbackBase {
+  /** Produce one model's chunk stream; consumed lazily via `yield*`. */
+  attempt: (model: string) => AsyncGenerator<T>;
+}
+
+/**
+ * Try `models[0]` (the primary); on failure, if `shouldTryBackup` allows,
+ * walk the remaining backup models in order. Resolves with the first
+ * successful result; otherwise rethrows the last error seen. Errors are
+ * rethrown untouched — wrap them at the call site.
+ *
+ * Streaming twin: {@link streamWithBackupFallback}.
+ */
+export async function withBackupFallback<T>(
+  opts: BackupFallbackOptions<T>
+): Promise<T> {
+  const {
+    models,
+    attempt,
+    shouldTryBackup,
+    onModelFailed,
+    onBackupStart,
+    onBackupSucceeded,
+  } = opts;
+
+  if (models.length === 0) {
+    throw new Error(
+      "withBackupFallback: `models` must include a primary model"
+    );
+  }
+
+  let lastError: unknown;
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    if (i > 0) onBackupStart?.(model, i, models.length - 1);
+    try {
+      const result = await attempt(model);
+      if (i > 0) onBackupSucceeded?.(model);
+      return result;
+    } catch (error: unknown) {
+      lastError = error;
+      onModelFailed?.(model, error, i + 1, models.length);
+      // A failure that doesn't qualify for backup ends the walk — the
+      // remaining models would hit the same deterministic error. Falling
+      // through to the throw covers both this early exit and exhaustion.
+      if (!shouldTryBackup(error)) break;
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Streaming twin of {@link withBackupFallback}: same walk, consuming each
+ * model's chunk stream lazily via `yield*` so chunks flow through unchanged.
+ * A stream that errors before completion counts as that model's failure and
+ * the walk proceeds exactly as in the non-streaming case.
+ */
+export async function* streamWithBackupFallback<T>(
+  opts: StreamBackupFallbackOptions<T>
+): AsyncGenerator<T> {
+  const {
+    models,
+    attempt,
+    shouldTryBackup,
+    onModelFailed,
+    onBackupStart,
+    onBackupSucceeded,
+  } = opts;
+
+  if (models.length === 0) {
+    throw new Error(
+      "streamWithBackupFallback: `models` must include a primary model"
+    );
+  }
+
+  let lastError: unknown;
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    if (i > 0) onBackupStart?.(model, i, models.length - 1);
+    try {
+      yield* attempt(model);
+      if (i > 0) onBackupSucceeded?.(model);
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      onModelFailed?.(model, error, i + 1, models.length);
+      if (!shouldTryBackup(error)) break;
+    }
+  }
+
+  throw lastError;
+}

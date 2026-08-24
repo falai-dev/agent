@@ -21,7 +21,7 @@ import type {
 } from "../types";
 import type { ProviderCapabilities } from "../types/ai";
 import type { HistoryItem } from "../types/history";
-import { withTimeoutAndRetry, withStreamRetry, resolveRetryConfig, combineAbortSignals } from "../utils/retry";
+import { withTimeoutAndRetry, withStreamRetry, withBackupFallback, streamWithBackupFallback, resolveRetryConfig, combineAbortSignals } from "../utils/retry";
 import { assertUsableCompletion } from "../utils/completion";
 import { tryParseJSONResponse } from "../utils/json";
 import { logger } from "../utils/logger";
@@ -353,58 +353,52 @@ export class GeminiProvider implements AiProvider {
   >(
     input: GenerateMessageInput<TContext>
   ): Promise<GenerateMessageOutput<TStructured>> {
-    // Try primary model first
+    // `tryingBackups` records that the primary failed but qualified for
+    // backups — the only path that reaches the "All models failed" terminal
+    // log below; an ineligible primary rethrows directly.
+    let primaryErrMsg = "";
+    let tryingBackups = false;
+
     try {
-      return await this.generateWithModel(this.primaryModel, input);
-    } catch (primaryError: unknown) {
-      const primaryErrMsg = getErrorMessage(primaryError);
-      logger.warn(
-        `[GEMINI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
-      );
-
-      if (!shouldUseBackupModel(primaryError)) {
-        throw toProviderError(primaryError, this.name, CLASSIFICATION_OPTIONS);
-      }
-
-      logger.debug(`[GEMINI] Trying backup models`);
-
-      let lastBackupError: unknown = primaryError;
-
-      for (let i = 0; i < this.backupModels.length; i++) {
-        const backupModel = this.backupModels[i];
-        logger.debug(
-          `[GEMINI] Trying backup model ${i + 1}/${this.backupModels.length
-          }: ${backupModel}`
-        );
-
-        try {
-          const result = await this.generateWithModel(backupModel, input);
-          logger.debug(`[GEMINI] Backup model ${backupModel} succeeded`);
-          return result as GenerateMessageOutput<TStructured>;
-        } catch (backupError: unknown) {
-          const backupErrMsg = getErrorMessage(backupError);
-          logger.warn(
-            `[GEMINI] Backup model ${backupModel} failed: ${backupErrMsg}`
-          );
-          lastBackupError = backupError;
-
-          if (
-            !shouldUseBackupModel(backupError) &&
-            i < this.backupModels.length - 1
-          ) {
+      return await withBackupFallback({
+        models: [this.primaryModel, ...this.backupModels],
+        attempt: (model) =>
+          this.generateWithModel<TContext, TStructured>(model, input),
+        shouldTryBackup: shouldUseBackupModel,
+        onModelFailed: (model, error, attemptNo, total) => {
+          const errMsg = getErrorMessage(error);
+          if (attemptNo === 1) {
+            primaryErrMsg = errMsg;
+            logger.warn(`[GEMINI] Primary model ${model} failed: ${errMsg}`);
+            if (shouldUseBackupModel(error)) {
+              tryingBackups = true;
+              logger.debug(`[GEMINI] Trying backup models`);
+            }
+            return;
+          }
+          logger.warn(`[GEMINI] Backup model ${model} failed: ${errMsg}`);
+          if (!shouldUseBackupModel(error) && attemptNo < total) {
             logger.debug(
               `[GEMINI] Backup model error doesn't qualify for further attempts`
             );
-            break;
           }
-        }
+        },
+        onBackupStart: (model, backupNo, backupTotal) => {
+          logger.debug(
+            `[GEMINI] Trying backup model ${backupNo}/${backupTotal}: ${model}`
+          );
+        },
+        onBackupSucceeded: (model) => {
+          logger.debug(`[GEMINI] Backup model ${model} succeeded`);
+        },
+      });
+    } catch (error: unknown) {
+      if (tryingBackups) {
+        logger.error(
+          `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${getErrorMessage(error)}`
+        );
       }
-
-      const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      logger.error(
-        `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
-      );
-      throw toProviderError(lastBackupError, this.name, CLASSIFICATION_OPTIONS);
+      throw toProviderError(error, this.name, CLASSIFICATION_OPTIONS);
     }
   }
 
@@ -567,64 +561,53 @@ export class GeminiProvider implements AiProvider {
   >(
     input: GenerateMessageInput<TContext>
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
-    // Try primary model first
+    // Same flag semantics as the non-streaming twin above.
+    let primaryErrMsg = "";
+    let tryingBackups = false;
+
     try {
-      yield* withStreamRetry(
-        (signal) => this.generateStreamWithModel(this.primaryModel, input, signal),
-        { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${this.primaryModel} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
-      );
-    } catch (primaryError: unknown) {
-      const primaryErrMsg = getErrorMessage(primaryError);
-      logger.warn(
-        `[GEMINI] Primary model ${this.primaryModel} failed: ${primaryErrMsg}`
-      );
-
-      if (!shouldUseBackupModel(primaryError)) {
-        throw toProviderError(primaryError, this.name, CLASSIFICATION_OPTIONS);
-      }
-
-      logger.debug(`[GEMINI] Trying backup models for streaming`);
-
-      let lastBackupError: unknown = primaryError;
-
-      for (let i = 0; i < this.backupModels.length; i++) {
-        const backupModel = this.backupModels[i];
-        logger.debug(
-          `[GEMINI] Trying backup model ${i + 1}/${this.backupModels.length
-          }: ${backupModel}`
-        );
-
-        try {
-          yield* withStreamRetry(
-            (signal) => this.generateStreamWithModel(backupModel, input, signal),
-            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${backupModel} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
-          );
-          logger.debug(`[GEMINI] Backup model ${backupModel} succeeded`);
-          return;
-        } catch (backupError: unknown) {
-          const backupErrMsg = getErrorMessage(backupError);
-          logger.warn(
-            `[GEMINI] Backup model ${backupModel} failed: ${backupErrMsg}`
-          );
-          lastBackupError = backupError;
-
-          if (
-            !shouldUseBackupModel(backupError) &&
-            i < this.backupModels.length - 1
-          ) {
+      yield* streamWithBackupFallback({
+        models: [this.primaryModel, ...this.backupModels],
+        attempt: (model) =>
+          withStreamRetry(
+            (signal) => this.generateStreamWithModel<TContext, TStructured>(model, input, signal),
+            { maxRetries: this.retryConfig.retries, firstChunkTimeoutMs: this.retryConfig.timeout, operationName: `Gemini ${model} stream`, isRetriable: (error) => isRetriableProviderError(error, CLASSIFICATION_OPTIONS) }
+          ),
+        shouldTryBackup: shouldUseBackupModel,
+        onModelFailed: (model, error, attemptNo, total) => {
+          const errMsg = getErrorMessage(error);
+          if (attemptNo === 1) {
+            primaryErrMsg = errMsg;
+            logger.warn(`[GEMINI] Primary model ${model} failed: ${errMsg}`);
+            if (shouldUseBackupModel(error)) {
+              tryingBackups = true;
+              logger.debug(`[GEMINI] Trying backup models for streaming`);
+            }
+            return;
+          }
+          logger.warn(`[GEMINI] Backup model ${model} failed: ${errMsg}`);
+          if (!shouldUseBackupModel(error) && attemptNo < total) {
             logger.debug(
               `[GEMINI] Backup model error doesn't qualify for further attempts`
             );
-            break;
           }
-        }
+        },
+        onBackupStart: (model, backupNo, backupTotal) => {
+          logger.debug(
+            `[GEMINI] Trying backup model ${backupNo}/${backupTotal}: ${model}`
+          );
+        },
+        onBackupSucceeded: (model) => {
+          logger.debug(`[GEMINI] Backup model ${model} succeeded`);
+        },
+      });
+    } catch (error: unknown) {
+      if (tryingBackups) {
+        logger.error(
+          `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${getErrorMessage(error)}`
+        );
       }
-
-      const lastBackupErrMsg = getErrorMessage(lastBackupError);
-      logger.error(
-        `[GEMINI] All models failed. Primary: ${primaryErrMsg}, Last backup: ${lastBackupErrMsg}`
-      );
-      throw toProviderError(lastBackupError, this.name, CLASSIFICATION_OPTIONS);
+      throw toProviderError(error, this.name, CLASSIFICATION_OPTIONS);
     }
   }
 

@@ -17,7 +17,7 @@ import type { PersistenceManager } from "./PersistenceManager";
 import type { StepLifecycle } from "./StepLifecycle";
 import { flow } from "./flow-namespace";
 import { CompactionEngine } from "./CompactionEngine";
-import { logger } from "../utils";
+import { boundConversationHistory, DEFAULT_MAX_HISTORY_MESSAGES, logger } from "../utils";
 
 export class SessionFinalizer<TContext = unknown, TData = unknown> {
     constructor(
@@ -37,6 +37,23 @@ export class SessionFinalizer<TContext = unknown, TData = unknown> {
      * Handle session persistence and finalization.
      */
     async finalize(session: SessionState<TData>, context: TContext): Promise<void> {
+        // Hard history bound — backstop when no compaction is configured (or
+        // after it ran). Unbounded growth eventually bricks the thread at the
+        // provider context limit.
+        const agentOptionsEarly = this.deps.getAgentOptions();
+        const historyCap = agentOptionsEarly.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
+        if (historyCap > 0 && session.history && session.history.length > historyCap) {
+            const bounded = boundConversationHistory(session.history, historyCap);
+            if (bounded !== session.history) {
+                logger.warn(
+                    `[SessionFinalizer] Session "${session.id}" history exceeded ${historyCap} entries ` +
+                    `(${session.history.length}); trimmed the oldest. Configure compaction for ` +
+                    `summarization instead of truncation, or raise maxHistoryMessages.`
+                );
+                session.history = bounded;
+            }
+        }
+
         // Deterministic compaction: runs on every finalize (not just addMessage)
         // so respond()-only callers get bounded history too
         const compactionOptions = this.deps.getCompactionOptions();

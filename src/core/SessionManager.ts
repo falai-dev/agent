@@ -12,7 +12,7 @@ import { PersistenceManager } from "./PersistenceManager";
 import { CompactionEngine } from "./CompactionEngine";
 import type { PersistenceAdapter } from "../types/persistence";
 import type { Agent } from "./Agent";
-import { createSession } from "../utils";
+import { boundConversationHistory, createSession, DEFAULT_MAX_HISTORY_MESSAGES } from "../utils";
 
 /**
  * SessionManager handles session lifecycle and conversation history
@@ -174,6 +174,16 @@ export class SessionManager<TData = unknown> {
     };
 
     session.history.push(historyItem);
+    // Same hard bound the finalizer applies — keeps interim auto-saves bounded
+    // on the chat()/stream() path too.
+    const cap = this.agent?.getAgentOptions().maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
+    if (cap > 0 && session.history) {
+      const bounded = boundConversationHistory(session.history, cap);
+      if (bounded !== session.history) {
+        log.warn(`SessionManager: history exceeded ${cap} entries; trimmed the oldest.`);
+        session.history = bounded;
+      }
+    }
     session.metadata!.lastUpdatedAt = new Date();
 
     // Ensure currentSession is updated

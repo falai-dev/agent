@@ -127,6 +127,13 @@ export interface AgentOptions<TContext = unknown, TData = unknown> {
    */
   persona?: Template<TContext>;
   /** Enable debug logging */
+  /**
+   * Hard bound on session.history length (default: 400). The oldest entries
+   * are trimmed — never splitting an assistant/tool pair — when the bound is
+   * exceeded and no compaction strategy shrank the history first. Set 0 to
+   * disable bounding entirely.
+   */
+  maxHistoryMessages?: number;
   debug?: boolean;
   /** Default context data available to the agent */
   context?: TContext;
