@@ -70,6 +70,36 @@ describe("respond({ message }) owns session history", () => {
         expect(roles.at(-1)).toBe("assistant");
         expect((response.session?.history ?? []).at(-1)?.content).toBe("Model reply.");
     });
+
+    test("streaming parity: respondStream's final chunk session also carries the assistant tail", async () => {
+        const agent = new Agent<Ctx, Data>({
+            name: "histStreamAgent",
+            sessionId: "sess_hist_stream",
+            provider: new MockProvider({ responseMessage: "Streamed reply." }),
+            flows: [{
+                id: "flowA", title: "A", requiredFields: ["item"],
+                steps: [{ id: "ask", prompt: "ask" }],
+            }],
+        });
+        const session = createSession<Data>("sess_hist_stream");
+
+        let finalChunk;
+        for await (const chunk of agent.respondStream({
+            history: [{ role: "user", content: "earlier context" }],
+            message: "I want the blue widget",
+            session,
+        })) {
+            if (chunk.done) finalChunk = chunk;
+        }
+
+        // Same ownership contract as respond(): user turn recorded pre-routing,
+        // assistant tail appended before the session is finalized/persisted.
+        const history = finalChunk?.session?.history ?? [];
+        const roles = history.map((h) => h.role);
+        expect(roles).toContain("user");
+        expect(roles.at(-1)).toBe("assistant");
+        expect(history.at(-1)?.content).toBe("Streamed reply.");
+    });
 });
 
 describe("allowedFlows restricts routing for the turn", () => {

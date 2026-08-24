@@ -1183,6 +1183,14 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 const accumulated = tail.message;
                 const delta = tail.replyOverridden ? accumulated : chunk.delta;
 
+                // History ownership (parity with the sync tail): with
+                // params.message the returned session carries the full
+                // exchange — the user turn was recorded pre-routing, the
+                // assistant tail lands here, BEFORE finalize persists it.
+                if (responseContext.turnMessage && tail.message) {
+                    tail.session.history = [...(tail.session.history ?? []), assistantMessage(tail.message)];
+                }
+
                 // Single streaming exit: finalize the post-phase session so
                 // post-signal mutations (e.g. pendingDirective) are persisted.
                 await this.sessionFinalizer.finalize(tail.session, effectiveContext);
