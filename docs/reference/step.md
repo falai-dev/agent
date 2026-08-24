@@ -101,30 +101,33 @@ interface StepLifecycleHooks<TContext = unknown, TData = unknown> {
 | `skip` | `(ctx) => boolean \| Promise<boolean>` or array | no | — | Code-evaluated skip predicates (OR semantics). When any predicate returns `true`, the step is bypassed. Only code predicates — no AI strings. |
 | `tools` | `(string \| Tool<TContext, TData>)[]` | no | `[]` | Tools available during this step. Strings are resolved against the agent's tool registry; objects are inline tools. Stacked on top of agent and flow scopes. |
 | `instructions` | `Instruction<TContext, TData>[]` | no | `[]` | Step-scoped behavioural statements (`kind: 'must' \| 'never' \| 'should'`). Active only while this step is current. See [Instruction](./instruction.md). |
-| `prepare` | function, tool id, or `Tool` object | no | — | **Shorthand** pre-LLM hook. Receives `(context, data?)` and returns `void \| PrepareResult`. For full directive control, use `hooks.prepare` instead. |
-| `finalize` | function, tool id, or `Tool` object | no | — | **Shorthand** post-LLM hook. Same shape as `prepare`. For full directive control, use `hooks.finalize` instead. |
-| `hooks` | `StepLifecycleHooks<TContext, TData>` | no | — | Full lifecycle callbacks: `onEnter`, `prepare`, `finalize`, `onExit`. See the table below. |
+| `prepare` | function, tool id, or `Tool` object | no | — | Pre-LLM hook. Receives `(context, data?)` and returns `void \| PrepareResult` (a Directive may be returned too). |
+| `finalize` | function, tool id, or `Tool` object | no | — | Post-generation hook, runs before persistence. Same shape as `prepare`. A returned `goTo`/`goToStep`/`reset`/`complete` redirects the **next** turn; state writes land immediately. |
+| `hooks` | `StepLifecycleHooks<TContext, TData>` | no | — | Alternative spelling of `prepare`/`finalize` (`hooks.prepare`, `hooks.finalize`). Both spellings run when declared together — shorthand first, then the hook, returns merged via Algorithm 4. |
 | `branches` | `BranchEntry<TContext, TData>[]` | no | — | Explicit source-local fork. Evaluated after `finalize`, before linear successor selection. The first entry whose `if`/`when` passes wins; its `then` resolves to a step id, a flow id, or a `Directive`. See [Branches](./branches.md). |
 
 ### Lifecycle hooks
 
-The lifecycle has four positions. Two of them — `prepare` and
-`finalize` — are also reachable through the top-level shorthand
-fields, with a smaller return type.
+Two hook positions exist per step: `prepare` (before generation) and
+`finalize` (after generation, before persistence). Each is reachable
+through a top-level field, a `hooks.*` entry, or both — declaring both
+runs them in sequence (shorthand first) with their returns merged by
+Algorithm 4 (`flow.merge`).
 
-| Hook | When it fires | `hooks.<name>` returns | Top-level shorthand returns | Use it for |
-|------|---------------|------------------------|------------------------------|------------|
-| `onEnter` | Before any other work the first time the step becomes current. | `void \| Directive` | n/a (no shorthand) | Append per-turn prompt context, inject one-turn tools, or short-circuit with `halt + reply`. |
-| `prepare` | Right before the LLM call, after `onEnter`. | `void \| Directive` | `void \| PrepareResult` | Mutate session data, fetch external context, halt the LLM call. |
-| `finalize` | After the LLM call and tool loop complete. | `void \| Directive` | `void \| PrepareResult` | Validate collected data, redirect with `goTo` / `goToStep`, complete the flow. |
-| `onExit` | When the step is left (next step entered, flow completed, aborted). | `void` | n/a | Emit telemetry. Cannot influence flow control. |
+| Position | When it fires | May return | Use it for |
+|----------|---------------|------------|------------|
+| `prepare` / `hooks.prepare` | Before routing on the step's turn (non-auto steps). | `void \| PrepareResult` | Write session/context state, redirect the current turn with `goToStep`/`goTo`/`reset` (queued as `pendingDirective` and applied by routing this turn). |
+| `finalize` / `hooks.finalize` | After generation completes, BEFORE the session is persisted. | `void \| PrepareResult` | Validate collected data, write state, queue a redirect for the next turn (`pendingDirective`), e.g. `{ complete: { next: { goTo: 'Checkout' } } }`. |
 
-`PrepareResult` is the shorthand return — a flat object with the
-common Directive fields (`dataUpdate`, `contextUpdate`, `goTo`,
-`goToStep`, `complete`, `halt`, `reply`). Use `hooks.<name>` when you
-need the full `HookContext` (with `session`, `history`, `dispatch`)
-or the full `Directive` surface (`appendPrompt`,
-`injectTools`, `abort`, `reset`).
+Handler directives merge through the canonical algorithm and are
+validated with `flow.validate`. State writes
+(`dataUpdate`/`contextUpdate`) apply immediately to the turn session,
+so auto-save captures them even if this is the conversation's last
+turn.
+
+Note for **auto steps**: their `prepare` runs inside the auto-chain,
+where pre-LLM fields (`appendPrompt`, `injectTools`, `halt`, `reply`)
+are honored directly.
 
 ### Resolution within a step
 
@@ -133,12 +136,12 @@ For one step, the engine walks this sequence per turn:
 1. Evaluate `if` (code, AND) and `when` (AI: positive OR, `!` exclusions inhibit) — fails skip the step entirely.
 2. Evaluate `skip` (code, OR) — true means bypass and fall through.
 3. Check `requires` — refuse entry if any required field is missing.
-4. Run `onEnter`, then `prepare` / `hooks.prepare`. May emit a `Directive` (pre-LLM fields honored).
+4. Run `prepare` / `hooks.prepare`. Its merged directive applies state writes immediately; position fields queue as `pendingDirective` for this turn's routing.
 5. **LLM step**: call the LLM with the step's prompt, tools, and instructions; tool loop runs until completion. **Auto step**: skip the LLM call. **Reply step**: render `reply` as the verbatim assistant message.
-6. Run `finalize` / `hooks.finalize`. May emit a `Directive`.
+6. Run `finalize` / `hooks.finalize` (before persistence). State writes land now; position fields queue for the next turn.
 7. Evaluate `branches`. The first entry whose `if`/`when` passes wins; its `then` resolves to a step id, a flow id, or a full `Directive`. If no entry matches, fall through.
 8. Linear successor / AI step selection.
-9. Run `onExit` for the step we are leaving.
+9. Persist the session (auto-save) after finalize has run.
 
 ## Examples
 

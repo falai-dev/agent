@@ -15,6 +15,7 @@ import type { AgentOptions, SessionState } from "../types";
 import type { CompactionOptions } from "../types/compaction";
 import type { PersistenceManager } from "./PersistenceManager";
 import type { StepLifecycle } from "./StepLifecycle";
+import { flow } from "./flow-namespace";
 import { CompactionEngine } from "./CompactionEngine";
 import { logger } from "../utils";
 
@@ -54,6 +55,23 @@ export class SessionFinalizer<TContext = unknown, TData = unknown> {
             }
         }
 
+        // Execute finalize BEFORE persisting so its state writes (which now
+        // land on this turn's session) are captured by the save below. A
+        // control-flow directive returned by finalize queues on the session —
+        // the pendingDirective applier applies it at the START of the next turn.
+        let finalizeDirective;
+        try {
+            finalizeDirective = await this.deps.stepLifecycle.runFinalize(session, context);
+        } catch (error) {
+            logger.error("[SessionFinalizer] Step finalize hook failed:", error);
+            throw error;
+        }
+        if (finalizeDirective) {
+            session.pendingDirective = session.pendingDirective
+                ? flow.merge(session.pendingDirective, finalizeDirective)
+                : finalizeDirective;
+        }
+
         // Auto-save session step to persistence if configured
         const persistenceManager = this.deps.getPersistenceManager();
         const agentOptions = this.deps.getAgentOptions();
@@ -65,9 +83,6 @@ export class SessionFinalizer<TContext = unknown, TData = unknown> {
             await persistenceManager.saveSessionState(session.id, session);
             logger.debug(`[SessionFinalizer] Auto-saved session step to persistence: ${session.id}`);
         }
-
-        // Execute finalize function
-        await this.deps.stepLifecycle.runFinalize(session, context);
 
         // Update current session if we have one
         const currentSession = this.deps.getCurrentSession();

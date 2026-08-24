@@ -11,6 +11,7 @@
  */
 
 import log from "loglevel";
+import type { Directive } from "../types";
 import type {
     ToolCallRequest,
     ToolExecutionUpdate,
@@ -329,15 +330,23 @@ export class StreamingToolExecutor<TContext = unknown, TData = unknown> {
         if (
             result &&
             typeof result === "object" &&
-            ("data" in result || "success" in result || "error" in result)
+            ("data" in result || "success" in result || "error" in result || "directive" in result || "directives" in result)
         ) {
             const r = result as Record<string, unknown>;
+            // A handler may return `{ directive }` (singular shorthand) or
+            // `{ directives }` — normalize both into the collected array so the
+            // concurrent path honors them identically to sequential execution.
+            const directives: Directive[] = [
+                ...(Array.isArray(r.directives) ? r.directives as Directive[] : []),
+                ...('directive' in r && r.directive != null ? [r.directive as Directive] : []),
+            ];
             return {
                 success: r.success !== false,
                 data: r.data,
                 error: r.error as string | undefined,
                 contextUpdate: r.contextUpdate as Record<string, unknown> | undefined,
                 dataUpdate: r.dataUpdate as Record<string, unknown> | undefined,
+                ...(directives.length > 0 ? { directives } : {}),
                 metadata: {
                     toolId: tool.id,
                     ...(r.meta as Record<string, unknown> | undefined),

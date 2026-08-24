@@ -110,14 +110,16 @@ requiredFields: ["name"],
 
 For this agent, completion happens on the first turn. For a longer flow, the gate would force more steps before the model wraps up.
 
-### `agent.respond(message)`
+### `agent.respond(params)`
 
 ```typescript
-const response = await agent.respond("Hi, I'm Alice");
+const response = await agent.respond({
+  history: [{ role: "user", content: "Hi, I'm Alice" }],
+});
 console.log(response.message);
 ```
 
-`respond(message)` runs one turn end to end: load (or create) the session, route to a flow, extract data, walk auto-step chains, call the LLM, deliver the assistant message, persist. It returns an `AgentResponse` with the fields you usually want on hand:
+`respond(params)` runs one turn end to end: route to a flow, extract data, walk auto-step chains, call the LLM, deliver the assistant message, persist. `params` takes `history` (required — the conversation so far as `{ role, content }[]`) and optionally `session`, `contextOverride`, and `signal`. When no session is passed, the agent manages one internally; pass an explicit session (see below) for server-side, multi-conversation use. It returns an `AgentResponse` with the fields you usually want on hand:
 
 | Field | Type | What it is |
 |-------|------|------------|

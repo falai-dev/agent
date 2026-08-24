@@ -25,6 +25,7 @@ import type {
     SignalTriggerState,
 } from "../types/signals";
 import type { SignalEvaluator } from "./SignalEvaluator";
+import { flow } from "./flow-namespace";
 import { logger } from "../utils";
 
 /** Recorded on `SignalFiring.extractionError` when a matched extraction-mode
@@ -654,90 +655,12 @@ export class SignalProcessor<TContext = unknown, TData = unknown> {
     private mergeDirectives(
         directives: SignalDirective<TContext, TData>[],
     ): Directive<TContext, TData> {
-        const merged: Directive<TContext, TData> = {};
-
-        for (const d of directives) {
-            // Position fields — last-write-wins
-            if (d.goTo !== undefined) {
-                merged.goTo = d.goTo;
-                // Clear other position fields
-                delete merged.goToStep;
-                delete merged.complete;
-                delete merged.abort;
-                delete merged.reset;
-            }
-            if (d.goToStep !== undefined) {
-                merged.goToStep = d.goToStep;
-                delete merged.goTo;
-                delete merged.complete;
-                delete merged.abort;
-                delete merged.reset;
-            }
-            if (d.complete !== undefined) {
-                merged.complete = d.complete;
-                delete merged.goTo;
-                delete merged.goToStep;
-                delete merged.abort;
-                delete merged.reset;
-            }
-            if (d.abort !== undefined) {
-                merged.abort = d.abort;
-                delete merged.goTo;
-                delete merged.goToStep;
-                delete merged.complete;
-                delete merged.reset;
-            }
-            if (d.reset !== undefined) {
-                merged.reset = d.reset;
-                delete merged.goTo;
-                delete merged.goToStep;
-                delete merged.complete;
-                delete merged.abort;
-            }
-
-            // halt — last-write-wins
-            if (d.halt !== undefined) {
-                merged.halt = d.halt;
-            }
-
-            // reply — last-write-wins
-            if (d.reply !== undefined) {
-                merged.reply = d.reply;
-            }
-
-            // appendPrompt — array-concat
-            if (d.appendPrompt != null) {
-                merged.appendPrompt = [
-                    ...(merged.appendPrompt ?? []),
-                    ...d.appendPrompt,
-                ];
-            }
-
-            // injectTools — array-concat
-            if (d.injectTools != null) {
-                merged.injectTools = [
-                    ...(merged.injectTools ?? []),
-                    ...d.injectTools,
-                ];
-            }
-
-            // dataUpdate — shallow-merge
-            if (d.dataUpdate != null) {
-                merged.dataUpdate = {
-                    ...(merged.dataUpdate ?? {}),
-                    ...d.dataUpdate,
-                };
-            }
-
-            // contextUpdate — shallow-merge
-            if (d.contextUpdate != null) {
-                merged.contextUpdate = {
-                    ...(merged.contextUpdate ?? {}),
-                    ...d.contextUpdate,
-                };
-            }
-        }
-
-        return merged;
+        // Canonical Algorithm 4 merge — one algorithm shared with tools and
+        // step hooks (position precedence, reply last-wins, state shallow-merge,
+        // halt OR).
+        return directives.reduce<Directive<TContext, TData>>(
+            (a, b) => flow.merge(a, b),
+            {}
+        );
     }
 }

@@ -6,6 +6,7 @@
 
 // Core
 export { Agent } from "./core/Agent";
+export type { RespondParams, StreamOptions, GenerateOptions } from "./core/ResponseModal";
 export { createAgent } from "./core/createAgent";
 export { Flow } from "./core/Flow";
 export { Step, FlowConfigurationError } from "./core/Step";

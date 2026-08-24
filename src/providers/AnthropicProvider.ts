@@ -74,7 +74,10 @@ export class AnthropicProvider implements AiProvider {
     supportsNativeJsonSchema: false, // JSON output is enforced via a prompt instruction, not a native schema mode
     supportsStreaming: true,
     supportsStreamingToolCalls: true,
-    supportsPromptCaching: true,
+    // No cache_control is attached to any request yet — reporting true would
+    // make consumers believe repeated system prompts are cached when they are
+    // not. Flip this when caching is actually implemented.
+    supportsPromptCaching: false,
   };
   private client: Anthropic;
   private primaryModel: string;

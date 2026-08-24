@@ -18,6 +18,7 @@ import type {
     AgentOptions,
     AgentResponseStreamChunk,
     AgentStructuredResponse,
+    Directive,
     HistoryItem,
     SessionState,
     ToolCallRequest,
@@ -26,7 +27,20 @@ import type { Flow } from "./Flow";
 import type { Step } from "./Step";
 import type { ToolManager } from "./ToolManager";
 import { ResponseGenerationError } from "./ResponseGenerationError";
+import { flow } from "./flow-namespace";
 import { historyToEvents, logger, serializeToolResult, assistantMessage, toolMessage } from "../utils";
+
+/**
+ * Reduce directives collected across a turn's tool executions into one via the
+ * canonical Algorithm 4 merge (`flow.merge`) — position precedence, reply
+ * last-wins, state shallow-merge, halt OR.
+ */
+export function mergeCollectedDirectives<TContext, TData>(
+    collected: Directive<TContext, TData>[]
+): Directive<TContext, TData> | undefined {
+    if (collected.length === 0) return undefined;
+    return collected.reduce((a, b) => flow.merge(a, b));
+}
 
 export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
     constructor(
@@ -69,6 +83,8 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
         finalToolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         finalMessage?: string;
         structured?: AgentStructuredResponse;
+        /** Directives emitted by tools this turn (ctx.dispatch / `{directive}` returns), merged. */
+        directives?: Directive<TContext, TData>;
     }> {
         try {
             const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal } = params;
@@ -76,6 +92,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             // runFollowUpLoop; here toolCalls is only read.
             const { toolCalls } = params;
             let { session } = params;
+
+            // Directives emitted by tools this turn — consumed by the caller
+            const collectedDirectives: Directive<TContext, TData>[] = [];
 
             // Convert HistoryItem[] to Event[] for internal processing
             const historyEvents = historyToEvents(history);
@@ -111,6 +130,11 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                         // Store the actual tool result data for history
                         toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
                         toolArgsMap.set(toolCall.toolName, toolCall.arguments);
+
+                        // Collect tool-emitted directives (ctx.dispatch / {directive})
+                        if (toolResult.directives?.length) {
+                            collectedDirectives.push(...toolResult.directives as Directive<TContext, TData>[]);
+                        }
 
                         // Check if tool execution was successful
                         if (!toolResult.success) {
@@ -149,6 +173,20 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 }
             }
 
+            // A tool spoke verbatim this turn: its reply IS the final message —
+            // skip the follow-up LLM call (documented dispatch semantics).
+            const preLoopDirectives = mergeCollectedDirectives(collectedDirectives);
+            if (preLoopDirectives?.reply) {
+                logger.debug("[ToolLoopExecutor] Tool directive reply short-circuits follow-up LLM call");
+                return {
+                    session,
+                    finalToolCalls: toolCalls,
+                    finalMessage: preLoopDirectives.reply,
+                    structured: { message: preLoopDirectives.reply },
+                    directives: preLoopDirectives,
+                };
+            }
+
             // Hand off to the multi-round follow-up loop shared with the
             // streaming path. The initial batch above already executed
             // sequentially and populated the result maps.
@@ -157,6 +195,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 session,
                 toolResultsMap,
                 toolArgsMap,
+                collectedDirectives,
                 context,
                 history,
                 selectedFlow,
@@ -188,6 +227,8 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
         session: SessionState<TData>;
         toolResultsMap: Map<string, string>;
         toolArgsMap: Map<string, Record<string, unknown>>;
+        /** Shared directive collector — initial-batch emissions land here too. */
+        collectedDirectives?: Directive<TContext, TData>[];
         context: TContext;
         history: HistoryItem[];
         selectedFlow?: Flow<TContext, TData>;
@@ -205,8 +246,9 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
         finalToolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
         finalMessage?: string;
         structured?: AgentStructuredResponse;
+        directives?: Directive<TContext, TData>;
     }> {
-        const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal, toolResultsMap, toolArgsMap } = params;
+        const { context, history, selectedFlow, responsePrompt, availableTools, responseSchema, signal, toolResultsMap, toolArgsMap, collectedDirectives = [] } = params;
         let { toolCalls, session } = params;
         try {
             // TOOL LOOP: Allow AI to make follow-up tool calls after initial tool execution
@@ -331,11 +373,28 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                             toolResultsMap.set(toolCall.toolName, serializeToolResult(toolResult));
                             toolArgsMap.set(toolCall.toolName, toolCall.arguments);
 
+                            // Collect tool-emitted directives (ctx.dispatch / {directive})
+                            if (toolResult.directives?.length) {
+                                collectedDirectives.push(...toolResult.directives as Directive<TContext, TData>[]);
+                            }
+
                             logger.debug(`[ToolLoopExecutor] Executed follow-up tool: ${toolCall.toolName} (success: ${toolResult.success})`);
                         } catch (error) {
                             logger.error(`[ToolLoopExecutor] Follow-up tool execution error for ${toolCall.toolName}:`, error);
                             continue;
                         }
+                    }
+
+                    // A tool emitted a verbatim reply this round: it IS the final
+                    // message — stop looping and skip any further LLM call.
+                    const roundDirectives = mergeCollectedDirectives(collectedDirectives ?? []);
+                    if (roundDirectives?.reply) {
+                        logger.debug("[ToolLoopExecutor] Tool directive reply short-circuits remaining tool loop");
+                        finalMessage = roundDirectives.reply;
+                        followUpStructured = { message: roundDirectives.reply };
+                        hasToolCalls = false;
+                        toolCalls = undefined;
+                        break;
                     }
 
                     // Update toolCalls for next iteration or final response
@@ -390,6 +449,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 finalToolCalls: toolCalls,
                 finalMessage,
                 structured: followUpStructured,
+                directives: mergeCollectedDirectives(collectedDirectives ?? []),
             };
         } catch (error) {
             throw ResponseGenerationError.fromError(error, 'tool_execution', params, {
@@ -494,11 +554,16 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             /** Closing message forced from the tool results, if one was generated. */
             finalMessage?: string;
             structured?: AgentStructuredResponse;
+            /** Directives emitted by tools this turn (ctx.dispatch / `{directive}` returns), merged. */
+            directives?: Directive<TContext, TData>;
         }
     > {
         const { context, history, selectedFlow, step, accumulated, responsePrompt, availableTools, responseSchema, signal } = params;
         let { session } = params;
         let toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }> | undefined = params.toolCalls;
+
+        // Directives emitted by tools this turn — surfaced to the caller
+        const collectedDirectives: Directive<TContext, TData>[] = [];
 
         // Use concurrent execution for the initial batch of tool calls
         const toolCallRequests: ToolCallRequest[] = params.toolCalls.map((tc, i) => ({
@@ -552,6 +617,10 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                         toolResultsMap.set(req.toolName, serializeToolResult(update.result));
                         toolArgsMap.set(req.toolName, req.arguments);
                     }
+                    // Collect tool-emitted directives (ctx.dispatch / {directive})
+                    if (update.result.directives?.length) {
+                        collectedDirectives.push(...update.result.directives as Directive<TContext, TData>[]);
+                    }
                 }
 
                 // Yield progress updates immediately
@@ -580,6 +649,7 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
                 session,
                 toolResultsMap,
                 toolArgsMap,
+                collectedDirectives,
                 context,
                 history,
                 selectedFlow,
@@ -605,9 +675,13 @@ export class ToolLoopExecutor<TContext = unknown, TData = unknown> {
             toolCalls = toolResult.finalToolCalls;
             finalMessage = toolResult.finalMessage;
             structured = toolResult.structured;
+            if (toolResult.directives) {
+                collectedDirectives.length = 0;
+                collectedDirectives.push(toolResult.directives);
+            }
         }
 
-        return { session, toolCalls, finalMessage, structured };
+        return { session, toolCalls, finalMessage, structured, directives: mergeCollectedDirectives(collectedDirectives) };
     }
 
     /**

@@ -17,6 +17,7 @@ import type { ConditionWhen, ConditionIf } from "../types/flow";
 import { generateStepId, logger } from "../utils";
 import { splitWhenConditions } from "../utils/condition";
 import { Agent } from './Agent'
+import { flow } from "./flow-namespace";
 
 /**
  * Error thrown when a step's configuration violates auto-step constraints.
@@ -26,6 +27,27 @@ export class FlowConfigurationError extends Error {
     super(message);
     this.name = "FlowConfigurationError";
   }
+}
+
+/** The function-form of step prepare/finalize. */
+type StepPrepareFn<TContext, TData> = (
+  context: TContext,
+  data?: Partial<TData>
+) => void | PrepareResult<TContext, TData> | Promise<void | PrepareResult<TContext, TData>>;
+
+/**
+ * Merge two handler results (shorthand + hooks.* desugar). Scalar/object
+ * results merge via the canonical Algorithm 4; void/undefined passes through.
+ */
+function mergeHookResults<TContext, TData>(
+  a: void | PrepareResult<TContext, TData>,
+  b: void | PrepareResult<TContext, TData>
+): PrepareResult<TContext, TData> | undefined {
+  if (a == null) return b ?? undefined;
+  if (b == null) return a;
+  // PrepareResult is a structural subset of Directive — the canonical merge
+  // accepts both sides and its output remains a valid PrepareResult.
+  return flow.merge<TContext, TData>(a, b);
 }
 
 /**
@@ -89,8 +111,63 @@ export class Step<TContext = unknown, TData = unknown> {
     this.reply = options.reply;
     this.when = options.when;
     this.if = options.if;
-    this.prepare = options.prepare;
-    this.finalize = options.finalize;
+
+    // Desugar `hooks.prepare` / `hooks.finalize` onto the shorthand fields so
+    // both spellings run through the same lifecycle machinery. When both are
+    // declared, both run — the shorthand first, then the hook — with their
+    // directive returns merged via Algorithm 4 (same desugar pattern as
+    // flow-level onComplete).
+    const hooks = options.hooks;
+
+    /** Compose a function-form shorthand with a function-form hook. */
+    const composeWithHook = (
+      base: StepPrepareFn<TContext, TData> | undefined,
+      hook: StepPrepareFn<TContext, TData>
+    ): StepPrepareFn<TContext, TData> => {
+      if (!base) return hook;
+      return async (context, data) =>
+        mergeHookResults<TContext, TData>(
+          await base(context, data),
+          await hook(context, data)
+        );
+    };
+
+    if (hooks?.prepare) {
+      const hookPrepare: StepPrepareFn<TContext, TData> = (context, data) =>
+        hooks.prepare!(context, data);
+      const base = options.prepare;
+      // A tool-reference shorthand cannot compose with a function hook in a
+      // single field — refuse loudly instead of silently dropping one.
+      if (base != null && typeof base !== "function") {
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Step "${this.id}" declares both a tool-based prepare and hooks.prepare. A step can only have one prepare handler — remove one or inline the tool call inside the function.`
+        );
+      }
+      this.prepare = composeWithHook(
+        typeof base === "function" ? base : undefined,
+        hookPrepare
+      );
+    } else {
+      this.prepare = options.prepare;
+    }
+
+    if (hooks?.finalize) {
+      const hookFinalize: StepPrepareFn<TContext, TData> = (context, data) =>
+        hooks.finalize!(context, data);
+      const base = options.finalize;
+      if (base != null && typeof base !== "function") {
+        throw new FlowConfigurationError(
+          `[FlowConfigurationError] Step "${this.id}" declares both a tool-based finalize and hooks.finalize. A step can only have one finalize handler — remove one or inline the tool call inside the function.`
+        );
+      }
+      this.finalize = composeWithHook(
+        typeof base === "function" ? base : undefined,
+        hookFinalize
+      );
+    } else {
+      this.finalize = options.finalize;
+    }
+
     this.tools = options.tools;
 
     // Validate when/if split: functions belong on `if`, not `when`

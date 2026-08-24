@@ -37,6 +37,7 @@ import { AutoChainExecutor, type AutoChainResult } from "./AutoChainExecutor";
 import { StepLifecycle } from "./StepLifecycle";
 import { SessionFinalizer } from "./SessionFinalizer";
 import { ToolLoopExecutor } from "./ToolLoopExecutor";
+import { flow } from "./flow-namespace";
 import { SignalCoordinator } from "./SignalCoordinator";
 import { ResponseGenerationError } from "./ResponseGenerationError";
 import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render } from "../utils";
@@ -517,7 +518,16 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             // PHASE 1: PREPARE - Execute prepare function if current step has one
             try {
-                await this.stepLifecycle.runPrepare(session, effectiveContext);
+                const prepareDirective = await this.stepLifecycle.runPrepare(session, effectiveContext);
+                // Queue the control-flow directive for THIS turn: routing
+                // (handleRoutingAndStepSelection) consumes session.pendingDirective
+                // before deciding flow/step, so a prepare-phase goTo/goToStep/
+                // reset steers the current turn.
+                if (prepareDirective) {
+                    session.pendingDirective = session.pendingDirective
+                        ? flow.merge(session.pendingDirective, prepareDirective)
+                        : prepareDirective;
+                }
             } catch (error) {
                 throw ResponseGenerationError.fromError(error, 'step_preparation', params, { session, effectiveContext });
             }
@@ -971,6 +981,27 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 message = toolResult.finalMessage;
             }
 
+            // Tool-emitted directives (ctx.dispatch / `{directive}` returns):
+            // state writes apply now; control flow queues for the next turn's
+            // pendingDirective applier (same deferred semantics as dispatch()).
+            if (toolResult.directives) {
+                const d = toolResult.directives;
+                if (d.dataUpdate) {
+                    session = mergeCollected(session, d.dataUpdate);
+                }
+                if (d.contextUpdate) {
+                    await this.agent.updateContext(d.contextUpdate);
+                }
+                const control = { ...d };
+                delete control.dataUpdate;
+                delete control.contextUpdate;
+                if (Object.keys(control).length > 0) {
+                    session.pendingDirective = session.pendingDirective
+                        ? flow.merge(session.pendingDirective, control)
+                        : control;
+                }
+            }
+
             // Collect data from response
             // Use follow-up structured data from tool loop when available, fall back to original result
             const dataSource = toolResult.structured
@@ -1290,6 +1321,29 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                     });
                     session = batchResult.session;
                     toolCalls = batchResult.toolCalls;
+
+                    // Tool-emitted directives (ctx.dispatch / `{directive}`):
+                    // state writes apply now; control flow queues for the next
+                    // turn's pendingDirective applier (same deferred semantics
+                    // as dispatch()). A verbatim tool reply already replaced the
+                    // closing message inside runStreamingBatch.
+                    if (batchResult.directives) {
+                        const d = batchResult.directives;
+                        if (d.dataUpdate) {
+                            session = mergeCollected(session, d.dataUpdate);
+                        }
+                        if (d.contextUpdate) {
+                            await this.agent.updateContext(d.contextUpdate);
+                        }
+                        const control = { ...d };
+                        delete control.dataUpdate;
+                        delete control.contextUpdate;
+                        if (Object.keys(control).length > 0) {
+                            session.pendingDirective = session.pendingDirective
+                                ? flow.merge(session.pendingDirective, control)
+                                : control;
+                        }
+                    }
 
                     // Prefer the post-tool follow-up structured for collection and
                     // emission whenever present — independent of whether a closing

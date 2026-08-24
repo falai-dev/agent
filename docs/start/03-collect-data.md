@@ -147,12 +147,11 @@ The pattern is consistent: the schema describes the universe of possible data, e
 Run the file with a single message that contains all three fields:
 
 ```typescript
-const session = { id: "demo-session" };
-
-const response = await agent.respond(
-  "I want a hotel in Lisbon for two people next Friday.",
-  session,
-);
+const response = await agent.respond({
+  history: [
+    { role: "user", content: "I want a hotel in Lisbon for two people next Friday." },
+  ],
+});
 
 console.log(response.message);
 console.log(response.data);
@@ -176,7 +175,13 @@ Three things happened in one turn:
 Try a message with one missing field:
 
 ```typescript
-await agent.respond("Book me a hotel in Lisbon next Friday.", session);
+await agent.respond({
+  history: [
+    { role: "user", content: "I want a hotel in Lisbon" },
+    { role: "assistant", content: "Sure — when do you travel?" },
+    { role: "user", content: "Book me a hotel in Lisbon next Friday." },
+  ],
+});
 ```
 
 The extractor populates `city` and `checkIn`. `ask_city` and `ask_check_in` both skip — their `collect` keys are present. `ask_guests` does *not* skip — `guests` is undefined — so the engine enters it and the assistant asks how many people are travelling.
@@ -184,7 +189,11 @@ The extractor populates `city` and `checkIn`. `ask_city` and `ask_check_in` both
 Try the inverse: a message with only one field.
 
 ```typescript
-await agent.respond("I'd like to go to Lisbon.", session);
+await agent.respond({
+  history: [
+    { role: "user", content: "I'd like to go to Lisbon." },
+  ],
+});
 ```
 
 The extractor populates `city` only. `ask_city` skips, `ask_check_in` enters next (its `requires: ["city"]` is satisfied), and the assistant asks for the check-in date. Three turns later, the same `confirm` step runs.

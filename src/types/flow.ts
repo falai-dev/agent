@@ -59,21 +59,21 @@ export type StoppedReason =
  * Result that a prepare/finalize hook may return to issue directives.
  * All fields are optional — returning void is also valid.
  */
-export interface PrepareResult {
+export interface PrepareResult<TContext = unknown, TData = unknown> {
   /** Partial data to merge into session.data */
-  dataUpdate?: Record<string, unknown>;
+  dataUpdate?: Partial<TData>;
   /** Partial context to merge into the agent context */
-  contextUpdate?: Record<string, unknown>;
+  contextUpdate?: Partial<TContext>;
   /** If true, stop the auto-step chain and end the turn with `reply` */
   halt?: boolean;
   /** Verbatim reply to send when halting */
   reply?: string;
   /** Jump to a step within the current flow */
-  goToStep?: string;
+  goToStep?: string | { step: string; flow?: string; data?: Partial<TData>; reason?: string; };
   /** Jump to another flow */
-  goTo?: string;
+  goTo?: string | { flow?: string; step?: string; data?: Partial<TData>; reason?: string; carry?: 'preserve' | 'reset'; };
   /** Mark the current flow as complete */
-  complete?: boolean;
+  complete?: true | { next?: Directive<unknown, unknown>; reason?: string; };
 }
 
 
@@ -416,46 +416,32 @@ export interface FlowOptions<TContext = unknown, TData = unknown> {
 }
 
 /**
- * Step lifecycle hooks for managing step-specific behavior.
+ * Step lifecycle hooks for managing step-specific behavior. Desugared onto the
+ * equivalent top-level `prepare` / `finalize` fields by the Step constructor —
+ * both spellings run through the same lifecycle machinery, and declaring both
+ * runs them in sequence with their returns merged (Algorithm 4).
  *
- * Pre-LLM hooks (`onEnter`, `prepare`) return `void | Directive`.
- * Post-LLM hooks (`finalize`) return `void | Directive`.
- * Informational hooks (`onExit`) return `void`.
+ * `prepare` runs before the AI responds; `finalize` runs after the turn's
+ * generation completes (before persistence). Both may return a Directive to
+ * write state or redirect flow.
  */
 export interface StepLifecycleHooks<TContext = unknown, TData = unknown> {
   /**
-   * Called on step entry. May return a Directive to augment the prompt,
-   * inject tools, halt, or redirect.
-   * Pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) are honored here.
-   */
-  onEnter?: (
-    ctx: HookContext<TContext, TData>
-  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
-
-  /**
-   * Called when the step is exited. Informational only — cannot influence flow control.
-   * Receives the reason the step was exited.
-   */
-  onExit?: (
-    ctx: HookContext<TContext, TData>,
-    reason: ExitReason
-  ) => void | Promise<void>;
-
-  /**
-   * Called pre-LLM. May return a Directive to augment the prompt,
-   * inject tools, or halt the LLM call.
-   * Pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) are honored here.
+   * Called pre-LLM (alongside any top-level `prepare`). May return a Directive
+   * to write state or redirect flow.
    */
   prepare?: (
-    ctx: HookContext<TContext, TData>
+    context: TContext,
+    data?: Partial<TData>
   ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
 
   /**
-   * Called post-LLM. May return a Directive to redirect flow, write state,
-   * or emit a verbatim reply.
+   * Called after generation (alongside any top-level `finalize`, before
+   * persistence). May return a Directive to redirect flow or write state.
    */
   finalize?: (
-    ctx: HookContext<TContext, TData>
+    context: TContext,
+    data?: Partial<TData>
   ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
 }
 
@@ -475,12 +461,12 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
   prepare?:
   | string
   | Tool<TContext, TData>
-  | ((context: TContext, data?: Partial<TData>) => void | PrepareResult | Promise<void | PrepareResult>);
+  | ((context: TContext, data?: Partial<TData>) => void | PrepareResult<TContext, TData> | Promise<void | PrepareResult<TContext, TData>>);
   /** Programmatic function or tool to run after AI responds */
   finalize?:
   | string
   | Tool<TContext, TData>
-  | ((context: TContext, data?: Partial<TData>) => void | PrepareResult | Promise<void | PrepareResult>);
+  | ((context: TContext, data?: Partial<TData>) => void | PrepareResult<TContext, TData> | Promise<void | PrepareResult<TContext, TData>>);
 
   /**
    * Fields to collect from the conversation in this step
@@ -569,8 +555,9 @@ export interface StepOptions<TContext = unknown, TData = unknown> {
   branches?: BranchMap<TContext, TData>;
 
   /**
-   * Step lifecycle hooks for managing step-specific behavior.
-   * Provides onEnter, onExit, prepare, and finalize hooks that receive HookContext.
+   * Step lifecycle hooks — an alternative spelling of the top-level
+   * `prepare` / `finalize` fields. Both spellings run when declared together;
+   * returns are merged via Algorithm 4.
    */
   hooks?: StepLifecycleHooks<TContext, TData>;
 }

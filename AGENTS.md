@@ -107,7 +107,7 @@ All implement `PersistenceAdapter` interface. All are optional peer dependencies
 ## Key Patterns
 
 - `createAgent(options)` is the recommended entry point (over `new Agent()`).
-- `agent.respond(message)` for synchronous turns; `agent.respondStream(message)` for streaming.
+- `agent.respond({ history, session? })` for synchronous turns; `agent.respondStream(...)` / `agent.stream(...)` for streaming.
 - `agent.dispatch(directive, session)` for out-of-turn redirection (webhooks, cron, UI).
 - Directives are plain object literals — no builders, no classes. Validated via `flow.validate()`.
 - Steps with `auto: true` execute without an LLM call (pure computation via hooks/branches).

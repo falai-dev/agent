@@ -81,7 +81,7 @@ export class ToolManager<TContext = unknown, TData = unknown> {
    * Set the transient tool layer for the current turn.
    *
    * Accepts the merged `injectTools` array from pre-LLM emitters
-   * (already concatenated in outer-to-inner order by the DirectiveBus).
+   * (concatenated in outer-to-inner order).
    * Deduplicates by tool `id` with last-definition-wins.
    *
    * Must be paired with `clearTransientTools()` in a try/finally guard

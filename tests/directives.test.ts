@@ -2,7 +2,7 @@
  * Directive pipeline integration tests
  *
  * Exercises the FULL directive pipeline end-to-end. Focus is on integration
- * points that span multiple components (Agent, flow namespace, DirectiveBus,
+ * points that span multiple components (Agent, flow namespace,
  * DirectiveChainTracker, ToolManager).
  *
  * **Validates: Requirements 1.1–1.16, 6.4–6.6, 9.1–9.9, 10.1–10.6, 22.1–22.3, 24.1, 24.3**
@@ -25,7 +25,6 @@ import type {
     ToolContext,
     ToolResult,
 } from "../src/types";
-import { DirectiveBus } from "../src/core/DirectiveBus";
 import { MockProvider } from "./mock-provider";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
@@ -445,75 +444,68 @@ describe("Agent.applyDirective is synchronous and idempotent modulo timestamps",
 
 // ─── 6. Two emitters merge per Algorithm 4 ──────────────────────────────────
 
-describe("Two emitters in one turn merge per Algorithm 4", () => {
+describe("Two emitters in one turn merge per Algorithm 4 via flow.merge", () => {
     test("position precedence: abort > complete > goTo > reset", () => {
-        const bus = new DirectiveBus();
-        bus.emit({ goTo: "FlowA" } as Directive, "tool:first");
-        bus.emit({ abort: "critical" } as Directive, "tool:second");
+        const first: Directive = { goTo: "FlowA" };
+        const second: Directive = { abort: "critical" };
 
-        const result = bus.drain()!;
+        const result = flow.merge(first, second);
         expect(result.abort).toBe("critical");
         expect(result.goTo).toBeUndefined();
     });
 
     test("last-wins tie-breaking for same-precedence position fields", () => {
-        const bus = new DirectiveBus();
-        bus.emit({ goTo: "FlowA" } as Directive, "tool:first");
-        bus.emit({ goTo: "FlowB" } as Directive, "tool:second");
+        const first: Directive = { goTo: "FlowA" };
+        const second: Directive = { goTo: "FlowB" };
 
-        const result = bus.drain()!;
+        const result = flow.merge(first, second);
         expect(result.goTo).toBe("FlowB");
     });
 
     test("dataUpdate shallow-merge: later overrides on key collision", () => {
-        const bus = new DirectiveBus();
-        bus.emit({ dataUpdate: { name: "Alice", email: "a@a.com" } } as Directive, "hook:prepare");
-        bus.emit({ dataUpdate: { email: "b@b.com", query: "help" } } as Directive, "tool:lookup");
+        const first: Directive = { dataUpdate: { name: "Alice", email: "a@a.com" } };
+        const second: Directive = { dataUpdate: { email: "b@b.com", query: "help" } };
 
-        const result = bus.drain()!;
+        const result = flow.merge(first, second);
         expect(result.dataUpdate).toEqual({ name: "Alice", email: "b@b.com", query: "help" });
     });
 
     test("contextUpdate shallow-merge: later overrides on key collision", () => {
-        const bus = new DirectiveBus();
-        bus.emit({ contextUpdate: { userId: "u1", role: "user" } } as Directive, "hook:onEnter");
-        bus.emit({ contextUpdate: { role: "admin" } } as Directive, "tool:elevate");
+        const first: Directive = { contextUpdate: { userId: "u1", role: "user" } };
+        const second: Directive = { contextUpdate: { role: "admin" } };
 
-        const result = bus.drain()!;
+        const result = flow.merge(first, second);
         expect(result.contextUpdate).toEqual({ userId: "u1", role: "admin" });
     });
 
     test("reply: last emission wins", () => {
-        const bus = new DirectiveBus();
-        bus.emit({ reply: "First message" } as Directive, "hook:onEnter");
-        bus.emit({ reply: "Second message" } as Directive, "hook:prepare");
+        const first: Directive = { reply: "First message" };
+        const second: Directive = { reply: "Second message" };
 
-        const result = bus.drain()!;
+        const result = flow.merge(first, second);
         expect(result.reply).toBe("Second message");
     });
 
     test("appendPrompt arrays concatenate in emission order (PreDirective)", () => {
-        const bus = new DirectiveBus();
-        bus.emit({ appendPrompt: ["line1"] } as unknown as Directive, "flow.onEnter");
-        bus.emit({ appendPrompt: ["line2", "line3"] } as unknown as Directive, "step.prepare");
+        const first: Directive = { appendPrompt: ["line1"] };
+        const second: Directive = { appendPrompt: ["line2", "line3"] };
 
-        const result = bus.drain() as unknown as { appendPrompt: string[] };
+        const result = flow.merge(first, second);
         expect(result.appendPrompt).toEqual(["line1", "line2", "line3"]);
     });
 
     test("injectTools concatenate then dedupe by id (last wins)", () => {
-        const toolV1 = { id: "search", handler: () => ({}) };
-        const toolV2 = { id: "search", handler: () => ({ v: 2 }) };
-        const toolOther = { id: "lookup", handler: () => ({}) };
+        const toolV1: Tool = { id: "search", handler: () => ({}) };
+        const toolV2: Tool = { id: "search", handler: () => ({ v: 2 }) };
+        const toolOther: Tool = { id: "lookup", handler: () => ({}) };
 
-        const bus = new DirectiveBus();
-        bus.emit({ injectTools: [toolV1, toolOther] } as unknown as Directive, "flow.onEnter");
-        bus.emit({ injectTools: [toolV2] } as unknown as Directive, "step.prepare");
+        const first: Directive = { injectTools: [toolV1, toolOther] };
+        const second: Directive = { injectTools: [toolV2] };
 
-        const result = bus.drain() as unknown as { injectTools: Array<{ id: string }> };
+        const result = flow.merge(first, second);
         expect(result.injectTools).toHaveLength(2);
-        expect(result.injectTools[0]).toBe(toolV2); // last wins for 'search'
-        expect(result.injectTools[1].id).toBe("lookup");
+        expect(result.injectTools![0]).toBe(toolV2); // last wins for 'search'
+        expect(result.injectTools![1].id).toBe("lookup");
     });
 });
 

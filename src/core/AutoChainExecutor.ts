@@ -15,10 +15,11 @@
  * Implements Algorithm 1 from `.kiro/specs/auto-steps/design.md`.
  */
 
-import type { SessionState } from "../types";
+import type { Directive, SessionState } from "../types";
 import type { Event } from "../types/history";
 import { FlowConfigurationError, Step } from "./Step";
 import { Flow } from "./Flow";
+import { flow } from "./flow-namespace";
 import { enterStep, mergeCollected, logger } from "../utils";
 import { createTemplateContext } from "../utils/template";
 import type {
@@ -31,20 +32,13 @@ import { evaluateIfPredicates } from "../utils/condition";
 
 /**
  * The directive-like object that `prepare` may return on auto-steps.
- * This is a structural subset of Directive (pre-LLM fields).
+ * A structural subset of Directive (pre-LLM + position fields), so results
+ * merge through the canonical Algorithm 4 (`flow.merge`).
  */
-export interface AutoStepPrepareResult {
-    dataUpdate?: Record<string, unknown>;
-    contextUpdate?: Record<string, unknown>;
-    halt?: boolean;
-    reply?: string;
-    /** Position-changing: jump to a step within the current flow. */
-    goToStep?: string;
-    /** Position-changing: jump to another flow. */
-    goTo?: string;
-    /** Position-changing: mark the flow as complete. */
-    complete?: boolean;
-}
+export type AutoStepPrepareResult<TContext = unknown, TData = unknown> = Pick<
+    Directive<TContext, TData>,
+    "dataUpdate" | "contextUpdate" | "halt" | "reply" | "goToStep" | "goTo" | "complete"
+>;
 
 /**
  * Result of running the auto-chain.
@@ -53,7 +47,7 @@ export interface AutoChainResult<TContext = unknown, TData = unknown> {
     /** The interactive step to hand off to the LLM path (undefined if chain ended without one). */
     resolvedStep?: Step<TContext, TData>;
     /** The merged directive from the halting auto-step's prepare (only set when stoppedReason = 'halt'). */
-    mergedDirective?: AutoStepPrepareResult;
+    mergedDirective?: AutoStepPrepareResult<TContext, TData>;
     /** Why the chain stopped, if it didn't reach an interactive step normally. */
     stoppedReason?: StoppedReason;
     /** Updated session after all auto-step state writes. */
@@ -192,10 +186,24 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
 
                 // STEP 5: position-changing directive (goToStep, goTo, complete)
                 if (merged.goToStep) {
-                    const targetStep = flow.getStep(merged.goToStep);
+                    // String form targets the current flow; object form carrying
+                    // a different `flow` defers to the pipeline for cross-flow
+                    // resolution (same as goTo).
+                    const goTarget = typeof merged.goToStep === "string"
+                        ? { step: merged.goToStep, flowId: undefined }
+                        : { step: merged.goToStep.step, flowId: merged.goToStep.flow };
+                    if (goTarget.flowId && goTarget.flowId !== flow.id) {
+                        return {
+                            resolvedStep: step,
+                            mergedDirective: merged,
+                            stoppedReason: 'goto',
+                            session,
+                        };
+                    }
+                    const targetStep = flow.getStep(goTarget.step);
                     if (!targetStep) {
                         throw new FlowConfigurationError(
-                            `[FlowConfigurationError] Auto-step "${step.id}" goToStep targets unknown step: "${merged.goToStep}" does not exist in the current flow. ` +
+                            `[FlowConfigurationError] Auto-step "${step.id}" goToStep targets unknown step: "${goTarget.step}" does not exist in the current flow. ` +
                             `Check the step id or use goTo to target a different flow.`
                         );
                     }
@@ -263,26 +271,15 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Run onEnter and prepare hooks for an auto-step, collecting any
+     * Run the prepare hook for an auto-step, collecting any
      * Directive return values (pre-LLM fields honored).
      */
     private async runStepHooks(
         step: Step<TContext, TData>,
         session: SessionState<TData>,
         context: TContext
-    ): Promise<AutoStepPrepareResult | undefined> {
-        let merged: AutoStepPrepareResult | undefined;
-
-        // onEnter (future hook — not yet in StepOptions, but handle if present)
-        const stepWithHooks = step as Step<TContext, TData> & {
-            onEnter?: (context: TContext, data: Partial<TData> | undefined) => Promise<unknown>;
-        };
-        if (typeof stepWithHooks.onEnter === 'function') {
-            const onEnterResult = await stepWithHooks.onEnter(context, session.data);
-            if (onEnterResult && typeof onEnterResult === 'object') {
-                merged = this.mergeDirectives(merged, onEnterResult as AutoStepPrepareResult);
-            }
-        }
+    ): Promise<AutoStepPrepareResult<TContext, TData> | undefined> {
+        let merged: AutoStepPrepareResult<TContext, TData> | undefined;
 
         // prepare hook — for auto-steps, prepare may return a Directive with pre-LLM fields
         if (step.prepare) {
@@ -296,7 +293,7 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
                 );
                 // prepare may return void or a directive-like object
                 if (prepareResult && typeof prepareResult === 'object') {
-                    merged = this.mergeDirectives(merged, prepareResult as AutoStepPrepareResult);
+                    merged = this.mergeDirectives(merged, prepareResult as AutoStepPrepareResult<TContext, TData>);
                 }
             } else {
                 // Tool reference (string or Tool object) — for auto-steps, tool-based
@@ -312,27 +309,17 @@ export class AutoChainExecutor<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Merge two directive-like objects. Later values override earlier ones
-     * for scalar fields; object fields (dataUpdate, contextUpdate) are deep-merged.
+     * Merge two directive-like objects via the canonical Algorithm 4 merge —
+     * one algorithm shared with tools, hooks and signals.
      */
     private mergeDirectives(
-        base: AutoStepPrepareResult | undefined,
-        incoming: AutoStepPrepareResult
-    ): AutoStepPrepareResult {
+        base: AutoStepPrepareResult<TContext, TData> | undefined,
+        incoming: AutoStepPrepareResult<TContext, TData>
+    ): AutoStepPrepareResult<TContext, TData> {
         if (!base) return { ...incoming };
-        return {
-            dataUpdate: incoming.dataUpdate
-                ? { ...(base.dataUpdate || {}), ...incoming.dataUpdate }
-                : base.dataUpdate,
-            contextUpdate: incoming.contextUpdate
-                ? { ...(base.contextUpdate || {}), ...incoming.contextUpdate }
-                : base.contextUpdate,
-            halt: incoming.halt ?? base.halt,
-            reply: incoming.reply ?? base.reply,
-            goTo: incoming.goTo ?? base.goTo,
-            goToStep: incoming.goToStep ?? base.goToStep,
-            complete: incoming.complete ?? base.complete,
-        };
+        // AutoStepPrepareResult is a structural subset of Directive, so both
+        // sides flow through the canonical merge directly — no casts needed.
+        return flow.merge<TContext, TData>(base, incoming);
     }
 
     /**

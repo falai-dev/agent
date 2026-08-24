@@ -361,9 +361,9 @@ export function sessionDataToStep<TData = Record<string, unknown>>(
  * `appendPrompt`, `injectTools`, and `halt` are transient (one-turn lifetime)
  * and must not be serialized. This is a belt-and-suspenders safety net —
  * `Agent.dispatch` already strips before setting `pendingDirective`, and the
- * DirectiveBus's post-LLM drain strips from post-LLM emitters. This function
- * ensures the persistence layer never writes these fields regardless of the
- * upstream path.
+ * signal pipeline strips pre-LLM-only fields from post-phase directives. This
+ * function ensures the persistence layer never writes these fields regardless
+ * of the upstream path.
  */
 function stripPreDirectiveFields<TData>(
   directive: Directive<unknown, TData>

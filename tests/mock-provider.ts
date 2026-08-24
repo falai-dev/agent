@@ -156,6 +156,15 @@ export class MockProvider implements AiProvider {
         // Unknown schema type - return empty object to avoid validation errors
         structuredResponse = {};
       }
+
+      // A scripted toolCalls config always wins — the model "decided" to call
+      // tools regardless of which schema branch generated the message shell.
+      if (this.config.structuredResponse?.toolCalls?.length) {
+        structuredResponse = {
+          ...(structuredResponse || {}),
+          ...this.config.structuredResponse,
+        };
+      }
     } else {
       // No schema provided, use configured structured response
       structuredResponse = this.config.structuredResponse;

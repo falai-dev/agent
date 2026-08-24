@@ -27,7 +27,7 @@ const agent = createAgent({
   }],
 });
 
-const response = await agent.respond("Hi, I'm Alice");
+const response = await agent.respond({ history: [{ role: "user", content: "Hi, I'm Alice" }] });
 console.log(response.message);
 ```
 

@@ -45,8 +45,8 @@ const agent = createAgent<{}, AppData>({
                     // When the user confirms, complete with a chained directive
                     // that moves to the "Checkout" flow.
                     hooks: {
-                        finalize: ({ data }) => {
-                            if (data.confirmed) {
+                        finalize: (_context, data) => {
+                            if (data?.confirmed) {
                                 const d: Directive<{}, AppData> = {
                                     complete: { next: { goTo: "Checkout" }, reason: "User confirmed" },
                                 };

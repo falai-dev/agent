@@ -2,26 +2,22 @@
  * PreDirective integration tests
  *
  * Tests integration-level scenarios that span multiple components:
- * - DirectiveBus → PromptComposer: appendPrompt from pre-LLM drain lands in system prompt
- * - DirectiveBus → ToolManager: injectTools available this turn, gone next turn
- * - halt + reply: merged PreDirective short-circuits LLM, emits reply, stoppedReason 'reply'
- * - halt without reply: empty content, stoppedReason 'halt'
- * - Multiple emitters: appendPrompt concat in outer-to-inner order, injectTools dedup by id, halt OR
- * - createPersistedState strips all PreDirective fields
- * - Post-LLM emitter: DirectiveBus strips pre-LLM fields, rest of directive applied
+ * - PromptComposer: appendPrompt lands in the system prompt via the transient appendage slot, current turn only
+ * - ToolManager: injectTools available this turn via the transient tool layer, gone next turn
+ * - flow.merge: canonical merge of multiple pre-LLM emissions (Algorithm 4) —
+ *   appendPrompt concat in outer-to-inner order, injectTools dedup by id, halt OR, reply last-wins
+ * - createPersistedState strips all PreDirective fields before persistence
  *
  * **Validates: Requirements 2.1–2.12, 24.5, 24.6, 27.1–27.4**
  */
 import { describe, test, expect } from "bun:test";
-import { DirectiveBus } from "../src/core/DirectiveBus";
+import { flow } from "../src/index";
 import { PromptComposer } from "../src/core/PromptComposer";
 import { ToolManager } from "../src/core/ToolManager";
 import { Agent } from "../src/core/Agent";
 import { createPersistedState } from "../src/utils/session";
 import { createTemplateContext } from "../src/utils/template";
-import { logger } from "../src/utils";
-import type { Directive } from "../src/types/flow";
-import type { SessionState } from "../src/types/session";
+import type { Directive, SessionState, Tool } from "../src/types";
 import { MockProvider } from "./mock-provider";
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -48,64 +44,43 @@ function makeSession(overrides?: Partial<SessionState<TestData>>): SessionState<
     };
 }
 
-// ─── 1. DirectiveBus → PromptComposer: appendPrompt from prepare hook ────────
+// ─── 1. PromptComposer: appendPrompt → per-turn transient appendage ──────────
 // Validates: Requirements 2.2, 2.8, 2.11, 27.1, 27.2
 
 describe("PreDirective integration: appendPrompt → PromptComposer", () => {
-    test("appendPrompt from a prepare hook (via DirectiveBus pre-LLM drain) lands in the system prompt for the current turn only", async () => {
-        // Simulate: prepare hook emits a PreDirective with appendPrompt
-        const bus = new DirectiveBus();
-        bus.emit(
-            { appendPrompt: ["The user is a VIP. Prioritize their request."] } as unknown as Directive,
-            "step.prepare:verify_order"
-        );
-
-        // Drain the bus (pre-LLM phase) to get merged PreDirective
-        const merged = bus.drain() as unknown as { appendPrompt: string[] };
-        expect(merged.appendPrompt).toEqual(["The user is a VIP. Prioritize their request."]);
-
-        // Feed the appendPrompt into PromptComposer (the handoff)
+    test("appendPrompt from a prepare hook lands in the system prompt for the current turn only", async () => {
+        // Simulate: prepare hook emitted { appendPrompt: [...] } — the pipeline
+        // hands it to PromptComposer's transientAppendage slot (the handoff).
         const ctx = createTemplateContext({});
         const composer = new PromptComposer(ctx);
         await composer.addInstruction("Help the user with their order.");
 
         const promptThisTurn = await composer.build({
-            transientAppendage: merged.appendPrompt,
+            transientAppendage: ["The user is a VIP. Prioritize their request."],
         });
 
         // The appendage should appear in the system prompt
         expect(promptThisTurn).toContain("The user is a VIP. Prioritize their request.");
 
-        // Next turn: no appendage → the sentence is gone
+        // Next turn: no appendage → the sentence is gone (the slot is per-build)
         const promptNextTurn = await composer.build();
         expect(promptNextTurn).not.toContain("The user is a VIP. Prioritize their request.");
     });
 
-    test("appendPrompt is for current turn only — fresh bus each turn means no carryover", async () => {
-        // Turn 1
-        const bus1 = new DirectiveBus();
-        bus1.emit(
-            { appendPrompt: ["Turn 1 context."] } as unknown as Directive,
-            "step.prepare:step_a"
-        );
-        const merged1 = bus1.drain() as unknown as { appendPrompt: string[] };
-
+    test("appendPrompt is for current turn only — a build without an appendage carries nothing over", async () => {
+        // Turn 1: prepare hook emits an appendage
         const ctx = createTemplateContext({});
         const composer = new PromptComposer(ctx);
-        const prompt1 = await composer.build({ transientAppendage: merged1.appendPrompt });
+        const prompt1 = await composer.build({ transientAppendage: ["Turn 1 context."] });
         expect(prompt1).toContain("Turn 1 context.");
 
-        // Turn 2: fresh bus, no emissions
-        const bus2 = new DirectiveBus();
-        const merged2 = bus2.drain();
-        expect(merged2).toBeUndefined();
-
+        // Turn 2: no emissions → fresh build without the appendage option
         const prompt2 = await composer.build();
         expect(prompt2).not.toContain("Turn 1 context.");
     });
 });
 
-// ─── 2. DirectiveBus → ToolManager: injectTools (transient layer) ────────────
+// ─── 2. ToolManager: injectTools → transient layer ───────────────────────────
 // Validates: Requirements 2.3, 2.4, 2.8, 2.12, 27.3
 
 describe("PreDirective integration: injectTools → ToolManager transient layer", () => {
@@ -116,21 +91,14 @@ describe("PreDirective integration: injectTools → ToolManager transient layer"
         // Agent-level tool
         agent.addTool({
             id: "agent-tool",
+            description: "Always available",
             handler: async () => "agent result",
         });
 
-        // Simulate: prepare hook returns PreDirective with injectTools
-        const bus = new DirectiveBus();
-        const injectedTool = { id: "transient-lookup", handler: async () => "transient result" };
-        bus.emit(
-            { injectTools: [injectedTool] } as unknown as Directive,
-            "step.prepare:ask_date"
-        );
-
-        const merged = bus.drain() as unknown as { injectTools: Array<{ id: string }> };
-
-        // Feed into ToolManager transient layer (the handoff)
-        toolManager.setTransientTools(merged.injectTools as any);
+        // Simulate: prepare hook returned PreDirective with injectTools;
+        // the pipeline feeds the array into ToolManager's transient layer.
+        const injectedTool: Tool = { id: "transient-lookup", description: "Per-turn lookup", handler: async () => "transient result" };
+        toolManager.setTransientTools([injectedTool]);
 
         // This turn: transient tool is available
         expect(toolManager.find("transient-lookup")).toBeDefined();
@@ -155,131 +123,39 @@ describe("PreDirective integration: injectTools → ToolManager transient layer"
 
         agent.addTool({
             id: "shared-tool",
-            name: "agent-version",
+            description: "agent-version",
             handler: async () => "agent",
         });
 
         // Inject transient tool with same id
-        const transientVersion = { id: "shared-tool", name: "transient-version", handler: async () => "transient" };
+        const transientVersion: Tool = { id: "shared-tool", description: "transient-version", handler: async () => "transient" };
         toolManager.setTransientTools([transientVersion]);
 
         // Transient version wins
         const found = toolManager.find("shared-tool");
-        expect(found?.name).toBe("transient-version");
+        expect(found?.description).toBe("transient-version");
 
         // After clear, agent version returns
         toolManager.clearTransientTools();
         const foundAfter = toolManager.find("shared-tool");
-        expect(foundAfter?.name).toBe("agent-version");
+        expect(foundAfter?.description).toBe("agent-version");
     });
 });
 
-// ─── 3. halt + reply: short-circuits LLM, emits reply, stoppedReason 'reply' ─
-// Validates: Requirements 2.5, 2.6
-
-describe("PreDirective integration: halt: true + reply short-circuits LLM", () => {
-    test("halt: true with reply: merged PreDirective signals LLM skip and provides reply text", () => {
-        const bus = new DirectiveBus();
-        bus.emit(
-            { halt: true, reply: "We are temporarily down — try in 5 minutes." } as unknown as Directive,
-            "step.prepare:check_status"
-        );
-
-        const merged = bus.drain() as unknown as { halt: boolean; reply: string };
-
-        // Pipeline logic: if halt is true, skip LLM call
-        expect(merged.halt).toBe(true);
-        // The reply is the assistant message for this turn
-        expect(merged.reply).toBe("We are temporarily down — try in 5 minutes.");
-
-        // stoppedReason should be 'reply' (validated at pipeline level)
-        // Here we verify the directive carries both fields correctly for the pipeline to act on
-        const stoppedReason = merged.halt && merged.reply ? "reply" : "halt";
-        expect(stoppedReason).toBe("reply");
-    });
-
-    test("halt + reply from multiple emitters: halt is OR, reply is last-wins", () => {
-        const bus = new DirectiveBus();
-        bus.emit(
-            { halt: false, reply: "First reply" } as unknown as Directive,
-            "flow.onEnter:booking"
-        );
-        bus.emit(
-            { halt: true, reply: "Override reply" } as unknown as Directive,
-            "step.prepare:verify"
-        );
-
-        const merged = bus.drain() as unknown as { halt: boolean; reply: string };
-
-        // halt: logical OR → true
-        expect(merged.halt).toBe(true);
-        // reply: last-wins
-        expect(merged.reply).toBe("Override reply");
-    });
-});
-
-// ─── 4. halt without reply: empty content, stoppedReason 'halt' ──────────────
-// Validates: Requirement 2.7
-
-describe("PreDirective integration: halt: true without reply → empty content", () => {
-    test("halt: true without reply produces empty content with stoppedReason 'halt'", () => {
-        const bus = new DirectiveBus();
-        bus.emit(
-            { halt: true, goTo: "Maintenance" } as unknown as Directive,
-            "step.prepare:health_check"
-        );
-
-        const merged = bus.drain() as unknown as { halt: boolean; reply?: string; goTo: string };
-
-        expect(merged.halt).toBe(true);
-        expect(merged.reply).toBeUndefined();
-        expect(merged.goTo).toBe("Maintenance");
-
-        // Pipeline logic: halt=true + no reply → empty content, stoppedReason = 'halt'
-        const stoppedReason = merged.halt && !merged.reply ? "halt" : "reply";
-        expect(stoppedReason).toBe("halt");
-    });
-
-    test("halt: true alone (no position field, no reply) → empty message, 'halt' reason", () => {
-        const bus = new DirectiveBus();
-        bus.emit({ halt: true } as unknown as Directive, "step.prepare:guard");
-
-        const merged = bus.drain() as unknown as { halt: boolean; reply?: string };
-
-        expect(merged.halt).toBe(true);
-        expect(merged.reply).toBeUndefined();
-
-        const stoppedReason = merged.halt && !merged.reply ? "halt" : "reply";
-        expect(stoppedReason).toBe("halt");
-    });
-});
-
-// ─── 5. Multiple emitters in one turn: concat, dedup, OR ─────────────────────
+// ─── 3. Multiple emitters in one turn merge via flow.merge ───────────────────
 // Validates: Requirements 2.8, 10.7, 10.8, 10.9, 27.1–27.4
 
-describe("PreDirective integration: multiple emitters merge correctly", () => {
+describe("PreDirective integration: multiple emitters merge via flow.merge", () => {
     test("appendPrompt arrays concatenate in outer-to-inner order", async () => {
-        const bus = new DirectiveBus();
-
-        // Outer-to-inner: agent.onEnter → flow.onEnter → step.onEnter → step.prepare
-        bus.emit(
-            { appendPrompt: ["Agent-level context."] } as unknown as Directive,
-            "agent.onEnter"
-        );
-        bus.emit(
-            { appendPrompt: ["Flow-level context."] } as unknown as Directive,
-            "flow.onEnter:booking"
-        );
-        bus.emit(
-            { appendPrompt: ["Step-level context."] } as unknown as Directive,
-            "step.onEnter:ask_date"
-        );
-        bus.emit(
-            { appendPrompt: ["Prepare-level context."] } as unknown as Directive,
-            "step.prepare:ask_date"
-        );
-
-        const merged = bus.drain() as unknown as { appendPrompt: string[] };
+        // Outer-to-inner: agent.onEnter → flow.onEnter → step.onEnter → step.prepare,
+        // folded through the canonical merge exactly as the pipeline does.
+        const emissions: Directive[] = [
+            { appendPrompt: ["Agent-level context."] },
+            { appendPrompt: ["Flow-level context."] },
+            { appendPrompt: ["Step-level context."] },
+            { appendPrompt: ["Prepare-level context."] },
+        ];
+        const merged = emissions.reduce((a, b) => flow.merge(a, b));
 
         // Concatenated in emission (outer-to-inner) order
         expect(merged.appendPrompt).toEqual([
@@ -289,9 +165,8 @@ describe("PreDirective integration: multiple emitters merge correctly", () => {
             "Prepare-level context.",
         ]);
 
-        // Verify PromptComposer preserves that order in the system prompt
-        const ctx = createTemplateContext({});
-        const composer = new PromptComposer(ctx);
+        // PromptComposer preserves that order in the system prompt
+        const composer = new PromptComposer(createTemplateContext({}));
         const prompt = await composer.build({ transientAppendage: merged.appendPrompt });
 
         const agentIdx = prompt.indexOf("Agent-level context.");
@@ -304,90 +179,87 @@ describe("PreDirective integration: multiple emitters merge correctly", () => {
         expect(stepIdx).toBeLessThan(prepareIdx);
     });
 
-    test("injectTools deduplicates by id with last-definition-wins", () => {
-        const bus = new DirectiveBus();
+    test("injectTools concatenate then deduplicate by id with last-definition-wins", () => {
+        const toolV1: Tool = { id: "lookup", description: "v1", handler: async () => "v1" };
+        const toolV2: Tool = { id: "lookup", description: "v2", handler: async () => "v2" };
+        const toolUnique: Tool = { id: "search", description: "search", handler: async () => "search" };
 
-        const toolV1 = { id: "lookup", name: "v1", handler: async () => "v1" };
-        const toolV2 = { id: "lookup", name: "v2", handler: async () => "v2" };
-        const toolUnique = { id: "search", name: "search", handler: async () => "search" };
-
-        bus.emit(
-            { injectTools: [toolV1, toolUnique] } as unknown as Directive,
-            "flow.onEnter:support"
+        const merged = flow.merge(
+            { injectTools: [toolV1, toolUnique] } as Directive,
+            { injectTools: [toolV2] } as Directive,
         );
-        bus.emit(
-            { injectTools: [toolV2] } as unknown as Directive,
-            "step.prepare:ask_query"
-        );
-
-        const merged = bus.drain() as unknown as { injectTools: Array<{ id: string; name: string }> };
 
         // Deduped: 'lookup' appears once with v2 (last-definition-wins), 'search' kept
         expect(merged.injectTools).toHaveLength(2);
-        const lookupTool = merged.injectTools.find(t => t.id === "lookup");
-        expect(lookupTool?.name).toBe("v2");
-        const searchTool = merged.injectTools.find(t => t.id === "search");
-        expect(searchTool?.name).toBe("search");
+        const lookupTool = merged.injectTools!.find(t => t.id === "lookup");
+        expect(lookupTool?.description).toBe("v2");
+        const searchTool = merged.injectTools!.find(t => t.id === "search");
+        expect(searchTool?.description).toBe("search");
 
         // Feed into ToolManager to verify resolution
         const agent = makeAgent();
         const tm = new ToolManager<TestContext, TestData>(agent);
-        tm.setTransientTools(merged.injectTools as any);
+        tm.setTransientTools(merged.injectTools!);
 
-        expect(tm.find("lookup")?.name).toBe("v2");
-        expect(tm.find("search")?.name).toBe("search");
+        expect(tm.find("lookup")?.description).toBe("v2");
+        expect(tm.find("search")?.description).toBe("search");
     });
 
     test("halt is logical-OR across multiple emitters", () => {
-        const bus = new DirectiveBus();
-
-        bus.emit({ halt: false } as unknown as Directive, "flow.onEnter:booking");
-        bus.emit({ halt: false } as unknown as Directive, "step.onEnter:ask_date");
-        bus.emit({ halt: true } as unknown as Directive, "step.prepare:ask_date");
-
-        const merged = bus.drain() as unknown as { halt: boolean };
+        const emissions: Directive[] = [{ halt: false }, { halt: false }, { halt: true }];
+        const merged = emissions.reduce((a, b) => flow.merge(a, b));
 
         // Any emitter setting halt=true → merged halt is true (logical OR)
         expect(merged.halt).toBe(true);
     });
 
-    test("all three PreDirective fields merge correctly across multiple emitters", async () => {
-        const bus = new DirectiveBus();
+    test("halt + reply from two emitters: halt ORs to true, reply is last-wins", () => {
+        const merged = flow.merge(
+            { halt: false, reply: "First reply" } as Directive,
+            { halt: true, reply: "Override reply" } as Directive,
+        );
 
-        const toolA = { id: "t1", handler: async () => "a" };
-        const toolB = { id: "t2", handler: async () => "b" };
+        // Pipeline contract: merged.halt=true + reply → the reply becomes the
+        // assistant message this turn (stoppedReason 'reply').
+        expect(merged.halt).toBe(true);
+        expect(merged.reply).toBe("Override reply");
+    });
 
-        bus.emit(
+    test("halt without reply merges alongside other fields — position survives, reply stays unset", () => {
+        const emissions: Directive[] = [{ goTo: "Maintenance" }, { halt: true }];
+        const merged = emissions.reduce((a, b) => flow.merge(a, b));
+
+        // Pipeline contract: merged.halt=true + no reply → empty content with
+        // stoppedReason 'halt', while other directive fields still apply.
+        expect(merged.goTo).toBe("Maintenance");
+        expect(merged.halt).toBe(true);
+        expect(merged.reply).toBeUndefined();
+    });
+
+    test("all three PreDirective fields merge correctly across multiple emitters", () => {
+        const toolA: Tool = { id: "t1", handler: async () => "a" };
+        const toolB: Tool = { id: "t2", handler: async () => "b" };
+
+        const merged = flow.merge(
             {
                 appendPrompt: ["From onEnter."],
                 injectTools: [toolA],
                 halt: false,
-            } as unknown as Directive,
-            "step.onEnter:check"
-        );
-        bus.emit(
+            } as Directive,
             {
                 appendPrompt: ["From prepare."],
                 injectTools: [toolB],
                 halt: true,
                 reply: "Halted!",
-            } as unknown as Directive,
-            "step.prepare:check"
+            } as Directive,
         );
-
-        const merged = bus.drain() as unknown as {
-            appendPrompt: string[];
-            injectTools: Array<{ id: string }>;
-            halt: boolean;
-            reply: string;
-        };
 
         // appendPrompt: concatenated
         expect(merged.appendPrompt).toEqual(["From onEnter.", "From prepare."]);
         // injectTools: deduped (no collision here, so both present)
         expect(merged.injectTools).toHaveLength(2);
-        expect(merged.injectTools[0].id).toBe("t1");
-        expect(merged.injectTools[1].id).toBe("t2");
+        expect(merged.injectTools![0].id).toBe("t1");
+        expect(merged.injectTools![1].id).toBe("t2");
         // halt: logical OR
         expect(merged.halt).toBe(true);
         // reply: last-wins
@@ -395,7 +267,7 @@ describe("PreDirective integration: multiple emitters merge correctly", () => {
     });
 });
 
-// ─── 6. Persisted directive does not carry appendPrompt/injectTools/halt ─────
+// ─── 4. Persisted directive does not carry appendPrompt/injectTools/halt ─────
 // Validates: Requirements 2.9, 12.6, 24.5
 
 describe("PreDirective integration: persistence stripping via createPersistedState", () => {
@@ -409,7 +281,7 @@ describe("PreDirective integration: persistence stripping via createPersistedSta
                 appendPrompt: ["Extra context."],
                 injectTools: [{ id: "temp-tool", handler: async () => "x" }],
                 halt: true,
-            } as any,
+            } as unknown as SessionState<TestData>["pendingDirective"],
         });
 
         const persisted = createPersistedState(session);
@@ -420,9 +292,9 @@ describe("PreDirective integration: persistence stripping via createPersistedSta
         expect(persisted.pendingDirective!.contextUpdate).toEqual({ userId: "u1" });
 
         // PreDirective fields stripped
-        expect("appendPrompt" in (persisted.pendingDirective as any)).toBe(false);
-        expect("injectTools" in (persisted.pendingDirective as any)).toBe(false);
-        expect("halt" in (persisted.pendingDirective as any)).toBe(false);
+        expect("appendPrompt" in persisted.pendingDirective!).toBe(false);
+        expect("injectTools" in persisted.pendingDirective!).toBe(false);
+        expect("halt" in persisted.pendingDirective!).toBe(false);
     });
 
     test("persisted directive with only PreDirective fields becomes effectively empty but retains Directive structure", () => {
@@ -430,7 +302,7 @@ describe("PreDirective integration: persistence stripping via createPersistedSta
             pendingDirective: {
                 appendPrompt: ["Transient only."],
                 halt: true,
-            } as any,
+            } as unknown as SessionState<TestData>["pendingDirective"],
         });
 
         const persisted = createPersistedState(session);
@@ -438,8 +310,8 @@ describe("PreDirective integration: persistence stripping via createPersistedSta
         // After stripping, the directive has no meaningful fields
         // but createPersistedState still includes it if the object is non-undefined
         if (persisted.pendingDirective) {
-            expect("appendPrompt" in (persisted.pendingDirective as any)).toBe(false);
-            expect("halt" in (persisted.pendingDirective as any)).toBe(false);
+            expect("appendPrompt" in persisted.pendingDirective).toBe(false);
+            expect("halt" in persisted.pendingDirective).toBe(false);
         }
     });
 
@@ -449,117 +321,5 @@ describe("PreDirective integration: persistence stripping via createPersistedSta
         const persisted = createPersistedState(session);
 
         expect("pendingDirective" in persisted).toBe(false);
-    });
-});
-
-// ─── 7. Post-LLM emitter: pre-LLM fields dropped with DEBUG log ─────────────
-// Validates: Requirement 2.10
-
-describe("PreDirective integration: post-LLM emitter field stripping", () => {
-    test("post-LLM emitter sets halt: true → field dropped; rest of directive applied", () => {
-        const bus = new DirectiveBus();
-        bus.setPhase("post-llm");
-
-        // finalize hook returns a directive that includes halt (invalid for post-LLM)
-        bus.emit(
-            {
-                goTo: "Billing",
-                reply: "Transferring to billing.",
-                dataUpdate: { tier: "premium" },
-                halt: true,
-            } as unknown as Directive,
-            "hook:finalize:verify_order"
-        );
-
-        const result = bus.drain()!;
-
-        // Directive fields preserved
-        expect(result.goTo).toBe("Billing");
-        expect(result.reply).toBe("Transferring to billing.");
-        expect(result.dataUpdate).toEqual({ tier: "premium" });
-
-        // Pre-LLM-only field stripped
-        expect((result as Record<string, unknown>).halt).toBeUndefined();
-    });
-
-    test("post-LLM emitter with all three pre-LLM fields: all stripped, Directive portion intact", () => {
-        const bus = new DirectiveBus();
-        bus.setPhase("post-llm");
-
-        bus.emit(
-            {
-                complete: true,
-                reply: "Flow complete!",
-                appendPrompt: ["should not be here"],
-                injectTools: [{ id: "stale" }],
-                halt: true,
-            } as unknown as Directive,
-            "hook:onComplete:booking"
-        );
-
-        const result = bus.drain()!;
-
-        expect(result.complete).toBe(true);
-        expect(result.reply).toBe("Flow complete!");
-        expect((result as Record<string, unknown>).appendPrompt).toBeUndefined();
-        expect((result as Record<string, unknown>).injectTools).toBeUndefined();
-        expect((result as Record<string, unknown>).halt).toBeUndefined();
-    });
-
-    test("post-LLM stripping emits DEBUG log naming the emitter and dropped fields", () => {
-        const debugCalls: string[] = [];
-        const originalDebug = logger.debug;
-        logger.debug = (...args: unknown[]) => { debugCalls.push(String(args[0])); };
-
-        try {
-            const bus = new DirectiveBus();
-            bus.setPhase("post-llm");
-            bus.emit(
-                { goTo: "X", appendPrompt: ["drop me"], halt: true } as unknown as Directive,
-                "tool:process_refund"
-            );
-
-            bus.drain();
-
-            // Verify DEBUG log was emitted
-            const strippingLog = debugCalls.find(
-                msg => msg.includes("Dropped") && msg.includes("pre-LLM-only")
-            );
-            expect(strippingLog).toBeDefined();
-            expect(strippingLog).toContain("tool:process_refund");
-            expect(strippingLog).toContain("appendPrompt");
-            expect(strippingLog).toContain("halt");
-        } finally {
-            logger.debug = originalDebug;
-        }
-    });
-
-    test("post-LLM emitter without pre-LLM fields: directive applied as-is, no stripping log", () => {
-        const debugCalls: string[] = [];
-        const originalDebug = logger.debug;
-        logger.debug = (...args: unknown[]) => { debugCalls.push(String(args[0])); };
-
-        try {
-            const bus = new DirectiveBus();
-            bus.setPhase("post-llm");
-            bus.emit(
-                { goTo: "NextFlow", reply: "Moving on.", dataUpdate: { name: "Alice" } } as unknown as Directive,
-                "hook:finalize:step_x"
-            );
-
-            const result = bus.drain()!;
-
-            expect(result.goTo).toBe("NextFlow");
-            expect(result.reply).toBe("Moving on.");
-            expect(result.dataUpdate).toEqual({ name: "Alice" });
-
-            // No stripping log should be emitted (no pre-LLM fields present)
-            const strippingLog = debugCalls.find(
-                msg => msg.includes("Dropped") && msg.includes("pre-LLM-only")
-            );
-            expect(strippingLog).toBeUndefined();
-        } finally {
-            logger.debug = originalDebug;
-        }
     });
 });
