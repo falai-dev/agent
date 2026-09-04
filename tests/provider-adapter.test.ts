@@ -15,6 +15,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { OpenAIProvider } from "../src/providers/OpenAIProvider.js";
+import { OpenRouterProvider } from "../src/providers/OpenRouterProvider.js";
 import { DeepSeekProvider } from "../src/providers/DeepSeekProvider.js";
 import { AnthropicProvider } from "../src/providers/AnthropicProvider.js";
 import { GeminiProvider } from "../src/providers/GeminiProvider.js";
@@ -333,6 +334,68 @@ describe("a bound effort reaches the wire", () => {
     await deepseek(fetchImpl, { config: { effort: "none" } }).generateMessage(input());
 
     expect(bodies[0].thinking).toEqual({ type: "disabled" });
+  });
+
+  const responsesTurn = () =>
+    sse([
+      JSON.stringify({ type: "response.output_text.delta", delta: "ok" }),
+      JSON.stringify({ type: "response.completed", response: { model: "gpt" } }),
+    ]);
+
+  /**
+   * The case the DeepSeek test above cannot catch, and the reason for
+   * `@providerkit/core` 0.4.1. Through 0.4.0 this shape emitted `reasoning`
+   * only for graded levels, so "none" left byte-identical to never asking —
+   * and not asking is the model's own default, which is `medium` on
+   * everything older than GPT-5.1. Under a small `maxTokens` that spends the
+   * whole allowance on invisible reasoning and returns empty text.
+   */
+  test("effort 'none' turns thinking off on the Responses shape", async () => {
+    const { bodies, fetchImpl } = scripted([responsesTurn]);
+
+    await new OpenAIProvider({
+      apiKey: "k",
+      model: "gpt",
+      config: { effort: "none" },
+      fetchImpl,
+    }).generateMessage(input());
+
+    expect(bodies[0].reasoning).toEqual({ effort: "none" });
+  });
+
+  /** "max" is this package's word. OpenAI's enum stops at `high`, and sending
+   * it verbatim 400'd the request on the top setting alone. */
+  test("effort 'max' is clamped to what the Responses enum accepts", async () => {
+    const { bodies, fetchImpl } = scripted([responsesTurn]);
+
+    await new OpenAIProvider({
+      apiKey: "k",
+      model: "gpt",
+      config: { effort: "max" },
+      fetchImpl,
+    }).generateMessage(input());
+
+    expect(bodies[0].reasoning).toEqual({ effort: "high", summary: "auto" });
+  });
+
+  /**
+   * Not a bug — pinned so nobody "corrects" it into "none". Models behind this
+   * gateway that always think refuse `reasoning.enabled: false` outright (GLM
+   * answers 400 "Reasoning is mandatory for this endpoint"), so the floor is
+   * measured against the live endpoint: zero is not reachable on OpenRouter,
+   * and a fork routing through it must budget for one `low` thinking pass.
+   */
+  test("OpenRouter floors 'none' at low, because that wire has no off switch", async () => {
+    const { bodies, fetchImpl } = scripted([() => chat({ content: "ok" })]);
+
+    await new OpenRouterProvider({
+      apiKey: "k",
+      model: "z-ai/glm-4.6",
+      config: { effort: "none" },
+      fetchImpl,
+    }).generateMessage(input());
+
+    expect(bodies[0].reasoning).toEqual({ effort: "low" });
   });
 
   test("no effort sends nothing at all — the model keeps its own default", async () => {

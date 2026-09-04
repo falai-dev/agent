@@ -77,7 +77,7 @@
     "directives",
     "signals"
   ],
-  "author": "Gustavo Salom\u00e9 <gusnips>",
+  "author": "Gustavo Salomé <gusnips>",
   "license": "MIT",
   "engines": {
     "node": ">=22.12"
@@ -93,8 +93,8 @@
     "typescript-eslint": "^8.18.2"
   },
   "dependencies": {
-    "loglevel": "^1.9.2",
-    "@providerkit/core": "^0.4.0"
+    "@providerkit/core": "^0.4.1",
+    "loglevel": "^1.9.2"
   },
   "peerDependencies": {
     "@opensearch-project/opensearch": "^2.0.0",
