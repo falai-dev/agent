@@ -454,11 +454,23 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     context: TContext;
     /** Merged directive from the directive bus (pre-LLM + post-LLM phases). */
     busDirective?: Directive<TContext, TData>;
-  }): Promise<{ nextStep: Step<TContext, TData> | undefined; session: SessionState<TData>; flowChanged?: Flow<TContext, TData> }> {
+  }): Promise<{
+    nextStep: Step<TContext, TData> | undefined;
+    session: SessionState<TData>;
+    flowChanged?: Flow<TContext, TData>;
+    /**
+     * The turn's authoritative completion verdict — callers must use this, not
+     * the `isFlowComplete` they passed in. The router derives its verdict from
+     * the LINEAR chain alone (the current step has no successor), before
+     * branches run, so what it returns is only a proposal. Branches win over
+     * flow completion (Algorithm 1, STEP 1) and this is where that resolves.
+     */
+    isFlowComplete: boolean;
+  }> {
     const { selectedFlow, selectedStep, session, isFlowComplete, context, busDirective } = params;
 
     if (!selectedFlow) {
-      return { nextStep: undefined, session };
+      return { nextStep: undefined, session, isFlowComplete };
     }
 
     // ─── GUARD: directive bus winner with a position field preempts branches ───
@@ -470,7 +482,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
       logger.debug(
         `[ResponsePipeline] Directive bus winner has position field — skipping branch evaluation and linear/AI selection`,
       );
-      return { nextStep: undefined, session };
+      return { nextStep: undefined, session, isFlowComplete };
     }
 
     // STEP 1 (Algorithm 1): branches win over linear chain AND flow completion.
@@ -486,14 +498,21 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           currentStep, selectedFlow, session, context
         );
         if (branchResult) {
-          return branchResult;
+          // A branch that resolved a position overrides the router's completion
+          // proposal. Without this, a branch that parks on a step of its own
+          // flow (`then: '<stepId>'`, `then: { reset: true }`) keeps
+          // isFlowComplete=true, the caller drops the step it just resolved,
+          // and the turn ends as a silent completion — no LLM call, empty
+          // reply, flow marked completed for the rest of the session.
+          const resolvedPosition = Boolean(branchResult.nextStep || branchResult.flowChanged);
+          return { ...branchResult, isFlowComplete: resolvedPosition ? false : isFlowComplete };
         }
         // undefined → fall through to linear/AI selection or flow completion
       }
     }
 
     if (isFlowComplete) {
-      return { nextStep: undefined, session };
+      return { nextStep: undefined, session, isFlowComplete: true };
     }
 
     let nextStep: Step<TContext, TData>;
@@ -546,7 +565,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
             nextStep = currentStepInstance;
           }
         }
-        return { nextStep, session };
+        return { nextStep, session, isFlowComplete: false };
       }
     }
 
@@ -558,7 +577,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
     );
     logger.debug(`[ResponsePipeline] Entered step: ${nextStep.id}`);
 
-    return { nextStep, session: updatedSession };
+    return { nextStep, session: updatedSession, isFlowComplete: false };
   }
 
   /**
@@ -928,7 +947,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
           selectedStep: stepResult.nextStep,
           responseDirectives: routingResult.responseDirectives,
           session: stepResult.session,
-          isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
+          isFlowComplete: stepResult.isFlowComplete,
           signalFirings: signalResult.firings,
           signalPreDirective: signalResult.mergedDirective || undefined,
           endedFlows: routingResult.endedFlows,
@@ -997,8 +1016,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         selectedStep: stepResult.nextStep, // Use the determined next step
         responseDirectives: routingResult.responseDirectives,
         session: stepResult.session,
-        // If a branch changed the flow, the original isFlowComplete no longer applies
-        isFlowComplete: stepResult.flowChanged ? false : isFlowComplete,
+        // determineNextStep owns the verdict: a branch that resolved a position
+        // (new flow, or a step of this one) overrides the router's proposal.
+        isFlowComplete: stepResult.isFlowComplete,
         endedFlows: routingResult.endedFlows,
       };
     } catch (error) {
@@ -1247,7 +1267,7 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         selectedStep: stepResult.nextStep,
         responseDirectives: undefined,
         session: stepResult.session,
-        isFlowComplete: false,
+        isFlowComplete: stepResult.isFlowComplete,
       },
     };
   }

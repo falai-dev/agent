@@ -97,6 +97,8 @@ For each entry in declaration order:
 
 If no entry matches, branches return `undefined` and resolution falls through to linear `nextStep` / AI step selection. This is the same fall-through used when `branches` is omitted entirely.
 
+A matched entry outranks implicit flow completion. Branches are evaluated before the terminus check, so a step with no linear successor — normally the end of the flow — stays alive as long as one of its entries resolves a position. `then: '<own step id>'` is therefore how a flow parks: the step re-renders each turn until a condition sends the conversation elsewhere. Only a fall-through (no entry matched) or an explicit `then: { complete: true }` ends the flow there.
+
 The code-first ordering is deliberate: `if` is free, `when` costs tokens. Running `if` first short-circuits the AI call when the predicate already disqualifies the entry.
 
 ### Resolution of `then`

@@ -11,6 +11,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { Agent } from "../src/index";
 import { ResponsePipeline } from "../src/core/ResponsePipeline";
 import { FlowRouter } from "../src/core/FlowRouter";
 import { SignalCoordinator } from "../src/core/SignalCoordinator";
@@ -416,5 +417,104 @@ describe("ResponsePipeline: routing-skip scoping and extraction cost", () => {
         expect(result.session.currentFlow?.id).toBe("registration");
         expect(result.session.currentStep?.id).toBe("ask_name");
         expect(result.session.data.name).toBe("Alice");
+    });
+});
+
+// ─── Fix 3: a branch beats the router's completion verdict ───────────────────
+
+/**
+ * The router calls "flow complete" from the LINEAR chain alone — the current
+ * step has no transition, so it is an implicit terminus — and it does so
+ * BEFORE branches run. `determineNextStep` then lets branches override that
+ * verdict. It used to override only when the branch changed FLOW, so a branch
+ * parking on a step of its own flow (`then: '<stepId>'`, `then: { reset }`)
+ * resolved a step that the caller immediately discarded: the turn ended as a
+ * silent completion (no LLM call, empty reply) and the flow was marked
+ * completed — dead for the rest of the session.
+ */
+describe("ResponsePipeline: branches override the router's completion verdict", () => {
+    /** Last step is an implicit terminus (no transition) that parks on itself. */
+    function parkingFlow(branches?: { then: string }[]) {
+        return new Flow<TestContext, TestData>({
+            id: "support",
+            title: "Support",
+            steps: [
+                { id: "ask_query", prompt: "What do you need?", collect: ["query"] },
+                { id: "wrap_up", prompt: "Anything else?", ...(branches ? { branches } : {}) },
+            ],
+        });
+    }
+
+    async function turnAtWrapUp(flow: Flow<TestContext, TestData>) {
+        const provider = new PipelineProbeProvider();
+        const { pipeline } = makePipeline(provider, [flow]);
+
+        let session = createSession<TestData>({ data: { query: "pricing" } });
+        session = enterFlow(session, "support", "Support");
+        session = enterStep(session, "wrap_up");
+
+        const result = await pipeline.routeAndSelectStep({
+            session,
+            history: userHistory("show me the photo"),
+            context: { userId: "u1" },
+        });
+        return { result, provider };
+    }
+
+    test("a self-parking branch on the last step keeps the turn alive", async () => {
+        const { result } = await turnAtWrapUp(parkingFlow([{ then: "wrap_up" }]));
+
+        // THE FIX: the branch resolved a step, so the flow is NOT complete —
+        // the caller renders `wrap_up` and calls the LLM instead of releasing
+        // the session to idle with an empty reply.
+        expect(result.isFlowComplete).toBe(false);
+        expect(result.selectedStep?.id).toBe("wrap_up");
+        expect(result.selectedFlow?.id).toBe("support");
+        expect(result.session.currentStep?.id).toBe("wrap_up");
+    });
+
+    test("contract preserved: the same last step without branches still completes", async () => {
+        const { result } = await turnAtWrapUp(parkingFlow());
+
+        expect(result.isFlowComplete).toBe(true);
+        expect(result.selectedStep).toBeUndefined();
+    });
+
+    test("end to end: the parked turn answers instead of dying silently", async () => {
+        const provider = new PipelineProbeProvider();
+        const agent = new Agent<TestContext, TestData>({
+            name: "ParkingAgent",
+            provider,
+            context: { userId: "u1" },
+            schema: TEST_SCHEMA,
+            flows: [
+                {
+                    title: "Support",
+                    steps: [
+                        { id: "ask_query", prompt: "What do you need?", collect: ["query"] },
+                        { id: "wrap_up", prompt: "Anything else?", branches: [{ then: "wrap_up" }] },
+                    ],
+                },
+            ],
+        });
+
+        const flow = agent.getFlows()[0];
+        let session = createSession<TestData>({ data: { query: "pricing" } });
+        session = enterFlow(session, flow.id, flow.title);
+        session = enterStep(session, "wrap_up");
+
+        const response = await agent.respond({
+            history: [{ role: "user", content: "show me the photo" }],
+            session,
+        });
+
+        // The turn rendered the step: a message came back and the session is
+        // still live. Before the fix this returned an empty message with
+        // isFlowComplete=true and a session released to idle.
+        expect(response.message).toBe("OK");
+        expect(response.isFlowComplete).toBe(false);
+        expect(response.session!.currentFlow?.id).toBe(flow.id);
+        expect(response.session!.currentStep?.id).toBe("wrap_up");
+        expect(response.executedSteps).toContainEqual({ id: "wrap_up", flowId: flow.id });
     });
 });
