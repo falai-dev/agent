@@ -7,15 +7,6 @@
     "types": ["@types/bun"],
     "rootDir": "./src",
     "outDir": "./dist",
-    "baseUrl": "./src",
-    "paths": {
-      "@/types": ["types/index"],
-      "@types/*": ["types/*"],
-      "@core/*": ["core/*"],
-      "@/providers/*": ["providers/*"],
-      "@utils/*": ["utils/*"],
-      "@/constants": ["constants/index"]
-    },
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

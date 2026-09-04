@@ -12,7 +12,7 @@
   `@providerkit/core`, which is ESM-only, and `require(esm)` landed in 22.12.
 - **Language:** TypeScript 5.3+ (strict mode)
 - **Module system:** Dual ESM/CJS (ESM primary). **Every relative import carries an explicit
-  `.js` extension**, in `src/` and `tests/` alike — Node's ESM resolver does not guess one, so
+  `.js` extension**, in `src/`, `tests/` and `examples/` alike — Node's ESM resolver does not guess one, so
   an extensionless specifier compiles fine, emits verbatim and then dies at runtime with
   `ERR_MODULE_NOT_FOUND`. It is invisible to the tests, which bun runs off source. Two things
   hold the line: `tsconfig.json` is on `node16` resolution, so tsc rejects the omission, and

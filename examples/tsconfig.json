@@ -1,13 +1,15 @@
 {
     "compilerOptions": {
         "target": "ES2022",
-        "module": "ESNext",
+        "module": "node16",
         "lib": [
             "ES2022",
             "DOM"
         ],
-        "moduleResolution": "bundler",
-        "types": [],
+        "moduleResolution": "node16",
+        "types": [
+            "node"
+        ],
         "strict": true,
         "esModuleInterop": true,
         "skipLibCheck": true,
@@ -15,6 +17,7 @@
         "resolveJsonModule": true,
         "allowSyntheticDefaultImports": true,
         "noEmit": true,
+        "allowImportingTsExtensions": true,
         "paths": {
             "@falai/agent": [
                 "../src/index.ts"

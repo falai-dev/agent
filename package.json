@@ -50,7 +50,7 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
     "prebuild": "bun run clean",
-    "prepublishOnly": "bun run lint && bun run typecheck && bun run build && bun run test",
+    "prepublishOnly": "bun run lint && bun run typecheck && bun run typecheck:examples && bun run build && bun run test",
     "release:patch": "bun pm version patch && bun publish",
     "release:minor": "bun pm version minor && bun publish",
     "release:major": "bun pm version major && bun publish",
