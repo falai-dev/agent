@@ -9,16 +9,16 @@
  * @module SignalEvaluator
  */
 
-import type { AiProvider } from "../types/ai";
-import type { Event } from "../types/history";
-import type { SessionState } from "../types/session";
+import type { AiProvider } from "../types/ai.js";
+import type { Event } from "../types/history.js";
+import type { SessionState } from "../types/session.js";
 import type {
     Signal,
     SignalPredicate,
     SignalPredicateContext,
-} from "../types/signals";
-import { eventsToHistory, logger } from "../utils";
-import { splitWhenConditions, evaluateIfPredicates } from "../utils/condition";
+} from "../types/signals.js";
+import { eventsToHistory, logger } from "../utils/index.js";
+import { splitWhenConditions, evaluateIfPredicates } from "../utils/condition.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types

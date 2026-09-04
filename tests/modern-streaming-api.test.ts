@@ -11,12 +11,12 @@
 
 import { expect, test, describe, beforeEach } from "bun:test";
 
-import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index";
+import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index.js";
 import {
   MockProvider,
   MockProviderFactory,
   MOCK_RESPONSES,
-} from "./mock-provider";
+} from "./mock-provider.js";
 
 // Test context types
 interface TestContext {

@@ -2,10 +2,10 @@
  * Flow/Journey DSL type definitions
  */
 
-import type { Tool } from "./tool";
-import type { StructuredSchema } from "./schema";
-import type { Instruction, HookContext, ExitReason } from "./agent";
-import type { Template } from "./template";
+import type { Tool } from "./tool.js";
+import type { StructuredSchema } from "./schema.js";
+import type { Instruction, HookContext, ExitReason } from "./agent.js";
+import type { Template } from "./template.js";
 
 // ─── Condition types (v2 when/if split) ──────────────────────────────────────
 
@@ -14,7 +14,7 @@ import type { Template } from "./template";
  * May be async. Used on `if` fields (free to evaluate, no LLM cost).
  */
 export type ConditionPredicate<TContext = unknown, TData = unknown> = (
-  ctx: { data: Partial<TData>; context: TContext; session: import("./session").SessionState<TData>; history: Event[] }
+  ctx: { data: Partial<TData>; context: TContext; session: import("./session.js").SessionState<TData>; history: Event[] }
 ) => boolean | Promise<boolean>;
 
 /**
@@ -31,8 +31,8 @@ export type ConditionIf<TContext = unknown, TData = unknown> =
  * `when` — they belong on `if` only.
  */
 export type ConditionWhen = string | string[];
-import type { SessionState } from "./session";
-import type { Event } from "./history";
+import type { SessionState } from "./session.js";
+import type { Event } from "./history.js";
 
 /**
  * Reason why execution stopped.

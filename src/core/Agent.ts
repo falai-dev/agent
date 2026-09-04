@@ -18,12 +18,12 @@ import type {
   AiProvider,
   CompactionOptions,
   Directive,
-} from "../types";
-import type { Signal } from "../types/signals";
-import { NotImplementedError } from "../types/errors";
-import { SignalProcessor } from "./SignalProcessor";
-import { SignalEvaluator } from "./SignalEvaluator";
-import type { StreamOptions, GenerateOptions, RespondParams, ResponseModalDeps } from "./ResponseModal";
+} from "../types/index.js";
+import type { Signal } from "../types/signals.js";
+import { NotImplementedError } from "../types/errors.js";
+import { SignalProcessor } from "./SignalProcessor.js";
+import { SignalEvaluator } from "./SignalEvaluator.js";
+import type { StreamOptions, GenerateOptions, RespondParams, ResponseModalDeps } from "./ResponseModal.js";
 import {
   mergeCollected,
   enterFlow,
@@ -32,18 +32,18 @@ import {
   logger,
   LoggerLevel,
   generateSignalId,
-} from "../utils";
+} from "../utils/index.js";
 
-import { Flow } from "./Flow";
-import { Step, FlowConfigurationError as StepFlowConfigurationError } from "./Step";
-import { PersistenceManager } from "./PersistenceManager";
-import { SessionManager } from "./SessionManager";
-import { FlowRouter } from "./FlowRouter";
-import { PromptSectionCache } from "./PromptSectionCache";
+import { Flow } from "./Flow.js";
+import { Step, FlowConfigurationError as StepFlowConfigurationError } from "./Step.js";
+import { PersistenceManager } from "./PersistenceManager.js";
+import { SessionManager } from "./SessionManager.js";
+import { FlowRouter } from "./FlowRouter.js";
+import { PromptSectionCache } from "./PromptSectionCache.js";
 
-import { ResponseModal } from "./ResponseModal";
-import { ToolManager } from "./ToolManager";
-import { CompactionEngine } from "./CompactionEngine";
+import { ResponseModal } from "./ResponseModal.js";
+import { ToolManager } from "./ToolManager.js";
+import { CompactionEngine } from "./CompactionEngine.js";
 
 /**
  * Error thrown when data validation fails

@@ -6,9 +6,9 @@
  * **Validates: Requirements 1.4, 1.5, 1.14, 1.15**
  */
 import { describe, test, expect } from "bun:test";
-import { flow } from "../src/core/flow-namespace";
-import { FlowConfigurationError } from "../src/core/Step";
-import type { Directive } from "../src/types/flow";
+import { flow } from "../src/core/flow-namespace.js";
+import { FlowConfigurationError } from "../src/core/Step.js";
+import type { Directive } from "../src/types/flow.js";
 
 // ─── flow.isDirective ────────────────────────────────────────────────────────
 
@@ -350,7 +350,7 @@ describe("flow namespace surface", () => {
 
 describe("flow namespace export", () => {
     test("flow is importable from the package barrel", async () => {
-        const barrel = await import("../src/index");
+        const barrel = await import("../src/index.js");
         expect(barrel.flow).toBeDefined();
         expect(barrel.flow.isDirective).toBeTypeOf("function");
         expect(barrel.flow.merge).toBeTypeOf("function");

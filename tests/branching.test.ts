@@ -9,8 +9,8 @@
  * - Integration with routing engine
  */
 import { expect, test, describe } from "bun:test";
-import { Agent, type Tool } from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
+import { Agent, type Tool } from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 interface SupportData {
   issueType?: "technical" | "billing" | "account" | "general";

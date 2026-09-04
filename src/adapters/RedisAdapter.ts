@@ -12,10 +12,10 @@ import type {
   SessionStatus,
   CollectedStateData,
   SessionUpdateOptions,
-} from "../types";
-import { SessionConflictError } from "../types/errors";
-import { createSessionId, logger } from "../utils";
-import { coerceDate } from "./sessionRow";
+} from "../types/index.js";
+import { SessionConflictError } from "../types/errors.js";
+import { createSessionId, logger } from "../utils/index.js";
+import { coerceDate } from "./sessionRow.js";
 
 /**
  * Redis client interface - matches ioredis/redis clients

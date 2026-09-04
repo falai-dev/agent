@@ -1,9 +1,9 @@
-import { cloneDeep } from "./clone";
-import type { SessionState } from "../types/session";
-import type { History } from "../types/history";
-import type { Directive } from "../types/flow";
-import type { CollectedStateData } from "../types/persistence";
-import { logger } from "./logger";
+import { cloneDeep } from "./clone.js";
+import type { SessionState } from "../types/session.js";
+import type { History } from "../types/history.js";
+import type { Directive } from "../types/flow.js";
+import type { CollectedStateData } from "../types/persistence.js";
+import { logger } from "./logger.js";
 
 /**
  * Helper to create a new session

@@ -1,12 +1,12 @@
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import { StreamingToolExecutor } from "../src/core/StreamingToolExecutor";
+import { StreamingToolExecutor } from "../src/core/StreamingToolExecutor.js";
 import type {
     Tool,
     ToolCallRequest,
     ToolContext,
     ToolExecutionUpdate,
-} from "../src/types/tool";
+} from "../src/types/tool.js";
 
 // --- Helpers ---
 

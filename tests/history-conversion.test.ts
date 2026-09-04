@@ -16,11 +16,11 @@ import {
   assistantMessage,
   toolMessage,
   systemMessage,
-} from "../src/utils/history";
+} from "../src/utils/history.js";
 
-import { EventKind, MessageRole } from "../src/types";
-import type { Event, MessageEventData, ToolEventData } from "../src/types";
-import type { HistoryItem, UserHistoryItem, AssistantHistoryItem, ToolHistoryItem, SystemHistoryItem } from "../src/types/history";
+import { EventKind, MessageRole } from "../src/types/index.js";
+import type { Event, MessageEventData, ToolEventData } from "../src/types/index.js";
+import type { HistoryItem, UserHistoryItem, AssistantHistoryItem, ToolHistoryItem, SystemHistoryItem } from "../src/types/history.js";
 
 describe("historyItemToEvent", () => {
   test("should convert user history item to event", () => {

@@ -8,15 +8,15 @@
 
 import { expect, test, describe, beforeEach } from "bun:test";
 
-import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index";
-import { ResponseModal, type RespondParams, type StreamOptions, type GenerateOptions } from "../src/core/ResponseModal";
-import { ResponseGenerationError } from "../src/core/ResponseGenerationError";
-import { historyToEvents, eventsToHistory } from "../src/utils/history";
+import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index.js";
+import { ResponseModal, type RespondParams, type StreamOptions, type GenerateOptions } from "../src/core/ResponseModal.js";
+import { ResponseGenerationError } from "../src/core/ResponseGenerationError.js";
+import { historyToEvents, eventsToHistory } from "../src/utils/history.js";
 import {
   MockProvider,
   MockProviderFactory,
   MOCK_RESPONSES,
-} from "./mock-provider";
+} from "./mock-provider.js";
 
 // Test context types
 interface TestContext {

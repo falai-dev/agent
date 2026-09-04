@@ -15,10 +15,10 @@ import type {
   Event,
   CreateSessionData,
   SessionUpdateOptions,
-} from "../types";
-import { SessionConflictError } from "../types/errors";
-import { logger } from '../utils'
-import { createSessionId } from '../utils';
+} from "../types/index.js";
+import { SessionConflictError } from "../types/errors.js";
+import { logger } from '../utils/index.js'
+import { createSessionId } from '../utils/index.js';
 
 /**
  * Prisma model operations

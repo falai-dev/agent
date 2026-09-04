@@ -17,22 +17,22 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
-import { MemoryAdapter } from "../src/adapters/MemoryAdapter";
-import { RedisAdapter } from "../src/adapters/RedisAdapter";
-import { createRedisStub } from "./redis-stub";
+import { MemoryAdapter } from "../src/adapters/MemoryAdapter.js";
+import { RedisAdapter } from "../src/adapters/RedisAdapter.js";
+import { createRedisStub } from "./redis-stub.js";
 import {
   SQLiteAdapter,
   type SqliteDatabase,
-} from "../src/adapters/SQLiteAdapter";
-import { PersistenceManager } from "../src/core/PersistenceManager";
-import { SessionConflictError } from "../src/types/errors";
-import { EventKind, MessageRole } from "../src/types/history";
+} from "../src/adapters/SQLiteAdapter.js";
+import { PersistenceManager } from "../src/core/PersistenceManager.js";
+import { SessionConflictError } from "../src/types/errors.js";
+import { EventKind, MessageRole } from "../src/types/history.js";
 import type {
   CollectedStateData,
   PersistenceAdapter,
   SessionData,
-} from "../src/types/persistence";
-import type { SessionState } from "../src/types/session";
+} from "../src/types/persistence.js";
+import type { SessionState } from "../src/types/session.js";
 
 /** Complex TData shape used across the contract (nested objects/arrays/nulls). */
 interface TestData {

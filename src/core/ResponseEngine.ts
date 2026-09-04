@@ -7,12 +7,12 @@ import type {
   Template,
   ScopedInstructions,
   AppliedInstruction,
-} from "../types";
-import type { Flow } from "./Flow";
-import type { Step } from "./Step";
-import { PromptComposer } from "./PromptComposer";
-import { PromptSectionCache } from "./PromptSectionCache";
-import { createTemplateContext, render } from "../utils/template";
+} from "../types/index.js";
+import type { Flow } from "./Flow.js";
+import type { Step } from "./Step.js";
+import { PromptComposer } from "./PromptComposer.js";
+import { PromptSectionCache } from "./PromptSectionCache.js";
+import { createTemplateContext, render } from "../utils/template.js";
 
 export interface BuildResponsePromptParams<
   TContext = unknown,

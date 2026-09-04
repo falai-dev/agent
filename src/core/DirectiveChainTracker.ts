@@ -12,9 +12,9 @@
  * Validates: Requirements 22.1, 22.2, 22.3
  */
 
-import { FlowConfigurationError } from "./Step";
-import { logger } from "../utils";
-import type { Directive } from "../types/flow";
+import { FlowConfigurationError } from "./Step.js";
+import { logger } from "../utils/index.js";
+import type { Directive } from "../types/flow.js";
 
 /**
  * Entry in the directive chain log — records what was emitted and by whom.

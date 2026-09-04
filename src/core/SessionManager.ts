@@ -6,13 +6,13 @@
  */
 
 import log from "loglevel";
-import type { SessionState } from "../types/session";
-import type { History, HistoryItem } from "../types/history";
-import { PersistenceManager } from "./PersistenceManager";
-import { CompactionEngine } from "./CompactionEngine";
-import type { PersistenceAdapter } from "../types/persistence";
-import type { Agent } from "./Agent";
-import { boundConversationHistory, createSession, DEFAULT_MAX_HISTORY_MESSAGES } from "../utils";
+import type { SessionState } from "../types/session.js";
+import type { History, HistoryItem } from "../types/history.js";
+import { PersistenceManager } from "./PersistenceManager.js";
+import { CompactionEngine } from "./CompactionEngine.js";
+import type { PersistenceAdapter } from "../types/persistence.js";
+import type { Agent } from "./Agent.js";
+import { boundConversationHistory, createSession, DEFAULT_MAX_HISTORY_MESSAGES } from "../utils/index.js";
 
 /**
  * SessionManager handles session lifecycle and conversation history

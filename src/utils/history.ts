@@ -3,9 +3,9 @@
  * Convert simplified history format to internal Event format
  */
 
-import type { Event, MessageEventData, ToolEventData, StatusEventData } from "../types";
-import { EventKind, MessageRole } from "../types";
-import type { History, HistoryItem, UserHistoryItem, AssistantHistoryItem, ToolHistoryItem } from "../types/history";
+import type { Event, MessageEventData, ToolEventData, StatusEventData } from "../types/index.js";
+import { EventKind, MessageRole } from "../types/index.js";
+import type { History, HistoryItem, UserHistoryItem, AssistantHistoryItem, ToolHistoryItem } from "../types/history.js";
 
 /**
  * Convert a simplified history item to an internal Event

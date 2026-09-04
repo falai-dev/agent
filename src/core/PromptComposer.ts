@@ -1,10 +1,10 @@
-import type { Event, Term, Instruction, AgentOptions, ScopedInstructions, AppliedInstruction } from "../types";
-import type { Flow } from "./Flow";
-import { render, renderMany, formatKnowledgeBase, createTemplateContext } from "../utils/template";
-import { TemplateContext } from "../types/template";
-import { PromptSectionCache } from "./PromptSectionCache";
-import { logger } from "../utils";
-import { splitWhenConditions } from "../utils/condition";
+import type { Event, Term, Instruction, AgentOptions, ScopedInstructions, AppliedInstruction } from "../types/index.js";
+import type { Flow } from "./Flow.js";
+import { render, renderMany, formatKnowledgeBase, createTemplateContext } from "../utils/template.js";
+import { TemplateContext } from "../types/template.js";
+import { PromptSectionCache } from "./PromptSectionCache.js";
+import { logger } from "../utils/index.js";
+import { splitWhenConditions } from "../utils/condition.js";
 
 export class PromptComposer<TContext = unknown, TData = unknown> {
   private parts: string[] = [];
@@ -168,7 +168,7 @@ export class PromptComposer<TContext = unknown, TData = unknown> {
           const result = await predicate({
             context: (this.renderContext.context ?? {}) as TContext,
             data: (this.renderContext.data || {}),
-            session: (this.renderContext.session ?? { id: '', data: {}, history: [], metadata: {} }) as import("../types/session").SessionState<TData>,
+            session: (this.renderContext.session ?? { id: '', data: {}, history: [], metadata: {} }) as import("../types/session.js").SessionState<TData>,
             history: this.renderContext.history || [],
           });
           if (!result) return false;

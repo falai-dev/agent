@@ -27,19 +27,19 @@ import {
     createPersistedState,
     createSession,
     restoreSession,
-} from "../src/index";
-import { ToolLoopExecutor } from "../src/core/ToolLoopExecutor";
-import { MockProvider } from "./mock-provider";
-import { DEFAULT_MAX_HISTORY_MESSAGES } from "../src/utils/session";
+} from "../src/index.js";
+import { ToolLoopExecutor } from "../src/core/ToolLoopExecutor.js";
+import { MockProvider } from "./mock-provider.js";
+import { DEFAULT_MAX_HISTORY_MESSAGES } from "../src/utils/session.js";
 import type {
     AgentStructuredResponse,
     AiProvider,
     GenerateMessageInput,
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
-} from "../src/types/ai";
-import type { Directive, PrepareResult } from "../src/types";
-import type { ToolExecutionUpdate } from "../src/types/tool";
+} from "../src/types/ai.js";
+import type { Directive, PrepareResult } from "../src/types/index.js";
+import type { ToolExecutionUpdate } from "../src/types/tool.js";
 
 interface Ctx { userId: string }
 interface Data { item?: string; confirmed?: boolean }
@@ -288,7 +288,7 @@ describe("Step hooks desugar composes both spellings", () => {
 
 describe("deleted machinery stays deleted", () => {
     test("DirectiveBus is not on the public surface", () => {
-        const exports = require("../src/index");
+        const exports = require("../src/index.js");
         expect(exports.DirectiveBus).toBeUndefined();
     });
 });

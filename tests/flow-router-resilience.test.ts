@@ -13,17 +13,17 @@
 
 import { describe, test, expect, spyOn } from "bun:test";
 import log from "loglevel";
-import { Agent } from "../src/index";
-import { FlowRouter } from "../src/core/FlowRouter";
-import { Flow } from "../src/core/Flow";
-import { createSession, enterStep, enterFlow, historyToEvents } from "../src/utils";
+import { Agent } from "../src/index.js";
+import { FlowRouter } from "../src/core/FlowRouter.js";
+import { Flow } from "../src/core/Flow.js";
+import { createSession, enterStep, enterFlow, historyToEvents } from "../src/utils/index.js";
 import type {
     SessionState,
     GenerateMessageInput,
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
-} from "../src/types";
-import type { AiProvider } from "../src/types/ai";
+} from "../src/types/index.js";
+import type { AiProvider } from "../src/types/ai.js";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
 

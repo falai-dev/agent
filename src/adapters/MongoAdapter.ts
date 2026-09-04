@@ -13,9 +13,9 @@ import type {
   CollectedStateData,
   CreateSessionData,
   SessionUpdateOptions,
-} from "../types";
-import { SessionConflictError } from "../types/errors";
-import { createSessionId } from "../utils";
+} from "../types/index.js";
+import { SessionConflictError } from "../types/errors.js";
+import { createSessionId } from "../utils/index.js";
 
 /**
  * MongoDB collection interface - matches mongodb driver

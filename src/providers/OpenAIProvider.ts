@@ -3,9 +3,9 @@
  * enforces the schema natively.
  */
 
-import type { ProviderCapabilities } from "../types/ai";
-import { OpenAICompatibleProvider } from "./OpenAICompatibleProvider";
-import type { RequestConfig } from "./ProviderAdapter";
+import type { ProviderCapabilities } from "../types/ai.js";
+import { OpenAICompatibleProvider } from "./OpenAICompatibleProvider.js";
+import type { RequestConfig } from "./ProviderAdapter.js";
 
 export interface OpenAIProviderOptions {
   /** OpenAI API key */

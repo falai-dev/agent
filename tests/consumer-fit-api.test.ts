@@ -9,12 +9,12 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { Agent } from "../src/core/Agent";
-import { createSession } from "../src/utils/session";
-import { MockProvider } from "./mock-provider";
-import { ProviderError } from "../src/types/errors";
-import type { AiProvider, GenerateMessageInput, GenerateMessageOutput } from "../src/types/ai";
-import type { HistoryItem } from "../src/types/history";
+import { Agent } from "../src/core/Agent.js";
+import { createSession } from "../src/utils/session.js";
+import { MockProvider } from "./mock-provider.js";
+import { ProviderError } from "../src/types/errors.js";
+import type { AiProvider, GenerateMessageInput, GenerateMessageOutput } from "../src/types/ai.js";
+import type { HistoryItem } from "../src/types/history.js";
 
 interface Ctx { userId: string }
 interface Data { item?: string; confirmed?: boolean }
@@ -178,7 +178,7 @@ describe("endedFlows surfaces flow exits", () => {
 });
 
 // Helper kept separate so the redirect test stays readable above.
-import { MockProviderFactory } from "./mock-provider";
+import { MockProviderFactory } from "./mock-provider.js";
 function MockProviderFactoryHelper() {
     return MockProviderFactory.withToolCalls([{ toolName: "redirect", arguments: {} }]);
 }

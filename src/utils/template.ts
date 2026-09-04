@@ -1,6 +1,6 @@
-import type { Template, TemplateContext } from "../types";
-import type { Event, MessageEventData } from "../types/history";
-import { MessageRole, EventKind } from "../types/history";
+import type { Template, TemplateContext } from "../types/index.js";
+import type { Event, MessageEventData } from "../types/history.js";
+import { MessageRole, EventKind } from "../types/history.js";
 
 /**
  * Renders a template, which can be a string or a function, using the provided context.

@@ -12,8 +12,8 @@
 
 import { createGeminiProvider } from "@providerkit/core";
 
-import type { ProviderCapabilities } from "../types/ai";
-import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter";
+import type { ProviderCapabilities } from "../types/ai.js";
+import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 
 export interface GeminiProviderOptions {
   /** Gemini API key */

@@ -9,11 +9,11 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { DirectiveChainTracker } from "../src/core/DirectiveChainTracker";
-import { FlowConfigurationError } from "../src/core/Step";
-import { Agent, createSession } from "../src/index";
-import type { Directive } from "../src/types";
-import { MockProvider } from "./mock-provider";
+import { DirectiveChainTracker } from "../src/core/DirectiveChainTracker.js";
+import { FlowConfigurationError } from "../src/core/Step.js";
+import { Agent, createSession } from "../src/index.js";
+import type { Directive } from "../src/types/index.js";
+import { MockProvider } from "./mock-provider.js";
 
 describe("DirectiveChainTracker", () => {
     describe("22.1: Track chain depth per turn", () => {

@@ -11,8 +11,8 @@ import type {
   MessageData,
   HistoryItem,
   History,
-} from "../types";
-import { EventKind, MessageRole } from "../types";
+} from "../types/index.js";
+import { EventKind, MessageRole } from "../types/index.js";
 
 /**
  * Convert a simple JSON history message to an internal Event

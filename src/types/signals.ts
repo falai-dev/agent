@@ -7,9 +7,9 @@
  * compatibility within the same major.
  */
 
-import type { SessionState } from "./session";
-import type { Directive } from "./flow";
-import type { Event } from "./history";
+import type { SessionState } from "./session.js";
+import type { Directive } from "./flow.js";
+import type { Event } from "./history.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Persistence types (shape locked in v2.0 — DO NOT modify)

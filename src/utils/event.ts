@@ -1,4 +1,4 @@
-import { type Event, EventKind } from "../types";
+import { type Event, EventKind } from "../types/index.js";
 /**
  * Helper to extract last message from history
  */

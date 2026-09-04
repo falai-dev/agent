@@ -15,16 +15,16 @@ import type {
   ToolCallRequest,
   ToolExecutionUpdate,
   Event,
-} from "../types";
-import type { Directive } from "../types/flow";
-import { ToolScope } from "../types";
-import { logger, isToolResultLike, extractResultDirectives } from "../utils";
+} from "../types/index.js";
+import type { Directive } from "../types/flow.js";
+import { ToolScope } from "../types/index.js";
+import { logger, isToolResultLike, extractResultDirectives } from "../utils/index.js";
 // Type-only import: ToolManager must not create a runtime cycle with Agent
-import type { Agent } from "./Agent";
-import { Flow } from "./Flow";
-import { Step } from "./Step";
-import { StreamingToolExecutor } from "./StreamingToolExecutor";
-import { evaluateToolGates } from "./toolGates";
+import type { Agent } from "./Agent.js";
+import { Flow } from "./Flow.js";
+import { Step } from "./Step.js";
+import { StreamingToolExecutor } from "./StreamingToolExecutor.js";
+import { evaluateToolGates } from "./toolGates.js";
 
 /**
  * Error thrown when tool creation fails

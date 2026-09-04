@@ -15,8 +15,8 @@ import {
     Flow,
     Step,
     FlowConfigurationError,
-} from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
+} from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 // ─── Test data types ─────────────────────────────────────────────────────────
 

@@ -4,9 +4,9 @@
  * Tests for the new ToolManager functionality
  */
 import { expect, test, describe } from "bun:test";
-import { Agent, ToolManager } from "../src/index";
-import type { ToolContext } from "../src/types/tool";
-import { MockProvider } from "./mock-provider";
+import { Agent, ToolManager } from "../src/index.js";
+import type { ToolContext } from "../src/types/tool.js";
+import { MockProvider } from "./mock-provider.js";
 
 interface TestContext {
     userId: string;

@@ -10,8 +10,8 @@ import { expect, test, describe } from "bun:test";
 import {
   Agent,
   createSession,
-} from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
+} from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 // Test data types for comprehensive agent-level data collection
 interface CustomerServiceData {

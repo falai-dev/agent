@@ -26,12 +26,12 @@
  * provider classes.
  */
 
-import type { ProviderCapabilities } from "../types/ai";
+import type { ProviderCapabilities } from "../types/ai.js";
 import {
   OpenAICompatibleProvider,
   type StructuredOutputMode,
-} from "./OpenAICompatibleProvider";
-import type { RequestConfig } from "./ProviderAdapter";
+} from "./OpenAICompatibleProvider.js";
+import type { RequestConfig } from "./ProviderAdapter.js";
 
 export interface OpenAICompatibleOptions {
   /** Provider identifier, e.g. "azure", "ollama", "groq". */

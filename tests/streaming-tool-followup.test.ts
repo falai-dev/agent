@@ -8,14 +8,14 @@
  */
 import { expect, test, describe } from "bun:test";
 
-import { Agent, ToolManager, createSession } from "../src/index";
-import { ToolLoopExecutor } from "../src/core/ToolLoopExecutor";
+import { Agent, ToolManager, createSession } from "../src/index.js";
+import { ToolLoopExecutor } from "../src/core/ToolLoopExecutor.js";
 import type {
     AiProvider,
     AgentStructuredResponse,
     GenerateMessageInput,
     GenerateMessageOutput,
-} from "../src/types/ai";
+} from "../src/types/ai.js";
 
 interface Ctx {
   userId: string;

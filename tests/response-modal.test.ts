@@ -12,15 +12,15 @@
 
 import { expect, test, describe, beforeEach } from "bun:test";
 
-import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index";
-import { ResponseModal, type RespondParams, type StreamOptions, type GenerateOptions } from "../src/core/ResponseModal";
-import { ResponseGenerationError } from "../src/core/ResponseGenerationError";
-import type { AiProvider, AgentStructuredResponse, GenerateMessageInput, GenerateMessageOutput, GenerateMessageStreamChunk } from "../src/types/ai";
+import { Agent, createSession, type AgentResponseStreamChunk } from "../src/index.js";
+import { ResponseModal, type RespondParams, type StreamOptions, type GenerateOptions } from "../src/core/ResponseModal.js";
+import { ResponseGenerationError } from "../src/core/ResponseGenerationError.js";
+import type { AiProvider, AgentStructuredResponse, GenerateMessageInput, GenerateMessageOutput, GenerateMessageStreamChunk } from "../src/types/ai.js";
 import {
   MockProvider,
   MockProviderFactory,
   MOCK_RESPONSES,
-} from "./mock-provider";
+} from "./mock-provider.js";
 
 // Test context types
 interface TestContext {

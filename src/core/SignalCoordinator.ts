@@ -12,13 +12,13 @@
  *   of the user-visible message.
  */
 
-import type { Directive, Event, SessionState } from "../types";
-import type { SignalFiring } from "../types/signals";
-import type { SignalProcessor } from "./SignalProcessor";
-import type { Flow } from "./Flow";
-import type { Step } from "./Step";
-import { hasDirectivePositionField } from "./ResponsePipeline";
-import { enterFlow, enterStep, mergeCollected, logger } from "../utils";
+import type { Directive, Event, SessionState } from "../types/index.js";
+import type { SignalFiring } from "../types/signals.js";
+import type { SignalProcessor } from "./SignalProcessor.js";
+import type { Flow } from "./Flow.js";
+import type { Step } from "./Step.js";
+import { hasDirectivePositionField } from "./ResponsePipeline.js";
+import { enterFlow, enterStep, mergeCollected, logger } from "../utils/index.js";
 
 /** Result of a signal phase run (pre or post). */
 export interface SignalPhaseResult<TContext = unknown, TData = unknown> {

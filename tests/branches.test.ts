@@ -9,9 +9,9 @@
  */
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import { Agent, Step, FlowConfigurationError } from "../src/index";
-import type { BranchMap, BranchEntry, Directive } from "../src/types/flow";
-import { MockProviderFactory } from "./mock-provider";
+import { Agent, Step, FlowConfigurationError } from "../src/index.js";
+import type { BranchMap, BranchEntry, Directive } from "../src/types/flow.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 interface TestData {
     plan?: string;
@@ -589,11 +589,11 @@ describe("Property: BranchMap construction-time validation rejects invalid shape
 // Phase 3 — Resolution Algorithm Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { createAiConditionEvaluator, evaluateBranches } from "../src/core/BranchEvaluator";
-import type { AiProvider } from "../src/types/ai";
-import type { BranchPredicateContext } from "../src/types/flow";
-import type { SessionState } from "../src/types/session";
-import type { WhenConditionGroups } from "../src/utils/condition";
+import { createAiConditionEvaluator, evaluateBranches } from "../src/core/BranchEvaluator.js";
+import type { AiProvider } from "../src/types/ai.js";
+import type { BranchPredicateContext } from "../src/types/flow.js";
+import type { SessionState } from "../src/types/session.js";
+import type { WhenConditionGroups } from "../src/utils/condition.js";
 
 /**
  * Helper: creates a minimal valid BranchPredicateContext for testing.
@@ -2777,7 +2777,7 @@ describe("Phase 5.2: State writes from hooks are visible to branch predicates", 
  * **Validates: Requirements 6.1, 6.2, 6.3, 6.4, 6.5**
  */
 
-import { hasDirectivePositionField, ResponsePipeline } from "../src/core/ResponsePipeline";
+import { hasDirectivePositionField, ResponsePipeline } from "../src/core/ResponsePipeline.js";
 
 describe("Phase 5: Pipeline-Level Resolution Precedence (Task 5.1)", () => {
 
@@ -3112,7 +3112,7 @@ describe("Phase 5: Pipeline-Level Resolution Precedence (Task 5.1)", () => {
             });
 
             // Access the pipeline via ResponseModal
-            const { ResponseModal } = await import("../src/core/ResponseModal");
+            const { ResponseModal } = await import("../src/core/ResponseModal.js");
             const modal = new ResponseModal(agent);
             const pipeline = modal.getResponsePipeline();
 
@@ -3168,7 +3168,7 @@ describe("Phase 5: Pipeline-Level Resolution Precedence (Task 5.1)", () => {
                 ],
             });
 
-            const { ResponseModal } = await import("../src/core/ResponseModal");
+            const { ResponseModal } = await import("../src/core/ResponseModal.js");
             const modal = new ResponseModal(agent);
             const pipeline = modal.getResponsePipeline();
 
@@ -3224,7 +3224,7 @@ describe("Phase 5: Pipeline-Level Resolution Precedence (Task 5.1)", () => {
                 ],
             });
 
-            const { ResponseModal } = await import("../src/core/ResponseModal");
+            const { ResponseModal } = await import("../src/core/ResponseModal.js");
             const modal = new ResponseModal(agent);
             const pipeline = modal.getResponsePipeline();
 

@@ -13,8 +13,8 @@
  */
 import { expect, test, describe } from "bun:test";
 import fc from "fast-check";
-import { Agent, Flow, createSession, MemoryAdapter } from "../src/index";
-import { MockProvider, MockProviderFactory } from "./mock-provider";
+import { Agent, Flow, createSession, MemoryAdapter } from "../src/index.js";
+import { MockProvider, MockProviderFactory } from "./mock-provider.js";
 
 // ─── Test Data Types ───────────────────────────────────────────────────────────
 

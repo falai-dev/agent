@@ -6,12 +6,12 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { Agent } from "../src/core/Agent";
+import { Agent } from "../src/core/Agent.js";
 import type {
     AiProvider,
     GenerateMessageInput,
     GenerateMessageOutput,
-} from "../src/types/ai";
+} from "../src/types/ai.js";
 
 interface TestContext { userId: string }
 interface TestData { item?: string }

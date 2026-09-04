@@ -8,8 +8,8 @@ import type { EndedFlow,
   SessionState,
   Directive,
   StructuredSchema,
-} from "../types";
-import type { SignalFiring } from "../types/signals";
+} from "../types/index.js";
+import type { SignalFiring } from "../types/signals.js";
 import {
   createSession,
   enterStep,
@@ -18,16 +18,16 @@ import {
   historyToEvents,
   eventsToHistory,
   getLastMessageFromHistory,
-} from "../utils";
-import { enterFlow } from "../utils/session";
-import { createTemplateContext } from "../utils/template";
-import { Flow } from "./Flow";
-import { Step, FlowConfigurationError } from "../core/Step";
-import { FlowRouter } from "./FlowRouter";
-import { evaluateBranches, createAiConditionEvaluator } from "./BranchEvaluator";
-import { DirectiveChainTracker } from "./DirectiveChainTracker";
-import { ResponseGenerationError } from "./ResponseGenerationError";
-import type { SignalCoordinator } from "./SignalCoordinator";
+} from "../utils/index.js";
+import { enterFlow } from "../utils/session.js";
+import { createTemplateContext } from "../utils/template.js";
+import { Flow } from "./Flow.js";
+import { Step, FlowConfigurationError } from "../core/Step.js";
+import { FlowRouter } from "./FlowRouter.js";
+import { evaluateBranches, createAiConditionEvaluator } from "./BranchEvaluator.js";
+import { DirectiveChainTracker } from "./DirectiveChainTracker.js";
+import { ResponseGenerationError } from "./ResponseGenerationError.js";
+import type { SignalCoordinator } from "./SignalCoordinator.js";
 
 /**
  * Position fields on a Directive that represent a navigation decision.

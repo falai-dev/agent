@@ -10,8 +10,8 @@ import { expect, test, describe } from "bun:test";
 import {
   createOpenAICompatibleProvider,
   type OpenAICompatibleOptions,
-} from "../src/providers/GenericOpenAICompatibleProvider";
-import { OpenAICompatibleProvider } from "../src/providers/OpenAICompatibleProvider";
+} from "../src/providers/GenericOpenAICompatibleProvider.js";
+import { OpenAICompatibleProvider } from "../src/providers/OpenAICompatibleProvider.js";
 
 const base: OpenAICompatibleOptions = {
   name: "ollama",

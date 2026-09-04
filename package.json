@@ -38,10 +38,11 @@
   },
   "homepage": "https://falai.dev",
   "scripts": {
-    "build": "bun run build:esm && bun run build:cjs && bun run fix:cjs",
+    "build": "bun run build:esm && bun run build:cjs && bun run fix:cjs && bun run check:dist",
     "build:esm": "tsc",
     "build:cjs": "tsc --project tsconfig.cjs.json",
     "fix:cjs": "echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
+    "check:dist": "node --input-type=module -e \"import './dist/index.js'\" && node -e \"require('./dist/cjs/index.js')\"",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "typecheck:examples": "tsc --noEmit --project examples/tsconfig.json",
@@ -78,7 +79,7 @@
   "author": "Gustavo Salom\u00e9 <gusnips>",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

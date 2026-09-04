@@ -12,15 +12,15 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { Agent, ToolManager } from "../src/index";
+import { Agent, ToolManager } from "../src/index.js";
 import type {
     AiProvider,
     GenerateMessageInput,
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
-} from "../src/types/ai";
-import type { HistoryItem } from "../src/types/history";
-import { MockProvider, MockProviderFactory } from "./mock-provider";
+} from "../src/types/ai.js";
+import type { HistoryItem } from "../src/types/history.js";
+import { MockProvider, MockProviderFactory } from "./mock-provider.js";
 
 interface TestContext { userId: string }
 interface TestData { item?: string; confirmed?: boolean }

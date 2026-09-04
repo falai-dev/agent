@@ -1,6 +1,6 @@
 import { expect, test, describe, beforeEach } from "bun:test";
-import { Agent, createSession } from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
+import { Agent, createSession } from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 interface TestData {
     userType?: "premium" | "basic";

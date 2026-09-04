@@ -13,16 +13,16 @@ import type {
   TemplateContext,
   ConditionEvaluationResult,
   Directive,
-} from "../types";
-import type { SessionState } from "../types/session";
-import type { StepResult } from "../types/flow";
-import type { ConditionWhen, ConditionIf } from "../types/flow";
+} from "../types/index.js";
+import type { SessionState } from "../types/session.js";
+import type { StepResult } from "../types/flow.js";
+import type { ConditionWhen, ConditionIf } from "../types/flow.js";
 
-import { generateFlowId, logger } from "../utils";
-import { splitWhenConditions } from "../utils/condition";
+import { generateFlowId, logger } from "../utils/index.js";
+import { splitWhenConditions } from "../utils/condition.js";
 
-import { Step, FlowConfigurationError } from "./Step";
-import { Agent } from './Agent'
+import { Step, FlowConfigurationError } from "./Step.js";
+import { Agent } from './Agent.js'
 
 /**
  * Represents a conversational flow/journey
@@ -647,7 +647,7 @@ export class Flow<TContext = unknown, TData = unknown> {
         context: context as TContext,
         data: session.data ?? {} as Partial<TData>,
         session: {} as SessionState<TData>,
-        history: [] as import("../types/history").Event[],
+        history: [] as import("../types/history.js").Event[],
         dispatch: () => { },
       };
       const result = await this.hooks.onComplete(hookCtx);

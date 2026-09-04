@@ -1,7 +1,7 @@
 /** @intent Session persistence with MemoryAdapter: implicit default, explicit wiring, and sessionId for cross-turn continuity.
  *  @teaches MemoryAdapter, PersistenceConfig, sessionId, session resumption
  *  @readAfter docs/guides/persistence.md */
-import { createAgent, GeminiProvider, MemoryAdapter } from "../src";
+import { createAgent, GeminiProvider, MemoryAdapter } from "../src/index.js";
 
 if (!process.env.GEMINI_API_KEY) throw new Error("Set GEMINI_API_KEY");
 

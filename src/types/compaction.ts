@@ -2,8 +2,8 @@
  * Context compaction types for managing conversation history size
  */
 
-import type { AiProvider } from "./ai";
-import type { HistoryItem } from "./history";
+import type { AiProvider } from "./ai.js";
+import type { HistoryItem } from "./history.js";
 
 /**
  * Configuration for the compaction engine.

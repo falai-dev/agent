@@ -6,12 +6,12 @@
  */
 import { expect, test, describe } from "bun:test";
 
-import { Agent, createSession, AgentResponseStreamChunk } from "../src/index";
+import { Agent, createSession, AgentResponseStreamChunk } from "../src/index.js";
 import {
   MockProvider,
   MockProviderFactory,
   MOCK_RESPONSES,
-} from "./mock-provider";
+} from "./mock-provider.js";
 
 // Test utilities
 function createStreamingTestAgent(provider?: MockProvider): Agent {

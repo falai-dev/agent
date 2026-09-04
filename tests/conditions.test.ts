@@ -15,9 +15,9 @@ import {
     Flow,
     Step,
     FlowConfigurationError,
-} from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
-import { createTemplateContext } from "../src/utils/template";
+} from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
+import { createTemplateContext } from "../src/utils/template.js";
 
 // ─── Test data types ─────────────────────────────────────────────────────────
 
@@ -482,7 +482,7 @@ describe("Conditions: when/if split", () => {
     describe("ConditionTemplate removed from public surface", () => {
         test("ConditionTemplate is NOT exported from @falai/agent", () => {
             // TypeScript compile-time enforcement + runtime check
-            const exports = require("../src/index");
+            const exports = require("../src/index.js");
             expect(exports.ConditionTemplate).toBeUndefined();
         });
     });

@@ -3,8 +3,8 @@
  * Tool system type definitions
  */
 
-import type { Event, StepRef, ValidationResult } from "./index";
-import type { Directive } from "./flow";
+import type { Event, StepRef, ValidationResult } from "./index.js";
+import type { Directive } from "./flow.js";
 
 /**
  * Context provided to tool handlers

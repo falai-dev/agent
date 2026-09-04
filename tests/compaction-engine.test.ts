@@ -1,8 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { CompactionEngine } from "../src/core/CompactionEngine";
-import type { HistoryItem } from "../src/types/history";
-import type { CompactionOptions } from "../src/types/compaction";
-import type { AiProvider } from "../src/types/ai";
+import { CompactionEngine } from "../src/core/CompactionEngine.js";
+import type { HistoryItem } from "../src/types/history.js";
+import type { CompactionOptions } from "../src/types/compaction.js";
+import type { AiProvider } from "../src/types/ai.js";
 
 // --- Helpers ---
 

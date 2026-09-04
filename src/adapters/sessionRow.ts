@@ -11,7 +11,7 @@ import type {
   CollectedStateData,
   SessionData,
   SessionStatus,
-} from "../types";
+} from "../types/index.js";
 
 /**
  * Coerce a raw stored value into a Date. Drivers variously hand back Date

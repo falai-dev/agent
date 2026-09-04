@@ -2,12 +2,12 @@
  * Session step types for tracking conversation progress
  */
 
-import type { History } from "./history";
-import type { Directive } from "./flow";
-import type { SignalsState } from "./signals";
+import type { History } from "./history.js";
+import type { Directive } from "./flow.js";
+import type { SignalsState } from "./signals.js";
 
 // Re-export for backward compatibility — canonical declarations live in ./signals.ts
-export type { SignalsState, SignalTriggerState } from "./signals";
+export type { SignalsState, SignalTriggerState } from "./signals.js";
 
 /**
  * Session state tracks the current position in the conversation flow

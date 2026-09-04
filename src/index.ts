@@ -5,95 +5,95 @@
  */
 
 // Core
-export { Agent } from "./core/Agent";
-export type { RespondParams, StreamOptions, GenerateOptions } from "./core/ResponseModal";
-export { ResponseGenerationError } from "./core/ResponseGenerationError";
-export type { EndedFlow } from "./types/agent";
-export { createAgent } from "./core/createAgent";
-export { Flow } from "./core/Flow";
-export { Step, FlowConfigurationError } from "./core/Step";
-export { flow } from "./core/flow-namespace";
+export { Agent } from "./core/Agent.js";
+export type { RespondParams, StreamOptions, GenerateOptions } from "./core/ResponseModal.js";
+export { ResponseGenerationError } from "./core/ResponseGenerationError.js";
+export type { EndedFlow } from "./types/agent.js";
+export { createAgent } from "./core/createAgent.js";
+export { Flow } from "./core/Flow.js";
+export { Step, FlowConfigurationError } from "./core/Step.js";
+export { flow } from "./core/flow-namespace.js";
 
-export { adaptEvent, convertHistoryToEvents } from "./core/Events";
-export { PersistenceManager } from "./core/PersistenceManager";
-export { SessionManager } from "./core/SessionManager";
-export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager";
-export { NotImplementedError, SessionConflictError, ProviderError } from "./types/errors";
-export type { ErrorKind } from "./types/errors";
+export { adaptEvent, convertHistoryToEvents } from "./core/Events.js";
+export { PersistenceManager } from "./core/PersistenceManager.js";
+export { SessionManager } from "./core/SessionManager.js";
+export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager.js";
+export { NotImplementedError, SessionConflictError, ProviderError } from "./types/errors.js";
+export type { ErrorKind } from "./types/errors.js";
 
 
 // Providers
-export { GeminiProvider } from "./providers/GeminiProvider";
-export type { GeminiProviderOptions } from "./providers/GeminiProvider";
-export { OpenAIProvider } from "./providers/OpenAIProvider";
-export type { OpenAIProviderOptions } from "./providers/OpenAIProvider";
-export { OpenRouterProvider } from "./providers/OpenRouterProvider";
-export type { OpenRouterProviderOptions } from "./providers/OpenRouterProvider";
-export { AnthropicProvider } from "./providers/AnthropicProvider";
-export type { AnthropicProviderOptions } from "./providers/AnthropicProvider";
-export { DeepSeekProvider } from "./providers/DeepSeekProvider";
-export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider";
+export { GeminiProvider } from "./providers/GeminiProvider.js";
+export type { GeminiProviderOptions } from "./providers/GeminiProvider.js";
+export { OpenAIProvider } from "./providers/OpenAIProvider.js";
+export type { OpenAIProviderOptions } from "./providers/OpenAIProvider.js";
+export { OpenRouterProvider } from "./providers/OpenRouterProvider.js";
+export type { OpenRouterProviderOptions } from "./providers/OpenRouterProvider.js";
+export { AnthropicProvider } from "./providers/AnthropicProvider.js";
+export type { AnthropicProviderOptions } from "./providers/AnthropicProvider.js";
+export { DeepSeekProvider } from "./providers/DeepSeekProvider.js";
+export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider.js";
 // Base class for building OpenAI-compatible providers (Groq, Together, etc.)
-export { OpenAICompatibleProvider } from "./providers/OpenAICompatibleProvider";
+export { OpenAICompatibleProvider } from "./providers/OpenAICompatibleProvider.js";
 export type {
   OpenAICompatibleProviderInit,
   StructuredOutputMode,
-} from "./providers/OpenAICompatibleProvider";
-export { createOpenAICompatibleProvider } from "./providers/GenericOpenAICompatibleProvider";
-export type { OpenAICompatibleOptions } from "./providers/GenericOpenAICompatibleProvider";
+} from "./providers/OpenAICompatibleProvider.js";
+export { createOpenAICompatibleProvider } from "./providers/GenericOpenAICompatibleProvider.js";
+export type { OpenAICompatibleOptions } from "./providers/GenericOpenAICompatibleProvider.js";
 // The bridge every provider above is built on — subclass it to bind any
 // `@providerkit/core` provider to this framework's seam.
-export { ProviderAdapter, resolveRetryConfig } from "./providers/ProviderAdapter";
+export { ProviderAdapter, resolveRetryConfig } from "./providers/ProviderAdapter.js";
 export type {
   ProviderAdapterInit,
   RequestConfig,
   RetryConfig,
-} from "./providers/ProviderAdapter";
+} from "./providers/ProviderAdapter.js";
 
 // Adapters
-export { PrismaAdapter } from "./adapters/PrismaAdapter";
+export { PrismaAdapter } from "./adapters/PrismaAdapter.js";
 export type {
   PrismaClient,
   FieldMappings,
   PrismaAdapterOptions,
-} from "./adapters/PrismaAdapter";
-export { RedisAdapter } from "./adapters/RedisAdapter";
-export type { RedisClient, RedisAdapterOptions } from "./adapters/RedisAdapter";
-export { MongoAdapter } from "./adapters/MongoAdapter";
+} from "./adapters/PrismaAdapter.js";
+export { RedisAdapter } from "./adapters/RedisAdapter.js";
+export type { RedisClient, RedisAdapterOptions } from "./adapters/RedisAdapter.js";
+export { MongoAdapter } from "./adapters/MongoAdapter.js";
 export type {
   MongoClient,
   MongoDatabase,
   MongoCollection,
   MongoAdapterOptions,
-} from "./adapters/MongoAdapter";
-export { PostgreSQLAdapter } from "./adapters/PostgreSQLAdapter";
+} from "./adapters/MongoAdapter.js";
+export { PostgreSQLAdapter } from "./adapters/PostgreSQLAdapter.js";
 export type {
   PgClient,
   PgQueryResult,
   PostgreSQLAdapterOptions,
-} from "./adapters/PostgreSQLAdapter";
-export { SQLiteAdapter } from "./adapters/SQLiteAdapter";
+} from "./adapters/PostgreSQLAdapter.js";
+export { SQLiteAdapter } from "./adapters/SQLiteAdapter.js";
 export type {
   SqliteDatabase,
   SqliteStatement,
   SQLiteAdapterOptions,
-} from "./adapters/SQLiteAdapter";
-export { MemoryAdapter } from "./adapters/MemoryAdapter";
-export { OpenSearchAdapter } from "./adapters/OpenSearchAdapter";
+} from "./adapters/SQLiteAdapter.js";
+export { MemoryAdapter } from "./adapters/MemoryAdapter.js";
+export { OpenSearchAdapter } from "./adapters/OpenSearchAdapter.js";
 export type {
   OpenSearchClient,
   OpenSearchAdapterOptions,
-} from "./adapters/OpenSearchAdapter";
+} from "./adapters/OpenSearchAdapter.js";
 
 // Utils
-export { generateFlowId, generateStepId, generateToolId } from "./utils/id";
-export { formatKnowledgeBase } from "./utils/template";
+export { generateFlowId, generateStepId, generateToolId } from "./utils/id.js";
+export { formatKnowledgeBase } from "./utils/template.js";
 export {
   ConditionEvaluator,
   createConditionEvaluator,
   extractAIContextStrings,
   hasProgrammaticConditions
-} from "./utils/condition";
+} from "./utils/condition.js";
 export {
   historyItemToEvent,
   historyToEvents,
@@ -103,7 +103,7 @@ export {
   assistantMessage,
   toolMessage,
   systemMessage,
-} from "./utils/history";
+} from "./utils/history.js";
 
 // Types
 export type {
@@ -200,6 +200,6 @@ export type {
   ConditionPredicate,
   ConditionIf,
   ConditionWhen,
-} from "./types";
-export { EventKind, MessageRole } from "./types";
-export { restoreSession, createSession, createSessionId, createPersistedState, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils";
+} from "./types/index.js";
+export { EventKind, MessageRole } from "./types/index.js";
+export { restoreSession, createSession, createSessionId, createPersistedState, enterFlow, enterStep, completeCurrentFlow, isFlowCompletedThisSession, mergeCollected } from "./utils/index.js";

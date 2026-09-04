@@ -1,6 +1,6 @@
-import type { TemplateContext, ConditionEvaluationResult } from "../types/template";
-import { createTemplateContext } from "./template";
-import { logger } from './logger'
+import type { TemplateContext, ConditionEvaluationResult } from "../types/template.js";
+import { createTemplateContext } from "./template.js";
+import { logger } from './logger.js'
 
 /**
  * Condition template — kept as a private type for internal use by the evaluator.

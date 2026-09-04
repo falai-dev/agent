@@ -4,7 +4,7 @@
  * Read next: docs/guides/instructions.md
  */
 
-import { createAgent, GeminiProvider } from "../src";
+import { createAgent, GeminiProvider } from "../src/index.js";
 
 if (!process.env.GEMINI_API_KEY) throw new Error("Set GEMINI_API_KEY");
 

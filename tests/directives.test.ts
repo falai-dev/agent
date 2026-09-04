@@ -15,17 +15,17 @@ import {
     ToolManager,
     createSession,
     flow,
-} from "../src/index";
+} from "../src/index.js";
 // Internal — not part of the public barrel since v2.4
-import { DirectiveChainTracker } from "../src/core/DirectiveChainTracker";
+import { DirectiveChainTracker } from "../src/core/DirectiveChainTracker.js";
 import type {
     Directive,
     SessionState,
     Tool,
     ToolContext,
     ToolResult,
-} from "../src/types";
-import { MockProvider } from "./mock-provider";
+} from "../src/types/index.js";
+import { MockProvider } from "./mock-provider.js";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
 

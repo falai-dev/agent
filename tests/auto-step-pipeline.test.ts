@@ -13,15 +13,15 @@
 import { expect, test, describe } from "bun:test";
 import * as fc from "fast-check";
 
-import { Agent, createSession, FlowConfigurationError } from "../src/index";
-import { ResponseModal, type RespondParams } from "../src/core/ResponseModal";
+import { Agent, createSession, FlowConfigurationError } from "../src/index.js";
+import { ResponseModal, type RespondParams } from "../src/core/ResponseModal.js";
 import type {
     AiProvider,
     GenerateMessageInput,
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
     AgentStructuredResponse,
-} from "../src/types/ai";
+} from "../src/types/ai.js";
 
 // ---------------------------------------------------------------------------
 // Counting Provider — wraps MockProvider logic and exposes a call counter

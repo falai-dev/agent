@@ -11,13 +11,13 @@
  * yield sites.
  */
 
-import type { AgentOptions, SessionState } from "../types";
-import type { CompactionOptions } from "../types/compaction";
-import type { PersistenceManager } from "./PersistenceManager";
-import type { StepLifecycle } from "./StepLifecycle";
-import { flow } from "./flow-namespace";
-import { CompactionEngine } from "./CompactionEngine";
-import { boundConversationHistory, DEFAULT_MAX_HISTORY_MESSAGES, logger } from "../utils";
+import type { AgentOptions, SessionState } from "../types/index.js";
+import type { CompactionOptions } from "../types/compaction.js";
+import type { PersistenceManager } from "./PersistenceManager.js";
+import type { StepLifecycle } from "./StepLifecycle.js";
+import { flow } from "./flow-namespace.js";
+import { CompactionEngine } from "./CompactionEngine.js";
+import { boundConversationHistory, DEFAULT_MAX_HISTORY_MESSAGES, logger } from "../utils/index.js";
 
 export class SessionFinalizer<TContext = unknown, TData = unknown> {
     constructor(

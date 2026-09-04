@@ -15,10 +15,10 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { Agent, FlowConfigurationError, createSession } from "../src/index";
-import { MemoryAdapter } from "../src/adapters/MemoryAdapter";
-import type { SessionState, Directive } from "../src/types";
-import { MockProvider } from "./mock-provider";
+import { Agent, FlowConfigurationError, createSession } from "../src/index.js";
+import { MemoryAdapter } from "../src/adapters/MemoryAdapter.js";
+import type { SessionState, Directive } from "../src/types/index.js";
+import { MockProvider } from "./mock-provider.js";
 
 // Test types
 interface TestContext {

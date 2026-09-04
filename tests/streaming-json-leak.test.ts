@@ -12,13 +12,13 @@
  */
 import { expect, test, describe } from "bun:test";
 
-import { Agent } from "../src/index";
-import { MockProvider } from "./mock-provider";
+import { Agent } from "../src/index.js";
+import { MockProvider } from "./mock-provider.js";
 import type {
   AgentStructuredResponse,
   GenerateMessageInput,
   GenerateMessageStreamChunk,
-} from "../src/types/ai";
+} from "../src/types/ai.js";
 
 /**
  * A MockProvider that streams the *raw JSON wrapper* of its structured response

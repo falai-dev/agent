@@ -12,11 +12,11 @@ import type {
     BranchMap,
     BranchPredicateContext,
     Directive,
-} from "../types/flow";
-import type { AiProvider } from "../types/ai";
-import type { Event } from "../types/history";
-import { eventsToHistory, logger } from "../utils";
-import { splitWhenConditions, evaluateIfPredicates, type WhenConditionGroups } from "../utils/condition";
+} from "../types/flow.js";
+import type { AiProvider } from "../types/ai.js";
+import type { Event } from "../types/history.js";
+import { eventsToHistory, logger } from "../utils/index.js";
+import { splitWhenConditions, evaluateIfPredicates, type WhenConditionGroups } from "../utils/condition.js";
 
 /**
  * The AI condition evaluator function signature.

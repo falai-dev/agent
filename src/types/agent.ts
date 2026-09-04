@@ -2,17 +2,17 @@
  * Agent-related type definitions
  */
 
-import type { AgentStructuredResponse, AiProvider } from "./ai";
-import type { Tool } from "./tool";
-import type { Directive, FlowOptions, StepRef, StoppedReason } from "./flow";
-import type { PersistenceConfig } from "./persistence";
-import type { SessionState } from "./session";
-import type { Signal, SignalFiring } from "./signals";
-import type { StructuredSchema } from "./schema";
-import type { Event } from "./history";
-import type { Template } from "./template";
-import type { ConditionWhen, ConditionIf } from "./flow";
-import type { PromptCacheConfig } from "./prompt-cache";
+import type { AgentStructuredResponse, AiProvider } from "./ai.js";
+import type { Tool } from "./tool.js";
+import type { Directive, FlowOptions, StepRef, StoppedReason } from "./flow.js";
+import type { PersistenceConfig } from "./persistence.js";
+import type { SessionState } from "./session.js";
+import type { Signal, SignalFiring } from "./signals.js";
+import type { StructuredSchema } from "./schema.js";
+import type { Event } from "./history.js";
+import type { Template } from "./template.js";
+import type { ConditionWhen, ConditionIf } from "./flow.js";
+import type { PromptCacheConfig } from "./prompt-cache.js";
 
 /**
  * Context passed to every lifecycle hook (flow and step).

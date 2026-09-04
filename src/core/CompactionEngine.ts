@@ -9,8 +9,8 @@
  */
 
 import log from "loglevel";
-import type { HistoryItem } from "../types/history";
-import type { CompactionOptions, CompactionResult } from "../types/compaction";
+import type { HistoryItem } from "../types/history.js";
+import type { CompactionOptions, CompactionResult } from "../types/compaction.js";
 
 export class CompactionEngine {
     /**

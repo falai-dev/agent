@@ -9,13 +9,13 @@
  * - Context management
  */
 
-import { Agent, type Instruction, type Term } from "../src/index";
+import { Agent, type Instruction, type Term } from "../src/index.js";
 import {
   MockProvider,
   MockProviderFactory,
   MOCK_RESPONSES,
-} from "./mock-provider";
-import { generateFlowId } from "../src/utils/id";
+} from "./mock-provider.js";
+import { generateFlowId } from "../src/utils/id.js";
 import { describe, test, expect } from "bun:test";
 
 // Test context types

@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { deserializeSessionRow } from "../src/adapters/sessionRow";
+import { deserializeSessionRow } from "../src/adapters/sessionRow.js";
 
 const baseRow = {
   id: "sess_1",

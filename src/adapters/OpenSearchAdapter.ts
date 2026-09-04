@@ -32,8 +32,8 @@
  * ```
  */
 
-import { cloneDeep } from "../utils/clone";
-import { createSessionId } from "../utils";
+import { cloneDeep } from "../utils/clone.js";
+import { createSessionId } from "../utils/index.js";
 import type {
   PersistenceAdapter,
   SessionRepository,
@@ -43,8 +43,8 @@ import type {
   CollectedStateData,
   CreateSessionData,
   SessionUpdateOptions,
-} from "../types";
-import { SessionConflictError } from "../types/errors";
+} from "../types/index.js";
+import { SessionConflictError } from "../types/errors.js";
 
 /**
  * OpenSearch Client interface (minimal typing for the official client)

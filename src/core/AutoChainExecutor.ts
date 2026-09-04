@@ -15,20 +15,20 @@
  * Implements Algorithm 1 from `.kiro/specs/auto-steps/design.md`.
  */
 
-import type { Directive, SessionState } from "../types";
-import type { Event } from "../types/history";
-import { FlowConfigurationError, Step } from "./Step";
-import { Flow } from "./Flow";
-import { flow } from "./flow-namespace";
-import { enterStep, mergeCollected, logger } from "../utils";
-import { createTemplateContext } from "../utils/template";
+import type { Directive, SessionState } from "../types/index.js";
+import type { Event } from "../types/history.js";
+import { FlowConfigurationError, Step } from "./Step.js";
+import { Flow } from "./Flow.js";
+import { flow } from "./flow-namespace.js";
+import { enterStep, mergeCollected, logger } from "../utils/index.js";
+import { createTemplateContext } from "../utils/template.js";
 import type {
     StoppedReason,
     BranchMap,
     BranchEntry,
     BranchPredicateContext,
-} from "../types/flow";
-import { evaluateIfPredicates } from "../utils/condition";
+} from "../types/flow.js";
+import { evaluateIfPredicates } from "../utils/condition.js";
 
 /**
  * The directive-like object that `prepare` may return on auto-steps.

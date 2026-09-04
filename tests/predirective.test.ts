@@ -11,14 +11,14 @@
  * **Validates: Requirements 2.1–2.12, 24.5, 24.6, 27.1–27.4**
  */
 import { describe, test, expect } from "bun:test";
-import { flow } from "../src/index";
-import { PromptComposer } from "../src/core/PromptComposer";
-import { ToolManager } from "../src/core/ToolManager";
-import { Agent } from "../src/core/Agent";
-import { createPersistedState } from "../src/utils/session";
-import { createTemplateContext } from "../src/utils/template";
-import type { Directive, SessionState, Tool } from "../src/types";
-import { MockProvider } from "./mock-provider";
+import { flow } from "../src/index.js";
+import { PromptComposer } from "../src/core/PromptComposer.js";
+import { ToolManager } from "../src/core/ToolManager.js";
+import { Agent } from "../src/core/Agent.js";
+import { createPersistedState } from "../src/utils/session.js";
+import { createTemplateContext } from "../src/utils/template.js";
+import type { Directive, SessionState, Tool } from "../src/types/index.js";
+import { MockProvider } from "./mock-provider.js";
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 

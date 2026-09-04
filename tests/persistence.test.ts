@@ -15,8 +15,8 @@ import {
   type PersistenceAdapter,
   type PersistenceManager,
   type SessionData,
-} from "../src";
-import { MockProviderFactory } from "./mock-provider";
+} from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 // Test data types
 interface TestSessionData {

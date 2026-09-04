@@ -11,7 +11,7 @@
  */
 
 import log from "loglevel";
-import type { Directive } from "../types";
+import type { Directive } from "../types/index.js";
 import type {
     ToolCallRequest,
     ToolExecutionUpdate,
@@ -19,9 +19,9 @@ import type {
     ToolContext,
     Tool,
     TrackedTool,
-} from "../types/tool";
-import { evaluateToolGates } from "./toolGates";
-import { isToolResultLike, extractResultDirectives } from "../utils";
+} from "../types/tool.js";
+import { evaluateToolGates } from "./toolGates.js";
+import { isToolResultLike, extractResultDirectives } from "../utils/index.js";
 
 /** Options for the StreamingToolExecutor */
 interface StreamingToolExecutorOptions {

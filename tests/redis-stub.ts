@@ -3,7 +3,7 @@
  * uses. TTLs and persistence are intentionally ignored. Shared by the adapter
  * unit tests and the cross-adapter contract suite.
  */
-import type { RedisClient } from "../src/adapters/RedisAdapter";
+import type { RedisClient } from "../src/adapters/RedisAdapter.js";
 
 export function createRedisStub(): RedisClient {
   const strings = new Map<string, string>();

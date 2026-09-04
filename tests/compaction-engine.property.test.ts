@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import { CompactionEngine } from "../src/core/CompactionEngine";
-import type { HistoryItem } from "../src/types/history";
+import { CompactionEngine } from "../src/core/CompactionEngine.js";
+import type { HistoryItem } from "../src/types/history.js";
 
 // --- Arbitraries for HistoryItem variants ---
 
@@ -179,8 +179,8 @@ describe("Property 7: Tool Result Budget Enforcement", () => {
 
 // --- Property 6: Compaction Preservation of Recent Messages ---
 
-import type { CompactionOptions } from "../src/types/compaction";
-import type { AiProvider } from "../src/types/ai";
+import type { CompactionOptions } from "../src/types/compaction.js";
+import type { AiProvider } from "../src/types/ai.js";
 
 /**
  * Mock AiProvider that returns a simple summary string.

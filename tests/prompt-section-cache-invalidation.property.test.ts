@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import { PromptSectionCache } from "../src/core/PromptSectionCache";
+import { PromptSectionCache } from "../src/core/PromptSectionCache.js";
 
 /**
  * Property 17: Cache Invalidation on State Change

@@ -9,10 +9,10 @@
  *       THE Agent SHALL place both d and d2 onto the per-turn directive bus.
  */
 import { expect, test, describe } from "bun:test";
-import { Agent, ToolManager } from "../src/index";
-import type { Tool, ToolResult, ToolContext } from "../src/types";
-import type { Directive } from "../src/types/flow";
-import { MockProvider } from "./mock-provider";
+import { Agent, ToolManager } from "../src/index.js";
+import type { Tool, ToolResult, ToolContext } from "../src/types/index.js";
+import type { Directive } from "../src/types/flow.js";
+import { MockProvider } from "./mock-provider.js";
 
 interface TestContext {
     userId: string;

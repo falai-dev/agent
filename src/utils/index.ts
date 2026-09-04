@@ -9,7 +9,7 @@ export {
   generateToolId,
   generateInlineToolId,
   generateSignalId,
-} from "./id";
+} from "./id.js";
 
 // Session management
 export {
@@ -26,7 +26,7 @@ export {
   mergeCollected,
   sessionStepToData,
   sessionDataToStep,
-} from "./session";
+} from "./session.js";
 
 // Template rendering
 export {
@@ -34,13 +34,13 @@ export {
   renderMany,
   formatKnowledgeBase,
   createTemplateContext,
-} from "./template";
+} from "./template.js";
 
 // Cloning utilities
-export { cloneDeep } from "./clone";
+export { cloneDeep } from "./clone.js";
 
 // Event utilities
-export { getLastMessageFromHistory } from "./event";
+export { getLastMessageFromHistory } from "./event.js";
 
 // History utilities
 export {
@@ -52,13 +52,13 @@ export {
   assistantMessage,
   toolMessage,
   systemMessage,
-} from "./history";
+} from "./history.js";
 
 // Logging
-export { LoggerLevel, logger } from "./logger";
+export { LoggerLevel, logger } from "./logger.js";
 
 // Completion helpers
-export { effectiveMessageText, assertUsableCompletion } from "./completion";
+export { effectiveMessageText, assertUsableCompletion } from "./completion.js";
 
 // Condition utilities
 export {
@@ -66,10 +66,10 @@ export {
   createConditionEvaluator,
   extractAIContextStrings,
   hasProgrammaticConditions,
-} from "./condition";
+} from "./condition.js";
 
 // JSON utilities
-export { parseJSONResponse, tryParseJSONResponse } from "./json";
+export { parseJSONResponse, tryParseJSONResponse } from "./json.js";
 
 // Serialization utilities
-export { serializeToolResult, isToolResultLike, extractResultDirectives } from "./serialize";
+export { serializeToolResult, isToolResultLike, extractResultDirectives } from "./serialize.js";

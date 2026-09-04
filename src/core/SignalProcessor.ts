@@ -11,11 +11,11 @@
  * @module SignalProcessor
  */
 
-import type { AiProvider } from "../types/ai";
-import type { Event } from "../types/history";
-import { MessageRole as MessageRoleEnum } from "../types/history";
-import type { SessionState } from "../types/session";
-import type { Directive } from "../types/flow";
+import type { AiProvider } from "../types/ai.js";
+import type { Event } from "../types/history.js";
+import { MessageRole as MessageRoleEnum } from "../types/history.js";
+import type { SessionState } from "../types/session.js";
+import type { Directive } from "../types/flow.js";
 import type {
     Signal,
     SignalContext,
@@ -23,10 +23,10 @@ import type {
     SignalFiring,
     SignalPredicateContext,
     SignalTriggerState,
-} from "../types/signals";
-import type { SignalEvaluator } from "./SignalEvaluator";
-import { flow } from "./flow-namespace";
-import { logger } from "../utils";
+} from "../types/signals.js";
+import type { SignalEvaluator } from "./SignalEvaluator.js";
+import { flow } from "./flow-namespace.js";
+import { logger } from "../utils/index.js";
 
 /** Recorded on `SignalFiring.extractionError` when a matched extraction-mode
  * signal yields no payload (model omitted the field or returned null). */

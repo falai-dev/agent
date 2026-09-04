@@ -1,7 +1,7 @@
 import { expect, test, describe, beforeEach } from "bun:test";
-import { TemplateContext } from "../src/types/template";
-import { ConditionEvaluator, extractAIContextStrings, hasProgrammaticConditions, splitWhenConditions } from "../src/utils/condition";
-import { createTemplateContext } from "../src/utils";
+import { TemplateContext } from "../src/types/template.js";
+import { ConditionEvaluator, extractAIContextStrings, hasProgrammaticConditions, splitWhenConditions } from "../src/utils/condition.js";
+import { createTemplateContext } from "../src/utils/index.js";
 
 /**
  * Test-local mirror of ConditionEvaluator's private condition shape —

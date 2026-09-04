@@ -11,13 +11,13 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { Agent, createSession, enterFlow, enterStep } from "../src/index";
+import { Agent, createSession, enterFlow, enterStep } from "../src/index.js";
 import type {
     GenerateMessageInput,
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
     AiProvider,
-} from "../src/types";
+} from "../src/types/index.js";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
 

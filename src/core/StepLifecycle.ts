@@ -14,12 +14,12 @@
  * verbatim replies, halts) are returned to the caller to act on.
  */
 
-import type { Directive, PrepareResult, SessionState, Tool } from "../types";
-import type { Flow } from "./Flow";
-import type { Step } from "./Step";
-import type { ToolManager } from "./ToolManager";
-import { flow } from "./flow-namespace";
-import { logger } from "../utils";
+import type { Directive, PrepareResult, SessionState, Tool } from "../types/index.js";
+import type { Flow } from "./Flow.js";
+import type { Step } from "./Step.js";
+import type { ToolManager } from "./ToolManager.js";
+import { flow } from "./flow-namespace.js";
+import { logger } from "../utils/index.js";
 
 /** Fields a caller can still act on after state writes have been applied. */
 const CONTROL_FIELDS = [

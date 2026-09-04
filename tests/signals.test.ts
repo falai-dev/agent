@@ -14,16 +14,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { Agent, FlowConfigurationError, EventKind, MessageRole } from "../src/index";
-import type { Event } from "../src/index";
-import type { Signal } from "../src/types/signals";
+import { Agent, FlowConfigurationError, EventKind, MessageRole } from "../src/index.js";
+import type { Event } from "../src/index.js";
+import type { Signal } from "../src/types/signals.js";
 import {
     buildSignalClassifierPrompt,
     buildMergedSchema,
     SignalEvaluator,
     splitIntoBatches,
-} from "../src/core/SignalEvaluator";
-import { MockProvider, MockProviderFactory } from "./mock-provider";
+} from "../src/core/SignalEvaluator.js";
+import { MockProvider, MockProviderFactory } from "./mock-provider.js";
 import log from "loglevel";
 import fc from "fast-check";
 
@@ -1036,15 +1036,15 @@ import {
     behaviorAllowsExecution,
     recordTrigger,
     buildSignalContext,
-} from "../src/core/SignalProcessor";
-import type { SignalEvaluationResult } from "../src/core/SignalEvaluator";
-import type { SessionState } from "../src/types/session";
+} from "../src/core/SignalProcessor.js";
+import type { SignalEvaluationResult } from "../src/core/SignalEvaluator.js";
+import type { SessionState } from "../src/types/session.js";
 import type {
     SignalDirective,
     SignalContext as SignalCtxType,
     SignalTriggerState,
     SignalFiring,
-} from "../src/types/signals";
+} from "../src/types/signals.js";
 
 /**
  * Mock evaluator implementing the SignalEvaluator interface for processor tests.
@@ -3297,10 +3297,10 @@ describe("Signals — Pipeline Integration", () => {
 
 // ─── Persistence Round-Trip Tests ────────────────────────────────────────────
 
-import { MemoryAdapter } from "../src/adapters/MemoryAdapter";
-import { PersistenceManager } from "../src/core/PersistenceManager";
-import { sessionStepToData, sessionDataToStep } from "../src/utils/session";
-import type { SignalsState } from "../src/types/signals";
+import { MemoryAdapter } from "../src/adapters/MemoryAdapter.js";
+import { PersistenceManager } from "../src/core/PersistenceManager.js";
+import { sessionStepToData, sessionDataToStep } from "../src/utils/session.js";
+import type { SignalsState } from "../src/types/signals.js";
 
 describe("Signals — Persistence Round-Trip", () => {
     /**

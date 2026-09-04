@@ -14,12 +14,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { OpenAIProvider } from "../src/providers/OpenAIProvider";
-import { DeepSeekProvider } from "../src/providers/DeepSeekProvider";
-import { AnthropicProvider } from "../src/providers/AnthropicProvider";
-import { toMessages } from "../src/providers/ProviderAdapter";
-import type { GenerateMessageInput } from "../src/types/ai";
-import type { HistoryItem } from "../src/types/history";
+import { OpenAIProvider } from "../src/providers/OpenAIProvider.js";
+import { DeepSeekProvider } from "../src/providers/DeepSeekProvider.js";
+import { AnthropicProvider } from "../src/providers/AnthropicProvider.js";
+import { toMessages } from "../src/providers/ProviderAdapter.js";
+import type { GenerateMessageInput } from "../src/types/ai.js";
+import type { HistoryItem } from "../src/types/history.js";
 
 // ── scripted wire ─────────────────────────────────────────────────────────
 

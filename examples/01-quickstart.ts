@@ -1,7 +1,7 @@
 /** @intent Minimal agent: one flow, one step, one response.
  *  @teaches createAgent, GeminiProvider, Flow, Step, respond
  *  @readAfter docs/start/02-first-agent.md */
-import { createAgent, GeminiProvider } from "../src";
+import { createAgent, GeminiProvider } from "../src/index.js";
 
 if (!process.env.GEMINI_API_KEY) throw new Error("Set GEMINI_API_KEY");
 

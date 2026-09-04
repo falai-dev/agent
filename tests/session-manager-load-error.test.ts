@@ -6,9 +6,9 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { SessionManager } from "../src/core/SessionManager";
-import type { PersistenceManager } from "../src/core/PersistenceManager";
-import type { SessionState } from "../src/types/session";
+import { SessionManager } from "../src/core/SessionManager.js";
+import type { PersistenceManager } from "../src/core/PersistenceManager.js";
+import type { SessionState } from "../src/types/session.js";
 
 describe("SessionManager.getOrCreate load-error handling", () => {
   test("a failed load THROWS instead of clobbering the session", async () => {

@@ -10,7 +10,7 @@
 
 import { createOpenAIProvider, createResponsesProvider, type Provider } from "@providerkit/core";
 
-import { ProviderAdapter, type ProviderAdapterInit, type RequestConfig } from "./ProviderAdapter";
+import { ProviderAdapter, type ProviderAdapterInit, type RequestConfig } from "./ProviderAdapter.js";
 
 /**
  * How structured (JSON-schema) output is requested from the endpoint:

@@ -19,7 +19,7 @@ export type {
   ValidationResult,
   HookContext,
   ExitReason,
-} from "./agent";
+} from "./agent.js";
 
 // History types
 export type {
@@ -39,8 +39,8 @@ export type {
   AssistantHistoryItem,
   SystemHistoryItem,
   ToolHistoryItem,
-} from "./history";
-export { EventKind, MessageRole } from "./history";
+} from "./history.js";
+export { EventKind, MessageRole } from "./history.js";
 
 // Flow types
 export type {
@@ -60,10 +60,10 @@ export type {
   ConditionWhen,
   StoppedReason,
   PrepareResult,
-} from "./flow";
+} from "./flow.js";
 
 // Session types
-export type { SessionState } from "./session";
+export type { SessionState } from "./session.js";
 
 // Signals types (canonical source)
 export type {
@@ -77,7 +77,7 @@ export type {
   SignalSchema,
   SignalsState,
   SignalTriggerState,
-} from "./signals";
+} from "./signals.js";
 
 // Tool types
 export type {
@@ -96,21 +96,21 @@ export type {
   ValidationConfig,
   ApiCallConfig,
   ComputationConfig
-} from "./tool";
-export { ToolScope } from "./tool";
+} from "./tool.js";
+export { ToolScope } from "./tool.js";
 
 // Compaction types
 export type {
   CompactionOptions,
   CompactionResult,
-} from "./compaction";
+} from "./compaction.js";
 
 // Prompt cache types
 export type {
   PromptSectionType,
   PromptCacheConfig,
   SectionCompute,
-} from "./prompt-cache";
+} from "./prompt-cache.js";
 
 // AI provider types
 export type {
@@ -121,10 +121,10 @@ export type {
   ReasoningConfig,
   GenerateMessageStreamChunk,
   ProviderCapabilities,
-} from "./ai";
+} from "./ai.js";
 
 // Schema types
-export type { StructuredSchema } from "./schema";
+export type { StructuredSchema } from "./schema.js";
 
 // Persistence types
 export type {
@@ -140,18 +140,18 @@ export type {
   SaveMessageOptions,
   CollectedStateData,
   SessionUpdateOptions,
-} from "./persistence";
+} from "./persistence.js";
 
 // Template types
 export type {
   Template,
   TemplateContext,
   ConditionEvaluationResult
-} from "./template";
+} from "./template.js";
 
 // Error types
-export { NotImplementedError, SessionConflictError, ProviderError } from "./errors";
-export type { ErrorKind } from "./errors";
+export { NotImplementedError, SessionConflictError, ProviderError } from "./errors.js";
+export type { ErrorKind } from "./errors.js";
 
 // Internal — ConditionTemplate is NOT exported from the public surface in v2.
 // It remains internally for the condition evaluator utility.
@@ -161,4 +161,4 @@ export {
   createConditionEvaluator,
   extractAIContextStrings,
   hasProgrammaticConditions
-} from "../utils/condition";
+} from "../utils/condition.js";

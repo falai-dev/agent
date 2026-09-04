@@ -18,8 +18,8 @@
  * **Validates: Requirements 14.1–14.7**
  */
 
-import { Agent } from "./Agent";
-import type { AgentOptions } from "../types";
+import { Agent } from "./Agent.js";
+import type { AgentOptions } from "../types/index.js";
 
 /**
  * Create an Agent from a single options object.

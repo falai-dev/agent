@@ -9,9 +9,9 @@ import {
   Agent,
   createSession,
   type Tool,
-} from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
-import { createTemplateContext } from "../src/utils";
+} from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
+import { createTemplateContext } from "../src/utils/index.js";
 
 // Test data types for agent-level data collection
 interface OrderData {

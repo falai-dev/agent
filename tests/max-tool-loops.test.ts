@@ -8,8 +8,8 @@
  */
 import { expect, test, describe } from "bun:test";
 
-import { Agent } from "../src/index";
-import { MockProvider } from "./mock-provider";
+import { Agent } from "../src/index.js";
+import { MockProvider } from "./mock-provider.js";
 
 interface TestData {
   name?: string;

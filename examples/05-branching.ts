@@ -1,8 +1,8 @@
 /** @intent Demonstrates step.branches — source-local forks with if, when, and Directive targets.
  *  @teaches BranchEntry, BranchMap, if-only fork, when-only fork, combined if+when, mixed targets
  *  @readAfter docs/guides/branching.md */
-import { createAgent, GeminiProvider } from "../src";
-import type { BranchMap, Directive, FlowOptions, StepOptions } from "../src";
+import { createAgent, GeminiProvider } from "../src/index.js";
+import type { BranchMap, Directive, FlowOptions, StepOptions } from "../src/index.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

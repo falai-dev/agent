@@ -16,9 +16,9 @@ import {
   MemoryAdapter,
   PersistenceManager,
   createSession,
-} from "../src/index";
-import { SessionConflictError } from "../src/types/errors";
-import { MockProvider } from "./mock-provider";
+} from "../src/index.js";
+import { SessionConflictError } from "../src/types/errors.js";
+import { MockProvider } from "./mock-provider.js";
 
 // Test data interfaces
 interface TestData {

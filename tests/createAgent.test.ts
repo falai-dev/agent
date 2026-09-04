@@ -4,7 +4,7 @@
  * **Validates: Requirements 14.1–14.7**
  */
 import { describe, test, expect } from "bun:test";
-import { createAgent, Agent } from "../src/index";
+import { createAgent, Agent } from "../src/index.js";
 
 // Minimal mock provider for testing
 const mockProvider = {

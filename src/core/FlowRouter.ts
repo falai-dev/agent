@@ -5,14 +5,14 @@ import type {
   SessionState,
   AiProvider,
   TemplateContext,
-} from "../types";
-import { MessageRole } from "../types";
-import { enterFlow, mergeCollected, isFlowCompletedThisSession } from "../utils";
-import type { Flow } from "./Flow";
-import type { Step } from "./Step";
-import { PromptComposer } from "./PromptComposer";
-import { PromptSectionCache } from "./PromptSectionCache";
-import { createTemplateContext, getLastMessageFromHistory, logger, eventsToHistory } from "../utils";
+} from "../types/index.js";
+import { MessageRole } from "../types/index.js";
+import { enterFlow, mergeCollected, isFlowCompletedThisSession } from "../utils/index.js";
+import type { Flow } from "./Flow.js";
+import type { Step } from "./Step.js";
+import { PromptComposer } from "./PromptComposer.js";
+import { PromptSectionCache } from "./PromptSectionCache.js";
+import { createTemplateContext, getLastMessageFromHistory, logger, eventsToHistory } from "../utils/index.js";
 
 export interface CandidateStep<TContext = unknown, TData = unknown> {
   step: Step<TContext, TData>;

@@ -1,13 +1,13 @@
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import { Agent, ToolManager } from "../src/index";
+import { Agent, ToolManager } from "../src/index.js";
 import type {
     Tool,
     ToolContext,
     ToolValidationResult,
     ToolPermissionResult,
-} from "../src/types/tool";
-import { MockProvider } from "./mock-provider";
+} from "../src/types/tool.js";
+import { MockProvider } from "./mock-provider.js";
 
 // --- Helpers ---
 
@@ -194,8 +194,8 @@ describe("Property 10: Validation and Permission Gating", () => {
 
 // --- Property 11: Per-Tool Result Size Budget ---
 
-import { StreamingToolExecutor } from "../src/core/StreamingToolExecutor";
-import type { ToolCallRequest, ToolExecutionUpdate } from "../src/types/tool";
+import { StreamingToolExecutor } from "../src/core/StreamingToolExecutor.js";
+import type { ToolCallRequest, ToolExecutionUpdate } from "../src/types/tool.js";
 
 function makeToolContext(): ToolContext<Ctx, Data> {
     return {

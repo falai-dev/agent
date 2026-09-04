@@ -12,11 +12,11 @@ import {
     createPersistedState,
     sessionStepToData,
     sessionDataToStep,
-} from "../src/utils/session";
-import { MemoryAdapter } from "../src/adapters/MemoryAdapter";
-import type { SessionState, SignalsState } from "../src/types/session";
-import type { Directive } from "../src/types/flow";
-import type { CollectedStateData } from "../src/types/persistence";
+} from "../src/utils/session.js";
+import { MemoryAdapter } from "../src/adapters/MemoryAdapter.js";
+import type { SessionState, SignalsState } from "../src/types/session.js";
+import type { Directive } from "../src/types/flow.js";
+import type { CollectedStateData } from "../src/types/persistence.js";
 
 // ─── Test data types ─────────────────────────────────────────────────────────
 

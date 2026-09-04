@@ -3,8 +3,8 @@
  * Support for optional database persistence (Prisma, etc.)
  */
 
-import type { Event, MessageRole } from "./history";
-import type { SessionState } from "./session";
+import type { Event, MessageRole } from "./history.js";
+import type { SessionState } from "./session.js";
 
 /**
  * Session status enum

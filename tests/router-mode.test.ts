@@ -10,8 +10,8 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { Agent, NotImplementedError } from "../src/index";
-import { MockProvider } from "./mock-provider";
+import { Agent, NotImplementedError } from "../src/index.js";
+import { MockProvider } from "./mock-provider.js";
 
 describe("routerMode reservation", () => {
     const baseOptions = {

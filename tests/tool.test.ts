@@ -17,8 +17,8 @@ import {
   type Tool,
   type ToolContext,
   type ToolResult,
-} from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
+} from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 // Test data types for agent-level data collection
 interface UserProfile {

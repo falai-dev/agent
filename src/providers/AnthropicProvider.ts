@@ -10,8 +10,8 @@
 
 import { createAnthropicProvider } from "@providerkit/core";
 
-import type { ProviderCapabilities } from "../types/ai";
-import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter";
+import type { ProviderCapabilities } from "../types/ai.js";
+import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 
 export interface AnthropicProviderOptions {
   /** Anthropic API key */

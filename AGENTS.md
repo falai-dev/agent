@@ -6,11 +6,17 @@
 
 **@falai/agent** — A conversational state engine for TypeScript where the AI understands, but the code is in control.
 
-- **Version:** 2.x, check package.json for more details
+- **Version:** 3.x, check package.json for more details
 - **License:** MIT
-- **Runtime:** Node 18+ or Bun 1.0+
+- **Runtime:** Node 22.12+ or Bun 1.0+. The floor is 22.12, not 22: the CJS build `require()`s
+  `@providerkit/core`, which is ESM-only, and `require(esm)` landed in 22.12.
 - **Language:** TypeScript 5.3+ (strict mode)
-- **Module system:** Dual ESM/CJS (ESM primary)
+- **Module system:** Dual ESM/CJS (ESM primary). **Every relative import carries an explicit
+  `.js` extension**, in `src/` and `tests/` alike — Node's ESM resolver does not guess one, so
+  an extensionless specifier compiles fine, emits verbatim and then dies at runtime with
+  `ERR_MODULE_NOT_FOUND`. It is invisible to the tests, which bun runs off source. Two things
+  hold the line: `tsconfig.json` is on `node16` resolution, so tsc rejects the omission, and
+  `bun run build` ends by loading both built entries under real Node.
 - **Package manager:** Bun (`bun.lock` present)
 
 ## Quick Commands
@@ -20,6 +26,7 @@
 | Install | `bun install` |
 | Build (full) | `bun run build` |
 | Build ESM only | `bun run build:esm` |
+| Load both built entries under Node | `bun run check:dist` |
 | Typecheck | `bun run typecheck` |
 | Typecheck examples | `bun run typecheck:examples` |
 | Lint | `bun run lint` |

@@ -1,5 +1,5 @@
-import type { SessionState } from "./session";
-import type { Event, MessageRole } from "./history";
+import type { SessionState } from "./session.js";
+import type { Event, MessageRole } from "./history.js";
 
 /**
  * Context object passed to template functions for dynamic rendering.

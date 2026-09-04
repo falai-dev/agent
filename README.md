@@ -68,7 +68,7 @@ npm install @falai/agent
 pnpm add @falai/agent
 ```
 
-Requires Node 22+ or Bun 1.0+. Set a provider API key in your environment (for example `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `DEEPSEEK_API_KEY`).
+Requires Node 22.12+ or Bun 1.0+. Set a provider API key in your environment (for example `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `DEEPSEEK_API_KEY`).
 
 ## License
 

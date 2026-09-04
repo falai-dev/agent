@@ -2,8 +2,8 @@
  * Serialization utilities for tool results and other data
  */
 
-import type { Directive } from "../types/flow";
-import type { ToolResult } from "../types/tool";
+import type { Directive } from "../types/flow.js";
+import type { ToolResult } from "../types/tool.js";
 
 /**
  * Decide whether a tool handler's return value is a ToolResult-shaped object.

@@ -42,10 +42,10 @@ import type {
   GenerateMessageOutput,
   GenerateMessageStreamChunk,
   ProviderCapabilities,
-} from "../types/ai";
-import type { HistoryItem } from "../types/history";
-import { assertUsableCompletion } from "../utils/completion";
-import { logger } from "../utils/logger";
+} from "../types/ai.js";
+import type { HistoryItem } from "../types/history.js";
+import { assertUsableCompletion } from "../utils/completion.js";
+import { logger } from "../utils/logger.js";
 
 /** Provider timeout (ms) + retry count, after defaults are applied. */
 export interface RetryConfig {

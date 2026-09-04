@@ -1,8 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { RedisAdapter } from "../src/adapters/RedisAdapter";
-import { createRedisStub } from "./redis-stub";
-import type { MessageData } from "../src/types/persistence";
-import { MessageRole } from "../src/types/history";
+import { RedisAdapter } from "../src/adapters/RedisAdapter.js";
+import { createRedisStub } from "./redis-stub.js";
+import type { MessageData } from "../src/types/persistence.js";
+import { MessageRole } from "../src/types/history.js";
 
 
 describe("RedisMessageRepository.findBySessionId", () => {

@@ -11,11 +11,11 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { Agent } from "../src/index";
-import { PromptComposer } from "../src/core/PromptComposer";
-import { createTemplateContext } from "../src/utils/template";
-import type { ScopedInstructions, Instruction, AppliedInstruction } from "../src/types/agent";
-import { MockProvider } from "./mock-provider";
+import { Agent } from "../src/index.js";
+import { PromptComposer } from "../src/core/PromptComposer.js";
+import { createTemplateContext } from "../src/utils/template.js";
+import type { ScopedInstructions, Instruction, AppliedInstruction } from "../src/types/agent.js";
+import { MockProvider } from "./mock-provider.js";
 
 // ─── Test data types ─────────────────────────────────────────────────────────
 

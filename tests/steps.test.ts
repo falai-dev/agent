@@ -4,9 +4,9 @@
  * Tests for edge cases, new features, and complex scenarios
  */
 import { expect, test, describe } from "bun:test";
-import { Agent, createSession, Step, type Tool } from "../src/index";
-import { MockProviderFactory } from "./mock-provider";
-import { createTemplateContext } from "../src/utils";
+import { Agent, createSession, Step, type Tool } from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
+import { createTemplateContext } from "../src/utils/index.js";
 
 interface TestData {
   field1?: string;

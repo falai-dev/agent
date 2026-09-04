@@ -8,9 +8,9 @@
  * **Validates: Requirements 2.2, 2.8, 2.11, 27.1, 27.2, 27.4**
  */
 import { describe, test, expect } from "bun:test";
-import { PromptComposer } from "../src/core/PromptComposer";
-import { createTemplateContext } from "../src/utils/template";
-import { PromptSectionCache } from "../src/core/PromptSectionCache";
+import { PromptComposer } from "../src/core/PromptComposer.js";
+import { createTemplateContext } from "../src/utils/template.js";
+import { PromptSectionCache } from "../src/core/PromptSectionCache.js";
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 

@@ -9,8 +9,8 @@
  * ("when denied, handler is NOT invoked") was silently a no-op on one
  * transport. Centralizing the logic here keeps both executors in lockstep.
  */
-import type { Tool, ToolContext, ToolExecutionResult } from "../types/tool";
-import { logger } from "../utils";
+import type { Tool, ToolContext, ToolExecutionResult } from "../types/tool.js";
+import { logger } from "../utils/index.js";
 
 /**
  * Run a tool's pre-execution gates in order: `validateInput`, then

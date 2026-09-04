@@ -11,21 +11,21 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { Agent } from "../src/index";
-import { ResponsePipeline } from "../src/core/ResponsePipeline";
-import { FlowRouter } from "../src/core/FlowRouter";
-import { SignalCoordinator } from "../src/core/SignalCoordinator";
-import type { SignalProcessor } from "../src/core/SignalProcessor";
-import { Flow } from "../src/core/Flow";
-import { createSession, enterFlow, enterStep, historyToEvents } from "../src/utils";
+import { Agent } from "../src/index.js";
+import { ResponsePipeline } from "../src/core/ResponsePipeline.js";
+import { FlowRouter } from "../src/core/FlowRouter.js";
+import { SignalCoordinator } from "../src/core/SignalCoordinator.js";
+import type { SignalProcessor } from "../src/core/SignalProcessor.js";
+import { Flow } from "../src/core/Flow.js";
+import { createSession, enterFlow, enterStep, historyToEvents } from "../src/utils/index.js";
 import type {
     SessionState,
     StructuredSchema,
     GenerateMessageInput,
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
-} from "../src/types";
-import type { AiProvider } from "../src/types/ai";
+} from "../src/types/index.js";
+import type { AiProvider } from "../src/types/ai.js";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
 

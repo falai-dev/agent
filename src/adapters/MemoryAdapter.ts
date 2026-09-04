@@ -13,10 +13,10 @@ import type {
   SessionStatus,
   SessionUpdateOptions,
   CreateSessionData,
-} from "../types";
-import { SessionConflictError } from "../types/errors";
-import { cloneDeep } from "../utils/clone";
-import { createSessionId } from "../utils";
+} from "../types/index.js";
+import { SessionConflictError } from "../types/errors.js";
+import { cloneDeep } from "../utils/clone.js";
+import { createSessionId } from "../utils/index.js";
 
 /**
  * Memory Adapter - Provider-style API for in-memory persistence

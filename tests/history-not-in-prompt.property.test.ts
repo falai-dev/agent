@@ -1,9 +1,9 @@
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import { PromptComposer } from "../src/core/PromptComposer";
-import { createTemplateContext } from "../src/utils/template";
-import { EventKind, MessageRole } from "../src/types/history";
-import type { Event, MessageEventData } from "../src/types/history";
+import { PromptComposer } from "../src/core/PromptComposer.js";
+import { createTemplateContext } from "../src/utils/template.js";
+import { EventKind, MessageRole } from "../src/types/history.js";
+import type { Event, MessageEventData } from "../src/types/history.js";
 
 // --- Arbitraries ---
 

@@ -9,12 +9,12 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { Agent } from "../src/core/Agent";
-import { MemoryAdapter } from "../src/adapters/MemoryAdapter";
-import { MockProvider, MockProviderFactory } from "./mock-provider";
-import { createSession } from "../src/utils/session";
-import type { Directive } from "../src/types";
-import type { ToolContext } from "../src/types/tool";
+import { Agent } from "../src/core/Agent.js";
+import { MemoryAdapter } from "../src/adapters/MemoryAdapter.js";
+import { MockProvider, MockProviderFactory } from "./mock-provider.js";
+import { createSession } from "../src/utils/session.js";
+import type { Directive } from "../src/types/index.js";
+import type { ToolContext } from "../src/types/tool.js";
 
 interface TestContext {
     userId: string;

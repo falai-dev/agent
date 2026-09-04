@@ -5,9 +5,9 @@
  * Directives are plain object literals; this namespace provides runtime utilities only.
  */
 
-import type { Directive } from "../types/flow";
-import type { SessionState } from "../types/session";
-import { FlowConfigurationError } from "./Step";
+import type { Directive } from "../types/flow.js";
+import type { SessionState } from "../types/session.js";
+import { FlowConfigurationError } from "./Step.js";
 
 // ─── Position field metadata ─────────────────────────────────────────────────
 

@@ -11,11 +11,11 @@
  * **Validates: Requirements 25.1–25.7, 17.9**
  */
 import { describe, test, expect } from "bun:test";
-import { Agent, FlowConfigurationError, createSession } from "../src/index";
-import { Step } from "../src/core/Step";
-import { MockProvider } from "./mock-provider";
-import type { SessionState } from "../src/types/session";
-import type { HistoryItem } from "../src/types";
+import { Agent, FlowConfigurationError, createSession } from "../src/index.js";
+import { Step } from "../src/core/Step.js";
+import { MockProvider } from "./mock-provider.js";
+import type { SessionState } from "../src/types/session.js";
+import type { HistoryItem } from "../src/types/index.js";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
 

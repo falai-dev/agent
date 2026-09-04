@@ -26,10 +26,10 @@ import type {
   SessionStatus,
   PersistenceAdapter,
   SessionUpdateOptions,
-} from "../types";
-import { SessionConflictError } from "../types/errors";
-import { createSessionId } from "../utils";
-import { deserializeSessionRow } from "./sessionRow";
+} from "../types/index.js";
+import { SessionConflictError } from "../types/errors.js";
+import { createSessionId } from "../utils/index.js";
+import { deserializeSessionRow } from "./sessionRow.js";
 
 /**
  * PostgreSQL query result interface

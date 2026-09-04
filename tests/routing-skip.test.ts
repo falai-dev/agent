@@ -9,9 +9,9 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { Agent, createSession, enterFlow, enterStep } from "../src/index";
-import type { SessionState, GenerateMessageInput, GenerateMessageOutput, GenerateMessageStreamChunk } from "../src/types";
-import type { AiProvider } from "../src/types/ai";
+import { Agent, createSession, enterFlow, enterStep } from "../src/index.js";
+import type { SessionState, GenerateMessageInput, GenerateMessageOutput, GenerateMessageStreamChunk } from "../src/types/index.js";
+import type { AiProvider } from "../src/types/ai.js";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
 

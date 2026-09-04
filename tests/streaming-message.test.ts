@@ -7,7 +7,7 @@
  */
 import { expect, test, describe } from "bun:test";
 
-import { extractMessageSoFar, StreamingMessageDecoder } from "../src/utils/streamingMessage";
+import { extractMessageSoFar, StreamingMessageDecoder } from "../src/utils/streamingMessage.js";
 
 /** Feed a string one character at a time; assert the message-so-far is always a clean prefix. */
 function streamCharByChar(full: string): { messages: string[]; finalDelta: string } {

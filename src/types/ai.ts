@@ -3,7 +3,7 @@
  */
 
 import type { Effort } from "@providerkit/core";
-import type { HistoryItem } from "./history";
+import type { HistoryItem } from "./history.js";
 
 /**
  * How hard the model thinks before answering.

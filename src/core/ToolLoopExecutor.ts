@@ -22,13 +22,13 @@ import type {
     HistoryItem,
     SessionState,
     ToolCallRequest,
-} from "../types";
-import type { Flow } from "./Flow";
-import type { Step } from "./Step";
-import type { ToolManager } from "./ToolManager";
-import { ResponseGenerationError } from "./ResponseGenerationError";
-import { flow } from "./flow-namespace";
-import { historyToEvents, logger, serializeToolResult, assistantMessage, toolMessage } from "../utils";
+} from "../types/index.js";
+import type { Flow } from "./Flow.js";
+import type { Step } from "./Step.js";
+import type { ToolManager } from "./ToolManager.js";
+import { ResponseGenerationError } from "./ResponseGenerationError.js";
+import { flow } from "./flow-namespace.js";
+import { historyToEvents, logger, serializeToolResult, assistantMessage, toolMessage } from "../utils/index.js";
 
 /**
  * One attempted tool execution, keyed by CALL (not tool name): parallel or

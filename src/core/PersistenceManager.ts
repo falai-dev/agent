@@ -17,10 +17,10 @@ import type {
   History,
   PersistenceAdapter,
   CollectedStateData,
-} from "../types";
-import { createSession, sessionStepToData, sessionDataToStep, logger } from "../utils";
-import { SessionConflictError } from "../types/errors";
-import { convertMessagesToHistory } from "./Events";
+} from "../types/index.js";
+import { createSession, sessionStepToData, sessionDataToStep, logger } from "../utils/index.js";
+import { SessionConflictError } from "../types/errors.js";
+import { convertMessagesToHistory } from "./Events.js";
 
 /**
  * Manager for handling persistence operations

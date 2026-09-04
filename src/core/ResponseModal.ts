@@ -23,30 +23,30 @@ import type {
     Term,
     StructuredSchema,
     CompactionOptions,
-} from "../types";
-import type { SignalFiring } from "../types/signals";
-import type { SessionManager } from "./SessionManager";
-import type { SignalProcessor } from "./SignalProcessor";
-import type { PromptSectionCache } from "./PromptSectionCache";
-import type { FlowRouter } from "./FlowRouter";
-import type { PersistenceManager } from "./PersistenceManager";
-import type { Flow } from "./Flow";
-import { Step } from "./Step";
-import { ResponseEngine } from "./ResponseEngine";
-import { ResponsePipeline } from "./ResponsePipeline";
-import { AutoChainExecutor, type AutoChainResult } from "./AutoChainExecutor";
-import { StepLifecycle } from "./StepLifecycle";
-import { SessionFinalizer } from "./SessionFinalizer";
-import { ToolLoopExecutor } from "./ToolLoopExecutor";
-import { flow } from "./flow-namespace";
-import { SignalCoordinator } from "./SignalCoordinator";
-import { ResponseGenerationError } from "./ResponseGenerationError";
-import { ProviderError, SessionConflictError } from "../types/errors";
-import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render, userMessage, assistantMessage } from "../utils";
-import { createTemplateContext } from "../utils/template";
-import { StreamingMessageDecoder } from "../utils/streamingMessage";
-import { tryParseJSONResponse } from "../utils/json";
-import type { ToolManager } from "./ToolManager";
+} from "../types/index.js";
+import type { SignalFiring } from "../types/signals.js";
+import type { SessionManager } from "./SessionManager.js";
+import type { SignalProcessor } from "./SignalProcessor.js";
+import type { PromptSectionCache } from "./PromptSectionCache.js";
+import type { FlowRouter } from "./FlowRouter.js";
+import type { PersistenceManager } from "./PersistenceManager.js";
+import type { Flow } from "./Flow.js";
+import { Step } from "./Step.js";
+import { ResponseEngine } from "./ResponseEngine.js";
+import { ResponsePipeline } from "./ResponsePipeline.js";
+import { AutoChainExecutor, type AutoChainResult } from "./AutoChainExecutor.js";
+import { StepLifecycle } from "./StepLifecycle.js";
+import { SessionFinalizer } from "./SessionFinalizer.js";
+import { ToolLoopExecutor } from "./ToolLoopExecutor.js";
+import { flow } from "./flow-namespace.js";
+import { SignalCoordinator } from "./SignalCoordinator.js";
+import { ResponseGenerationError } from "./ResponseGenerationError.js";
+import { ProviderError, SessionConflictError } from "../types/errors.js";
+import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render, userMessage, assistantMessage } from "../utils/index.js";
+import { createTemplateContext } from "../utils/template.js";
+import { StreamingMessageDecoder } from "../utils/streamingMessage.js";
+import { tryParseJSONResponse } from "../utils/json.js";
+import type { ToolManager } from "./ToolManager.js";
 
 /**
  * The narrow surface ResponseModal (and its collaborators) need from the

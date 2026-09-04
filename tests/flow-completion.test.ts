@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Agent } from "../src";
-import { MockProviderFactory } from "./mock-provider";
+import { Agent } from "../src/index.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 interface DemoData {
     username: string;

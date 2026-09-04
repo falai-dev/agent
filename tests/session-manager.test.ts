@@ -15,7 +15,7 @@ import {
   UserHistoryItem,
   type SessionState,
   type History,
-} from "../src/index";
+} from "../src/index.js";
 
 // Test data interfaces
 interface TestData {

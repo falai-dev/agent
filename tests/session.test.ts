@@ -11,9 +11,9 @@ import {
   SessionManager,
   PersistenceManager,
   type SessionState,
-} from "../src/index";
-import { cloneDeep } from "../src/utils/clone";
-import { MockProviderFactory } from "./mock-provider";
+} from "../src/index.js";
+import { cloneDeep } from "../src/utils/clone.js";
+import { MockProviderFactory } from "./mock-provider.js";
 
 // Test data types for agent-level data collection
 interface SupportTicketData {

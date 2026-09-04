@@ -7,9 +7,9 @@
 
 import { expect, test, describe } from "bun:test";
 
-import type { RespondParams } from "../src/core/ResponseModal";
-import type { AgentStructuredResponse } from "../src/types/ai";
-import type { SessionState } from "../src/types";
+import type { RespondParams } from "../src/core/ResponseModal.js";
+import type { AgentStructuredResponse } from "../src/types/ai.js";
+import type { SessionState } from "../src/types/index.js";
 
 // Test context and data types
 interface TestContext {

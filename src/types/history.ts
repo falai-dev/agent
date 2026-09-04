@@ -16,7 +16,7 @@ export enum MessageRole {
   SYSTEM = "system",
 }
 
-import type { SessionState } from "./session";
+import type { SessionState } from "./session.js";
 
 /**
  * Types of events in the interaction history

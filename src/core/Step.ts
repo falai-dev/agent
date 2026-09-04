@@ -9,15 +9,15 @@ import type {
   Instruction,
   Tool,
   PrepareResult,
-} from "../types";
-import type { SessionState } from "../types/session";
-import type { StepResult, BranchSpec, BranchResult } from "../types/flow";
-import { ToolScope, Template, TemplateContext } from "../types";
-import type { ConditionWhen, ConditionIf } from "../types/flow";
-import { generateStepId, logger } from "../utils";
-import { splitWhenConditions } from "../utils/condition";
-import { Agent } from './Agent'
-import { flow } from "./flow-namespace";
+} from "../types/index.js";
+import type { SessionState } from "../types/session.js";
+import type { StepResult, BranchSpec, BranchResult } from "../types/flow.js";
+import { ToolScope, Template, TemplateContext } from "../types/index.js";
+import type { ConditionWhen, ConditionIf } from "../types/flow.js";
+import { generateStepId, logger } from "../utils/index.js";
+import { splitWhenConditions } from "../utils/condition.js";
+import { Agent } from './Agent.js'
+import { flow } from "./flow-namespace.js";
 
 /**
  * Error thrown when a step's configuration violates auto-step constraints.

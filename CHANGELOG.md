@@ -16,7 +16,7 @@ All notable changes to `@falai/agent` will be documented in this file.
 
 - **`retryConfig.timeout` now bounds SILENCE, not the whole call.** It was a total wall-clock cap on a non-streaming attempt, so a healthy but long generation died at the one-minute mark. It is now the gap allowed before the first byte and between any two after it. A request that never gets a reply still fails at the same moment; one that is steadily producing tokens is left alone. Same field, same default (60s).
 
-- **Node 22+.** Node 18 reached end of life in April 2025 and Node 20 in April 2026. The floor is now declared in `engines` rather than implied.
+- **Node 22.12+.** Node 18 reached end of life in April 2025 and Node 20 in April 2026, so the floor is now declared in `engines` rather than implied. It is 22.12 and not 22 because the CJS build `require()`s `@providerkit/core`, which is ESM-only — `require(esm)` is what makes that work, and it landed in 22.12.
 
 ### Added
 
@@ -25,6 +25,8 @@ All notable changes to `@falai/agent` will be documented in this file.
 - **`ProviderAdapter` is exported.** Subclass it to bind any `@providerkit/core` provider to this framework's seam.
 
 ### Fixed
+
+- **`import` from this package now works under plain Node.** The ESM build re-exported its own modules without file extensions (`export { Agent } from "./core/Agent"`), which Node's ESM resolver refuses to guess — so `import { createAgent } from "@falai/agent"` threw `ERR_MODULE_NOT_FOUND` on the first specifier it hit. This was true of every 2.x release too, not just this one: bundlers resolve an extensionless specifier and the CJS entry guesses the extension, so the only consumers who ever hit it were the ones running the ESM build directly, and nothing here caught it — the tests run off source, under bun, which guesses as well. All 392 relative specifiers are explicit now, `tsconfig.json` is on `node16` resolution so tsc rejects an omission rather than emitting it, and `bun run build` ends by loading both built entries under real Node.
 
 - **A branch that parks on a step of its own flow no longer kills the turn.** The router calls "flow complete" from the linear chain alone — this step has no successor, so it is an implicit terminus — and it decides that *before* branches run. `determineNextStep` was meant to let branches override that verdict, but it only did so when the branch changed FLOW. A branch resolving to a step of the current flow (`then: '<stepId>'`, `then: { goToStep: '<stepId>' }`, `then: { reset: true }`) therefore resolved a step the caller immediately discarded: no LLM call, an empty reply, and the flow marked completed — excluded from routing for the rest of the session, so every following message fell through to the fallback path. The verdict now belongs to `determineNextStep`, which clears it whenever a branch resolved a position at all. Parking a flow on its last step — the natural way to hold a conversation open after its goal is met — works as the docs describe it.
 

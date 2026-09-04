@@ -11,12 +11,12 @@
 
 import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
-import { Agent } from "../src/core/Agent";
-import { PromptComposer } from "../src/core/PromptComposer";
-import { PromptSectionCache } from "../src/core/PromptSectionCache";
-import { createTemplateContext } from "../src/utils/template";
-import type { Instruction, ScopedInstructions } from "../src/types/agent";
-import { MockProvider } from "./mock-provider";
+import { Agent } from "../src/core/Agent.js";
+import { PromptComposer } from "../src/core/PromptComposer.js";
+import { PromptSectionCache } from "../src/core/PromptSectionCache.js";
+import { createTemplateContext } from "../src/utils/template.js";
+import type { Instruction, ScopedInstructions } from "../src/types/agent.js";
+import { MockProvider } from "./mock-provider.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

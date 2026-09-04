@@ -6,9 +6,9 @@
  * Validates: Requirements 2.9, 12.6, 24.5
  */
 import { expect, test, describe } from "bun:test";
-import { createPersistedState } from "../src/utils/session";
-import type { SessionState } from "../src/types/session";
-import type { Directive } from "../src/types/flow";
+import { createPersistedState } from "../src/utils/session.js";
+import type { SessionState } from "../src/types/session.js";
+import type { Directive } from "../src/types/flow.js";
 
 describe("createPersistedState", () => {
     const baseSession: SessionState<{ name?: string }> = {

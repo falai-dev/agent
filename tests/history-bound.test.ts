@@ -9,9 +9,9 @@ import { describe, expect, test } from "bun:test";
 import {
     boundConversationHistory,
     DEFAULT_MAX_HISTORY_MESSAGES,
-} from "../src/utils/session";
-import { assistantMessage, toolMessage, userMessage } from "../src/utils/history";
-import type { HistoryItem } from "../src/types/history";
+} from "../src/utils/session.js";
+import { assistantMessage, toolMessage, userMessage } from "../src/utils/history.js";
+import type { HistoryItem } from "../src/types/history.js";
 
 function makeHistory(n: number): HistoryItem[] {
     return Array.from({ length: n }, (_, i) =>

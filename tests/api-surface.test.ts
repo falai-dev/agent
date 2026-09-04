@@ -21,14 +21,14 @@ import {
     createSession,
     enterFlow,
     enterStep,
-} from "../src/index";
-import type { StepRef } from "../src/index";
+} from "../src/index.js";
+import type { StepRef } from "../src/index.js";
 import type {
     GenerateMessageInput,
     GenerateMessageOutput,
     GenerateMessageStreamChunk,
-} from "../src/types";
-import type { AiProvider } from "../src/types/ai";
+} from "../src/types/index.js";
+import type { AiProvider } from "../src/types/ai.js";
 
 // ─── Test types ──────────────────────────────────────────────────────────────
 
@@ -286,12 +286,12 @@ describe("API Surface Integration", () => {
         test("ResponsePipeline is NOT exported from the package", () => {
             // Runtime check: attempt to access ResponsePipeline from the index exports.
             // The public barrel (src/index.ts) should NOT re-export it.
-            const exports = require("../src/index");
+            const exports = require("../src/index.js");
             expect(exports.ResponsePipeline).toBeUndefined();
         });
 
         test("internal classes are not on the public surface", () => {
-            const exports = require("../src/index");
+            const exports = require("../src/index.js");
             // Requirement 15.2: these should NOT be exported
             expect(exports.BatchExecutor).toBeUndefined();
             expect(exports.BatchPromptBuilder).toBeUndefined();
@@ -303,7 +303,7 @@ describe("API Surface Integration", () => {
         });
 
         test("removed v1 types are not on the public surface (Requirement 15.3)", () => {
-            const exports = require("../src/index");
+            const exports = require("../src/index.js");
             expect(exports.FlowDirective).toBeUndefined();
             expect(exports.GoToFlowDirective).toBeUndefined();
             expect(exports.GoToStepDirective).toBeUndefined();
@@ -315,7 +315,7 @@ describe("API Surface Integration", () => {
         });
 
         test("stable surface elements ARE exported (Requirement 15.1)", () => {
-            const exports = require("../src/index");
+            const exports = require("../src/index.js");
             expect(exports.Agent).toBeDefined();
             expect(exports.Flow).toBeDefined();
             expect(exports.Step).toBeDefined();

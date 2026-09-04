@@ -11,7 +11,7 @@ import type {
   GenerateMessageOutput,
   GenerateMessageStreamChunk,
   AgentStructuredResponse,
-} from "../src/types/ai";
+} from "../src/types/ai.js";
 
 /**
  * Mock AI Provider Configuration

@@ -7,8 +7,8 @@
  * directives, available tools) are recomputed on every resolveAll() call.
  */
 
-import type { PromptSectionType, PromptCacheConfig, SectionCompute } from "../types/prompt-cache";
-export type { PromptSectionType, PromptCacheConfig, SectionCompute } from "../types/prompt-cache";
+import type { PromptSectionType, PromptCacheConfig, SectionCompute } from "../types/prompt-cache.js";
+export type { PromptSectionType, PromptCacheConfig, SectionCompute } from "../types/prompt-cache.js";
 
 /** Internal entry tracking a registered section */
 interface PromptSectionEntry {
