@@ -53,8 +53,7 @@
     "prepublishOnly": "bun run lint && bun run typecheck && bun run typecheck:examples && bun run build && bun run test",
     "release:patch": "bun pm version patch && bun publish",
     "release:minor": "bun pm version minor && bun publish",
-    "release:major": "bun pm version major && bun publish && bun run release:pointer",
-    "release:pointer": "node -e \"const v=require('./package.json').version,p='./pointer/package.json',j=require(p);j.version=v;j.dependencies['@falai/agent']='^'+v.split('.')[0]+'.0.0';require('fs').writeFileSync(p,JSON.stringify(j,null,2)+'\\n')\" && cd pointer && bun install && bun publish",
+    "release:major": "bun pm version major && bun publish",
     "release:alpha": "bun publish --tag alpha",
     "release": "bun publish",
     "test": "bun test tests/*.test.ts"

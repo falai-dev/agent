@@ -18,15 +18,10 @@
   hold the line: `tsconfig.json` is on `node16` resolution, so tsc rejects the omission, and
   `bun run build` ends by loading both built entries under real Node.
 - **Package manager:** Bun (`bun.lock` present)
-- **Published name:** `@falai/agent`, and only that. `pointer/` is a separate 6-file package
-  published as the unscoped `falai` — it holds the name (the npm neighbourhood around "falai" is
-  fal.ai's) and re-exports us via a `^3.x` dependency, so both names resolve to ONE hoisted module
-  instance. Never advertise it, never move code into it. The `^3.x` range tracks every patch and
-  minor on its own, so only a **major** has to move it — `release:major` therefore chains
-  `release:pointer`, which rewrites the alias's `version` and dependency range to the new major and
-  publishes it. No other release script touches it, and republishing an identical alias per patch
-  would be pure noise. If that last step fails to resolve the just-published major (registry lag),
-  rerun `bun run release:pointer` alone.
+- **Published name:** `@falai/agent`, and only that. **The unscoped `falai` cannot be published** —
+  npm's typo-squatting guard rejects it with `403 Package name too similar to existing package
+  flat`, and that check is on the registry, so no amount of package content changes the answer.
+  Don't spend another round trip trying; the scope is the only name.
 
 ## Quick Commands
 
@@ -43,7 +38,6 @@
 | Test | `bun test tests/*.test.ts` |
 | Clean | `bun run clean` |
 | Publish current version | `bun run release` |
-| Publish the `falai` alias (automatic on majors) | `bun run release:pointer` |
 
 ## Architecture
 
