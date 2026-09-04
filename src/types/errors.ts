@@ -3,6 +3,23 @@
  */
 
 /**
+ * The normalized provider failure, and the kinds it comes in.
+ *
+ * v3 re-exports these from `@providerkit/core` rather than keeping a second
+ * copy. The taxonomy is wider there — thirteen kinds named by what actually
+ * fixes them, where this package had eight — so a caller can now tell an
+ * exhausted balance from a per-minute throttle, a plan that never included the
+ * API from a wrong key, and an outgrown context window from a bad request.
+ *
+ * Breaking: the kind lives on `error.kind`, not `error.code`, and the spellings
+ * changed with the taxonomy (`rate_limited` is `rate`, `overloaded` is
+ * `overload`, `invalid_request` splits into `invalid`, `context`, `model` and
+ * `content`). `schema_rejected` is gone: nothing ever produced it.
+ */
+export { ProviderError } from "@providerkit/core";
+export type { ErrorKind } from "@providerkit/core";
+
+/**
  * Typed error for not-yet-implemented surface. Subclass of Error (not of
  * FlowConfigurationError) so handlers can distinguish "not yet built" from
  * "misconfigured".
@@ -14,41 +31,6 @@ export class NotImplementedError extends Error {
     constructor(message: string) {
         super(message);
         this.name = 'NotImplementedError';
-    }
-}
-
-/**
- * Normalized error codes for AI provider failures.
- *
- * Providers map their SDK/HTTP errors onto these codes so callers can
- * handle failures uniformly regardless of which provider is configured.
- */
-export type ProviderErrorCode =
-    | 'rate_limited'
-    | 'overloaded'
-    | 'auth'
-    | 'invalid_request'
-    | 'schema_rejected'
-    | 'timeout'
-    | 'network'
-    | 'unknown';
-
-/**
- * Normalized error thrown by AI providers for terminal failures — i.e.
- * after retries and backup models (if any) have been exhausted.
- *
- * The original SDK/HTTP error is preserved as `cause` for debugging and
- * provider-specific handling.
- */
-export class ProviderError extends Error {
-    constructor(
-        public readonly code: ProviderErrorCode,
-        public readonly provider: string,
-        message: string,
-        public readonly cause?: unknown,
-    ) {
-        super(message);
-        this.name = 'ProviderError';
     }
 }
 

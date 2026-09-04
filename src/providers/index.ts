@@ -1,6 +1,9 @@
 /**
- * AI Provider exports
- * Centralized export point for all AI provider implementations
+ * AI provider exports.
+ *
+ * Every provider here is a thin binding over `@providerkit/core`: the vendor
+ * knowledge lives in that package, and these classes supply the naming,
+ * capabilities and construction this framework's seam expects.
  */
 
 export { AnthropicProvider } from "./AnthropicProvider";
@@ -21,16 +24,11 @@ export type { DeepSeekProviderOptions } from "./DeepSeekProvider";
 export { OpenAICompatibleProvider } from "./OpenAICompatibleProvider";
 export type {
   OpenAICompatibleProviderInit,
-  OpenAICompatibleRequestConfig,
   StructuredOutputMode,
 } from "./OpenAICompatibleProvider";
 
 export { createOpenAICompatibleProvider } from "./GenericOpenAICompatibleProvider";
 export type { OpenAICompatibleOptions } from "./GenericOpenAICompatibleProvider";
 
-export {
-  classifyProviderError,
-  isBackupEligible,
-  toProviderError,
-} from "./errorClassification";
-export type { ErrorClassificationOptions } from "./errorClassification";
+export { ProviderAdapter, resolveRetryConfig } from "./ProviderAdapter";
+export type { ProviderAdapterInit, RequestConfig, RetryConfig } from "./ProviderAdapter";

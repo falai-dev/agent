@@ -1,41 +1,29 @@
 /**
- * OpenAI provider implementation with retry and backup models
+ * OpenAI provider. Structured output goes out on the Responses API, which
+ * enforces the schema natively.
  */
-
-import OpenAI from "openai";
 
 import type { ProviderCapabilities } from "../types/ai";
-import {
-  OpenAICompatibleProvider,
-  type OpenAICompatibleRequestConfig,
-} from "./OpenAICompatibleProvider";
+import { OpenAICompatibleProvider } from "./OpenAICompatibleProvider";
+import type { RequestConfig } from "./ProviderAdapter";
 
-/**
- * Configuration options for OpenAI provider
- * Uses types from openai package
- */
 export interface OpenAIProviderOptions {
   /** OpenAI API key */
   apiKey: string;
-  /** Organization ID (optional) */
-  organization?: string;
-  /** Model to use (required) - e.g., "gpt-5.6", "gpt-5.4-mini" */
+  /** Model to use (required) — e.g. "gpt-5.6", "gpt-5.4-mini" */
   model: string;
-  /** Backup models to try if primary fails (default: []) */
+  /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
-  /** Default parameters - uses ChatCompletionCreateParamsNonStreaming from openai package */
-  config?: OpenAICompatibleRequestConfig;
-  /** Retry configuration */
-  retryConfig?: {
-    timeout?: number;
-    retries?: number;
-  };
+  /** Organization id, sent as the `OpenAI-Organization` header */
+  organization?: string;
+  /** Request defaults sent with every call */
+  config?: RequestConfig;
+  /** Idle-stream deadline and retry budget */
+  retryConfig?: { timeout?: number; retries?: number };
+  /** Replacement `fetch`, for tests that script the wire. */
+  fetchImpl?: typeof fetch;
 }
 
-/**
- * OpenAI provider implementation with backup models and retry logic.
- * Structured output uses the responses.parse API (native JSON schema).
- */
 export class OpenAIProvider extends OpenAICompatibleProvider {
   public readonly name = "openai";
   public readonly capabilities: ProviderCapabilities = {
@@ -43,39 +31,27 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
     supportsNativeJsonSchema: true,
     supportsStreaming: true,
     supportsStreamingToolCalls: true,
-    supportsPromptCaching: false,
+    // v3: the shape auto-caches repeated prefixes and now reports the hit
+    // count, which the old adapter never read.
+    supportsPromptCaching: true,
   };
 
-  protected readonly logLabel = "OPENAI";
-  protected readonly displayName = "OpenAI";
-
   constructor(options: OpenAIProviderOptions) {
-    const {
-      apiKey,
-      organization,
-      model,
-      backupModels,
-      config,
-      retryConfig,
-    } = options;
-
-    if (!apiKey) {
-      throw new Error("OpenAI API key is required");
-    }
-
-    if (!model) {
-      throw new Error("Model is required. Example: 'gpt-5.6' or 'gpt-5.5'");
-    }
+    if (!options.apiKey) throw new Error("OpenAI API key is required");
+    if (!options.model) throw new Error("Model is required. Example: 'gpt-5.6' or 'gpt-5.5'");
 
     super({
-      client: new OpenAI({
-        apiKey,
-        organization,
-      }),
-      model,
-      backupModels,
-      config,
-      retryConfig,
+      id: "openai",
+      apiKey: options.apiKey,
+      model: options.model,
+      structuredOutput: "responses_parse",
+      ...(options.organization
+        ? { headers: { "OpenAI-Organization": options.organization } }
+        : {}),
+      ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.config ? { config: options.config } : {}),
+      ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
   }
 }

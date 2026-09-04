@@ -2,31 +2,21 @@
  * AI provider types
  */
 
+import type { Effort } from "@providerkit/core";
 import type { HistoryItem } from "./history";
 
 /**
- * Reasoning/thinking configuration for AI models
+ * How hard the model thinks before answering.
+ *
+ * v3 takes `@providerkit/core`'s effort union, which every provider speaks:
+ * "none" | "low" | "medium" | "high" | "max". Absent means the provider's own
+ * default and is never sent. v2's "minimal" is spelled "low"; `summary` and
+ * `includeThoughts` are gone because they are no longer choices — the shapes
+ * that need them get them switched on whenever an effort is set, which is the
+ * only setting that ever produced reasoning output.
  */
 export interface ReasoningConfig {
-  /**
-   * Effort level for reasoning models (OpenAI: gpt-5, o-series)
-   * - minimal: Fastest, least reasoning
-   * - low: Basic reasoning
-   * - medium: Balanced reasoning
-   * - high: Maximum reasoning effort
-   */
-  effort?: "minimal" | "low" | "medium" | "high";
-  /**
-   * Summary detail level of reasoning process
-   * - auto: Model decides
-   * - concise: Brief summary
-   * - detailed: Full reasoning details
-   */
-  summary?: "auto" | "concise" | "detailed";
-  /**
-   * Whether to include thinking/reasoning in response (Gemini)
-   */
-  includeThoughts?: boolean;
+  effort?: Effort;
 }
 
 /**

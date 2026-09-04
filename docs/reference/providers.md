@@ -11,15 +11,17 @@ order: 10
 
 Providers are the strategy plug between an `Agent` and a model vendor. Every provider implements the same `AiProvider` interface, so the Agent itself stays vendor-agnostic. Pass an instance to `createAgent({ provider })` and the agent talks to that vendor for every turn (and for compaction, if you wire it in).
 
-`@falai/agent` ships five built-in providers. All five accept an `apiKey` and a required `model`, support `backupModels` for automatic failover on overload or 5xx, and accept a vendor-typed `config` object that flows through to the underlying SDK.
+`@falai/agent` ships five built-in providers. All five accept an `apiKey` and a required `model`, support `backupModels` for automatic failover, and take the same neutral `RequestConfig` for sampling defaults.
 
-| Provider | Class | Options | SDK |
-|----------|-------|---------|-----|
-| Google Gemini | `GeminiProvider` | `GeminiProviderOptions` | `@google/genai` |
-| OpenAI | `OpenAIProvider` | `OpenAIProviderOptions` | `openai` |
-| Anthropic Claude | `AnthropicProvider` | `AnthropicProviderOptions` | `@anthropic-ai/sdk` |
-| OpenRouter | `OpenRouterProvider` | `OpenRouterProviderOptions` | `openai` (compat) |
-| DeepSeek | `DeepSeekProvider` | `DeepSeekProviderOptions` | `openai` (compat) |
+There are no vendor SDKs behind them. Every provider is a thin binding over [`@providerkit/core`](https://www.npmjs.com/package/@providerkit/core), which speaks each vendor's REST API over `fetch` — so installing this package does not install one vendor's SDK for a consumer who uses another.
+
+| Provider | Class | Options | Wire |
+|----------|-------|---------|------|
+| Google Gemini | `GeminiProvider` | `GeminiProviderOptions` | `generateContent` (SSE) |
+| OpenAI | `OpenAIProvider` | `OpenAIProviderOptions` | Responses API |
+| Anthropic Claude | `AnthropicProvider` | `AnthropicProviderOptions` | Messages API |
+| OpenRouter | `OpenRouterProvider` | `OpenRouterProviderOptions` | chat completions |
+| DeepSeek | `DeepSeekProvider` | `DeepSeekProviderOptions` | chat completions |
 
 ## Capabilities
 
@@ -86,9 +88,10 @@ interface GeminiProviderOptions {
   apiKey: string;
   model: string;
   backupModels?: string[];
-  config?: Partial<GenerateContentConfig>; // from @google/genai
+  baseUrl?: string;
+  config?: RequestConfig;                  // temperature, topP, maxTokens, stopSequences
   retryConfig?: { timeout?: number; retries?: number };
-  client?: GoogleGenAI;                    // pre-configured SDK client override
+  fetchImpl?: typeof fetch;                // scripted wire, for tests
 }
 ```
 
@@ -140,7 +143,7 @@ interface OpenAIProviderOptions {
 | `organization` | `string` | no | — | Forwarded as `OpenAI-Organization`. |
 | `model` | `string` | yes | — | e.g. `"gpt-5.6"`, `"gpt-5.4-mini"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on overload/rate-limit errors. |
-| `config` | OpenAI params | no | — | Defaults for `temperature`, `top_p`, etc. |
+| `config` | `RequestConfig` | no | — | Defaults for `temperature`, `topP`, `maxTokens`, `stopSequences`. |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
 | `retryConfig.retries` | `number` | no | `3` | Total attempts. |
 
@@ -179,7 +182,7 @@ interface AnthropicProviderOptions {
 | `apiKey` | `string` | yes* | — | Throws if empty (unless `client` is set). |
 | `model` | `string` | yes | — | e.g. `"claude-sonnet-5"`, `"claude-opus-5"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on retriable failures (rate limits, overload incl. 529, timeouts, network). |
-| `config` | Anthropic params | no | — | Defaults for `max_tokens`, `system`, etc. The provider sets `max_tokens=4096` if neither `config.max_tokens` nor `parameters.maxOutputTokens` is set. |
+| `config` | `RequestConfig` | no | — | Defaults for `temperature`, `topP`, `maxTokens`, `stopSequences`. `maxTokens` falls back to 4096 if neither it nor `parameters.maxOutputTokens` is set. |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. On streams it also bounds time-to-first-token. |
 | `retryConfig.retries` | `number` | no | `3` | Total attempts. |
 | `client` | `Anthropic` | no | — | Pre-configured SDK client; overrides the internally-constructed one. Intended for tests injecting scripted transports; production callers should pass `apiKey`. |
@@ -190,7 +193,7 @@ interface AnthropicProviderOptions {
 const anthropic = new AnthropicProvider({
   apiKey: process.env.ANTHROPIC_API_KEY!,
   model: "claude-sonnet-5",
-  config: { max_tokens: 8192 },
+  config: { maxTokens: 8192 },
 });
 ```
 
@@ -282,12 +285,11 @@ const deepseek = new DeepSeekProvider({
 
 ## Building a custom OpenAI-compatible provider
 
-Many vendors (Groq, Together, Fireworks, …) expose OpenAI-compatible chat-completions APIs. Instead of implementing `AiProvider` from scratch, subclass the exported `OpenAICompatibleProvider` base class — it handles message/history building, tool-call parsing, streaming chunks, backup-model fallback, retries, schema passthrough, and normalized `ProviderError` wrapping. `OpenAIProvider`, `OpenRouterProvider`, and `DeepSeekProvider` are themselves thin subclasses.
+Many vendors (Groq, Together, Fireworks, …) expose OpenAI-compatible chat-completions APIs. Instead of implementing `AiProvider` from scratch, subclass the exported `OpenAICompatibleProvider` base class — history and tool translation, streaming, tool-call assembly, backup-model fallback, retries and normalized `ProviderError`s all come with it. `OpenAIProvider`, `OpenRouterProvider`, and `DeepSeekProvider` are themselves thin subclasses.
 
-A minimal subclass supplies the configured client, naming, and capabilities:
+A minimal subclass supplies the endpoint, naming, and capabilities:
 
 ```typescript
-import OpenAI from "openai";
 import {
   OpenAICompatibleProvider,
   type ProviderCapabilities,
@@ -303,23 +305,20 @@ export class GroqProvider extends OpenAICompatibleProvider {
     supportsPromptCaching: false,
   };
 
-  protected readonly logLabel = "GROQ";       // tag in log lines
-  protected readonly displayName = "Groq";    // name in retry/error messages
-
   constructor(options: { apiKey: string; model: string; backupModels?: string[] }) {
     super({
-      client: new OpenAI({
-        apiKey: options.apiKey,
-        baseURL: "https://api.groq.com/openai/v1",
-      }),
+      id: "groq",
+      apiKey: options.apiKey,
+      baseUrl: "https://api.groq.com/openai",
       model: options.model,
+      structuredOutput: "json_schema",
       backupModels: options.backupModels,
     });
   }
 }
 ```
 
-That is a complete, working provider. For genuinely vendor-specific behavior, override the protected hooks — `DeepSeekProvider` is the reference pattern: it overrides `executeStructuredGenerate` (no `responses.parse` API), `structuredResponseFormat` (native `json_schema` enforcement), `configureStreamParams` (usage in stream chunks), and `onStreamDelta` (reasoning content on the delta).
+That is a complete, working provider. Vendor-specific wire behaviour is not this layer's job any more: it lives in `@providerkit/core`, which the provider classes are thin bindings over. `DeepSeekProvider` is the reference pattern for what is left here — an id, a base URL, the structured-output mode the endpoint actually supports, and its capabilities. To bind a core provider this package does not ship a class for, subclass `ProviderAdapter` directly.
 
 ## Errors
 
@@ -333,7 +332,11 @@ All five providers share the same construction-time guards and runtime failure m
 | Primary and every backup model fail | `ProviderError` with a normalized `code` | After exhausting retries and `backupModels`. Propagates bare out of `respond()`. |
 | Anthropic streaming with `system: undefined` | Vendor 400 | Set `config.system` or rely on history-derived system messages. |
 
-The retry/backup logic only kicks in for **transient** errors: rate limits (429), overload/availability (500/503, Anthropic's 529, `overloaded`-style codes and messages such as `overloaded`, `unavailable`, `internal error`, or OpenRouter's `capacity`), timeouts, and network faults. Deterministic failures — auth (401/403), invalid requests (400/404/422), and caller aborts — fail fast without burning the retry budget. On streaming calls, only failures *before the first chunk* are retried; `retryConfig.timeout` doubles as the time-to-first-token deadline so a stream that opens and stalls is treated as failed.
+The retry/backup logic only kicks in for **transient** errors: rate limits, overload and availability, timeouts, and network faults. Deterministic failures — a wrong key, an exhausted balance, an invalid request, a caller's abort — fail fast without burning the retry budget. Classification reads the response BODY before its status, because vendors file the same cause under whatever status they like.
+
+Only failures *before the first chunk* are retried: past that the stream is committed, and a retry would replay text the reader has already seen. The same rule governs the walk to a backup model. `retryConfig.timeout` is the silence deadline — the wait allowed before the first byte, and between any two after it — so a stream that opens and stalls is treated as failed while a long, healthy one is left alone.
+
+A model the endpoint will not serve also walks to the next model on the list, which is what the list is for.
 
 ### `ProviderError`
 
@@ -342,24 +345,20 @@ Terminal failures — after retries and backup models are exhausted — throw th
 ```typescript
 import { ProviderError } from "@falai/agent";
 
-type ProviderErrorCode =
-  | 'rate_limited'      // 429-style throttling
-  | 'overloaded'        // capacity / 503 / 529
-  | 'auth'              // invalid or missing credentials
-  | 'invalid_request'   // vendor rejected the request shape
-  | 'schema_rejected'   // structured-output schema rejected
-  | 'timeout'           // per-attempt timeout exhausted
-  | 'network'           // connection-level failure
-  | 'unknown';          // anything unclassified
-
-try {
-  await provider.generateMessage(input);
-} catch (err) {
-  if (err instanceof ProviderError) {
-    console.error(err.provider, err.code); // e.g. "openai" "rate_limited"
-    console.error(err.cause);              // original SDK error
-  }
-}
+type ErrorKind =
+  | 'aborted'      // the caller pressed Stop — never retried
+  | 'timeout'      // our deadline, or a 408
+  | 'network'      // never reached the provider
+  | 'overload'     // theirs and temporary — retry, and try another model
+  | 'rate'         // per-minute throttle — wait, or rotate key or model
+  | 'quota'        // balance or usage window exhausted — waiting will not fix it
+  | 'entitlement'  // the plan never included this API
+  | 'auth'         // the key is wrong, not the request
+  | 'model'        // the model id is not served here
+  | 'context'      // the prompt outgrew the window — send less
+  | 'content'      // safety filter or refusal
+  | 'invalid'      // any other 4xx — a bug in what we sent
+  | 'unknown'
 ```
 
 When the failure surfaces through `agent.respond(...)`, the `ProviderError` propagates **bare** — catch it with `instanceof`, no unwrapping. (On streaming turns, errors arrive wrapped as `ResponseGenerationError` on the final chunk's `error` field, with the original on `.cause`.) See [Errors](./errors.md).

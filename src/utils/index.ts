@@ -57,26 +57,6 @@ export {
 // Logging
 export { LoggerLevel, logger } from "./logger";
 
-// Retry utilities
-export type {
-  RetryOptions,
-  StreamRetryOptions,
-  RetryConfig,
-  BackupFallbackBase,
-  BackupFallbackOptions,
-  StreamBackupFallbackOptions,
-} from "./retry";
-export {
-  retry,
-  withTimeoutAndRetry,
-  withStreamRetry,
-  resolveRetryConfig,
-  combineAbortSignals,
-  withBackupFallback,
-  streamWithBackupFallback,
-  backupFallbackLogging,
-} from "./retry";
-
 // Completion helpers
 export { effectiveMessageText, assertUsableCompletion } from "./completion";
 

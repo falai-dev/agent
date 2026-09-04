@@ -151,7 +151,7 @@ export type {
 
 // Error types
 export { NotImplementedError, SessionConflictError, ProviderError } from "./errors";
-export type { ProviderErrorCode } from "./errors";
+export type { ErrorKind } from "./errors";
 
 // Internal — ConditionTemplate is NOT exported from the public surface in v2.
 // It remains internally for the condition evaluator utility.

@@ -2,6 +2,36 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [3.0.0]
+
+### Changed (BREAKING)
+
+- **The provider layer is now `@providerkit/core`.** The six provider classes keep their names, their constructor options and their place in the public API, but everything underneath them — message building, streaming, tool-call assembly, retry, backup models, error classification — moved into a package built for exactly that job, and the three vendor SDKs went with it. `@anthropic-ai/sdk`, `@google/genai` and `openai` are no longer dependencies of this package: installing `@falai/agent` no longer installs one vendor's SDK for a consumer who uses another. The provider layer went from 3,521 lines to 915.
+
+  The reason this is a major and not an internal change: the seams that used to leak a vendor's types are gone.
+  - `config` was `Partial<ChatCompletionCreateParamsNonStreaming>` (and Anthropic's / Gemini's equivalents). It is now `RequestConfig` — `temperature`, `topP`, `maxTokens`, `stopSequences` — the fields every supported shape actually has. A vendor-specific knob belongs to that vendor's own client. **Migration:** rename `top_p` → `topP`, `max_tokens` → `maxTokens`, `stop` → `stopSequences`; a field outside that set was silently ignored on at least one provider already.
+  - `client` (an injected SDK instance, for tests) is now `fetchImpl`. There is no SDK to inject; a test scripts the bytes the provider really receives.
+  - `ProviderError` and its kinds come from `@providerkit/core`. The kind lives on `error.kind`, not `error.code`, and the taxonomy is wider — thirteen kinds named by what fixes them, where this package had eight. A caller can now tell an exhausted balance from a per-minute throttle, a plan that never included the API from a wrong key, and an outgrown context window from a generic bad request. `rate_limited` is `rate`, `overloaded` is `overload`, and `invalid_request` splits into `invalid`, `context`, `model` and `content`. `schema_rejected` is gone: nothing ever produced it.
+  - `ReasoningConfig` takes the shared effort union — `"none" | "low" | "medium" | "high" | "max"`. **Migration:** `"minimal"` is spelled `"low"`. `summary` and `includeThoughts` are gone; they are no longer choices, because the shapes that need them get them switched on whenever an effort is set, which was the only setting that ever produced reasoning output.
+
+- **`retryConfig.timeout` now bounds SILENCE, not the whole call.** It was a total wall-clock cap on a non-streaming attempt, so a healthy but long generation died at the one-minute mark. It is now the gap allowed before the first byte and between any two after it. A request that never gets a reply still fails at the same moment; one that is steadily producing tokens is left alone. Same field, same default (60s).
+
+- **Node 22+.** Node 18 reached end of life in April 2025 and Node 20 in April 2026. The floor is now declared in `engines` rather than implied.
+
+### Added
+
+- **Prompt-cache accounting.** A turn's metadata now carries `cachedInputTokens`, the cache-hit subset of the prompt — billed far cheaper, and previously not read at all. Anthropic's cache reads and writes are reconciled into the same numbers the OpenAI shapes report, so one usage record means the same thing across providers.
+- **Structured output is enforced on the streaming path too.** Only the non-streaming path could reach a schema-enforcing endpoint before, so streaming silently degraded to plain JSON mode. Both paths now run the same pipeline: `generateMessage` is `generateMessageStream` drained.
+- **`ProviderAdapter` is exported.** Subclass it to bind any `@providerkit/core` provider to this framework's seam.
+
+### Fixed
+
+- **Anthropic structured output was never actually requested.** Anthropic has no native schema mode, and the schema was reaching the request as nothing at all — so the model answered in prose, the parse failed, and the turn returned no structured output while looking like a success. The schema now rides as a system block, placed after the cached one so a per-call schema cannot invalidate the system prompt's cache.
+- **A schema with optional fields no longer 400s on OpenAI.** Strict mode demands every listed property be required and every object closed, all the way down; a flow with a `data` block or a collecting step produces neither. Enforcement is now requested only when the schema can satisfy it.
+- **`jsonSchema: {}` no longer asks for JSON mode.** Compaction's summariser passes an empty schema meaning "no schema"; sent as one it became a schema block with no type, which is a flat 400 — so conversation summarisation silently failed on the shapes that enforce schemas.
+- **Gemini now sends a response schema alongside tools.** It was dropped when both were present, from a 2024-era API constraint that no longer holds.
+- **A model the gateway will not serve walks to the backup model** instead of ending the turn.
+
 ## [2.6.1]
 
 ### Added

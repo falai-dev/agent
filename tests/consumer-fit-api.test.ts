@@ -188,7 +188,7 @@ describe("typed errors propagate", () => {
         const boom: AiProvider = {
             name: "boom",
             capabilities: new MockProvider().capabilities,
-            generateMessage: () => Promise.reject(new ProviderError("rate_limited", "stub", "slow down")),
+            generateMessage: () => Promise.reject(new ProviderError("boom", "rate", "slow down")),
             // eslint-disable-next-line require-yield
             generateMessageStream: async function* () { throw new Error("unused"); },
         } as unknown as AiProvider;
@@ -204,9 +204,10 @@ describe("typed errors propagate", () => {
             await agent.respond({ history: [{ role: "user", content: "hi" }] });
             expect.unreachable();
         } catch (error) {
-            // Bare rethrow: consumers can branch on the normalized code
+            // Bare rethrow: consumers branch on the normalized kind, which in
+            // v3 is the package's own thirteen-member taxonomy.
             expect(error instanceof ProviderError).toBe(true);
-            expect((error as ProviderError).code).toBe("rate_limited");
+            expect((error as ProviderError).kind).toBe("rate");
         }
     });
 

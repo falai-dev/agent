@@ -22,18 +22,16 @@
  *     defaultHeaders: { "api-key": process.env.AZURE_OPENAI_KEY! },
  *   });
  *
- * For OpenAI/OpenRouter (native `responses.parse`) and Anthropic/Gemini, prefer
- * their dedicated provider classes.
+ * For OpenAI, OpenRouter, Anthropic and Gemini, prefer their dedicated
+ * provider classes.
  */
-
-import OpenAI from "openai";
 
 import type { ProviderCapabilities } from "../types/ai";
 import {
   OpenAICompatibleProvider,
-  type OpenAICompatibleRequestConfig,
   type StructuredOutputMode,
 } from "./OpenAICompatibleProvider";
+import type { RequestConfig } from "./ProviderAdapter";
 
 export interface OpenAICompatibleOptions {
   /** Provider identifier, e.g. "azure", "ollama", "groq". */
@@ -46,10 +44,6 @@ export interface OpenAICompatibleOptions {
   model: string;
   /** Backup models to try if the primary fails. */
   backupModels?: string[];
-  /** Human-readable name for error messages. Defaults to `name`. */
-  displayName?: string;
-  /** Uppercase tag for log lines. Defaults to `name.toUpperCase()`. */
-  logLabel?: string;
   /** Capability overrides, merged over the defaults (all true except caching). */
   capabilities?: Partial<ProviderCapabilities>;
   /** Extra request headers (e.g. Azure's `api-key`, a gateway's auth header). */
@@ -61,9 +55,11 @@ export interface OpenAICompatibleOptions {
    */
   structuredOutput?: StructuredOutputMode;
   /** Default request parameters merged into every call. */
-  config?: OpenAICompatibleRequestConfig;
-  /** Per-call timeout (ms) and retry count. */
+  config?: RequestConfig;
+  /** Idle-stream deadline (ms) and retry count. */
   retryConfig?: { timeout?: number; retries?: number };
+  /** Replacement `fetch`, for tests that script the wire. */
+  fetchImpl?: typeof fetch;
 }
 
 /** Sensible defaults for a modern OpenAI-compatible endpoint. */
@@ -85,8 +81,6 @@ const DEFAULT_CAPABILITIES: ProviderCapabilities = {
 class GenericOpenAICompatibleProvider extends OpenAICompatibleProvider {
   public readonly name: string;
   public readonly capabilities: ProviderCapabilities;
-  protected readonly logLabel: string;
-  protected readonly displayName: string;
 
   constructor(options: OpenAICompatibleOptions) {
     if (!options.name) {
@@ -105,23 +99,21 @@ class GenericOpenAICompatibleProvider extends OpenAICompatibleProvider {
     }
 
     super({
-      client: new OpenAI({
-        apiKey: options.apiKey,
-        baseURL: options.baseURL,
-        ...(options.defaultHeaders ? { defaultHeaders: options.defaultHeaders } : {}),
-      }),
+      id: options.name,
+      apiKey: options.apiKey,
+      baseUrl: options.baseURL,
       model: options.model,
-      backupModels: options.backupModels,
-      config: options.config,
-      retryConfig: options.retryConfig,
-      // Arbitrary compatible endpoints rarely have responses.parse; default to
-      // the broadly-supported chat json_schema strategy.
+      // Arbitrary compatible endpoints rarely serve the Responses API; default
+      // to the broadly-supported chat json_schema strategy.
       structuredOutput: options.structuredOutput ?? "json_schema",
+      ...(options.defaultHeaders ? { headers: options.defaultHeaders } : {}),
+      ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.config ? { config: options.config } : {}),
+      ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
 
     this.name = options.name;
-    this.displayName = options.displayName ?? options.name;
-    this.logLabel = options.logLabel ?? options.name.toUpperCase();
     this.capabilities = { ...DEFAULT_CAPABILITIES, ...options.capabilities };
   }
 }

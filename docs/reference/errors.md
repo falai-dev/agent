@@ -32,7 +32,7 @@ class ToolExecutionError      extends Error {
 }
 class NotImplementedError     extends Error { /* name = "NotImplementedError" */ }
 class ProviderError           extends Error {
-  code: ProviderErrorCode;   // 'rate_limited' | 'overloaded' | 'auth' | 'invalid_request'
+  kind: ErrorKind;   // 'rate' | 'overload' | 'quota' | 'entitlement' | 'auth' | 'context' | …
                              // | 'schema_rejected' | 'timeout' | 'network' | 'unknown'
   provider: string;          // e.g. "openai"
   cause?: unknown;           // original SDK/HTTP error
@@ -65,7 +65,7 @@ class DataValidationError     extends Error { errors: ValidationError[] }
 | `ToolExecutionError` | A handler throws, all retries fail, or `validateInput` cannot correct invalid args. | `toolId`, `executionContext`, `cause` | Surface a user-friendly message; optionally `agent.dispatch({ goTo: '<recovery-flow>' })`. |
 | `DataValidationError` | `agent.respond(...)` collects values that violate the declared `schema`. | `errors: ValidationError[]` | Re-prompt for the offending fields, then retry. |
 | `ResponseGenerationError` | A turn fails for any reason other than a typed error the framework rethrows bare (see `ProviderError` below) — provider call failure, malformed structured output, hook failure. Exported; also carries the original error on the native `.cause`. | `cause`, `details.phase`, `details.originalError` | Retry with backoff, fall back to a different provider, or surface a soft failure to the user. |
-| `ProviderError` | A provider call fails terminally — retries and `backupModels` exhausted. Normalized across all vendors. Propagates **bare** out of `respond()` (`instanceof` survives — no unwrapping needed). Streaming turns surface it wrapped on the final chunk's `error`. | `code`, `provider`, `cause` (original SDK error) | Match on `code`: backoff for `rate_limited`/`overloaded`, fix credentials for `auth`, fail fast otherwise. |
+| `ProviderError` | A provider call fails terminally — retries and `backupModels` exhausted. Normalized across all vendors. Propagates **bare** out of `respond()` (`instanceof` survives — no unwrapping needed). Streaming turns surface it wrapped on the final chunk's `error`. | `kind`, `provider`, `status`, `body`, `cause` | Match on `kind`: back off for `rate`/`overload`, top up for `quota`, fix credentials for `auth`, compact for `context`, fail fast otherwise. |
 | `SessionConflictError` | A session save carries a stale `version` — another writer persisted the session after this one loaded it (concurrent `respond()` calls, parallel webhooks, two tabs). | `sessionId`, `expectedVersion`, `actualVersion` | Reload the session and retry the operation, or surface the conflict. |
 | `NotImplementedError` | A reserved option is set to a value this version does not support (e.g. `routerMode: 'embedding'` in v2.0). | `message` | Use a supported value. |
 
@@ -115,9 +115,9 @@ try {
   const response = await agent.respond({ history });
 } catch (err) {
   if (err instanceof ProviderError) {
-    switch (err.code) {
-      case "rate_limited":
-      case "overloaded":
+    switch (err.kind) {
+      case "rate":
+      case "overload":
         return retryWithBackoff();         // transient — wait and retry
       case "auth":
         throw err;                          // config bug — crash loudly

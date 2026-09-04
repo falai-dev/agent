@@ -19,7 +19,7 @@ export { PersistenceManager } from "./core/PersistenceManager";
 export { SessionManager } from "./core/SessionManager";
 export { ToolManager, ToolCreationError, ToolExecutionError } from "./core/ToolManager";
 export { NotImplementedError, SessionConflictError, ProviderError } from "./types/errors";
-export type { ProviderErrorCode } from "./types/errors";
+export type { ErrorKind } from "./types/errors";
 
 
 // Providers
@@ -35,9 +35,20 @@ export { DeepSeekProvider } from "./providers/DeepSeekProvider";
 export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider";
 // Base class for building OpenAI-compatible providers (Groq, Together, etc.)
 export { OpenAICompatibleProvider } from "./providers/OpenAICompatibleProvider";
-export type { StructuredOutputMode } from "./providers/OpenAICompatibleProvider";
+export type {
+  OpenAICompatibleProviderInit,
+  StructuredOutputMode,
+} from "./providers/OpenAICompatibleProvider";
 export { createOpenAICompatibleProvider } from "./providers/GenericOpenAICompatibleProvider";
 export type { OpenAICompatibleOptions } from "./providers/GenericOpenAICompatibleProvider";
+// The bridge every provider above is built on — subclass it to bind any
+// `@providerkit/core` provider to this framework's seam.
+export { ProviderAdapter, resolveRetryConfig } from "./providers/ProviderAdapter";
+export type {
+  ProviderAdapterInit,
+  RequestConfig,
+  RetryConfig,
+} from "./providers/ProviderAdapter";
 
 // Adapters
 export { PrismaAdapter } from "./adapters/PrismaAdapter";
