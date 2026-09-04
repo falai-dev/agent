@@ -18,6 +18,11 @@
   hold the line: `tsconfig.json` is on `node16` resolution, so tsc rejects the omission, and
   `bun run build` ends by loading both built entries under real Node.
 - **Package manager:** Bun (`bun.lock` present)
+- **Published name:** `@falai/agent`, and only that. `pointer/` is a separate 6-file package
+  published as the unscoped `falai` — it holds the name (the npm neighbourhood around "falai" is
+  fal.ai's) and re-exports us via a `^3.x` dependency, so both names resolve to ONE hoisted module
+  instance. Never advertise it, never move code into it. It only needs republishing when the major
+  changes; `cd pointer && bun run check` proves both entries still resolve.
 
 ## Quick Commands
 
@@ -34,6 +39,7 @@
 | Test | `bun test tests/*.test.ts` |
 | Clean | `bun run clean` |
 | Publish current version | `bun run release` |
+| Publish the `falai` alias (majors only) | `cd pointer && bun install && bun run release` |
 
 ## Architecture
 
