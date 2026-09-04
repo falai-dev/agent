@@ -59,6 +59,7 @@ export class AnthropicProvider extends ProviderAdapter {
         id: "anthropic",
         ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
         ...(options.config?.maxTokens ? { maxTokens: options.config.maxTokens } : {}),
+        ...(options.config?.effort ? { effort: options.config.effort } : {}),
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       }),
       model: options.model,

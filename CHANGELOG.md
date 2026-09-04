@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [3.0.1]
+
+### Added
+
+- **`config.effort` — a provider can once again be told not to think.** Every `@providerkit/core` factory takes a bound `effort`, and none of the six provider classes forwarded it, so v3 had no way to reach the one setting that turns thinking off: an absent effort means the model's own dynamic thinking on every shape. That is fine until `maxTokens` is small, because thinking tokens come out of the same budget as the answer — a capped turn could spend the whole allowance thinking and return a completion with no text in it, which the framework correctly reports as a failed turn. `config: { effort: 'none' }` now rides to the wire on all four shapes (`thinkingLevel: MINIMAL` on Gemini, `thinking: { type: 'disabled' }` on DeepSeek, no `reasoning_effort` on OpenAI, a minimum budget on Anthropic). This is what v2's `thinkingConfig: { thinkingBudget: 0 }` migrates to.
+
 ## [3.0.0]
 
 ### Changed (BREAKING)

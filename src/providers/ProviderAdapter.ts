@@ -28,6 +28,7 @@ import {
   watchChunks,
   withStreamRetry,
   type ChatMessage,
+  type Effort,
   type JsonObjectSchema,
   type Provider,
   type ProviderChunk,
@@ -91,6 +92,14 @@ export interface RequestConfig {
   topP?: number;
   maxTokens?: number;
   stopSequences?: string[];
+  /**
+   * How hard the model thinks, bound as this provider's default. Absent means
+   * the model's own dynamic thinking, which is what every shape does when the
+   * field is never sent — so `"none"` is the only way to say *don't*, and it
+   * matters most under a small `maxTokens`, where thinking tokens come out of
+   * the same budget as the answer and can consume all of it.
+   */
+  effort?: Effort;
 }
 
 export interface ProviderAdapterInit {

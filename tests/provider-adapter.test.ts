@@ -17,6 +17,7 @@ import { describe, expect, test } from "bun:test";
 import { OpenAIProvider } from "../src/providers/OpenAIProvider.js";
 import { DeepSeekProvider } from "../src/providers/DeepSeekProvider.js";
 import { AnthropicProvider } from "../src/providers/AnthropicProvider.js";
+import { GeminiProvider } from "../src/providers/GeminiProvider.js";
 import { toMessages } from "../src/providers/ProviderAdapter.js";
 import type { GenerateMessageInput } from "../src/types/ai.js";
 import type { HistoryItem } from "../src/types/history.js";
@@ -292,5 +293,60 @@ describe("the adapter is not the OpenAI dialect wearing a hat", () => {
     expect(result.structured).toEqual({ message: "ok" });
     // The Responses shape carries a schema under `text.format`, not `response_format`.
     expect(bodies[0].text).toBeDefined();
+  });
+});
+
+// ── bound effort ──────────────────────────────────────────────────────────
+
+/**
+ * `config.effort` is the only way to tell a model NOT to think. Absent, every
+ * dialect falls back to the model's own dynamic thinking — which under a small
+ * `maxTokens` competes with the answer for the same budget and can eat all of
+ * it, returning a completion with no text in it.
+ */
+describe("a bound effort reaches the wire", () => {
+  const geminiTurn = () =>
+    sse([
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: "ok" }] }, finishReason: "STOP" }],
+      }),
+    ]);
+
+  test("effort 'none' turns thinking off on the Gemini shape", async () => {
+    const { bodies, fetchImpl } = scripted([geminiTurn]);
+    const provider = new GeminiProvider({
+      apiKey: "k",
+      model: "gemini-3.5-flash",
+      config: { temperature: 0.4, effort: "none" },
+      fetchImpl,
+    });
+
+    await provider.generateMessage(input());
+
+    const generationConfig = bodies[0].generationConfig as Record<string, unknown>;
+    expect(generationConfig.thinkingConfig).toEqual({ thinkingLevel: "MINIMAL" });
+  });
+
+  test("effort 'none' turns thinking off on the OpenAI-compatible shape", async () => {
+    const { bodies, fetchImpl } = scripted([() => chat({ content: "ok" })]);
+
+    await deepseek(fetchImpl, { config: { effort: "none" } }).generateMessage(input());
+
+    expect(bodies[0].thinking).toEqual({ type: "disabled" });
+  });
+
+  test("no effort sends nothing at all — the model keeps its own default", async () => {
+    const { bodies, fetchImpl } = scripted([geminiTurn]);
+    const provider = new GeminiProvider({
+      apiKey: "k",
+      model: "gemini-3.5-flash",
+      config: { temperature: 0.4 },
+      fetchImpl,
+    });
+
+    await provider.generateMessage(input());
+
+    const generationConfig = bodies[0].generationConfig as Record<string, unknown>;
+    expect(generationConfig.thinkingConfig).toBeUndefined();
   });
 });

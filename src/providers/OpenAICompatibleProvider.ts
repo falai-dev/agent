@@ -63,6 +63,7 @@ function buildProvider(init: OpenAICompatibleProviderInit, mode: StructuredOutpu
       ...(init.baseUrl ? { baseUrl: `${init.baseUrl}` } : {}),
       ...(init.headers ? { headers: init.headers } : {}),
       ...(init.config?.maxTokens ? { maxTokens: init.config.maxTokens } : {}),
+      ...(init.config?.effort ? { effort: init.config.effort } : {}),
       ...(init.fetchImpl ? { fetchImpl: init.fetchImpl } : {}),
     });
   }
@@ -74,6 +75,7 @@ function buildProvider(init: OpenAICompatibleProviderInit, mode: StructuredOutpu
     ...(init.baseUrl ? { baseUrl: init.baseUrl } : {}),
     ...(init.headers ? { headers: init.headers } : {}),
     ...(init.config?.maxTokens ? { maxTokens: init.config.maxTokens } : {}),
+    ...(init.config?.effort ? { effort: init.config.effort } : {}),
     ...(init.providerOrder ? { providerOrder: init.providerOrder } : {}),
     ...(init.fetchImpl ? { fetchImpl: init.fetchImpl } : {}),
   });
