@@ -92,7 +92,7 @@
   },
   "dependencies": {
     "loglevel": "^1.9.2",
-    "@providerkit/core": "file:../../providerkit/core"
+    "@providerkit/core": "^0.4.0"
   },
   "peerDependencies": {
     "@opensearch-project/opensearch": "^2.0.0",
