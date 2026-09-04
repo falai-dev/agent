@@ -114,7 +114,10 @@ All implement `PersistenceAdapter` interface. All are optional peer dependencies
 - **Error format:** `[ErrorClass] what: why. how to fix.` — typed error classes (`FlowConfigurationError`, `ToolCreationError`, `ToolExecutionError`, `NotImplementedError`).
 - **Naming:** Classes are PascalCase, files match their default export. Utilities are camelCase.
 - **Exports:** Everything public goes through `src/index.ts`. No deep imports from consumers.
-- **Path aliases:** `@/types`, `@core/*`, `@/providers/*`, `@utils/*`, `@/constants` (tsconfig paths).
+- **No path aliases.** `tsconfig.json` used to declare six (`@core/*`, `@utils/*`, one of them
+  `@types/*`, which shadowed the real scope); nothing in `src`, `tests` or `examples` imported a
+  single one, and under `node16` resolution they pointed at extensionless targets. Removed —
+  relative imports only, each with its `.js` extension.
 - **Logging:** Uses `loglevel` library. Debug logging gated by `debug: true` on agent options.
 
 ## Key Patterns
