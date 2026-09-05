@@ -2,6 +2,15 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [3.1.1]
+
+### Fixed
+
+- **On OpenRouter, `effort: 'none'` now really means none, and `'max'` reaches the gateway's top tier.** The 3.1.0 note below says OpenRouter floors `none` at `low`; that was true of the `@providerkit/core` it shipped against and is retracted here. The floor was built on reading one field's 400 onto another — that gateway does refuse `reasoning: { enabled: false }` on a model that always thinks, but `reasoning: { effort: 'none' }` is a value its own enum takes, and an effort a model cannot honour is mapped to the nearest rather than refused. So a turn that asked not to think was budgeting for a `low` pass it never ordered, which is the whole failure `config.effort` was added to prevent: a capped `maxTokens` spent on invisible reasoning. That same enum runs `xhigh > high > medium > low > minimal > none`, so `max` no longer clamps to `high` there either — 0.95 of the thinking budget instead of 0.8.
+- **A structured-output request now describes the shape it wants on the gateways.** Every provider on the OpenAI dialect that is not OpenAI itself — OpenRouter, DeepSeek, GLM, Kimi, Groq — went out as `response_format: { type: 'json_object' }` and nothing more, which asks for valid JSON and says nothing at all about which JSON. A step with a `jsonSchema` got back syntactically perfect JSON in a shape nobody asked for: the parse succeeded and the step received an object with none of the fields it declared, on the happy path, where no retry looks and no error is recorded. The schema now rides as a system message wherever the endpoint cannot enforce it natively.
+
+Both arrive with the dependency floor, raised to `@providerkit/core@^0.4.3`. Nothing in this package's own API moved.
+
 ## [3.1.0]
 
 ### Added
