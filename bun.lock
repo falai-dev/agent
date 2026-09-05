@@ -5,7 +5,7 @@
     "": {
       "name": "@falai/agent",
       "dependencies": {
-        "@providerkit/core": "^0.4.1",
+        "@providerkit/core": "^0.4.2",
         "loglevel": "^1.9.2",
       },
       "devDependencies": {
@@ -69,7 +69,7 @@
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
-    "@providerkit/core": ["@providerkit/core@0.4.1", "", { "peerDependencies": { "zod": "^4" }, "optionalPeers": ["zod"] }, "sha512-UeArf3aEkbPzINbAMy6+B6bS3i3Wbh1qAdgRsS3GCo6PvApwtAdla06Qz/MvsBpCNIUSs+V8HcvjVUPlyGOLqQ=="],
+    "@providerkit/core": ["@providerkit/core@0.4.2", "", { "peerDependencies": { "zod": "^4" }, "optionalPeers": ["zod"] }, "sha512-HQcFJcBfze9nVVA9KqnFTEVn+TQ6bohCif3ADveVGEEvNwgX+Yc1wHrG4aueclpW/7tkP61451YI253cyK+q3Q=="],
 
     "@types/bun": ["@types/bun@1.3.0", "", { "dependencies": { "bun-types": "1.3.0" } }, "sha512-+lAGCYjXjip2qY375xX/scJeVRmZ5cY0wyHYyCYxNcdEXrQ4AOe3gACgd4iQ8ksOslJtW4VNxBJ8llUwc3a6AA=="],
 

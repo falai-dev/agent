@@ -92,7 +92,7 @@
     "typescript-eslint": "^8.18.2"
   },
   "dependencies": {
-    "@providerkit/core": "^0.4.1",
+    "@providerkit/core": "^0.4.2",
     "loglevel": "^1.9.2"
   },
   "peerDependencies": {

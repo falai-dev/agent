@@ -379,13 +379,17 @@ describe("a bound effort reaches the wire", () => {
   });
 
   /**
-   * Not a bug — pinned so nobody "corrects" it into "none". Models behind this
-   * gateway that always think refuse `reasoning.enabled: false` outright (GLM
-   * answers 400 "Reasoning is mandatory for this endpoint"), so the floor is
-   * measured against the live endpoint: zero is not reachable on OpenRouter,
-   * and a fork routing through it must budget for one `low` thinking pass.
+   * This pinned a `low` floor until @providerkit/core 0.4.2, on the reasoning
+   * that GLM answers 400 "Reasoning is mandatory for this endpoint" — which it
+   * does, but to `reasoning.enabled: false`, a different field that nothing
+   * sends. `none` is a member of OpenRouter's own effort enum
+   * (xhigh|high|medium|low|minimal|none) and an unsupported level is mapped to
+   * the nearest rather than refused, so the floor was not protecting a request
+   * from being rejected — it was buying a thinking pass on every turn that
+   * asked for none. Zero IS reachable here; what is unreachable is the
+   * `enabled` flag.
    */
-  test("OpenRouter floors 'none' at low, because that wire has no off switch", async () => {
+  test("OpenRouter takes 'none' — the refusal it rejects is the `enabled` flag", async () => {
     const { bodies, fetchImpl } = scripted([() => chat({ content: "ok" })]);
 
     await new OpenRouterProvider({
@@ -395,7 +399,8 @@ describe("a bound effort reaches the wire", () => {
       fetchImpl,
     }).generateMessage(input());
 
-    expect(bodies[0].reasoning).toEqual({ effort: "low" });
+    expect(bodies[0].reasoning).toEqual({ effort: "none" });
+    expect(bodies[0].reasoning).not.toHaveProperty("enabled");
   });
 
   test("no effort sends nothing at all — the model keeps its own default", async () => {
