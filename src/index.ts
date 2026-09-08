@@ -36,6 +36,7 @@ export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider.js";
 // Base class for building OpenAI-compatible providers (Groq, Together, etc.)
 export { OpenAICompatibleProvider } from "./providers/OpenAICompatibleProvider.js";
 export type {
+  JsonWithTools,
   OpenAICompatibleProviderInit,
   StructuredOutputMode,
 } from "./providers/OpenAICompatibleProvider.js";
@@ -44,6 +45,9 @@ export type { OpenAICompatibleOptions } from "./providers/GenericOpenAICompatibl
 // The bridge every provider above is built on — subclass it to bind any
 // `@providerkit/core` provider to this framework's seam.
 export { ProviderAdapter, resolveRetryConfig } from "./providers/ProviderAdapter.js";
+// The probe's own shapes, re-exported so a consumer reading `probeJsonWithTools`
+// off a provider does not have to add `@providerkit/core` to see its result.
+export type { JsonWithToolsProbe, ProbeOptions } from "@providerkit/core";
 export type {
   ProviderAdapterInit,
   RequestConfig,

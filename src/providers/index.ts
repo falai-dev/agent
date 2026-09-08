@@ -23,6 +23,7 @@ export type { DeepSeekProviderOptions } from "./DeepSeekProvider.js";
 
 export { OpenAICompatibleProvider } from "./OpenAICompatibleProvider.js";
 export type {
+  JsonWithTools,
   OpenAICompatibleProviderInit,
   StructuredOutputMode,
 } from "./OpenAICompatibleProvider.js";

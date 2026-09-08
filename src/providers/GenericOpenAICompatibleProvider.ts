@@ -29,6 +29,7 @@
 import type { ProviderCapabilities } from "../types/ai.js";
 import {
   OpenAICompatibleProvider,
+  type JsonWithTools,
   type StructuredOutputMode,
 } from "./OpenAICompatibleProvider.js";
 import type { RequestConfig } from "./ProviderAdapter.js";
@@ -54,6 +55,11 @@ export interface OpenAICompatibleOptions {
    * is OpenAI-only). See {@link StructuredOutputMode}.
    */
   structuredOutput?: StructuredOutputMode;
+  /**
+   * See {@link JsonWithTools}. Only affects calls that carry tools, and the
+   * answer is the model's, not the endpoint's — measure the one you serve.
+   */
+  jsonWithTools?: JsonWithTools;
   /** Default request parameters merged into every call. */
   config?: RequestConfig;
   /** Idle-stream deadline (ms) and retry count. */
@@ -106,6 +112,7 @@ class GenericOpenAICompatibleProvider extends OpenAICompatibleProvider {
       // Arbitrary compatible endpoints rarely serve the Responses API; default
       // to the broadly-supported chat json_schema strategy.
       structuredOutput: options.structuredOutput ?? "json_schema",
+      ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
       ...(options.defaultHeaders ? { headers: options.defaultHeaders } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
       ...(options.config ? { config: options.config } : {}),

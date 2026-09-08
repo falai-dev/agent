@@ -5,7 +5,7 @@
  */
 
 import type { ProviderCapabilities } from "../types/ai.js";
-import { OpenAICompatibleProvider } from "./OpenAICompatibleProvider.js";
+import { OpenAICompatibleProvider, type JsonWithTools } from "./OpenAICompatibleProvider.js";
 import type { RequestConfig } from "./ProviderAdapter.js";
 
 export interface DeepSeekProviderOptions {
@@ -19,6 +19,12 @@ export interface DeepSeekProviderOptions {
   baseURL?: string;
   /** Request defaults sent with every call */
   config?: RequestConfig;
+  /**
+   * See {@link JsonWithTools} — and reach for it here first. The measured
+   * DeepSeek flash models called a tool 0/5 with the schema on the response
+   * format, and narrated it instead.
+   */
+  jsonWithTools?: JsonWithTools;
   /** Idle-stream deadline and retry budget */
   retryConfig?: { timeout?: number; retries?: number };
   /** Replacement `fetch`, for tests that script the wire. */
@@ -48,6 +54,7 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
       model: options.model,
       // No Responses API here; chat completions enforces the schema natively.
       structuredOutput: "json_schema",
+      ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
       ...(options.config ? { config: options.config } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),

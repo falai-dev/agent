@@ -22,6 +22,7 @@ import {
   ProviderError,
   classify,
   isBackupEligible,
+  probeJsonWithTools,
   requireContent,
   streamWatch,
   streamWithBackupModels,
@@ -30,6 +31,8 @@ import {
   type ChatMessage,
   type Effort,
   type JsonObjectSchema,
+  type JsonWithToolsProbe,
+  type ProbeOptions,
   type Provider,
   type ProviderChunk,
   type StreamOptions,
@@ -258,6 +261,29 @@ export abstract class ProviderAdapter implements AiProvider {
     this.primaryModel = init.model;
     this.backupModels = init.backupModels ?? [];
     this.retryConfig = resolveRetryConfig(init.retryConfig);
+  }
+
+  /**
+   * Ask this provider's MODEL whether it can still call a tool while its output
+   * is pinned to a schema — the shape every turn here sends, because that is how
+   * `message` and the step's `collect` fields come back.
+   *
+   * Some models cannot, and they do not report it: the call has nowhere to go,
+   * so the model narrates it ("let me look that up for you") and stops. On the
+   * wire the turn succeeded. Downstream it reads as an agent that will not use
+   * its tools, and no instruction fixes it — which is why this is a measurement
+   * rather than a setting to reason about.
+   *
+   * Run it once, at boot, and pass `use` back as `jsonWithTools` (or fail the
+   * boot when it is `null` — that model cannot serve this framework's turns).
+   * Log `calls`: `0/3 and 3/3` is what makes the next model swap's regression
+   * obvious. Costs `samples × 2` short calls, and errors propagate.
+   */
+  async probeJsonWithTools(opts?: ProbeOptions): Promise<JsonWithToolsProbe> {
+    return probeJsonWithTools(this.provider, {
+      model: this.primaryModel,
+      ...(opts ?? {}),
+    });
   }
 
   async generateMessage<TContext = unknown, TStructured = AgentStructuredResponse>(

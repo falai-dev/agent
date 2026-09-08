@@ -49,6 +49,39 @@ The five built-ins:
 
 The two asymmetries: Anthropic reports `supportsNativeJsonSchema: false` because its JSON output is enforced via a prompt instruction, not a native schema mode — and it is the only built-in that reports `supportsPromptCaching: true`.
 
+These flags describe the vendor. What a given **model** does is a separate question, and one of them will cost you a production agent if you guess it — see below.
+
+## When the agent narrates a tool instead of calling it
+
+The symptom: the model answers a turn that clearly needs a tool by *describing* the tool call — _"let me look that price up for you"_ — and stops. The tool handler never runs. It looks like a model with no initiative, and no instruction fixes it.
+
+It is not the prompt. Every turn this framework sends carries a response schema, because that is how `message` and `collect` fields come back. Some models cannot emit a tool call while their output is pinned to a schema: the call has nowhere to go, so they write the announcement instead. Nothing fails, nothing is logged, and the turn succeeds on the wire.
+
+Measured 2026-09-07, same request, sampled:
+
+| model | tool called | with `jsonWithTools: "prompt"` |
+|-------|-------------|-------------------------------|
+| `z-ai/glm-5.3-flash` | 0/10 | 8/8 |
+| `deepseek-v4-flash-0731` | 0/5 | — |
+| `gemini-3.8-flash` | 3/10 | — |
+| `gemini-3.5-flash-lite` | 10/10 | 6/6 |
+| `gpt-5.6-luna` | 10/10 | 6/6 |
+| `qwen3.8-flash` | 10/10 | 1/6 |
+
+`jsonWithTools: "prompt"` on `OpenRouterProvider`, `DeepSeekProvider`, `GeminiProvider` or `createOpenAICompatibleProvider` leaves the response format off the calls that carry tools and sends the schema as prompt there instead. Calls without tools are untouched.
+
+Do not pick it from the table — the qwen row is why. Ask the model, once, at boot:
+
+```typescript
+import { probeJsonWithTools } from "@providerkit/core";
+
+const probe = await probeJsonWithTools(provider);
+// { use: "prompt", calls: { response_format: 0, prompt: 3 }, samples: 3 }
+if (!probe.use) throw new Error("this model cannot use tools with a schema at all");
+```
+
+Log `calls`, not just `use`. `0/3 and 3/3` is what makes the next model swap's regression obvious.
+
 ## Use with createAgent
 
 `createAgent({ provider })` accepts any class that implements `AiProvider`. Swap providers by changing the constructor; nothing else in your agent has to move.
@@ -89,6 +122,7 @@ interface GeminiProviderOptions {
   model: string;
   backupModels?: string[];
   baseUrl?: string;
+  jsonWithTools?: "response_format" | "prompt";
   config?: RequestConfig;                  // temperature, topP, maxTokens, stopSequences
   retryConfig?: { timeout?: number; retries?: number };
   fetchImpl?: typeof fetch;                // scripted wire, for tests
@@ -102,6 +136,7 @@ interface GeminiProviderOptions {
 | `apiKey` | `string` | yes* | — | Throws if empty (unless `client` is set). |
 | `model` | `string` | yes | — | Use the model id, e.g. `"gemini-3.1-pro-preview"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on retriable failures (rate limits, overload, timeouts, network). |
+| `jsonWithTools` | `"response_format" \| "prompt"` | no | `"response_format"` | How the schema rides on calls that also carry tools. `gemini-3.5-flash` and `-flash-lite` need nothing; `gemini-3.8-flash` measured 3/10 — [see above](#when-the-agent-narrates-a-tool-instead-of-calling-it). |
 | `config` | `Partial<GenerateContentConfig>` | no | — | Vendor-typed defaults (e.g. `temperature`, `systemInstruction`). |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. On streams it also bounds time-to-first-token. |
 | `retryConfig.retries` | `number` | no | `3` | Total attempts before giving up. |
@@ -212,6 +247,7 @@ interface OpenRouterProviderOptions {
   backupModels?: string[];
   siteUrl?: string;
   siteName?: string;
+  jsonWithTools?: "response_format" | "prompt";
   config?: Partial<Omit<ChatCompletionCreateParamsNonStreaming, "model" | "messages">>;
   retryConfig?: { timeout?: number; retries?: number };
 }
@@ -226,6 +262,7 @@ interface OpenRouterProviderOptions {
 | `backupModels` | `string[]` | no | `[]` | Tried in order on overload/capacity errors. |
 | `siteUrl` | `string` | no | `""` | Sent as `HTTP-Referer` for OpenRouter rankings. |
 | `siteName` | `string` | no | `""` | Sent as `X-Title` for OpenRouter rankings. |
+| `jsonWithTools` | `"response_format" \| "prompt"` | no | `"response_format"` | How the schema rides on calls that also carry tools. One gateway, hundreds of models, and they disagree — [see above](#when-the-agent-narrates-a-tool-instead-of-calling-it). |
 | `config` | OpenAI params | no | — | OpenAI-shaped defaults (forwarded to OpenRouter). |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |
 | `retryConfig.retries` | `number` | no | `3` | Total attempts. |
@@ -255,6 +292,7 @@ interface DeepSeekProviderOptions {
   model: string;
   backupModels?: string[];
   baseURL?: string;
+  jsonWithTools?: "response_format" | "prompt";
   config?: Partial<Omit<ChatCompletionCreateParamsNonStreaming, "model" | "messages">>;
   retryConfig?: { timeout?: number; retries?: number };
 }
@@ -267,6 +305,7 @@ interface DeepSeekProviderOptions {
 | `apiKey` | `string` | yes | — | Throws if empty. |
 | `model` | `string` | yes | — | e.g. `"deepseek-chat"`, `"deepseek-reasoner"`. |
 | `backupModels` | `string[]` | no | `[]` | Tried in order on overload/rate-limit errors. |
+| `jsonWithTools` | `"response_format" \| "prompt"` | no | `"response_format"` | Reach for it here first: the measured DeepSeek flash models called a tool 0/5 under a response format — [see above](#when-the-agent-narrates-a-tool-instead-of-calling-it). |
 | `baseURL` | `string` | no | `"https://api.deepseek.com"` | Custom endpoint for self-hosted or proxy deployments. |
 | `config` | OpenAI params | no | — | OpenAI-shaped defaults (forwarded to DeepSeek). |
 | `retryConfig.timeout` | `number` | no | `60000` | Per-attempt timeout in ms. |

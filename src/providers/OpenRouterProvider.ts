@@ -3,7 +3,7 @@
  */
 
 import type { ProviderCapabilities } from "../types/ai.js";
-import { OpenAICompatibleProvider } from "./OpenAICompatibleProvider.js";
+import { OpenAICompatibleProvider, type JsonWithTools } from "./OpenAICompatibleProvider.js";
 import type { RequestConfig } from "./ProviderAdapter.js";
 
 export interface OpenRouterProviderOptions {
@@ -24,6 +24,14 @@ export interface OpenRouterProviderOptions {
    * conversation's rounds. Fallbacks stay on: this is a preference, not a lock.
    */
   providerOrder?: string[];
+  /**
+   * See {@link JsonWithTools} — and reach for it here first. One gateway serves
+   * hundreds of models and they do not agree: measured through this provider,
+   * `z-ai/glm-5.3-flash` called a tool 0/10 with the schema on the response
+   * format and 8/8 with it in the prompt, while `qwen3.8-flash` went the other
+   * way, 10/10 → 1/6. Changing `model` can change the right answer here.
+   */
+  jsonWithTools?: JsonWithTools;
   /** Request defaults sent with every call */
   config?: RequestConfig;
   /** Idle-stream deadline and retry budget */
@@ -54,6 +62,7 @@ export class OpenRouterProvider extends OpenAICompatibleProvider {
       // Chat completions rather than the Responses API: this gateway's
       // json_schema passthrough is what its models actually support.
       structuredOutput: "json_schema",
+      ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
       headers: {
         ...(options.siteUrl ? { "HTTP-Referer": options.siteUrl } : {}),
         ...(options.siteName ? { "X-Title": options.siteName } : {}),

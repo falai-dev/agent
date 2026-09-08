@@ -177,6 +177,39 @@ describe("a stream becomes one accumulated turn", () => {
     expect((bodies[0].response_format as { type: string }).type).toBe("json_schema");
   });
 
+  test("jsonWithTools reaches the wire, and only changes the calls carrying tools", async () => {
+    // A response format pins the decoder, and on some models a pinned decoder
+    // cannot emit a tool call at all — so the model narrates the call it could
+    // not make and the turn ends with nothing logged. Measured 2026-09-07:
+    // z-ai/glm-5.3-flash called its tool 0/10 this way and 8/8 without the
+    // format. Whether a model needs it is the model's answer, not ours, which
+    // is why it is a setting the caller passes down rather than a rule here.
+    const schema = {
+      type: "object",
+      properties: { message: { type: "string" } },
+      required: ["message"],
+      additionalProperties: false,
+    };
+    const sent = async (tools?: GenerateMessageInput<undefined>["tools"]) => {
+      const { bodies, fetchImpl } = scripted([() => chat({ content: '{"message":"ok"}' })]);
+      await new OpenRouterProvider({
+        apiKey: "k",
+        model: "z-ai/glm-5.3-flash",
+        jsonWithTools: "prompt",
+        fetchImpl,
+      }).generateMessage(input({ ...(tools ? { tools } : {}), parameters: { jsonSchema: schema } }));
+      return bodies[0];
+    };
+
+    const withTools = await sent([{ id: "search", name: "search", description: "look it up" }]);
+    expect(withTools.response_format).toBeUndefined();
+    // The schema still reaches the model, the one way nothing can suppress.
+    expect(JSON.stringify(withTools.messages)).toContain("message");
+
+    // No tools on the call, no bet to lose: the enforced schema rides as always.
+    expect((await sent()).response_format).toMatchObject({ type: "json_schema" });
+  });
+
   // Compaction asks for a summary with `jsonSchema: {}` — meaning "no schema".
   // Sent as one it becomes a json_schema block with no type, which is a 400.
   test("an empty schema asks for no JSON mode at all", async () => {
