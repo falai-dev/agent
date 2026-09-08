@@ -13,6 +13,7 @@
 import { createGeminiProvider } from "@providerkit/core";
 
 import type { ProviderCapabilities } from "../types/ai.js";
+import type { JsonWithTools } from "./OpenAICompatibleProvider.js";
 import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 
 export interface GeminiProviderOptions {
@@ -24,6 +25,13 @@ export interface GeminiProviderOptions {
   backupModels?: string[];
   /** Any endpoint speaking the Gemini generateContent dialect. */
   baseUrl?: string;
+  /**
+   * See {@link JsonWithTools}. The answer is the MODEL's, not the endpoint's:
+   * `gemini-3.5-flash` and `-flash-lite` called their tool under
+   * `responseJsonSchema` every time, while `gemini-3.8-flash` managed 3/10
+   * (2026-09-07). `probeJsonWithTools()` asks the one you serve.
+   */
+  jsonWithTools?: JsonWithTools;
   /** Request defaults sent with every call */
   config?: RequestConfig;
   /** Idle-stream deadline and retry budget */
@@ -55,6 +63,7 @@ export class GeminiProvider extends ProviderAdapter {
         model: options.model,
         id: "gemini",
         ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+        ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
         ...(options.config?.maxTokens ? { maxTokens: options.config.maxTokens } : {}),
         ...(options.config?.effort ? { effort: options.config.effort } : {}),
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
