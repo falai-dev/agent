@@ -45,7 +45,7 @@ import { ProviderError, SessionConflictError } from "../types/errors.js";
 import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render, userMessage, assistantMessage } from "../utils/index.js";
 import { createTemplateContext } from "../utils/template.js";
 import { StreamingMessageDecoder } from "../utils/streamingMessage.js";
-import { tryParseJSONResponse } from "../utils/json.js";
+import { extractEmbeddedJSONObject, tryParseJSONResponse } from "../utils/json.js";
 import type { ToolManager } from "./ToolManager.js";
 
 /**
@@ -459,31 +459,46 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
     }
 
     /**
-     * Repair-parse a JSON-shaped protocol fragment (truncated output,
-     * fence-wrapped JSON) into a structured payload. Raw protocol fragments
-     * must never surface as the user-visible reply: if the repair parse fails,
-     * fail the turn LOUDLY so the caller's rollback/retry path engages instead
-     * of leaking `{"message": "…` to an end user. Plain prose (not JSON-shaped
-     * at all) never reaches this helper — the call sites gate on the fragment
-     * shape and pass it through untouched.
+     * Recover a structured payload from a schema-mandated response the provider
+     * could not parse. Raw protocol fragments must never surface as the
+     * user-visible reply. Three shapes arrive here:
+     * - a truncated or fence-wrapped envelope → one repair-parse;
+     * - conversational prose FOLLOWED BY the envelope (the model answered
+     *   twice — the observed WhatsApp leak) → recover the embedded envelope,
+     *   whose "message" field is the complete intended reply;
+     * - plain prose with nothing recoverable → `undefined`; the caller passes
+     *   it through untouched. (An envelope truncated mid-stream after prose
+     *   also lands here: the prose is user-worthy and the fragment carries
+     *   nothing recoverable.)
+     * An unrecoverable JSON-SHAPED fragment throws so the turn fails LOUDLY
+     * and the caller's rollback/retry path engages instead of leaking
+     * `{"message": "…` to an end user.
      */
     private salvageStructuredOutput(
         raw: string,
         surface: "turn" | "stream"
-    ): AgentStructuredResponse {
+    ): AgentStructuredResponse | undefined {
         const salvaged = tryParseJSONResponse(raw) as Partial<AgentStructuredResponse> | undefined;
         if (salvaged && typeof salvaged.message === "string") {
             logger.warn(`[ResponseModal] Salvaged malformed structured output from ${surface} via JSON repair parse.`);
             return { ...salvaged, message: salvaged.message };
         }
-        throw ResponseGenerationError.fromError(
-            new Error(
-                "Model returned a schema-mandated response that could not be parsed as JSON. " +
-                `The ${surface} was failed instead of delivering raw protocol output to the user.`
-            ),
-            'structured_output_malformed',
-            { responseSchemaName: 'response_output' }
-        );
+        const embedded = extractEmbeddedJSONObject(raw) as Partial<AgentStructuredResponse> | undefined;
+        if (embedded && typeof embedded.message === "string") {
+            logger.warn(`[ResponseModal] Salvaged structured output embedded after prose from ${surface}.`);
+            return { ...embedded, message: embedded.message };
+        }
+        if (/^\s*(```|{)/.test(raw)) {
+            throw ResponseGenerationError.fromError(
+                new Error(
+                    "Model returned a schema-mandated response that could not be parsed as JSON. " +
+                    `The ${surface} was failed instead of delivering raw protocol output to the user.`
+                ),
+                'structured_output_malformed',
+                { responseSchemaName: 'response_output' }
+            );
+        }
+        return undefined;
     }
 
     /**
@@ -1073,10 +1088,12 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             // rollback/retry path engages instead of leaking `{"message": "…` to
             // an end user. Plain prose (not JSON-shaped at all) still passes
             // through — it is not a protocol fragment.
-            if (!structuredData && responseSchema && message && /^\s*(```|{)/.test(message)) {
+            if (!structuredData && responseSchema && message) {
                 const salvaged = this.salvageStructuredOutput(message, "turn");
-                structuredData = salvaged;
-                message = salvaged.message;
+                if (salvaged) {
+                    structuredData = salvaged;
+                    message = salvaged.message;
+                }
             }
 
             const effectiveResult = structuredData ? { ...result, structured: structuredData } : result;
@@ -1467,12 +1484,15 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
                 // requested but no structured payload arrived, and the accumulated
                 // text is JSON-shaped (a protocol fragment) — repair-parse it or
                 // fail the turn rather than leaking raw output to the user.
-                if (chunk.done && !finalStructured && responseSchema && finalAccumulated && /^\s*(```|{)/.test(finalAccumulated)) {
+                if (chunk.done && !finalStructured && responseSchema && finalAccumulated) {
                     const salvaged = this.salvageStructuredOutput(finalAccumulated, "stream");
-                    finalStructured = salvaged;
-                    finalDelta = salvaged.message.startsWith(finalAccumulated)
-                        ? salvaged.message.slice(finalAccumulated.length)
-                        : salvaged.message;
+                    if (salvaged) {
+                        finalDelta = salvaged.message.startsWith(finalAccumulated)
+                            ? salvaged.message.slice(finalAccumulated.length)
+                            : salvaged.message;
+                        finalStructured = salvaged;
+                        finalAccumulated = salvaged.message;
+                    }
                 }
 
                 // Collect data on the final chunk for any flow step — flow

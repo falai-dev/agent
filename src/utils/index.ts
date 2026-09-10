@@ -69,7 +69,7 @@ export {
 } from "./condition.js";
 
 // JSON utilities
-export { parseJSONResponse, tryParseJSONResponse } from "./json.js";
+export { parseJSONResponse, tryParseJSONResponse, extractEmbeddedJSONObject } from "./json.js";
 
 // Serialization utilities
 export { serializeToolResult, isToolResultLike, extractResultDirectives } from "./serialize.js";

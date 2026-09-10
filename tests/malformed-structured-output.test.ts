@@ -76,4 +76,30 @@ describe("malformed schema-mandated output", () => {
         });
         expect(response.message).toBe("Just a plain sentence from the model.");
     });
+
+    test("prose followed by the protocol envelope unwraps to the envelope's reply", async () => {
+        // The observed WhatsApp leak: the model wrote the conversational reply,
+        // then emitted the protocol envelope repeating it. The raw turn is
+        // neither plain prose nor pure JSON, so neither the parse nor the
+        // JSON-shape gate caught it — only the embedded extraction does.
+        const raw =
+            'Boa noite Danilo! Perfeito, pesquisa é sempre bem-vinda 😄\nSe quiser, te mando os valores.' +
+            '{"message":"Boa noite Danilo! Perfeito, pesquisa é sempre bem-vinda 😄\\nSe quiser, te mando os valores.","intencao":"pesquisa de preços / comparação"}';
+        const agent = makeAgent(raw);
+        const response = await agent.respond({
+            history: [{ role: "user", content: "pesquisada" }],
+        });
+        expect(response.message).toBe(
+            "Boa noite Danilo! Perfeito, pesquisa é sempre bem-vinda 😄\nSe quiser, te mando os valores."
+        );
+        expect(response.message).not.toContain("{");
+    });
+
+    test("prose that merely contains braces passes through untouched", async () => {
+        const agent = makeAgent("Use {chaves} com cuidado.");
+        const response = await agent.respond({
+            history: [{ role: "user", content: "hi" }],
+        });
+        expect(response.message).toBe("Use {chaves} com cuidado.");
+    });
 });
