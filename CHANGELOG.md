@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **The response prompt now shows the model what is already collected.** Pre-extraction runs before a step is chosen and merges what the user's message said into `session.data`, but only the routing prompt ever rendered that data; the response prompt listed the step's fields with no values, so a step whose guideline says "ask which device" asked for a device the user had just named — the extraction call was paid for and its result never reached the model that writes the reply. Each field already present in session data is now marked `← ALREADY KNOWN: "value"` in the Data Collection Rules, with the rule that a known field is never asked for again even when the guideline says to ask, and when every FOCUS field of the current step is known the prompt says the step's questions are done. No skip is implied: a step that greets and collects still runs, it just stops re-asking.
+
 ## [3.1.1]
 
 ### Fixed

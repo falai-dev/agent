@@ -176,6 +176,21 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
       const stepCollectFields = new Set(currentStep?.collect?.map(f => String(f)) || []);
       const fieldDescriptions: string[] = [];
 
+      // Values already in session data (pre-extraction this turn, or earlier
+      // turns). The routing prompt shows them; the response prompt must too,
+      // or the model follows a "ask for X" guideline for an X it already has.
+      const sessionData = (session?.data ?? {}) as Record<string, unknown>;
+      const isKnown = (field: string): boolean => {
+        const value = sessionData[field];
+        return value !== undefined && value !== null && value !== '';
+      };
+      const fieldMarkers = (field: string): string => {
+        let markers = '';
+        if (stepCollectFields.has(field)) markers += ` ← FOCUS FOR THIS STEP`;
+        if (isKnown(field)) markers += ` ← ALREADY KNOWN: ${JSON.stringify(sessionData[field])}`;
+        return markers;
+      };
+
       for (const field of allFlowFields) {
         if (agentSchema?.properties) {
           const fieldSchema = agentSchema.properties[field];
@@ -193,25 +208,19 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
 
             // Add description
             fieldInfo += `: ${fieldDesc}`;
-
-            // Mark if this is the current step's focus
-            if (stepCollectFields.has(field)) {
-              fieldInfo += ` ← FOCUS FOR THIS STEP`;
-            }
+            fieldInfo += fieldMarkers(field);
 
             fieldDescriptions.push(fieldInfo);
           }
         } else {
           // No agent schema - generate dynamic description from field name
-          let fieldInfo = `  • ${field} (string): ${field}`;
-          if (stepCollectFields.has(field)) {
-            fieldInfo += ` ← FOCUS FOR THIS STEP`;
-          }
-          fieldDescriptions.push(fieldInfo);
+          fieldDescriptions.push(`  • ${field} (string): ${field}${fieldMarkers(field)}`);
         }
       }
 
       if (fieldDescriptions.length > 0) {
+        const stepSatisfied =
+          stepCollectFields.size > 0 && [...stepCollectFields].every(isKnown);
         const instruction = [
           `## Data Collection Rules`,
           ``,
@@ -219,6 +228,15 @@ export class ResponseEngine<TContext = unknown, TData = unknown> {
           ``,
           `Available fields to extract:`,
           ...fieldDescriptions,
+          ``,
+          `**Already-known fields:**`,
+          `- A field marked ALREADY KNOWN is settled. NEVER ask the user for it again, even when the guideline above says to ask: acknowledge it and move on to what the step still needs.`,
+          `- The same applies to a field the user's latest message already answers: extract it, do not ask for it.`,
+          ...(stepSatisfied
+            ? [
+              `- Every FOCUS field of this step is already known, so this step's questions are done. Respond to what the user said and move the conversation forward.`,
+            ]
+            : []),
           ``,
           `**How to collect data:**`,
           `1. Read the user's message carefully`,
