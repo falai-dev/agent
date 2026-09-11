@@ -177,6 +177,66 @@ describe("a stream becomes one accumulated turn", () => {
     expect((bodies[0].response_format as { type: string }).type).toBe("json_schema");
   });
 
+  const REPLY_SCHEMA = {
+    jsonSchema: {
+      type: "object",
+      properties: { message: { type: "string" } },
+      required: ["message"],
+      additionalProperties: false,
+    },
+    schemaName: "reply",
+  };
+
+  test("an envelope with raw newlines inside the message is repaired, not passed on as text", async () => {
+    // What a model writes when the schema rode in its PROMPT instead of pinning
+    // the decoder: it pretty-prints, and the line breaks land inside the string
+    // where JSON forbids them. `JSON.parse` alone gives up here, and the caller
+    // then reads the raw envelope as the reply — the 2026-09-11 WhatsApp leak.
+    const raw = '{\n"message": "Boa escolha!\n\u00c0 vista: R$ 3.149"\n}';
+    const { fetchImpl } = scripted([() => chat({ content: raw })]);
+
+    const result = await deepseek(fetchImpl).generateMessage(input({ parameters: REPLY_SCHEMA }));
+
+    expect(result.structured).toEqual({ message: "Boa escolha!\n\u00c0 vista: R$ 3.149" });
+  });
+
+  test("an unreadable envelope is dropped rather than offered as the turn's message", async () => {
+    // Beyond repair (the stray quote moves the string boundary). With a tool
+    // call in the same turn there is still a way forward — the tool results
+    // produce the reply — so the turn survives, but the bytes must not.
+    const raw = '{"message": "R$ 3."149, sem fechar';
+    const { fetchImpl } = scripted([
+      () => chat({ content: raw, tool_calls: [{ index: 0, id: "c1", function: { name: "catalog", arguments: "{}" } }] }),
+    ]);
+
+    const result = await deepseek(fetchImpl).generateMessage(input({ parameters: REPLY_SCHEMA }));
+
+    expect(result.structured?.message).toBe("");
+    expect(result.message).toBe("");
+    expect(result.structured?.toolCalls?.[0]?.toolName).toBe("catalog");
+  });
+
+  test("an unreadable envelope with nothing to fall back on fails the turn", async () => {
+    const { fetchImpl } = scripted([() => chat({ content: '{"message": "R$ 3."149, sem fechar' })]);
+
+    await expect(
+      deepseek(fetchImpl).generateMessage(input({ parameters: REPLY_SCHEMA })),
+    ).rejects.toThrow(/No response from/);
+  });
+
+  test("a plain-text preamble beside a tool call is still the message", async () => {
+    const { fetchImpl } = scripted([
+      () => chat({
+        content: "Deixa eu ver aqui.",
+        tool_calls: [{ index: 0, id: "c1", function: { name: "catalog", arguments: "{}" } }],
+      }),
+    ]);
+
+    const result = await deepseek(fetchImpl).generateMessage(input({ parameters: REPLY_SCHEMA }));
+
+    expect(result.structured?.message).toBe("Deixa eu ver aqui.");
+  });
+
   test("jsonWithTools reaches the wire, and only changes the calls carrying tools", async () => {
     // A response format pins the decoder, and on some models a pinned decoder
     // cannot emit a tool call at all — so the model narrates the call it could

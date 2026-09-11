@@ -2,12 +2,103 @@
  * JSON parsing utilities
  */
 
+/** JSON's own short escapes for the control characters a model actually types. */
+const CONTROL_ESCAPES: Record<string, string> = {
+  "\n": "\\n",
+  "\r": "\\r",
+  "\t": "\\t",
+  "\b": "\\b",
+  "\f": "\\f",
+};
+
+/**
+ * Escape the raw control characters a model left unescaped inside a string
+ * literal.
+ *
+ * JSON forbids a literal newline between quotes. A model whose decoder is
+ * pinned to the schema cannot break that rule, but one merely ASKED for the
+ * envelope in its prompt — which is how a schema rides on any call that also
+ * carries tools — breaks it constantly, because it pretty-prints the reply it
+ * would have sent:
+ *
+ *     {
+ *     "message": "Boa escolha!
+ *     À vista: R$ 3.149"
+ *     }
+ *
+ * `JSON.parse` calls that an unterminated string and gives up, and the whole
+ * envelope travels on as the user-visible reply. Re-escaping the control
+ * characters makes it parse into exactly what the model meant.
+ *
+ * A string ends at the next unescaped quote, so a stray quote inside the
+ * message shifts the boundary and the result fails to parse. That is the
+ * intended outcome: a wrong guess must never become a reply.
+ */
+function escapeControlCharsInStrings(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  for (const ch of text) {
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out += ch;
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      out += ch;
+    } else if (ch === "\\") {
+      escaped = true;
+      out += ch;
+    } else if (ch === '"') {
+      inString = false;
+      out += ch;
+    } else if (ch < " ") {
+      out += CONTROL_ESCAPES[ch] ?? `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+    } else {
+      out += ch;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Parse strictly, then once more with {@link escapeControlCharsInStrings}.
+ * Throws when neither reading is valid JSON.
+ */
+function parseLenient(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (strictError) {
+    try {
+      return JSON.parse(escapeControlCharsInStrings(text));
+    } catch {
+      // The repair is a second reading of the same text, not a different
+      // dialect — so the first violation is the one worth reporting.
+      throw strictError;
+    }
+  }
+}
+
+/**
+ * Whether text is shaped like a protocol envelope rather than a reply to a
+ * person — an opening brace or a code fence. Text that fails to parse AND
+ * looks like this is never user-worthy: it is a broken envelope, and showing
+ * it is the leak this module exists to prevent.
+ */
+export function isJSONShaped(text: string): boolean {
+  return /^\s*(```|\{)/.test(text);
+}
+
 /**
  * Clean and parse JSON response that might be wrapped in markdown code blocks
  * Handles cases like:
  * - ```json\n{...}\n```
  * - ```\n{...}\n```
  * - Plain JSON: {...}
+ * - An object whose string values carry unescaped newlines
  */
 export function parseJSONResponse(text: string): unknown {
   if (!text || typeof text !== 'string') {
@@ -28,7 +119,7 @@ export function parseJSONResponse(text: string): unknown {
 
   // Try to parse the cleaned JSON
   try {
-    return JSON.parse(cleaned);
+    return parseLenient(cleaned);
   } catch (error) {
     throw new Error(`Failed to parse JSON response: ${error instanceof Error ? error.message : String(error)}\nContent: ${cleaned.substring(0, 200)}...`);
   }
@@ -66,7 +157,7 @@ export function extractEmbeddedJSONObject(text: string): Record<string, unknown>
     if (end === -1) continue;
 
     try {
-      const parsed = JSON.parse(text.slice(start, end + 1));
+      const parsed = parseLenient(text.slice(start, end + 1));
       if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }

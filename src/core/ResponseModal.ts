@@ -45,7 +45,7 @@ import { ProviderError, SessionConflictError } from "../types/errors.js";
 import { cloneDeep, mergeCollected, logger, historyToEvents, completeCurrentFlow, render, userMessage, assistantMessage } from "../utils/index.js";
 import { createTemplateContext } from "../utils/template.js";
 import { StreamingMessageDecoder } from "../utils/streamingMessage.js";
-import { extractEmbeddedJSONObject, tryParseJSONResponse } from "../utils/json.js";
+import { extractEmbeddedJSONObject, isJSONShaped, tryParseJSONResponse } from "../utils/json.js";
 import type { ToolManager } from "./ToolManager.js";
 
 /**
@@ -488,7 +488,7 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
             logger.warn(`[ResponseModal] Salvaged structured output embedded after prose from ${surface}.`);
             return { ...embedded, message: embedded.message };
         }
-        if (/^\s*(```|{)/.test(raw)) {
+        if (isJSONShaped(raw)) {
             throw ResponseGenerationError.fromError(
                 new Error(
                     "Model returned a schema-mandated response that could not be parsed as JSON. " +
@@ -1114,8 +1114,19 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             session = toolResult.session;
             toolCalls = toolResult.finalToolCalls;
+            let toolStructured = toolResult.structured;
             if (toolResult.finalMessage) {
-                message = toolResult.finalMessage;
+                // The tool loop's follow-up calls carry the SAME response schema,
+                // and their message replaces the one the guard above already
+                // cleared — so an envelope produced after the tools ran reaches
+                // the user through a path that guard never sees. (Observed
+                // 2026-09-11: a catalog lookup answered, then the closing call
+                // returned `{"message": "…"}` raw to a WhatsApp customer.)
+                const salvaged = responseSchema
+                    ? this.salvageStructuredOutput(toolResult.finalMessage, "turn")
+                    : undefined;
+                message = salvaged?.message ?? toolResult.finalMessage;
+                if (salvaged) toolStructured = salvaged;
             }
 
             // Tool-emitted directives (ctx.dispatch / `{directive}` returns):
@@ -1127,8 +1138,8 @@ export class ResponseModal<TContext = unknown, TData = unknown> {
 
             // Collect data from response
             // Use follow-up structured data from tool loop when available, fall back to original result
-            const dataSource = toolResult.structured
-                ? { structured: toolResult.structured }
+            const dataSource = toolStructured
+                ? { structured: toolStructured }
                 : effectiveResult;
             session = await this.collectDataFromResponse({ result: dataSource, selectedFlow, nextStep, session });
 

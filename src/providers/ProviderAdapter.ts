@@ -49,6 +49,7 @@ import type {
 } from "../types/ai.js";
 import type { HistoryItem } from "../types/history.js";
 import { assertUsableCompletion } from "../utils/completion.js";
+import { isJSONShaped, tryParseJSONResponse } from "../utils/json.js";
 import { logger } from "../utils/logger.js";
 
 /** Provider timeout (ms) + retry count, after defaults are applied. */
@@ -360,16 +361,27 @@ export abstract class ProviderAdapter implements AiProvider {
     const toolCalls = toolCallsOf(acc, this.name);
     let structured: TStructured | undefined;
     if (json && acc.text) {
-      try {
-        structured = JSON.parse(acc.text) as TStructured;
-      } catch (error) {
-        logger.warn(`[${this.name}] Failed to parse JSON response:`, error);
+      // Lenient on purpose. `JSON.parse` alone rejects the envelope a model
+      // writes when the schema rode in its PROMPT rather than pinning the
+      // decoder — pretty-printed, with raw newlines inside the message string.
+      // Every caller reads `structured?.message || message`, so a parse that
+      // gives up here hands the raw protocol to the user as their reply.
+      structured = tryParseJSONResponse(acc.text) as TStructured | undefined;
+      if (!structured) {
+        logger.warn(`[${this.name}] Failed to parse JSON response (${acc.text.length} chars).`);
       }
     }
+    // An envelope that did not parse is not text, and must not be offered as
+    // any part of the turn's reply. Every caller reads
+    // `structured?.message || message`, so whichever of those two still holds
+    // the raw bytes is what a customer ends up reading. A preamble beside a
+    // tool call ("deixa eu ver aqui") is real text and stays.
+    const text = json && !structured && isJSONShaped(acc.text) ? "" : acc.text;
+
     if (toolCalls.length > 0) {
       structured = {
         ...(structured ?? {}),
-        message: (structured as AgentStructuredResponse | undefined)?.message || acc.text,
+        message: (structured as AgentStructuredResponse | undefined)?.message || text,
         toolCalls,
       } as TStructured;
     }
@@ -377,11 +389,13 @@ export abstract class ProviderAdapter implements AiProvider {
     // A parsed-but-blank message with no tool calls is as empty as no text. The
     // stream guard upstream only knows about chunks; this one knows what the
     // turn was FOR, and a turn that produced `{"message":""}` did not do it.
-    assertUsableCompletion(structured, acc.text, toolCalls.length, this.name);
+    // A dropped envelope with no tool calls to fall back on lands here too: the
+    // turn fails loudly and the caller's retry/fallback path engages.
+    assertUsableCompletion(structured, text, toolCalls.length, this.name);
 
     yield {
       delta: "",
-      accumulated: acc.text,
+      accumulated: text,
       done: true,
       metadata: {
         model: acc.model,
