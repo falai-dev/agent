@@ -29,6 +29,8 @@ export { OpenAIProvider } from "./providers/OpenAIProvider.js";
 export type { OpenAIProviderOptions } from "./providers/OpenAIProvider.js";
 export { OpenRouterProvider } from "./providers/OpenRouterProvider.js";
 export type { OpenRouterProviderOptions } from "./providers/OpenRouterProvider.js";
+export { ZaiProvider } from "./providers/ZaiProvider.js";
+export type { ZaiProviderOptions } from "./providers/ZaiProvider.js";
 export { AnthropicProvider } from "./providers/AnthropicProvider.js";
 export type { AnthropicProviderOptions } from "./providers/AnthropicProvider.js";
 export { DeepSeekProvider } from "./providers/DeepSeekProvider.js";

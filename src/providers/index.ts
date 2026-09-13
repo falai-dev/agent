@@ -33,3 +33,6 @@ export type { OpenAICompatibleOptions } from "./GenericOpenAICompatibleProvider.
 
 export { ProviderAdapter, resolveRetryConfig } from "./ProviderAdapter.js";
 export type { ProviderAdapterInit, RequestConfig, RetryConfig } from "./ProviderAdapter.js";
+
+export { ZaiProvider } from "./ZaiProvider.js";
+export type { ZaiProviderOptions } from "./ZaiProvider.js";

@@ -89,6 +89,7 @@ All providers implement the `AiProvider` interface:
 - `OpenAIProvider` — OpenAI (`openai` SDK)
 - `AnthropicProvider` — Anthropic (`@anthropic-ai/sdk`)
 - `OpenRouterProvider` — OpenRouter (OpenAI-compatible)
+- `ZaiProvider` — Z.ai Coding Plan (Anthropic-compatible; the flat-rate plan hosting GLM — bare model ids, explicit no-thinking marker)
 
 ## Persistence Adapters
 
