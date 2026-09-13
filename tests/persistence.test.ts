@@ -380,17 +380,13 @@ describe("PersistenceManager Integration", () => {
     expect(response.session?.data?.userId).toBe("valid-user");
     expect(response.session?.data?.step).toBe(1);
 
-    // Test invalid data should throw validation error
-    try {
-      await agent.updateCollectedData({
-        invalidField: "should not be allowed",
-        // Intentionally schema-invalid payload to exercise the validation-error path.
-      } as unknown as Partial<TestSessionData>);
-      throw new Error("Expected validation error was not thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("validation failed");
-    }
+    // A field the schema does not declare is dropped, not thrown on
+    const undeclaredUpdate = { step: 2, invalidField: "not declared" };
+    await agent.updateCollectedData(undeclaredUpdate);
+
+    const collected = agent.getCollectedData();
+    expect(collected).not.toHaveProperty("invalidField");
+    expect(collected.step).toBe(2);
   });
 });
 

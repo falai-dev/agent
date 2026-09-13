@@ -24,6 +24,7 @@ export {
   completeCurrentFlow,
   isFlowCompletedThisSession,
   mergeCollected,
+  dropUndeclaredFields,
   sessionStepToData,
   sessionDataToStep,
 } from "./session.js";

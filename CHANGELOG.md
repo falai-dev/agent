@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [3.2.5]
+
+### Fixed
+
+- **A field the model extracts but the schema never declared no longer kills the turn.** Pre-extraction asks for the schema's fields, but a model can return more — `battery_health`, `product_interest` — and `updateCollectedData` treated any undeclared key as a validation error. The `DataValidationError` escaped the routing phase as a `ResponseGenerationError`, so the whole turn failed and the user got the consumer's error fallback instead of a reply, over one key nobody asked for. `validateData` now reports an undeclared key as a warning, and `updateCollectedData` drops it with one log line naming it. Pre-extraction drops it too, before returning: all three pipeline merge points write the extracted data into the turn session before `updateCollectedData` sees it, so filtering only there would still have persisted the key. Declared fields are handled exactly as before.
+
 ## [3.2.4]
 
 ### Fixed

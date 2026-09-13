@@ -278,15 +278,19 @@ async function testAgentCreationAndConfiguration() {
     assert(validResult.valid === true, "Valid data should pass validation");
     assert(validResult.errors.length === 0, "Valid data should have no errors");
 
-    // Test invalid data (field not in schema)
-    const invalidData = {
+    // A field not in schema is a warning, not an error
+    const undeclaredData = {
       issue: "Login problem",
-      invalidField: "should not be allowed",
+      invalidField: "not declared",
     };
 
-    const invalidResult = agent.validateData(invalidData as any);
-    assert(invalidResult.valid === false, "Invalid data should fail validation");
-    assert(invalidResult.errors.length > 0, "Invalid data should have errors");
+    const undeclaredResult = agent.validateData(undeclaredData);
+    assert(undeclaredResult.valid === true, "Undeclared field should not fail validation");
+    assert(undeclaredResult.errors.length === 0, "Undeclared field should not be an error");
+    assert(
+      undeclaredResult.warnings.some(w => w.field === "invalidField"),
+      "Undeclared field should be reported as a warning"
+    );
   });
 
   await runTest("should update collected data with validation", async () => {
@@ -303,16 +307,12 @@ async function testAgentCreationAndConfiguration() {
     assertEqual(collectedData.issue, "Cannot access account", "Issue should be updated");
     assertEqual(collectedData.category, "technical", "Category should be updated");
 
-    // Test invalid update should throw error
-    try {
-      await agent.updateCollectedData({ invalidField: "test" } as any);
-      throw new Error("Expected validation error was not thrown");
-    } catch (error) {
-      assert(
-        error instanceof Error && error.message.includes("validation failed"),
-        "Should throw validation error for invalid data"
-      );
-    }
+    // An undeclared field is dropped, not thrown on
+    const undeclaredUpdate = { resolution: "Password reset", invalidField: "test" };
+    await agent.updateCollectedData(undeclaredUpdate);
+    assert(!("invalidField" in agent.getCollectedData()), "Undeclared field should not be stored");
+    assertEqual(agent.getCollectedData().resolution, "Password reset", "Declared field in the same update should be stored");
+    assertEqual(agent.getCollectedData().issue, "Cannot access account", "Earlier data should survive");
   });
 
   await runTest("should support new addTool method with unified interface", () => {
@@ -1008,6 +1008,34 @@ if (import.meta.url === `file://${process.argv[1]}`) {
  * Property 2: Generated Flow IDs use the `flow_` prefix
  * Validates: Requirements 5.1, 5.2
  */
+/**
+ * A model can extract a field the agent schema never declared. It must be
+ * dropped, not throw DataValidationError and kill the whole turn.
+ */
+describe("updateCollectedData with an undeclared field", () => {
+  interface PhoneData {
+    modelo?: string;
+  }
+
+  test("keeps declared fields, drops the undeclared one, does not throw", async () => {
+    const agent = new Agent<unknown, PhoneData>({
+      name: "PhoneAgent",
+      provider: MockProviderFactory.basic(),
+      schema: {
+        type: "object",
+        properties: { modelo: { type: "string" } },
+      },
+    });
+
+    const extracted = { modelo: "iPhone 13", battery_health: "90%" };
+    await agent.updateCollectedData(extracted);
+
+    const collected = agent.getCollectedData();
+    expect(collected.modelo).toBe("iPhone 13");
+    expect(collected).not.toHaveProperty("battery_health");
+  });
+});
+
 describe("generateFlowId", () => {
   test("should produce IDs with the flow_ prefix", () => {
     expect(generateFlowId("Foo")).toMatch(/^flow_/);

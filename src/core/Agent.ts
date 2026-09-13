@@ -26,6 +26,7 @@ import { SignalEvaluator } from "./SignalEvaluator.js";
 import type { StreamOptions, GenerateOptions, RespondParams, ResponseModalDeps } from "./ResponseModal.js";
 import {
   mergeCollected,
+  dropUndeclaredFields,
   enterFlow,
   enterStep,
   completeCurrentFlow,
@@ -482,7 +483,11 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
   }
 
   /**
-   * Validate data against the agent-level schema
+   * Validate data against the agent-level schema.
+   *
+   * A field the schema does not declare is a warning, not an error: a model
+   * can extract a key nobody asked for, and `updateCollectedData` drops it
+   * instead of failing the turn. `valid` is false only when `errors` is not empty.
    */
   validateData(data: Partial<TData>): ValidationResult {
     if (!this._schema) {
@@ -493,11 +498,11 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
     const errors: ValidationError[] = [];
     const warnings: ValidationError[] = [];
 
-    // Basic validation - check if provided fields exist in schema
+    // Undeclared fields are warnings — updateCollectedData drops them
     if (this._schema.properties) {
       for (const [key, value] of Object.entries(data)) {
         if (!(key in this._schema.properties)) {
-          errors.push({
+          warnings.push({
             field: key,
             value,
             message: `Field '${key}' is not defined in agent schema`,
@@ -555,11 +560,14 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
   /**
    * Update collected data with validation.
    * Writes to the live session when one exists; otherwise stages the data
-   * for the session that will be created.
+   * for the session that will be created. Fields the agent schema does not
+   * declare are dropped with a warning, never stored.
    */
   async updateCollectedData(updates: Partial<TData>): Promise<void> {
+    const declaredUpdates = dropUndeclaredFields(updates, this._schema);
+
     // Validate the updates
-    const validation = this.validateData(updates);
+    const validation = this.validateData(declaredUpdates);
     if (!validation.valid) {
       const errorMessages = validation.errors.map(e => e.message).join(', ');
       throw new DataValidationError(validation.errors, `[DataValidationError] Data validation failed: fields [${errorMessages}] did not pass schema validation. Fix the offending values to match the declared schema.`);
@@ -576,7 +584,7 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
 
     let newData: Partial<TData> = {
       ...previousData,
-      ...updates
+      ...declaredUpdates
     };
 
     // Trigger agent-level lifecycle hook if configured
@@ -591,7 +599,7 @@ export class Agent<TContext = unknown, TData = unknown> implements ResponseModal
       this._pendingData = newData;
     }
 
-    logger.debug("[Agent] Collected data updated:", updates);
+    logger.debug("[Agent] Collected data updated:", declaredUpdates);
   }
 
   // ---------------------------------------------------------------------------

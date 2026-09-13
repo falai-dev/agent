@@ -3,6 +3,7 @@ import type { SessionState } from "../types/session.js";
 import type { History } from "../types/history.js";
 import type { Directive } from "../types/flow.js";
 import type { CollectedStateData } from "../types/persistence.js";
+import type { StructuredSchema } from "../types/schema.js";
 import { logger } from "./logger.js";
 
 /**
@@ -286,6 +287,29 @@ export function mergeCollected<TData = Record<string, unknown>>(
       lastUpdatedAt: new Date(),
     },
   };
+}
+
+/**
+ * Keep only the fields the agent schema declares. A model can extract a key
+ * nobody declared (e.g. `battery_health`); it is dropped with one warning
+ * instead of reaching session data. No schema, or no properties, keeps all.
+ */
+export function dropUndeclaredFields<TData>(
+  data: Partial<TData>,
+  schema: StructuredSchema | undefined
+): Partial<TData> {
+  const properties = schema?.properties;
+  if (!properties) return data;
+
+  const dropped = Object.keys(data).filter((key) => !(key in properties));
+  if (dropped.length === 0) return data;
+
+  logger.warn(
+    `[Agent] Dropped fields not declared in agent schema: ${dropped.join(", ")}`
+  );
+  return Object.fromEntries(
+    Object.entries(data).filter(([key]) => key in properties)
+  ) as Partial<TData>;
 }
 
 /**

@@ -38,8 +38,8 @@ class RoutingTrackingProvider implements AiProvider {
         supportsPromptCaching: false,
     };
     public calls: { schemaName?: string; prompt: string }[] = [];
-    /** Data to return when pre-extraction runs */
-    public extractionData: Partial<TestData> = {};
+    /** Data to return when pre-extraction runs — may carry keys the schema doesn't declare, as real models do */
+    public extractionData: Record<string, unknown> = {};
 
     async generateMessage<TContext = unknown, TStructured = unknown>(
         input: GenerateMessageInput<TContext>
@@ -244,6 +244,35 @@ describe("Routing skip optimization", () => {
 
             // Flow is retained
             expect(response.session?.currentFlow?.id).toBe(regFlow.id);
+        });
+    });
+
+    describe("Undeclared extracted fields", () => {
+        test("a field the schema does not declare is dropped instead of failing the turn", async () => {
+            const provider = new RoutingTrackingProvider();
+            const agent = createCollectAgent(provider);
+
+            const regFlow = agent.getFlows().find(f => f.title === "Registration")!;
+            const nameStep = regFlow.getStep("ask_name")!;
+
+            let session = createSession<TestData>({ data: {} });
+            session = enterFlow(session, regFlow.id, regFlow.title);
+            session = enterStep(session, nameStep.id, nameStep.description);
+
+            // Production shape: the model adds a key nobody declared
+            provider.extractionData = { name: "Alice", battery_health: "90%" };
+
+            const response = await agent.respond({
+                history: [{ role: "user", content: "I'm Alice, my battery is at 90%" }],
+                session,
+            });
+
+            // The routing_optimization path ran and the turn survived
+            expect(provider.getRoutingCallCount()).toBe(0);
+            expect(response.message).toBe("OK");
+            expect(response.session?.data?.name).toBe("Alice");
+            expect(response.session?.data).not.toHaveProperty("battery_health");
+            expect(agent.getCollectedData()).not.toHaveProperty("battery_health");
         });
     });
 

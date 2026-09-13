@@ -14,6 +14,7 @@ import {
   createSession,
   enterStep,
   mergeCollected,
+  dropUndeclaredFields,
   logger,
   historyToEvents,
   eventsToHistory,
@@ -1391,7 +1392,9 @@ export class ResponsePipeline<TContext = unknown, TData = unknown> {
         },
       });
 
-      return result.structured || {};
+      // Every caller merges this into the turn session BEFORE updateCollectedData
+      // runs, so an undeclared key is dropped here, at the source
+      return dropUndeclaredFields(result.structured || {}, agentSchema);
     } catch (error) {
       logger.error(`[ResponsePipeline] Pre-extraction failed:`, error);
       return {};
