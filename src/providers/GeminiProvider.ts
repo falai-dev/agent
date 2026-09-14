@@ -10,9 +10,9 @@
  * holds — a sibling codebase runs the combination in production today.
  */
 
-import { createGeminiProvider } from "@providerkit/core";
+import { createGeminiProvider, type FallbackOptions, type Provider } from "@providerkit/core";
 
-import type { ProviderCapabilities } from "../types/ai.js";
+import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
 import type { JsonWithTools } from "./OpenAICompatibleProvider.js";
 import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 
@@ -23,6 +23,9 @@ export interface GeminiProviderOptions {
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
+  /** Fallback providers to try if this provider fails/exhausts */
+  fallbacks?: Array<AiProvider | Provider>;
+  fallbackOptions?: FallbackOptions<Provider>;
   /** Any endpoint speaking the Gemini generateContent dialect. */
   baseUrl?: string;
   /**
@@ -71,6 +74,8 @@ export class GeminiProvider extends ProviderAdapter {
       model: options.model,
       ...(options.config ? { defaults: options.config } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
+      ...(options.fallbackOptions ? { fallbackOptions: options.fallbackOptions } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
     });
   }

@@ -72,6 +72,8 @@ export abstract class OpenAICompatibleProvider extends ProviderAdapter {
       model: init.model,
       ...(init.config ? { defaults: init.config } : {}),
       ...(init.backupModels ? { backupModels: init.backupModels } : {}),
+      ...(init.fallbacks ? { fallbacks: init.fallbacks } : {}),
+      ...(init.fallbackOptions ? { fallbackOptions: init.fallbackOptions } : {}),
       ...(init.retryConfig ? { retryConfig: init.retryConfig } : {}),
     });
     this.config = init.config;

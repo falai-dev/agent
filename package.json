@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Conversational state engine for TypeScript where the AI understands, but the code is in control",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -92,7 +92,7 @@
     "typescript-eslint": "^8.18.2"
   },
   "dependencies": {
-    "@providerkit/core": "^0.7.1",
+    "@providerkit/core": "^0.8.0",
     "loglevel": "^1.9.2"
   },
   "peerDependencies": {

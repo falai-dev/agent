@@ -35,6 +35,8 @@ export { AnthropicProvider } from "./providers/AnthropicProvider.js";
 export type { AnthropicProviderOptions } from "./providers/AnthropicProvider.js";
 export { DeepSeekProvider } from "./providers/DeepSeekProvider.js";
 export type { DeepSeekProviderOptions } from "./providers/DeepSeekProvider.js";
+export { FallbackAiProvider } from "./providers/FallbackAiProvider.js";
+export type { FallbackAiProviderOptions } from "./providers/FallbackAiProvider.js";
 // Base class for building OpenAI-compatible providers (Groq, Together, etc.)
 export { OpenAICompatibleProvider } from "./providers/OpenAICompatibleProvider.js";
 export type {

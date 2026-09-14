@@ -27,9 +27,11 @@ import {
   streamWatch,
   streamWithBackupModels,
   watchChunks,
+  withFallbackProviders,
   withStreamRetry,
   type ChatMessage,
   type Effort,
+  type FallbackOptions,
   type JsonObjectSchema,
   type JsonWithToolsProbe,
   type ProbeOptions,
@@ -119,6 +121,12 @@ export interface ProviderAdapterInit {
   defaults?: RequestConfig;
   /** Tried in order after the primary. */
   backupModels?: string[];
+  /**
+   * Fallback providers to try if this provider fails/exhausts.
+   * Accepts both @falai/agent AiProviders (like ZaiProvider) and @providerkit/core Providers.
+   */
+  fallbacks?: Array<AiProvider | Provider>;
+  fallbackOptions?: FallbackOptions<Provider>;
   retryConfig?: { timeout?: number; retries?: number };
 }
 
@@ -212,6 +220,9 @@ interface Accumulator {
 }
 
 function fold(acc: Accumulator, chunk: ProviderChunk): string {
+  if (chunk.source) {
+    acc.model = chunk.source.model;
+  }
   if (chunk.usage) {
     acc.promptTokens = chunk.usage.inputTokens;
     acc.completionTokens = chunk.usage.outputTokens;
@@ -256,12 +267,31 @@ export abstract class ProviderAdapter implements AiProvider {
   protected readonly retryConfig: RetryConfig;
   private readonly defaults: ProviderAdapterInit["defaults"];
 
+  public get coreProvider(): Provider {
+    return this.provider;
+  }
+
   protected constructor(init: ProviderAdapterInit) {
     this.defaults = init.defaults;
-    this.provider = init.provider;
     this.primaryModel = init.model;
     this.backupModels = init.backupModels ?? [];
     this.retryConfig = resolveRetryConfig(init.retryConfig);
+
+    if (init.fallbacks && init.fallbacks.length > 0) {
+      const coreProviders: Provider[] = [
+        init.provider,
+        ...init.fallbacks.map((f) => {
+          if (f instanceof ProviderAdapter) return f.coreProvider;
+          if ("coreProvider" in f && (f as { coreProvider: Provider }).coreProvider) {
+            return (f as { coreProvider: Provider }).coreProvider;
+          }
+          return f as Provider;
+        }),
+      ];
+      this.provider = withFallbackProviders(coreProviders, init.fallbackOptions);
+    } else {
+      this.provider = init.provider;
+    }
   }
 
   /**

@@ -12,9 +12,9 @@
  * which is thinking ON.
  */
 
-import { createZaiCodingProvider } from "@providerkit/core";
+import { createZaiCodingProvider, type FallbackOptions, type Provider } from "@providerkit/core";
 
-import type { ProviderCapabilities } from "../types/ai.js";
+import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
 import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 
 export interface ZaiProviderOptions {
@@ -22,8 +22,11 @@ export interface ZaiProviderOptions {
   apiKey: string;
   /** Model to use. Defaults to the fleet workhorse `glm-5.3-flash`. */
   model?: string;
-  /** Backup models to try if the primary fails (default: []) */
+  /** Backup models to try on this provider if the primary fails (default: []) */
   backupModels?: string[];
+  /** Fallback providers to try if this provider fails/exhausts */
+  fallbacks?: Array<AiProvider | Provider>;
+  fallbackOptions?: FallbackOptions<Provider>;
   /** Any endpoint speaking the Anthropic Messages dialect with the plan's
    *  auth. Defaults to the coding endpoint. */
   baseUrl?: string;
@@ -61,6 +64,8 @@ export class ZaiProvider extends ProviderAdapter {
       model,
       ...(options.config ? { defaults: options.config } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
+      ...(options.fallbackOptions ? { fallbackOptions: options.fallbackOptions } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
     });
   }

@@ -8,18 +8,21 @@
  * `@providerkit/core`; this file is the constructor.
  */
 
-import { createAnthropicProvider } from "@providerkit/core";
+import { createAnthropicProvider, type FallbackOptions, type Provider } from "@providerkit/core";
 
-import type { ProviderCapabilities } from "../types/ai.js";
+import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
 import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 
 export interface AnthropicProviderOptions {
   /** Anthropic API key */
   apiKey: string;
-  /** Model to use (required) — e.g. "claude-sonnet-5", "claude-opus-5" */
+  /** Model to use (required) — e.g. "claude-sonnet-5" or "claude-opus-5" */
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
+  /** Fallback providers to try if this provider fails/exhausts */
+  fallbacks?: Array<AiProvider | Provider>;
+  fallbackOptions?: FallbackOptions<Provider>;
   /** Any endpoint speaking the Anthropic Messages dialect. */
   baseUrl?: string;
   /** Request defaults sent with every call */
@@ -65,6 +68,8 @@ export class AnthropicProvider extends ProviderAdapter {
       model: options.model,
       ...(options.config ? { defaults: options.config } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
+      ...(options.fallbackOptions ? { fallbackOptions: options.fallbackOptions } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
     });
   }
