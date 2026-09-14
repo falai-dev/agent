@@ -4,8 +4,9 @@
  * down, where they are the dialect's business rather than this file's.
  */
 
-import type { ProviderCapabilities } from "../types/ai.js";
+import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
 import { OpenAICompatibleProvider, type JsonWithTools } from "./OpenAICompatibleProvider.js";
+import type { Provider } from "@providerkit/core";
 import type { RequestConfig } from "./ProviderAdapter.js";
 
 export interface DeepSeekProviderOptions {
@@ -15,6 +16,13 @@ export interface DeepSeekProviderOptions {
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
+  /**
+   * Fallback providers, tried in order after this one fails or exhausts.
+   * Accepts both @falai/agent AiProviders (like ZaiProvider) and
+   * @providerkit/core Providers — the seam that makes a coding-plan primary
+   * degrade to anything else rather than fail the turn.
+   */
+  fallbacks?: Array<AiProvider | Provider>;
   /** Custom base URL (default: "https://api.deepseek.com") */
   baseURL?: string;
   /** Request defaults sent with every call */
@@ -56,6 +64,7 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
       structuredOutput: "json_schema",
       ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
       ...(options.config ? { config: options.config } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),

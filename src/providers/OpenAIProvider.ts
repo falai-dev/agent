@@ -3,8 +3,9 @@
  * enforces the schema natively.
  */
 
-import type { ProviderCapabilities } from "../types/ai.js";
+import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
 import { OpenAICompatibleProvider } from "./OpenAICompatibleProvider.js";
+import type { Provider } from "@providerkit/core";
 import type { RequestConfig } from "./ProviderAdapter.js";
 
 export interface OpenAIProviderOptions {
@@ -14,6 +15,13 @@ export interface OpenAIProviderOptions {
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
+  /**
+   * Fallback providers, tried in order after this one fails or exhausts.
+   * Accepts both @falai/agent AiProviders (like ZaiProvider) and
+   * @providerkit/core Providers — the seam that makes a coding-plan primary
+   * degrade to anything else rather than fail the turn.
+   */
+  fallbacks?: Array<AiProvider | Provider>;
   /** Organization id, sent as the `OpenAI-Organization` header */
   organization?: string;
   /** Request defaults sent with every call */
@@ -49,6 +57,7 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
         ? { headers: { "OpenAI-Organization": options.organization } }
         : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
       ...(options.config ? { config: options.config } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),

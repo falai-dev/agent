@@ -26,13 +26,14 @@
  * provider classes.
  */
 
-import type { ProviderCapabilities } from "../types/ai.js";
+import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
 import {
   OpenAICompatibleProvider,
   type JsonWithTools,
   type StructuredOutputMode,
 } from "./OpenAICompatibleProvider.js";
 import type { RequestConfig } from "./ProviderAdapter.js";
+import type { Provider } from "@providerkit/core";
 
 export interface OpenAICompatibleOptions {
   /** Provider identifier, e.g. "azure", "ollama", "groq". */
@@ -45,6 +46,12 @@ export interface OpenAICompatibleOptions {
   model: string;
   /** Backup models to try if the primary fails. */
   backupModels?: string[];
+  /**
+   * Fallback providers, tried in order after this one fails or exhausts.
+   * Accepts both @falai/agent AiProviders (like ZaiProvider) and
+   * @providerkit/core Providers.
+   */
+  fallbacks?: Array<AiProvider | Provider>;
   /** Capability overrides, merged over the defaults (all true except caching). */
   capabilities?: Partial<ProviderCapabilities>;
   /** Extra request headers (e.g. Azure's `api-key`, a gateway's auth header). */
@@ -115,6 +122,7 @@ class GenericOpenAICompatibleProvider extends OpenAICompatibleProvider {
       ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
       ...(options.defaultHeaders ? { headers: options.defaultHeaders } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
       ...(options.config ? { config: options.config } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),

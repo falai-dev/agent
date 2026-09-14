@@ -2,9 +2,10 @@
  * OpenRouter — one OpenAI-compatible endpoint in front of many models.
  */
 
-import type { ProviderCapabilities } from "../types/ai.js";
+import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
 import { OpenAICompatibleProvider, type JsonWithTools } from "./OpenAICompatibleProvider.js";
 import type { RequestConfig } from "./ProviderAdapter.js";
+import type { Provider } from "@providerkit/core";
 
 export interface OpenRouterProviderOptions {
   /** OpenRouter API key */
@@ -13,6 +14,13 @@ export interface OpenRouterProviderOptions {
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
+  /**
+   * Fallback providers, tried in order after this one fails or exhausts.
+   * Accepts both @falai/agent AiProviders (like ZaiProvider) and
+   * @providerkit/core Providers — the seam that makes a coding-plan primary
+   * degrade to anything else rather than fail the turn.
+   */
+  fallbacks?: Array<AiProvider | Provider>;
   /** Site URL for OpenRouter's rankings */
   siteUrl?: string;
   /** App name for OpenRouter's rankings */
@@ -69,6 +77,7 @@ export class OpenRouterProvider extends OpenAICompatibleProvider {
       },
       ...(options.providerOrder ? { providerOrder: options.providerOrder } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
+      ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
       ...(options.config ? { config: options.config } : {}),
       ...(options.retryConfig ? { retryConfig: options.retryConfig } : {}),
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
