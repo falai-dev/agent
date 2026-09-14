@@ -472,17 +472,20 @@ describe("a bound effort reaches the wire", () => {
   });
 
   /**
-   * This pinned a `low` floor until @providerkit/core 0.4.2, on the reasoning
-   * that GLM answers 400 "Reasoning is mandatory for this endpoint" — which it
-   * does, but to `reasoning.enabled: false`, a different field that nothing
-   * sends. `none` is a member of OpenRouter's own effort enum
-   * (xhigh|high|medium|low|minimal|none) and an unsupported level is mapped to
-   * the nearest rather than refused, so the floor was not protecting a request
-   * from being rejected — it was buying a thinking pass on every turn that
-   * asked for none. Zero IS reachable here; what is unreachable is the
-   * `enabled` flag.
+   * Re-measured live 2026-09-14 through providerkit 0.10.1's dialect table:
+   * GLM 5.3 Flash on OpenRouter answers 400 "Reasoning is mandatory" to
+   * `reasoning.effort: "none"` (its earlier enum acceptance is gone), and its
+   * off switch is the ABSENT field — omitting `reasoning` disables thinking.
+   * So `none` encodes as omission on this dialect; the only thing that must
+   * never ride is the `enabled` flag, refused for every model.
+   *
+   * Why dialect-level and not per-model capabilities: the wire GRAMMAR is the
+   * endpoint's (OpenRouter's `reasoning` object, DeepSeek's `thinking`), while
+   * what each model does with it is the model's. An explicit `none` is
+   * spellable on DeepSeek and OpenAI but not on OpenRouter; omission is the
+   * one encoding every OpenRouter model accepts, and for GLM it IS off.
    */
-  test("OpenRouter takes 'none' — the refusal it rejects is the `enabled` flag", async () => {
+  test("OpenRouter: effort 'none' omits the reasoning field — the absent field is GLM's off switch", async () => {
     const { bodies, fetchImpl } = scripted([() => chat({ content: "ok" })]);
 
     await new OpenRouterProvider({
@@ -492,8 +495,8 @@ describe("a bound effort reaches the wire", () => {
       fetchImpl,
     }).generateMessage(input());
 
-    expect(bodies[0].reasoning).toEqual({ effort: "none" });
-    expect(bodies[0].reasoning).not.toHaveProperty("enabled");
+    expect(bodies[0]).not.toHaveProperty("reasoning");
+    expect(bodies[0]).not.toHaveProperty("reasoning_effort");
   });
 
   test("no effort sends nothing at all — the model keeps its own default", async () => {
