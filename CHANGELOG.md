@@ -2,6 +2,32 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [3.4.1]
+
+### Dependencies
+
+- **Bump `@providerkit/core` to `^0.10.0`**:
+  - Centralized `isRetryable` predicate honoring `x-should-retry` headers, transport network blips, and rate-limit bounds.
+  - Wire-level tool schema sanitization: `toGeminiToolSchema` converts nullable union types (`anyOf` with null, array types with null) into OpenAPI 3.0 `nullable: true`, normalizes numeric enums to strings, and strips unsupported keywords; `toAnthropicToolSchema` unwraps root union schemas into unified object schemas.
+  - Wire tool-argument repair: rescues concatenated/prepended JSON objects via `findLastValidJsonObject`, normalizes blank tool call IDs, and bounds tool call IDs to <= 64 characters for ChatGPT Responses compatibility.
+  - OpenRouter sticky routing: auto-pins requests to the model's first-party vendor host (`openRouterHostFor`) to preserve KV prompt caching across multi-turn agent conversations.
+  - Gemini 3.x and 2.x dual thinking support: uses `thinkingLevel` (`MINIMAL`, `LOW`, `MEDIUM`, `HIGH`) for Gemini 3+ models and `thinkingBudget` for Gemini 2.x.
+  - Context overflow token margin extraction via `parseContextOverflow`.
+  - Added `subtractUsage` and `UsageTracker.subtract` for rolling back optimistic turns without negative ledger drift.
+
+## [3.4.0]
+
+### Added
+
+- **FallbackSpec preset-id fallback resolution**: providers can now declare cross-provider fallbacks by preset ID with full dialect, endpoint, and credential encapsulation.
+- **Dynamic model capabilities resolution**: on-demand model capabilities resolution via `resolveModelCapabilities` with ID normalization and caching.
+
+## [3.3.0]
+
+### Added
+
+- **Shared cooldown-aware fallback pool**: cross-provider fallback handling with transient error tracking and cooldown management.
+
 ## [3.2.5]
 
 ### Fixed

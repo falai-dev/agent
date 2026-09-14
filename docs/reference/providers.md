@@ -322,6 +322,33 @@ const deepseek = new DeepSeekProvider({
 });
 ```
 
+## Cross-provider fallbacks
+
+In addition to `backupModels` (which fail over to another model on the *same* provider), providers accept a `fallbacks` list of `FallbackSpec` objects. When the primary provider encounters a transient failure (rate limits, outages, 5xx), the engine automatically falls over to the backup providers with cooldown management:
+
+```typescript
+import { ZaiProvider } from "@falai/agent";
+
+const provider = new ZaiProvider({
+  apiKey: process.env.ZAI_API_KEY!,
+  model: "glm-5.3-flash",
+  fallbacks: [
+    {
+      preset: "openrouter",
+      apiKey: process.env.OPENROUTER_API_KEY!,
+      model: "z-ai/glm-5.3-flash",
+    },
+    {
+      preset: "deepseek",
+      apiKey: process.env.DEEPSEEK_API_KEY!,
+      model: "deepseek-flash",
+    },
+  ],
+});
+```
+
+The underlying `@providerkit/core` engine tracks cooldowns per provider, automatically bypassing throttled backends until their cooldown expires.
+
 ## Building a custom OpenAI-compatible provider
 
 Many vendors (Groq, Together, Fireworks, …) expose OpenAI-compatible chat-completions APIs. Instead of implementing `AiProvider` from scratch, subclass the exported `OpenAICompatibleProvider` base class — history and tool translation, streaming, tool-call assembly, backup-model fallback, retries and normalized `ProviderError`s all come with it. `OpenAIProvider`, `OpenRouterProvider`, and `DeepSeekProvider` are themselves thin subclasses.
