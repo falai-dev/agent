@@ -87,6 +87,17 @@ describe("Speak names the failure", () => {
     });
   });
 
+  test("a bare 402 is classified as a wall, not as a mystery outage", async () => {
+    // The kinds a wake can fix are 408, a transient 429, 5xx and no answer at
+    // all — nothing else. A payment wall reaches here as a plain rejection with
+    // a status and no kind, and `unknown` (the one retryable fallback) is
+    // reserved for an error carrying no status at all.
+    expect(await deferralFor(Object.assign(new Error("payment required"), { status: 402 }))).toEqual({
+      code: "provider-quota",
+      retryable: false,
+    });
+  });
+
   test("a busy server is the case the ladder was built for", async () => {
     expect(await deferralFor(new ProviderError("gemini", "overload", "503 overloaded"))).toEqual({
       code: "provider-unavailable",
