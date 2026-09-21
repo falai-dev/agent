@@ -846,7 +846,9 @@ export class Runner<C = unknown, D = unknown> {
       const action = this.options.actions?.[step.do];
       let result: ActionResult;
       if (!action) {
-        result = { failed: "ação desconhecida" };
+        // `validateFlow` rejects this at agent build; a spec that reached the
+        // runner another way still names what is missing rather than failing blank.
+        result = { failed: `unknown action "${step.do}"` };
       } else {
         try {
           result = await action.run(renderDeep(step.with ?? {}, this.scope(turn, run)), {

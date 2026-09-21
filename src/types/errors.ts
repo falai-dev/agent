@@ -22,7 +22,7 @@ export type { ErrorKind } from "@providerkit/core";
 /**
  * Thrown by the persistence layer when a session save carries a stale
  * `version` — i.e. another writer persisted the session after this one
- * loaded it (concurrent respond() calls, parallel webhooks, two tabs).
+ * loaded it (concurrent turn() calls, parallel webhooks, two tabs).
  *
  * Handlers should reload the session and retry or surface the conflict.
  */
