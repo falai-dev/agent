@@ -9,6 +9,7 @@
 
 import type { AgentOptions } from "../types/agent.js";
 import type { FieldDef, Instruction } from "../types/flow.js";
+import { splitPhrases } from "../utils/phrases.js";
 import { isKnown } from "../utils/schema.js";
 import { render, type TemplateScope } from "../utils/template.js";
 
@@ -106,7 +107,12 @@ export function instructionsSection<C, D>(groups: InstructionGroup<C, D>[], scop
       const text = render(item.prompt, scope).trim();
       if (!text) continue;
       const when = item.when === undefined ? [] : Array.isArray(item.when) ? item.when : [item.when];
-      const condition = when.length ? ` (apply only when: ${when.join(" OR ")})` : "";
+      const { counts, excludes } = splitPhrases(when);
+      const clauses = [
+        ...(counts.length ? [`apply only when: ${counts.join(" OR ")}`] : []),
+        ...(excludes.length ? [`never when: ${excludes.join(" OR ")}`] : []),
+      ];
+      const condition = clauses.length ? ` (${clauses.join("; ")})` : "";
       lines.push(`- [${item.kind ?? "should"}] ${group.caption} ${text}${condition}`);
     }
   }

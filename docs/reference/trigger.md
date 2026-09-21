@@ -49,6 +49,26 @@ The run takes the conversation: it becomes the asker and holds the floor — onl
 
 The run starts beside the conversation. It is meant for `do` and `say` steps: it does not get routed to. A talk step in it behaves like any talk step and takes the floor.
 
+### Phrases that rule a trigger out
+
+Phrases are alternatives — one match is enough — so a list alone can only say "any of these". A phrase that opens with `!` says the opposite: it stops the trigger, whatever else matched.
+
+```ts fragment
+on: [{
+  mention: [
+    'o cliente pede para falar com uma pessoa',
+    '!o cliente só concorda com o horário oferecido',   // "pode sim" is a yes to the meeting
+    '!o cliente menciona outra pessoa sem pedir atendimento',
+  ],
+}]
+```
+
+Without the two exclusions, a customer answering "pode sim" to an offer of a meeting reads as a request for a human, because that sentence really does mention a person. The model is given the two lists separately and told that an exclusion overrides a match.
+
+Works in `message` (an exclusion scores the flow 0), in `mention` (an exclusion answers false), and in an instruction's `when`. Whitespace around a phrase is trimmed, a bare `"!"` is ignored, and a `!` anywhere but the first character is ordinary text.
+
+A trigger whose phrases are *all* exclusions can never fire, so `validateFlow` rejects it. For a flow that should catch everything else, use `message: []`.
+
 ### silence
 
 | Field | Type | Default | Meaning |

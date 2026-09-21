@@ -43,6 +43,7 @@ import type {
 } from "../types/flow.js";
 import type { StructuredSchema } from "../types/schema.js";
 import { isDuration } from "../utils/duration.js";
+import { splitPhrases } from "../utils/phrases.js";
 import { toWireSchema } from "../utils/schema.js";
 
 // ── The JSON form ───────────────────────────────────────────────────────
@@ -233,6 +234,8 @@ interface LooseInstruction {
 }
 interface LooseTrigger {
   repeat?: Repeat;
+  message?: string[];
+  mention?: string[];
   event?: string;
   silence?: Duration;
   after?: Duration;
@@ -428,6 +431,21 @@ export function validateFlow<C = unknown, D = LooseData>(
     duration(trigger.after, at, "after");
     if (typeof trigger.repeat === "object") duration(trigger.repeat.cooldown, at, "repeat.cooldown");
     pred(trigger.if, at, "if");
+    // Phrases opening with `!` rule the trigger out; a list of nothing but
+    // those can never fire, so the flow is dead and nothing would say so.
+    // `message: []` is the deliberate catch-all and stays legal.
+    for (const key of ["message", "mention"] as const) {
+      const phrases: string[] | undefined = trigger[key];
+      if (!phrases?.length) continue;
+      if (splitPhrases(phrases).counts.length > 0) continue;
+      throw problem(
+        at,
+        `every ${key} phrase starts with "!", so nothing can ever match it`,
+        `A "!" phrase rules the trigger out. Add at least one plain phrase saying when it should fire${
+          key === "message" ? ", or use an empty list for a catch-all" : ""
+        }.`,
+      );
+    }
   });
 
   flow.steps.forEach((step, i) => {

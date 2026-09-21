@@ -30,6 +30,8 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 ### Added
 
+- **A trigger phrase that opens with `!` rules the trigger out instead of firing it.** Phrases are alternatives, so a list alone can only say "any of these" — and the accuracy of a real classifier rests on being able to say "but not this". A customer answering "pode sim" to an offer of a meeting is agreeing to the meeting, yet that sentence does mention a person, so a handoff detector without exclusions fires on every cheerful yes. v3 had this as documented `ConditionWhen` syntax and v4 dropped it, which silently turned each exclusion into one more reason to fire. Now `message` (an exclusion scores the flow 0), `mention` (an exclusion answers false) and an instruction's `when` (`never when: …`) each reach the model as two lists, with the exclusions stated to override a match. A `!` anywhere but the first character is ordinary text, a bare `"!"` is ignored, and `validateFlow` rejects a trigger whose phrases are all exclusions, because nothing could ever match it — `message: []` is still how a flow catches everything else.
+
 - **`TurnResult.usage` says what the turn's model calls cost.** `{ promptTokens, completionTokens, cachedInputTokens }`, the providers' own counts added up over the understand call, the speak call, every tool round and a compaction summary — the figure a host bills a conversation from. It sits beside `llmCalls` and is absent, never zero, when a turn spent no call or the provider reported no counts.
 
 ### Docs and tooling

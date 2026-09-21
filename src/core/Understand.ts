@@ -23,6 +23,7 @@ import type { FieldDef, FieldDefs, Flow, ParamDef, ParamDefs } from "../types/fl
 import type { StructuredSchema } from "../types/schema.js";
 import { extractEmbeddedJSONObject, isRecord } from "../utils/json.js";
 import { logger } from "../utils/logger.js";
+import { splitPhrases } from "../utils/phrases.js";
 import { coerceField, isKnown, pendingFields, toWireSchema } from "../utils/schema.js";
 import { render, type TemplateScope } from "../utils/template.js";
 import { readUsage } from "../utils/usage.js";
@@ -245,8 +246,9 @@ function flowsSection<C, D>(candidates: Flow<C, D>[], aliases: Aliases, t: (text
   ];
   candidates.forEach((flow, i) => {
     lines.push(`${i + 1}. ${aliases.of(flow.id, "f")} — ${flow.name}${flow.description ? `: ${t(flow.description)}` : ""}`);
-    const phrases = triggerPhrases(flow, "message");
-    if (phrases.length) lines.push(`   The customer: ${phrases.map(t).join("; ")}`);
+    const { counts, excludes } = splitPhrases(triggerPhrases(flow, "message"));
+    if (counts.length) lines.push(`   The customer: ${counts.map(t).join("; ")}`);
+    if (excludes.length) lines.push(`   Score 0 when: ${excludes.map(t).join("; ")}`);
   });
   lines.push(
     "",
@@ -265,12 +267,14 @@ function mentionsSection<C, D>(flows: Flow<C, D>[], aliases: Aliases, t: (text: 
   const lines = [
     "## Things the customer may mention",
     "For each item, answer true when the customer's message clearly brings it up, false otherwise. " +
-      "Be conservative: true needs clear, explicit evidence in the message. The phrases under an item are alternatives; one match is enough.",
+      "Be conservative: true needs clear, explicit evidence in the message. The phrases under an item are alternatives; one match is enough. " +
+      "A 'Does not count when' line overrides a match: if one of those fits, answer false.",
   ];
   for (const flow of flows) {
     lines.push(`- ${aliases.of(flow.id, "f")} — ${flow.name}${flow.description ? `: ${t(flow.description)}` : ""}`);
-    const phrases = triggerPhrases(flow, "mention");
-    if (phrases.length) lines.push(`  Counts when: ${phrases.map(t).join("; ")}`);
+    const { counts, excludes } = splitPhrases(triggerPhrases(flow, "mention"));
+    if (counts.length) lines.push(`  Counts when: ${counts.map(t).join("; ")}`);
+    if (excludes.length) lines.push(`  Does not count when: ${excludes.map(t).join("; ")}`);
     const defs = extractDefs(flow);
     if (defs) {
       lines.push("  When true, also extract:");
