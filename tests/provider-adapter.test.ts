@@ -206,7 +206,7 @@ describe("a stream becomes one accumulated turn", () => {
     expect(result.structured?.toolCalls?.map((call) => call.toolName)).toEqual(["first", "second"]);
   });
 
-  test("a schema request parses the accumulated text", async () => {
+  test("a schema request asks for JSON, carries the shape as prompt, and parses the reply", async () => {
     const { bodies, fetchImpl } = scripted([() => chat({ content: '{"message":"parsed"}' })]);
     const result = await deepseek(fetchImpl).generateMessage(
       input({
@@ -222,7 +222,12 @@ describe("a stream becomes one accumulated turn", () => {
       }),
     );
     expect(result.structured).toEqual({ message: "parsed" });
-    expect((bodies[0].response_format as { type: string }).type).toBe("json_schema");
+    // DeepSeek answers a `json_schema` format with
+    // `400 "This response_format type is unavailable now"`, so the request asks
+    // for JSON and the schema travels as prompt instead.
+    expect((bodies[0].response_format as { type: string }).type).toBe("json_object");
+    const sent = bodies[0].messages as Array<{ role: string; content: string }>;
+    expect(sent.at(-1)).toMatchObject({ role: "system", content: expect.stringContaining('"message"') });
   });
 
   const REPLY_SCHEMA = {

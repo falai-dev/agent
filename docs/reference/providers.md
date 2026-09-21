@@ -38,12 +38,12 @@ Every provider carries `capabilities: ProviderCapabilities`, five flags that des
 | Flag | Gemini | OpenAI | Anthropic | OpenRouter | DeepSeek | Z.ai | `createOpenAICompatibleProvider` default |
 |------|--------|--------|-----------|------------|----------|------|------------------------------------------|
 | `supportsTools` | yes | yes | yes | yes | yes | yes | yes |
-| `supportsNativeJsonSchema` | yes | yes | no | yes | yes | no | yes |
+| `supportsNativeJsonSchema` | yes | yes | no | yes | no | no | yes |
 | `supportsStreaming` | yes | yes | yes | yes | yes | yes | yes |
 | `supportsStreamingToolCalls` | yes | yes | yes | yes | yes | yes | yes |
 | `supportsPromptCaching` | yes | yes | yes | yes | yes | yes | no |
 
-Anthropic has no native schema mode, so the schema is sent as an extra system block after the cached one; Z.ai is Anthropic-compatible and reports the same flag. `FallbackAiProvider` reports a flag as true only when every provider in its list does. `createOpenAICompatibleProvider` takes `capabilities` overrides merged over its defaults.
+Anthropic has no native schema mode, so the schema is sent as an extra system block after the cached one; Z.ai is Anthropic-compatible and reports the same flag, and DeepSeek serves JSON mode but not a schema. In all three the schema reaches the model as prompt, which is why Gemini's own limit matters: on Gemini 2 a response schema and tools cannot ride the same call (`400 "Function calling with a response mime type: 'application/json' is unsupported"`), so those calls send the schema as prompt too. Gemini 3 takes both. `FallbackAiProvider` reports a flag as true only when every provider in its list does. `createOpenAICompatibleProvider` takes `capabilities` overrides merged over its defaults.
 
 ## Options every vendor provider takes
 
@@ -179,7 +179,13 @@ const openrouter = new OpenRouterProvider({
 });
 ```
 
-Base URL `https://openrouter.ai/api`, chat completions with `json_schema`. OpenRouter's prompt cache lives on the upstream host's account, and default routing hops between hosts, so `providerOrder` keeps a conversation warm; fallbacks stay on, it is a preference, not a lock.
+Base URL `https://openrouter.ai/api`, chat completions with `json_schema`.
+
+**The upstream host is pinned for you.** OpenRouter's prompt cache lives on the upstream host's account, and default routing hops between hosts, so every hop is a cold cache. By default the model's own vendor is preferred — `z-ai/glm-5.3-flash` goes to `z-ai`, `anthropic/claude-sonnet-5` to `anthropic` — with fallbacks on, so it is a preference and never a failed call. Measured 2026-09-21: unpinned, four calls with the same 2.9k-token prefix all landed on a host that reported `cached: 0`; pinned, the second call read 2,880 of 2,904 tokens from cache.
+
+Pass `providerOrder` to choose the hosts yourself. There is no way to say it inside `model`: OpenRouter answers `400 "z-ai/glm-5.3-flash@novita is not a valid model ID"`.
+
+One caveat worth measuring for your own model: through this gateway, `z-ai/glm-5.3-flash` put "somos umas 30 pessoas" in the wrong band of a four-value enum on most attempts, in every JSON mode and routing tried, while the same model on [ZaiProvider](#zaiprovider) and `deepseek-chat` got it right every time. Run `bun run eval:live --only openrouter` against the model you ship.
 
 ## DeepSeekProvider
 
@@ -204,7 +210,7 @@ import { DeepSeekProvider } from "@falai/agent";
 const deepseek = new DeepSeekProvider({ apiKey: process.env.DEEPSEEK_API_KEY ?? "", model: "deepseek-chat" });
 ```
 
-Chat completions with `json_schema`. Reasoning arrives on `reasoning_content` and cache hits under `prompt_cache_hit_tokens`; both are read one layer down.
+Chat completions with `json_object`: DeepSeek answers a `json_schema` response format with `400 "This response_format type is unavailable now"`, so the endpoint guarantees JSON and the schema travels in the prompt. Reasoning arrives on `reasoning_content` and cache hits under `prompt_cache_hit_tokens`; both are read one layer down.
 
 ## ZaiProvider
 

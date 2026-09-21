@@ -5,9 +5,10 @@
  * hits and the thinking levels are all in `@providerkit/core`, written against
  * the REST API rather than the SDK.
  *
- * v3 sends a response schema alongside tools when a caller asks for both. v2
- * dropped the schema in that case, from a 2024-era constraint that no longer
- * holds — a sibling codebase runs the combination in production today.
+ * On Gemini 3 a response schema and tools travel on the same call. On Gemini 2
+ * they cannot: the API answers `400 "Function calling with a response mime
+ * type: 'application/json' is unsupported"`, so the schema rides in the prompt
+ * instead. `@providerkit/core` reads the model id and picks; nothing to set.
  */
 
 import { createGeminiProvider, type FallbackOptions, type Provider } from "@providerkit/core";

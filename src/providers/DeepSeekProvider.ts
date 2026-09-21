@@ -43,7 +43,8 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
   public readonly name = "deepseek";
   public readonly capabilities: ProviderCapabilities = {
     supportsTools: true,
-    supportsNativeJsonSchema: true,
+    // JSON yes, a schema no — see `structuredOutput` below.
+    supportsNativeJsonSchema: false,
     supportsStreaming: true,
     supportsStreamingToolCalls: true,
     supportsPromptCaching: true,
@@ -60,8 +61,12 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
       apiKey: options.apiKey,
       baseUrl: options.baseURL ?? "https://api.deepseek.com",
       model: options.model,
-      // No Responses API here; chat completions enforces the schema natively.
-      structuredOutput: "json_schema",
+      // DeepSeek serves `response_format: { type: 'json_object' }` and nothing
+      // else: a `json_schema` format answers
+      // `400 "This response_format type is unavailable now"` on every call.
+      // So the endpoint guarantees JSON and the prompt carries the shape, which
+      // is the path the parser already tolerates.
+      structuredOutput: "json_object",
       ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
       ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),
