@@ -7,8 +7,8 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { Agent, falai, NotImplementedError } from "../src/index.js";
-import type { DataOf, InferData, InferParams } from "../src/index.js";
+import { Agent, falai } from "../src/index.js";
+import type { DataOf, Flow, InferData, InferParams } from "../src/index.js";
 import { mockProvider } from "./mock-provider.js";
 
 interface LeadContext {
@@ -119,20 +119,36 @@ describe("falai()", () => {
     expect(result).toEqual({ ok: true, detail: "owner: oi" });
   });
 
-  test("agent() builds a shell whose turn is not implemented yet", async () => {
-    const agent = f.agent({
-      name: "Ana",
-      provider: mockProvider(),
-      actions: { notify },
-      conditions: { tagsAny },
-      flows: [triagem],
+  test("agent() checks every name a flow uses when it is built", () => {
+    const build = (flows: Flow<LeadContext, Data>[]) =>
+      f.agent({ name: "Ana", provider: mockProvider(), actions: { notify }, conditions: { tagsAny }, flows });
+    expect(() => build([triagem, triagem])).toThrow('flow "triagem" is declared twice');
+    expect(() => build([f.flow({ id: "x", name: "X", steps: [{ id: "a", prompt: "Oi.", tools: ["agenda"] }] })])).toThrow('unknown tool "agenda"');
+    expect(() => build([f.flow({ id: "x", name: "X", steps: [{ id: "a", do: "typo", with: {} }] })])).toThrow('unknown action "typo"');
+    expect(() => f.agent({ name: "Ana", provider: mockProvider(), flows: [], idle: { prompt: "Responda.", tools: ["agenda"] } })).toThrow(
+      'idle: unknown tool "agenda"',
+    );
+  });
+
+  test("agent().turn: the single message flow starts unscored; one understand call, one speak call", async () => {
+    const provider = mockProvider({
+      understand: [{ flows: {}, fields: { nome: null } }],
+      speak: [{ message: "Oi! Como você se chama?", nome: null }],
     });
+    const agent = f.agent({ name: "Ana", provider, actions: { notify }, conditions: { tagsAny }, flows: [triagem] });
     expect(agent).toBeInstanceOf(Agent);
     expect(agent.options.fields).toBe(f.fields);
-    expect(agent.options.flows).toEqual([triagem]);
 
     const context: LeadContext = { lead: { id: "l1", tags: [], owner: "ai" } };
-    await expect(agent.turn({ sessionId: "s1", context, message: "oi" })).rejects.toBeInstanceOf(NotImplementedError);
+    const r = await agent.turn({ sessionId: "s1", context, message: "oi", id: "m1" });
+    expect(provider.calls.map((c) => c.schemaName)).toEqual(["understand", "speak"]);
+    expect(r.llmCalls).toBe(2);
+    expect(r.messages).toEqual([
+      { text: "Oi! Como você se chama?", kind: "ai", afterMs: 0, key: "triagem#m1:quem:1", runId: "triagem#m1", stepId: "quem" },
+    ]);
+    expect(r.session.runs).toHaveLength(1);
+    expect(r.session.runs[0]).toMatchObject({ id: "triagem#m1", stepId: "quem", status: "asking", asked: { nome: 1 } });
+    expect(r.started).toEqual([{ runId: "triagem#m1", flowId: "triagem", anchor: "s1", dedupeKey: "triagem:s1:" }]);
   });
 
   test("falai() without fields still builds an agent", () => {

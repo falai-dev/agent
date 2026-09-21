@@ -98,8 +98,8 @@ export interface FlowSpec {
   tools?: string[];
 }
 
-/** What a flow's names resolve against: the agent's fields, actions, events and conditions. */
-export type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "conditions">;
+/** What a flow's names resolve against: the agent's fields, actions, events, conditions and tools. */
+export type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "conditions" | "tools">;
 
 // ── fromSpec / toSpec ───────────────────────────────────────────────────
 
@@ -221,7 +221,8 @@ function jsonPredRequired<C, D extends LooseData>(pred: Pred<C, D>, at: string):
 // ── validateFlow ────────────────────────────────────────────────────────
 
 /** A read-only view that a typed Flow and a spec-derived Flow both fit; the validator only reads. */
-type LoosePred = ((ctx: never) => boolean) | ConditionSpec<LooseData>;
+// A typed flow's ConditionSpec<D> and a spec's JSON both read as a name → argument map here.
+type LoosePred = ((ctx: never) => boolean) | Record<string, unknown>;
 interface LooseBranch {
   then: Next<LooseData>;
   when?: string;
@@ -251,6 +252,7 @@ interface LooseStep {
   with?: Record<string, unknown>;
   wait?: Duration | { event: string; upTo?: Duration };
   if?: LoosePred;
+  tools?: string[];
 }
 interface LooseFlow {
   id: string;
@@ -259,6 +261,7 @@ interface LooseFlow {
   clearOnStart?: string[];
   steps: LooseStep[];
   instructions?: LooseInstruction[];
+  tools?: string[];
 }
 
 const BUILT_IN_CONDITIONS = ["equals", "known", "silenced"];
@@ -270,13 +273,14 @@ const DURATION_HINT = 'Write a number and a unit: "30s", "5m", "24h" or "3d".';
  * `FlowConfigurationError` on the first problem that would break at runtime;
  * returns warnings for what runs but probably not as intended.
  */
-export function validateFlow<C, D extends LooseData>(
+export function validateFlow<C = unknown, D = LooseData>(
   input: Flow<C, D> | FlowSpec,
   registries: Registries,
 ): { warnings: string[] } {
   // Nulls mean "not set" in a spec; a typed flow has none, so one pass serves both forms.
   const flow: LooseFlow = stripNulls(input);
-  const { fields, actions = {}, events = {}, conditions = {} } = registries;
+  const { fields, actions = {}, events = {}, conditions = {}, tools = [] } = registries;
+  const toolIds = new Set(tools.map((tool) => tool.id));
   const warnings: string[] = [];
 
   if (typeof flow.id !== "string" || flow.id === "") {
@@ -307,6 +311,12 @@ export function validateFlow<C, D extends LooseData>(
   const slug = (name: string, at: string, where: string): void => {
     if (!own(fields, name)) {
       throw problem(at, `unknown field "${name}" in ${where}`, "Add it to the agent's fields or fix the slug.");
+    }
+  };
+
+  const toolNames = (names: string[] | undefined, at: string): void => {
+    for (const name of names ?? []) {
+      if (!toolIds.has(name)) throw problem(at, `unknown tool "${name}"`, "Register it in the agent's tools or fix the name.");
     }
   };
 
@@ -406,6 +416,7 @@ export function validateFlow<C, D extends LooseData>(
 
   for (const field of flow.clearOnStart ?? []) slug(field, flowAt, "clearOnStart");
   pred(flow.while, flowAt, "while");
+  toolNames(flow.tools, flowAt);
   flow.instructions?.forEach((ins, i) => pred(ins.if, flowAt, `instructions[${i}].if`));
 
   flow.on?.forEach((trigger, i) => {
@@ -444,6 +455,7 @@ export function validateFlow<C, D extends LooseData>(
       edge(i, branch.then, at, `${where}.then`);
     });
     step.instructions?.forEach((ins, j) => pred(ins.if, at, `instructions[${j}].if`));
+    toolNames(step.tools, at);
 
     if (step.do !== undefined) {
       if (!own(actions, step.do)) {

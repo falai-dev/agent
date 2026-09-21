@@ -9,30 +9,14 @@
  */
 
 import type { AgentOptions, EndReason, TurnInput, TurnResult } from "../types/agent.js";
-import type {
-  ActionResult,
-  Branch,
-  DoStep,
-  Duration,
-  Flow,
-  IfStep,
-  Next,
-  Pred,
-  Repeat,
-  SayStep,
-  Step,
-  StepBase,
-  TalkStep,
-  Trigger,
-  WaitEventStep,
-  WaitStep,
-} from "../types/flow.js";
+import type { ActionResult, Branch, DoStep, Duration, Flow, IfStep, Next, Pred, PredCtx, Repeat, SayStep, Step, StepBase, TalkStep, Trigger, WaitEventStep, WaitStep } from "../types/flow.js";
+import type { History } from "../types/history.js";
 import type { Run, Session, StepOutcome, StepOutcomeKind, TriggerKind } from "../types/session.js";
 import { cloneDeep } from "../utils/clone.js";
 import { parseDuration } from "../utils/duration.js";
 import { coerceField, DEFAULT_MAX_ASKS, extractMode, isKnown, pendingFields } from "../utils/schema.js";
 import { render, renderDeep } from "../utils/template.js";
-import type { IdleRequest, InputKind, SpeakOutcome, Spoken, TalkRequest, UnderstandRequest, Understanding } from "./contracts.js";
+import type { IdleRequest, InputKind, SpeakOutcome, SpeakRequest, Spoken, TalkRequest, UnderstandRequest, Understanding } from "./contracts.js";
 import { deepEqual, evaluate } from "./predicate.js";
 
 /** A `wait` this short rides as `afterMs` on the next message instead of a real wake. */
@@ -538,7 +522,7 @@ export class Runner<C = unknown, D = unknown> {
     if (!messageFlows.length && !mentionFlows.length && !branches.length && !Object.keys(fields).length) return null;
     return {
       text: turn.what.text,
-      history: turn.input.history ?? turn.session.history ?? [],
+      history: this.historyOf(turn),
       context: turn.context,
       data: turn.session.data,
       ...(floorRun && floorFlow ? { floor: { run: floorRun, flow: floorFlow } } : {}),
@@ -547,6 +531,11 @@ export class Runner<C = unknown, D = unknown> {
       branches,
       fields,
     };
+  }
+
+  /** The host's history for this turn; the session's own (playground) is the fallback. */
+  private historyOf(turn: Turn<C, D>): History {
+    return turn.input.history ?? turn.session.history ?? [];
   }
 
   /** The asker, or the run that took the floor in Ingest. */
@@ -675,6 +664,39 @@ export class Runner<C = unknown, D = unknown> {
     turn.queue = [...turn.session.runs];
     await this.drain(turn);
     return this.speaker(turn);
+  }
+
+  /**
+   * Everything Speak needs for this turn's one speaker. Instructions are agent,
+   * then flow, then step (idle: agent, then idle), each already judged by its
+   * `if`; tools are the step's list, else the flow's, else every agent tool.
+   */
+  speakRequest(turn: Turn<C, D>, talk: TalkRequest<C, D> | IdleRequest<C, D>): SpeakRequest<C, D> {
+    const own = "idle" in talk
+      ? { instructions: talk.idle.instructions ?? [], tools: talk.idle.tools }
+      : { instructions: [...(talk.flow.instructions ?? []), ...(talk.step.instructions ?? [])], tools: talk.step.tools ?? talk.flow.tools };
+    const ctx: PredCtx<C, D> = {
+      context: turn.context,
+      data: turn.session.data,
+      input: "idle" in talk ? undefined : talk.run.input,
+      ...("idle" in talk ? {} : { run: talk.run }),
+      silenced: turn.silenced,
+      now: turn.now,
+    };
+    const conditions = this.options.conditions ?? {};
+    const instructions = [...(this.options.instructions ?? []), ...own.instructions].filter((ins) => !ins.if || evaluate(ins.if, ctx, conditions));
+    const all = this.options.tools ?? [];
+    const allowed = own.tools;
+    return {
+      talk,
+      input: turn.what.kind === "message" ? { kind: turn.kind, text: turn.what.text } : { kind: turn.kind },
+      context: turn.context,
+      data: turn.session.data,
+      history: this.historyOf(turn),
+      now: turn.now,
+      instructions,
+      tools: allowed ? all.filter((tool) => allowed.includes(tool.id)) : all,
+    };
   }
 
   private speaker(turn: Turn<C, D>): TalkRequest<C, D> | IdleRequest<C, D> | null {

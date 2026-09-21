@@ -105,7 +105,6 @@ export type { PromptCacheConfig, PromptSectionType, SectionCompute } from "./pro
 
 export {
   FlowConfigurationError,
-  NotImplementedError,
   ProviderError,
   SessionConflictError,
 } from "./errors.js";

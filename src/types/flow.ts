@@ -103,7 +103,8 @@ export interface PredCtx<C = unknown, D = unknown, P = unknown> {
   context: C;
   data: Partial<D>;
   input: P;
-  run: Run;
+  /** The run being judged. Absent only for an agent-level instruction while the idle speaker answers. */
+  run?: Run;
   /** The host's reason the assistant cannot speak right now, when it cannot. */
   silenced?: string;
   now: Date;

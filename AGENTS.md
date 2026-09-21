@@ -126,7 +126,7 @@ All providers implement the `AiProvider` interface:
 - **Strict TypeScript** — `strict: true`, no implicit any, no unused locals/params, no implicit returns.
 - **No `as any`** — Fix the underlying type mismatch. Tests may use `as unknown as T` with justification.
 - **ESLint** — `@typescript-eslint/recommended-type-checked` rules. `no-floating-promises: error`, `no-explicit-any: warn`.
-- **Error format:** `[ErrorClass] what: why. how to fix.` — typed error classes (`FlowConfigurationError`, `ToolCreationError`, `ToolExecutionError`, `NotImplementedError`).
+- **Error format:** `[ErrorClass] what: why. how to fix.` — typed error classes (`FlowConfigurationError`, `ToolCreationError`, `ToolExecutionError`, `SessionConflictError`, `InvalidSessionError`).
 - **Naming:** Classes are PascalCase, files match their default export. Utilities are camelCase.
 - **Exports:** Everything public goes through `src/index.ts`. No deep imports from consumers.
 - **No path aliases.** `tsconfig.json` used to declare six (`@core/*`, `@utils/*`, one of them

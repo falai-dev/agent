@@ -10,7 +10,6 @@ export type { DataOf, Falai, FalaiRoot } from "./core/falai.js";
 export { Agent } from "./core/Agent.js";
 export {
   FlowConfigurationError,
-  NotImplementedError,
   ProviderError,
   SessionConflictError,
 } from "./types/errors.js";
