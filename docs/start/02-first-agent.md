@@ -1,199 +1,149 @@
 ---
 title: "Your first agent"
-description: "Build a 16-line agent that responds to a user message, and meet the seven primitives that shape every @falai/agent program."
+description: "Build Ana from one field and one flow, run one turn and learn the six words the rest of the docs use."
 type: tutorial
 order: 2
 ---
 
 # Your first agent
 
-You are about to write an agent that fits on one screen. One schema, one flow, one step, one turn — and from it the full mental model unfolds. The framework's seven primitives all participate in this single call, even though only three appear as syntax. The page names all seven so the rest of the tutorial can reference them without introduction.
+This is `examples/01-quickstart.ts`, the file you ran on the last page. Save it as `ana.ts`:
 
-This page builds the smallest agent that does real work — sixteen lines of TypeScript, one `respond` call, one greeting back from the model. The point is not the greeting. The point is to put every primitive of the framework on the page at once, in the smallest possible shape, so the rest of the tutorial extends a scaffold you can already read in full.
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-By the end of this page you will have a runnable file, an expected output, and a working mental map of the [seven primitives](../concepts/architecture.md). The next page extends this same file into a data-collecting agent.
-
-Keep [Install](./01-install.md) finished and your `GEMINI_API_KEY` ready in `.env` before you continue.
-
-## The whole agent
-
-Drop this into `src/index.ts`:
-
-```typescript
-import { createAgent, GeminiProvider } from "@falai/agent";
-
-const agent = createAgent({
-  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
-  schema: { type: "object", properties: { name: { type: "string" } } },
-  flows: [{
-    title: "Greet",
-    requiredFields: ["name"],
-    steps: [{ id: "ask_name", prompt: "What's your name?", collect: ["name"] }],
-  }],
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome da pessoa, sem tom de formulário." },
 });
 
-const response = await agent.respond({
-  history: [{ role: "user", content: "Hi, I'm Alice" }],
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "boas-vindas",
+      name: "Boas-vindas",
+      on: [{ message: [] }],
+      steps: [
+        { id: "nome", collect: ["nome"] },
+        { id: "ajuda", prompt: "Agradeça pelo nome e pergunte como pode ajudar." },
+      ],
+    }),
+  ],
 });
-console.log(response.message);
+
+const r = await agent.turn({ sessionId: "demo", message: "oi" });
+console.log(r.messages[0]?.text);
 ```
-
-That is the whole program. No persistence config, no tools, no branches, no signals. Three primitives appear by name (`Agent`, `Flow`, `Step`) and three more sit one decision away (`Tool`, `Instruction`, `Directive`). The next sections walk through every line.
-
-## Walk it line by line
-
-### Imports
-
-```typescript
-import { createAgent, GeminiProvider } from "@falai/agent";
-```
-
-`createAgent` is the level-1 factory — sugar over `new Agent(options)` — and the recommended construction path for application code. Its signature and full options surface live in the [`createAgent` reference](../reference/create-agent.md).
-
-`GeminiProvider` is one of four built-in [providers](../reference/providers.md). Swap to `OpenAIProvider`, `AnthropicProvider`, or `OpenRouterProvider` by changing this single import — the agent itself stays vendor-agnostic.
-
-### `createAgent({ ... })`
-
-```typescript
-const agent = createAgent({ /* ... */ });
-```
-
-`createAgent` accepts one options object. Generic inference flows from `schema` through every `flows[].steps[].collect` reference, so the type of `session.data` and tool-handler arguments is derived once and propagates everywhere. Misuse — duplicate flow ids, an unknown key in `collect`, a malformed signal — surfaces as `FlowConfigurationError` synchronously, before any turn runs.
-
-### `provider`
-
-```typescript
-provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
-```
-
-The provider is the strategy plug between the agent and the model vendor. Every provider implements the same `AiProvider` interface, so the agent talks to Gemini today and to a different vendor tomorrow with one line changed. See [Providers](../reference/providers.md) for the full options surface — `model`, `backupModels`, `config`, `retryConfig`.
-
-### `schema`
-
-```typescript
-schema: { type: "object", properties: { name: { type: "string" } } },
-```
-
-The schema is the single source of truth for `TData` — the typed shape of everything the agent collects across the whole conversation. It lives at the agent level, not the flow level. Every `collect` site in every step references keys defined here, and TypeScript verifies the references at compile time.
-
-This shape is why pre-extraction works: when a user message arrives, the engine extracts every collectable field it can in one pass, then skips any step whose `collect` set is already satisfied. The next tutorial page leans on this property hard. For the framing, see [the schema-first principle](../concepts/architecture.md#the-schema-first-principle).
-
-### `flows`
-
-```typescript
-flows: [{
-  title: "Greet",
-  requiredFields: ["name"],
-  steps: [/* ... */],
-}],
-```
-
-A [`Flow`](../reference/flow.md) is one conversational goal — booking a hotel, escalating a complaint, greeting a stranger. The router selects exactly one flow per turn. This agent has only one flow, so the router has nothing to choose between; later tutorials add more.
-
-`title` is the human-readable name (also used in the `Directive.goTo` shorthand). `requiredFields` declares which schema keys must be present in `session.data` before the engine fires the flow's completion path. The greeter's only required field is `name`.
-
-### Step `prompt` and `collect`
-
-```typescript
-steps: [{ id: "ask_name", prompt: "What's your name?", collect: ["name"] }],
-```
-
-A [`Step`](../reference/step.md) is a single node inside a flow. This step has the simplest LLM-step shape: an `id` for routing and logs, a `prompt` that becomes the engine's instruction to the model, and a `collect` set that names the schema fields this step is responsible for extracting from the user message.
-
-When the user writes `"Hi, I'm Alice"`, the engine routes into `Greet`, lands on `ask_name`, runs pre-extraction against the schema, and lifts `name: "Alice"` into `session.data`. The step's `collect` set is now satisfied — and because `name` is the flow's only `requiredField`, the flow is complete on this very turn.
-
-### `requiredFields`
-
-```typescript
-requiredFields: ["name"],
-```
-
-`requiredFields` is the completion gate. The flow is **done** the moment every key in this array is present in `session.data`. Completion is a state transition, not a message — the framework never speaks on its own. Anything the user reads at completion comes from the model's response on the same turn or from a `reply` step on the next turn.
-
-For this agent, completion happens on the first turn. For a longer flow, the gate would force more steps before the model wraps up.
-
-### `agent.respond(params)`
-
-```typescript
-const response = await agent.respond({
-  history: [{ role: "user", content: "Hi, I'm Alice" }],
-});
-console.log(response.message);
-```
-
-`respond(params)` runs one turn end to end: route to a flow, extract data, walk auto-step chains, call the LLM, deliver the assistant message, persist. `params` takes `history` (required — the conversation so far as `{ role, content }[]`) and optionally `session`, `contextOverride`, and `signal`. When no session is passed, the agent manages one internally; pass an explicit session (see below) for server-side, multi-conversation use. It returns an `AgentResponse` with the fields you usually want on hand:
-
-| Field | Type | What it is |
-|-------|------|------------|
-| `message` | `string` | The assistant's reply for this turn. |
-| `session` | `SessionState<TData>` | The updated session — including `session.data` with the extracted fields. |
-| `isFlowComplete` | `boolean` | `true` once `requiredFields` are all satisfied. |
-| `appliedInstructions` | `AppliedInstruction[]` | Instructions that rendered into this turn's prompt (deterministic, not self-reported). |
-| `triggeredSignals` | `SignalFiring[]` | Any signals that fired this turn. |
-
-`response.message` is the only field this minimal program reads. The rest become useful as the agent grows.
-
-## The seven primitives
-
-Three primitives appear by name in the code above: [`Agent`](../concepts/architecture.md#agent), [`Flow`](../concepts/architecture.md#flow), and [`Step`](../concepts/architecture.md#step). Four more shape every program of any size, and you will meet them in the pages ahead:
-
-- [`Agent`](../concepts/architecture.md#agent) — the top-level handle. Owns the schema, provider, flows, tools, signals, and persistence.
-- [`Flow`](../concepts/architecture.md#flow) — one conversational goal. Owns its steps, scoped tools, instructions, and completion semantics.
-- [`Step`](../concepts/architecture.md#step) — one node inside a flow. Asks a question, collects fields, calls tools, runs hooks, or speaks a verbatim line.
-- [`Tool`](../concepts/architecture.md#tool) — a typed function the AI can call. May redirect the conversation by emitting a directive. Added on page [04](./04-add-tools.md).
-- [`Instruction`](../concepts/architecture.md#instruction) — a `must` / `never` / `should` behavioral statement at agent, flow, or step scope.
-- [`Directive`](../concepts/architecture.md#directive) — a flat object any tool, hook, or branch returns to write state, change position, or speak verbatim.
-
-Read [Architecture](../concepts/architecture.md) end to end when you want the full mental model — what each primitive owns, how they reference each other, and why the set is exactly seven.
-
-## Run it
-
-Make sure `.env` has `GEMINI_API_KEY` set, then run the file:
 
 ```bash
-bun run src/index.ts
+GEMINI_API_KEY=your-key bun run ana.ts
 ```
 
-Or with Node 20+:
+Ana says hello and asks your name. The file has four parts: fields, a flow, an agent, a turn.
 
-```bash
-node --env-file=.env --experimental-strip-types src/index.ts
+## Fields
+
+```ts fragment
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome da pessoa, sem tom de formulário." },
+});
 ```
 
-You should see a single line of greeting prose, something like:
+A field is one piece of data Ana can collect. You declare every field once, on the agent, with a `type` and an `ask`. The `ask` is not the question itself; it tells the model how to ask, and the model phrases it to fit the conversation.
 
+`f` is your toolkit. Everything you build from it (`f.flow`, `f.agent`, later `f.action`) knows the field names, so `collect: ["nmoe"]` is a compile error, not a bug found in production.
+
+## The flow
+
+```ts fragment
+f.flow({
+  id: "boas-vindas",
+  name: "Boas-vindas",
+  on: [{ message: [] }],
+  steps: [
+    { id: "nome", collect: ["nome"] },
+    { id: "ajuda", prompt: "Agradeça pelo nome e pergunte como pode ajudar." },
+  ],
+})
 ```
-Hi Alice, nice to meet you! How can I help today?
+
+A flow is a trigger plus an ordered list of steps.
+
+- `on` holds the triggers: when a run of this flow starts. `{ message: [] }` means "when the customer writes". The empty list is a catch-all; put phrases in it once you have a second flow, and the model routes between them — see [Triggers](../guides/triggers.md).
+- `steps` run in order. Both steps here are talk steps: the model speaks. `collect` lists the fields the step needs; `prompt` is a guideline for what to say. A step may have one or both.
+- `id` is required on the flow and on every step. No step may be called `end`: that word, used as a `then` or `else` target, ends the run. Ids are stable names the framework uses in keys and logs.
+
+## The agent
+
+```ts fragment
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [/* the flow above */],
+});
 ```
 
-The exact words come from the model — they will not match across runs — but the shape is stable: one assistant message, addressed to Alice by name, written in the tone the model defaults to. If the call fails, double-check that `GEMINI_API_KEY` is exported and that your `.env` is being loaded (Bun loads it automatically; Node needs `--env-file`).
+One agent serves every conversation. Nothing about one customer lives inside it: the conversation's state arrives on each turn and comes back changed. `name` is how Ana calls herself in the prompt; `provider` is the class from the install page.
 
-## What just happened
+## The turn
 
-In one turn, the engine:
+```ts fragment
+const r = await agent.turn({ sessionId: "demo", message: "oi" });
+```
 
-1. Created a fresh session keyed by an auto-generated id (the default `MemoryAdapter` keeps it in process).
-2. Ran the flow router. With one flow on the agent, `Greet` wins by default.
-3. Pre-extracted `name: "Alice"` from the user message in a single pass against the schema, before any step ran.
-4. Skipped `ask_name` because its `collect` set was already satisfied — the engine never re-asks for data it already has.
-5. Called the LLM once with the active prompt, the typed `session.data`, and the conversation history.
-6. Returned the assistant message with `isFlowComplete: true` because `requiredFields` were already met.
+`turn()` is the one entry point. You hand it what just happened (here: a message) and it hands back what to do. The result `r` has:
 
-This sequence — pre-extract, then skip-then-execute, then check completion — is the [turn pipeline](../concepts/pipeline.md), and it runs on every `respond` call regardless of flow size.
+| Field | What it is |
+|---|---|
+| `r.messages` | What to send. Each has `text`, `kind` (`"ai"` phrased by the model, `"verbatim"` from a `say` step), `afterMs` and a `key`. |
+| `r.schedule` | Timers to put in your queue. Empty here; page 5 uses it. |
+| `r.llmCalls` | Model calls this turn spent. Here: 1. A text turn costs at most 2, plus one per tool round. |
+| `r.session` | The conversation's state: collected `data`, live `runs`. You keep it and pass it back next time. |
+| `r.changed` | `false` means nothing happened: save nothing, send nothing. |
+| `r.outcomes` | One line per step, your execution log. |
+| `r.started`, `r.ended` | Runs that began or finished this turn, with the flow id and, for `ended`, a `reason`. |
+| `r.skipped` | Triggers that matched but did not start a run, with the reason (`code: 'already-claimed'`, …). |
 
-## When something goes wrong
+The framework never sends and never saves. Both are your job, and [Go to production](./05-go-to-production.md) shows the loop.
 
-A few common failure modes and where to look:
+## The second turn
 
-- **`Missing API key`** or a 401 from Gemini — `GEMINI_API_KEY` is unset or your `.env` did not load. Bun loads `.env` automatically; Node needs `--env-file=.env`.
-- **`FlowConfigurationError: collect references unknown key 'foo'`** — the schema does not declare `foo` as a property. Add it to `schema.properties` or fix the `collect` array.
-- **`FlowConfigurationError: duplicate flow id` / `duplicate step id`** — two flows or two steps share the same auto-derived id. Set explicit `id` values to disambiguate.
-- **The LLM call hangs** — check the `model` (Gemini's free tier expects `"gemini-3.1-pro-preview"` or `"gemini-3.1-flash-lite"`) and your network. Provider errors surface as `ResponseGenerationError`.
+Pass `r.session` back as `session` and Ana continues where she stopped. Add to the end of `ana.ts`:
 
-The full set of typed errors and the `[<ErrorClass>] <what>: <why>. <how to fix>.` format contract live in the [Errors reference](../reference/errors.md).
+```ts fragment
+const second = await agent.turn({ sessionId: "demo", session: r.session, message: "sou a Bia" });
+console.log(second.session.data); // { nome: "Bia" }
+console.log(second.messages[0]?.text); // Ana thanks Bia and asks how she can help
+console.log(second.llmCalls); // 2
+```
 
-## Where this leaves you
+What happened inside, in order:
 
-You have a runnable agent, an expected-shape output, and the names of every primitive that will appear in the rest of the tutorial. The next page swaps the trivial `name` schema for a structured booking schema and three steps that each `collect` one field. The same single message — *"I want a hotel in Lisbon for two people next Friday"* — populates all three fields at once and lands the agent on the confirmation step on the first turn.
+1. The model read "sou a Bia" and found `nome`. That is the understand call.
+2. Code saw that the `nome` step has nothing left to collect and moved the run to `ajuda`.
+3. The model phrased the `ajuda` prompt. That is the speak call.
+4. `ajuda` was the last step, so the run ended. `second.session.runs` is empty.
 
-**Next:** [Collect data](./03-collect-data.md)
+Two calls, and the code decided every movement. The model never chooses which step comes next.
+
+The first turn spent one call. There was one flow and no phrases to route by, and no step was asking yet, so the understand call had no work and was skipped. On the second turn the `nome` step was asking, so the understand call ran to read the reply. Rule of thumb: the understand call runs only when there is routing or a field to read; the speak call runs whenever Ana says something. [The turn](../concepts/pipeline.md) has the exact rules.
+
+## The six words
+
+| Word | Meaning | In this file |
+|---|---|---|
+| flow | a trigger plus an ordered list of steps | `boas-vindas` |
+| trigger | when a run of the flow starts | `{ message: [] }` |
+| step | one thing a run does: talk, `say`, `do`, `wait` or `if` | `nome`, `ajuda` |
+| field | one piece of data, declared once on the agent | `nome` |
+| run | one live execution of a flow inside a session | started on turn 1, ended on turn 2 |
+| turn | one call to `agent.turn()`: one input in, messages and timers out | two of them |
+
+Two more things you will meet soon.
+
+A message flow starts once per session by default, so a third "oi" does not start `boas-vindas` again. `repeat: "always"` on the trigger changes that.
+
+When no run is asking anything, Ana still answers. This is the idle speaker. It replies as Ana with no flow or step behind it: the agent's `name`, `persona`, `goal`, `knowledgeBase` and agent-level instructions, and nothing from a flow. `idle: { prompt: "..." }` on the agent gives it a guideline; `idle: "silent"` mutes it.
+
+Next: [Collect data](./03-collect-data.md) gives Ana four fields and a confirmation.

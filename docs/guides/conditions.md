@@ -1,181 +1,217 @@
 ---
-title: "When and if"
-description: "Pick between AI-evaluated `when` strings and code-evaluated `if` predicates, and combine them to save tokens."
+title: "Conditions"
+description: "if is a question your code answers for free; when is a question the model answers inside a model call."
 type: guide
-order: 1
+order: 2
 ---
 
-# When and if
+# Conditions
 
-Conditions decide whether a flow activates, a step runs, an instruction applies, or a branch fires. v2 splits them into two distinct fields with different evaluators:
+Two words, two judges. `if` is a question your code answers. `when` is a question the model answers from what the customer just said.
 
-- `when` — strings the LLM evaluates against intent and the conversation. Costs tokens.
-- `if` — TypeScript predicates the engine evaluates locally. Free.
+The smallest condition is an `if` step:
 
-The split is the same everywhere: `Flow`, `Step`, `Instruction`, and `BranchEntry` all expose `when?` and `if?` with identical semantics. This guide shows how to pick between them, how arrays combine, and what happens when both are set. If you are migrating from v1, the [v1 → v2 migration guide](../migration/v1-to-v2.md) covers the renamed condition fields.
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-## Pick the right field
-
-Reach for `if` first. It's free, deterministic, and reads clearly in code review.
-
-| Question to answer                                              | Use      |
-| --------------------------------------------------------------- | -------- |
-| Is this user authenticated? Is `data.tier === 'pro'`?           | `if`     |
-| Is the feature flag on? Is the order older than 90 days?        | `if`     |
-| Did the user ask about pricing? Are they expressing frustration? | `when`   |
-| Is the user describing a refund scenario in their own words?    | `when`   |
-
-If the answer lives in `data`, `context`, or `session`, it's `if`. If the answer requires reading the user's intent from natural language, it's `when`.
-
-## `when` — AI strings
-
-`when` accepts a string or an array of strings. Functions are rejected at construction time with `FlowConfigurationError`.
-
-```typescript
-{
-  title: "Refund",
-  when: "the user is requesting a refund",
+interface Ctx {
+  lead: { tags: string[] };
 }
-```
 
-Multiple non-`!` strings combine with **OR** semantics — any clause may pass for the condition to match. Use the array form for alternative natural-language expressions of the same intent:
+const f = falai<Ctx>().fields({});
 
-```typescript
-{
-  title: "Address",
-  when: [
-    "the user asked about the address",
-    "the user asked where we are located",
+const agent = f.agent({
+  name: "Ana",
+  // Set GEMINI_API_KEY in your environment before running this.
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "boas-vindas",
+      name: "Boas-vindas",
+      steps: [
+        { id: "vip", if: ({ context }) => context.lead.tags.includes("vip"), then: "tapete", else: "oi" },
+        { id: "tapete", say: "Bem-vindo de volta. Já avisei seu gerente de conta.", then: "end" },
+        { id: "oi", say: "Oi. Posso ajudar em algo?" },
+      ],
+    }),
   ],
-}
+});
+
+const r = await agent.turn({ sessionId: "s1", context: { lead: { tags: ["vip"] } }, start: { flow: "boas-vindas", key: "signup:1" } });
+console.log(r.messages[0]?.text); // "Bem-vindo de volta. Já avisei seu gerente de conta."
+console.log(r.llmCalls); // 0
 ```
 
-Prefix a string with `!` to make it an exclusion. Exclusions also combine with OR semantics: if any exclusion matches, the condition is inhibited. A negative-only `when` means "active unless this exclusion matches."
+Code answered the question, so the turn cost no model call.
 
-```typescript
-{
-  title: "Checkout",
-  when: [
-    "the user is ready to buy",
-    "!the user is asking for support",
+## `if`: code, free
+
+An `if` is a `Pred`: a function that returns a boolean, or the same thing written as JSON (a `ConditionSpec`). Both see the same context.
+
+| `PredCtx` field | What it is |
+|---|---|
+| `context` | the host context passed to this `turn()` |
+| `data` | the collected fields so far, `Partial<D>` |
+| `input` | the run's input: an event payload, a start input, a mention's extract; `unknown` |
+| `run` | the run being judged; absent only for an agent-level instruction while the idle speaker answers |
+| `silenced` | the host's reason the assistant cannot speak now; absent when it can |
+| `now` | the agent's clock |
+
+### As a function
+
+```ts fragment
+if: ({ context, data, now }) => context.lead.owner === "ai" && data.nome !== undefined && now.getHours() < 18
+```
+
+A function is the most direct form. It cannot be stored: `toSpec` refuses a flow that carries one with a `FlowConfigurationError`. For a flow that lives in a database, write the JSON form.
+
+### As JSON
+
+A `ConditionSpec` is an object whose keys are conditions. Every listed key must hold. Three are built in:
+
+| Key | Holds when | Example |
+|---|---|---|
+| `equals` | each listed field equals the given value | `{ equals: { confirmado: true } }` |
+| `known` | each listed field has a value (not `undefined`, `null` or `''`) | `{ known: ['nome', 'empresa'] }` |
+| `silenced` | `true`: the host said the assistant cannot speak; `false`: it can | `{ silenced: true }` |
+
+Any other key names one of the agent's `conditions` and carries its argument:
+
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
+
+interface Ctx {
+  lead: { tags: string[] };
+}
+
+const f = falai<Ctx>().fields({
+  nome: { type: "string", ask: "Pergunte o nome." },
+  confirmado: { type: "boolean", ask: "Resuma o que anotou e pergunte se está certo." },
+});
+
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  conditions: {
+    // Used by name in JSON: { tagsAny: ["vip", "parceiro"] }. The argument comes from JSON unchecked, so test it.
+    tagsAny: f.condition((ctx, tags: string[]) => Array.isArray(tags) && tags.some((t) => ctx.context.lead.tags.includes(t))),
+  },
+  flows: [
+    f.flow({
+      id: "fechamento",
+      name: "Fechamento",
+      on: [{ message: ["quer fechar o contrato"], if: { tagsAny: ["vip", "parceiro"] } }],
+      steps: [
+        { id: "quem", collect: ["nome"] },
+        { id: "confirma", collect: ["confirmado"] },
+        { id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado", "nome"] } },
+        { id: "tchau", prompt: "Agradeça e diga que um vendedor continua daqui." },
+      ],
+    }),
   ],
-}
+});
 ```
 
-The strings are sent to the LLM as part of the routing or activation prompt. For instructions, the string is appended to the instruction bullet so the response model can apply the instruction conditionally. Keep conditions short, intent-shaped, and free of code-style boolean expressions — `"the user wants to cancel"` lands; `"data.cancelRequested === true"` does not.
+`f.condition` gives the check its argument type; the JSON side stays a plain object. When the agent is built, `validateFlow` checks every JSON condition and throws `FlowConfigurationError` on the first problem:
 
-## `if` — code predicates
+- `equals` must be an object; each key must be a field; each value must have the field's exact type (`"3"` is not a number, nothing is coerced) and be in its `enum` unless it is a template such as `"{{context.plano}}"`.
+- `known` must be a list of field slugs.
+- `silenced` must be a boolean.
+- Any other key must be a registered condition, or the error names it: `unknown condition "tagsAny"`.
 
-`if` accepts a function or an array of functions. Each predicate receives a `TemplateContext`-shaped argument (`{ context, data, session, history, helpers }`) and returns `boolean | Promise<boolean>`.
+Keys with an `undefined` value are skipped. An empty object `{}` always holds.
 
-```typescript
-{
-  title: "Enterprise",
-  if: ({ context }) => context.tier === "enterprise",
-}
-```
+## `when`: judged by the model
 
-Arrays combine with **AND** semantics — every predicate must return truthy.
+A `when` is a sentence about the customer's latest message. It appears in two places:
 
-```typescript
-{
-  if: [
-    ({ context }) => context.authenticated,
-    ({ data }) => (data.cartTotal ?? 0) > 100,
+- **A branch on a talk step.** The understand call answers it true or false while the step is asking. The first branch that holds moves the run. See [Branching](branching.md).
+- **An instruction.** The sentence is rendered into the speak prompt for the model to apply itself: "when the customer is upset, apologise once". It is guidance, not a gate; code never evaluates it.
+
+```ts
+import { falai } from "@falai/agent";
+
+const f = falai().fields({
+  pedido: { type: "string", ask: "Pergunte o número do pedido." },
+});
+
+const suporte = f.flow({
+  id: "suporte",
+  name: "Suporte a pedidos",
+  on: [{ message: ["problema com um pedido"] }],
+  instructions: [{ kind: "must", when: "o cliente está irritado", prompt: "Peça desculpa uma vez e vá direto à solução." }],
+  steps: [
+    {
+      id: "dados",
+      collect: ["pedido"],
+      branches: [{ when: "a pessoa pede para falar com um humano", then: { flow: "humano" } }],
+    },
+    { id: "resolve", prompt: "Explique o próximo passo para o pedido {{data.pedido}}." },
   ],
+});
+```
+
+What a `when` costs: the understand call happens at most once per turn, and every `when` branch rides in it. When that call would not happen otherwise (a single message flow, nothing to extract, no mention flows), a `when` branch alone makes the turn spend it. An instruction's `when` costs nothing extra: it is text inside the speak prompt.
+
+A `when` only makes sense where there is fresh customer text. Branches on a `wait` step are judged when the customer replies, by code only: an `if` branch there works, a `when` branch is listed by the type but never asked.
+
+## Where each is allowed
+
+| Place | `if` | `when` |
+|---|---|---|
+| Trigger (`on[].if`) | yes: the run starts only if it holds; also the flow's default `while` | no: the phrases in `message` and `mention` are the model's part |
+| Flow `while` | yes: re-checked whenever the run moves | no |
+| Branch on a talk step | yes, code | yes, the understand call |
+| Branch on a `wait` step | yes, when the customer replies | never judged |
+| `if` step | yes, required | no |
+| Instruction (agent, flow or step) | yes: the instruction is dropped from the prompt when it fails | yes: rendered into the prompt |
+
+## Which one to write
+
+Ask where the answer already is.
+
+- In `context`, `data` or the input: `if`. It is free and deterministic.
+- In what the customer just said, and you need code to act on it: a `when` branch.
+- In what the customer just said, and it is a yes or no you will keep: collect a boolean field with `extract: 'asked'` and gate on it with an `if` step. The speak envelope of that step fills the field; there is no extra call. The confirmation pattern in [Collection](../concepts/collection.md) is this.
+- Both: a `when` branch on the step and an `if` on the flow. Each is judged by its own judge.
+
+## JSON flows
+
+A stored flow carries only the JSON form. `f.fromSpec` types it, and the agent checks the names when it is built:
+
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
+import type { FlowSpec } from "@falai/agent";
+
+interface Ctx {
+  lead: { stageId: string };
 }
+
+const f = falai<Ctx>().fields({});
+
+const spec: FlowSpec = {
+  id: "proposta",
+  name: "Acompanhar proposta",
+  on: [{ event: "stage_entered", after: "1h", if: { inStage: "proposta" } }],
+  while: { inStage: "proposta" },
+  steps: [{ id: "p", kind: "prompt", prompt: "Pergunte se a proposta chegou bem e se há dúvidas." }],
+};
+
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  events: { stage_entered: f.event<{ stageId: string }>() },
+  conditions: {
+    inStage: f.condition((ctx, stageId: string) => ctx.context.lead.stageId === stageId),
+  },
+  flows: [f.fromSpec(spec)],
+});
 ```
 
-Predicates that throw or reject are caught, logged, and treated as `false` for that evaluation. They never corrupt the session — the worst case is the condition fails to match.
+Remove `inStage` from `conditions` and `f.agent` throws `[FlowConfigurationError] flow "proposta": unknown condition "inStage" in while. Register it in conditions or use equals, known, silenced.` The flow's `while` is checked before its triggers, so that is the line you see first. More in [Flows from JSON](flows-from-json.md).
 
-### What's in the predicate context
+## Read next
 
-Predicates receive a context object with the same shape used everywhere templates and conditions evaluate. The fields you'll reach for most:
-
-| Field      | Type                     | Notes                                                            |
-| ---------- | ------------------------ | ---------------------------------------------------------------- |
-| `data`     | `Partial<TData>`         | Collected schema fields. Null-check anything not in `requires`.  |
-| `context`  | `TContext`               | Agent-level ambient context (user, env, services).               |
-| `session`  | `SessionState<TData>`    | Current flow id, current step id, full history.                  |
-| `history`  | `Event[]`                | Read-only conversation history.                                  |
-
-Predicates can be `async`. Awaiting a database lookup or feature-flag service is supported, but remember: every predicate runs every time its host primitive is evaluated. Keep them cheap, or memoize the work in a hook upstream.
-
-```typescript
-{
-  if: async ({ context, data }) =>
-    await context.flags.isEnabled("v2_pricing", data.userId),
-}
-```
-
-## When both are set
-
-Setting both `when` and `if` on the same primitive runs `if` **first**, free. `when` is only sent to the LLM when every `if` predicate passes. The order is deliberate: predicates short-circuit the LLM call when the answer is already disqualified.
-
-```typescript
-{
-  title: "US Pricing",
-  if: ({ context }) => context.country === "US" && context.flags.usPricing,
-  when: "the user is asking about pricing",
-}
-```
-
-In the snippet above, non-US users skip the AI evaluation entirely. The `when` string costs tokens only when the predicate already says "this user is in scope, ask the AI whether they're asking about pricing."
-
-This pattern is the recommended shape any time a condition has both a cheap precondition and an intent classification. Lead with `if` to gate. Use `when` to interpret.
-
-## Where the split lives
-
-The same `when` / `if` shape attaches to four primitives. Semantics are identical in each location:
-
-| Primitive       | Field path              | What it gates                                      |
-| --------------- | ----------------------- | -------------------------------------------------- |
-| Flow            | `FlowOptions.when/if`   | Whether the router selects this flow this turn     |
-| Step            | `StepOptions.when/if`   | Whether the step is reachable in the current flow  |
-| Instruction     | `Instruction.when/if`   | Whether the instruction applies to the response    |
-| BranchEntry     | `BranchEntry.when/if`   | Whether this branch entry matches inside `step.branches` |
-
-```typescript
-// Flow scope — gate flow selection
-{ title: "Refund", when: "user wants a refund", if: ({ context }) => context.authenticated }
-
-// Step scope — gate step reachability
-{ id: "verify_payment", when: "user is confirming the order", if: ({ data }) => !!data.cardToken }
-
-// Instruction scope — render only when relevant
-{ kind: "should", when: "user mentions a discount code", prompt: "Validate the code before applying it." }
-
-// Branch scope — pick a successor
-branches: [
-  { if: ({ data }) => data.tier === "enterprise", when: "user wants pricing", then: "enterprise_pricing" },
-  { then: "default_pricing" },
-]
-```
-
-## `step.skip` is the OR companion
-
-One adjacent field rounds out the picture. `step.skip` is **function-only** with **OR** semantics — when any predicate returns truthy, the step is bypassed. Use it for "skip when this field already exists" cases:
-
-```typescript
-{
-  id: "ask_email",
-  collect: ["email"],
-  skip: ({ data }) => !!data.email,
-}
-```
-
-`skip` does not accept strings. There is no AI counterpart — skipping is a code decision by design.
-
-## Quick reference
-
-A short checklist before shipping a condition:
-
-- Does it read a field, flag, or context value? Use `if`.
-- Does it interpret natural language? Use `when`.
-- Multiple natural-language alternatives where any may match? Put them in `when` — non-`!` entries use OR.
-- Need an AI-evaluated exclusion? Prefix that `when` entry with `!`.
-- Multiple code predicates that must all pass? Put them in `if` — arrays use AND.
-- Need to skip when a value is already collected? `step.skip` (OR semantics).
-- Both fields set? `if` runs first, free; `when` only fires if `if` passes.
-
-**Next:** [Branching](./branching.md)
+- [Branching](branching.md): `when` and `if` branches, the `if` step, `clear`.
+- [Flow control](flow-control.md): `while` and the premise check.
+- [Actions, events and conditions reference](../reference/actions-events-conditions.md): `Condition`, `ConditionSpec`, `PredCtx`.

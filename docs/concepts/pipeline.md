@@ -1,399 +1,153 @@
 ---
-title: "Turn pipeline"
-description: "How a single call to agent.respond moves through directive resolution, routing, signals, hooks, the LLM, and persistence."
+title: "The turn pipeline"
+description: "The eight phases of one agent.turn() call, what each one does and what each one spends."
 type: concept
 order: 2
 ---
 
-# Turn pipeline
+# The turn pipeline
 
-> **Where this is introduced:** [Architecture](./architecture.md)
+One turn is one call to `agent.turn(input)`. The input is a message, a wake, an event or a manual start. All four run the same eight phases, in the same order. Two phases may call the model, once each. The rest is code.
 
-Every interaction with `@falai/agent` is a *turn* — one user message in,
-one assistant message out. Inside that boundary the framework runs a
-fixed sequence of phases: it consumes a pending directive, evaluates
-pre-signals in parallel with routing, picks the next step, runs hooks
-around an LLM call, applies the merged result, and persists. The order
-is the same on every turn. The shape of the turn is the framework. The
-LLM understands; the pipeline keeps the code in control.
+| # | Phase | Who | What it does | Spends |
+|---|---|---|---|---|
+| 1 | Load | code | Reads the clock, copies the session or creates one, trims the history when `compaction` is set | 0, or 1 when a summary is written |
+| 2 | Ingest | code | Records the input, resolves waits, starts event and manual runs | 0 |
+| 3 | Understand | model | Judges the customer's message: routing, mentions, branches, field values | 0 or 1 |
+| 4 | Decide | code | Applies the judgement: starts and resumes runs, writes fields, fires a branch | 0 |
+| 5 | Run | code | Moves every run that can move until it asks, parks or ends | 0 |
+| 6 | Speak | model | Phrases the one reply and extracts the step's fields | 0 or 1, plus 1 per tool round |
+| 7 | Settle | code | Applies what was spoken, re-parks on failure, arms silence wakes | 0 |
+| 8 | Return | code | Builds the `TurnResult` | 0 |
 
-This page is the per-turn mental model: the diagram, the resolution
-precedence, the per-turn **directive bus**, and the merge rules used
-when more than one handler tries to write at once.
+`Agent.turn()` in `src/core/Agent.ts` is these phases in one line each: `Runner.begin` (1 and 2), `Understand.run` (3), `Runner.decide` (4), `Runner.advance` (5), `Speak.run` (6), `Runner.settle` (7), `Runner.finish` (8).
 
-## The pipeline diagram
+```ts
+import type { Agent } from "@falai/agent";
+declare const agent: Agent; // one flow, one collect step; see Architecture
 
-```mermaid
-graph TB
-    IN[respond / respondStream]
-    IN --> PEND{session.pendingDirective?}
-
-    PEND -- yes --> APPLY1[Apply pending directive]
-    APPLY1 --> STEP
-
-    PEND -- no --> PAR[Parallel]
-    PAR --> PRE[PRE-SIGNAL phase<br/>pre / both signals]
-    PAR --> ROUTER[AI routing<br/>FlowRouter]
-
-    PRE --> MERGE{Pre-signal directive?}
-    ROUTER --> MERGE
-    MERGE -- halt --> HALT[Skip LLM]
-    MERGE -- position --> APPLY2[Apply signal position]
-    MERGE -- augment only --> KEEP[Keep routing + apply augmentation]
-    MERGE -- none --> KEEP
-
-    APPLY2 --> STEP
-    KEEP --> STEP
-
-    STEP[Step resolution]
-    STEP --> AUTO[Auto-step chain]
-    AUTO --> BRANCH[step.branches]
-    BRANCH --> SUCC[Linear successor /<br/>AI step selection]
-
-    SUCC --> ENTER[onEnter / prepare hooks<br/>pre-LLM bus]
-    HALT --> POSTSIG
-    ENTER --> LLM[LLM call + tool loop]
-    LLM --> FIN[finalize hook<br/>post-LLM bus]
-    FIN --> COL[Collect + merge directives]
-
-    COL --> POSTSIG[POST-SIGNAL phase<br/>post / both signals]
-    POSTSIG --> PERSIST[Persist session]
-    PERSIST --> OUT[AgentResponse]
+const r = await agent.turn({ sessionId: "s1", message: "oi" });
+console.log(r.llmCalls); // 1: one flow, nothing to judge, one speak call
+console.log(r.outcomes.map((o) => [o.stepId, o.status, o.detail]));
 ```
 
-Three things to notice:
+## 1. Load
 
-- **`pendingDirective` shortcuts the top half.** When a previous turn
-  left a directive on the session, or `agent.dispatch()` was called
-  between turns, it is applied first and routing is skipped.
-- **Pre-signals run in parallel with routing.** Both calls are issued
-  via `Promise.all` so the common case (no halt, no signal redirect)
-  pays no extra latency. If a pre-signal halts or sets a position
-  field, the parallel routing result is discarded.
-- **Post-signals come after the LLM.** They cannot stop *this* turn —
-  they observe the assistant's reply, optionally extract structured
-  data, and at most arm `pendingDirective` for the next turn.
+`now` comes from the agent's `clock` (default: the system time). The session you passed is deep-copied; the input is never mutated. No session means a fresh one: `{ id: sessionId, v: 4, version: 0, data: {}, runs: [], claims: {}, inputs: [], metadata: {} }`. A `wake` with no session does nothing: outcome `code: 'no-session'`, `changed: false`.
 
-The two signal phases are no-ops when `agent.signals` is empty or
-unset. See [Signals](../reference/signals.md) for the full surface.
+A session saved by 3.x is the host's job: run `migrateSession` where you deserialize, before `turn()`. See [Persistence](../guides/persistence.md).
 
-## Resolution precedence
+When the agent has `compaction`, the history is trimmed here, once per turn, before either call sees it. Only the last layer (`auto_compact`, a written summary) calls the model, and it counts as one call in `llmCalls`. See [Compaction](../guides/compaction.md).
 
-When more than one source could decide where the conversation goes
-next — a pending directive, a pre-signal, the AI router, an auto-step,
-a `step.branches` entry, the linear chain, the post-signal phase — the
-pipeline resolves them in a fixed, locked order. This order does not
-change between releases. Knowing it is enough to predict what every
-turn will do.
+## 2. Ingest
 
-1. **`session.pendingDirective` is consumed first.**
-   Set on the previous turn (e.g. by a post-signal, by a
-   `complete: { next }` chain, by a tool that emitted `goTo`) or by
-   `agent.dispatch()` from outside any turn. When present it is
-   applied verbatim and the rest of the top half is skipped. The
-   field is cleared as part of the apply step so it cannot fire
-   twice.
+What happens depends on the input kind.
 
-2. **PRE-SIGNAL phase, in parallel with routing.**
-   Pre-phase signals (`phase: 'pre'` or `phase: 'both'`) run via the
-   same `Promise.all` that issues the routing classifier call. Their
-   directives merge through the per-turn bus (see below). If the
-   merged pre-phase directive sets `halt: true`, the LLM is skipped
-   for this turn. If it carries a position field (`goTo`,
-   `goToStep`, `complete`, `abort`, `reset`), that position wins and
-   the routing result is discarded. If it only carries augmentation
-   (`appendPrompt`, `injectTools`) or state writes (`dataUpdate`,
-   `contextUpdate`), routing is kept and the augmentation is layered
-   on top.
+**Message.** An `id` the session already saw (it keeps the last 50) is dropped: `code: 'duplicate-input'`, `changed: false`. Otherwise the id is recorded and `lastUserAt` is set to `at` (or `now`). Then every run parked on a timer `wait` with an `else` takes that `else`, in the order the runs started: the customer replied before the timer ran out. Outcome `code: 'replied'`.
 
-3. **AI routing.**
-   `FlowRouter.decide` picks the active flow and entry step based on
-   the user message, conversation history, and each flow's `when`
-   condition. Used only when steps 1 and 2 produced no position
-   field. Routing is the framework's *intent classifier*: it answers
-   "what is the user trying to do right now?" and nothing else. It
-   never writes data and never speaks.
+**Wake.** A key starting with `silence:` is a silence wake: it starts the silence flow only while the session still shows that silence (see [Runs and waits](./runs-and-waits.md#wakes)). Any other key belongs to the one run whose `waiting.key` equals it. That run goes back to `running`, and its step says what the wake means: `code: 'no-reply'` on a timer wait, `code: 'no-event'` on an event wait, or a deferred `do` about to run again. No such run: `code: 'stale-wake'`, `changed: false`.
 
-4. **Auto-step chain.**
-   With a current flow and step in hand, the pipeline walks the
-   `auto: true` chain — each auto-step's `onEnter` and `prepare`
-   hooks fire, branches resolve, and the chain advances without an
-   LLM call until it reaches a non-auto step, a `halt`, a `reply`,
-   a `complete`, or the per-turn cap (`maxAutoStepsPerTurn`). Auto
-   steps are how the code half of the contract advances state in
-   bulk between user messages.
+**Event.** An `inbound` event counts as the customer speaking: it sets `lastUserAt` and resolves reply waits like a message. An `outbound` one counts as the assistant speaking and sets `lastAssistantAt`. Every run parked on `wait: { event }` for this name takes `then` (`code: 'event-arrived'`). Then every flow with a matching `event` trigger goes through the [start checks](./runs-and-waits.md#starting-a-run); the payload becomes the run's `input`, and `after` parks the new run before its first step (`code: 'awaiting-trigger'`).
 
-5. **Step branches.**
-   When the resolved step has `branches`, they evaluate in
-   declaration order. The `if` predicate runs first (free, code-only
-   evaluation). If it passes, the optional `when` string is sent to
-   the AI as a yes/no classifier. The first entry whose conditions
-   all match wins; its `then` is applied — a step id (jump within
-   the flow), a flow id (cross-flow jump), or a full `Directive`.
-   Code-only branches incur zero token cost.
+**Start.** The named flow goes through the start checks with the host's `key` and `input`. A flow the agent does not have leaves `code: 'flow-gone'` in `skipped`.
 
-6. **Linear successor / AI step selection.**
-   When no branch matched, the pipeline falls through to the linear
-   chain. If exactly one candidate successor passes its `skip`
-   condition, that step is entered. If several pass, the framework
-   asks the AI to pick (the same routing primitive, scoped to the
-   surviving candidates). If none pass, the flow is implicitly
-   complete (the *last step terminates the flow* rule from v2 — no
-   sentinel value, no special return type).
+A run that takes or resumes the floor here (a resolved wait, a wake) makes phase 4 skip routing: the customer is answering that run.
 
-7. **POST-SIGNAL phase.**
-   After `finalize` and the post-LLM bus merge, post-phase signals
-   evaluate sequentially against the just-completed turn. They see
-   the assistant's reply, the collected data, and any tool results.
-   Post-phase position directives (`goTo`, `goToStep`, `complete`)
-   set `session.pendingDirective` for the *next* turn — there is no
-   mid-turn re-entry, by design, to keep turn semantics legible.
-   Pre-LLM-only fields (`appendPrompt`, `injectTools`, `halt`) are
-   dropped with a debug warning if a post-phase signal emits them.
+## 3. Understand
 
-This is the precedence the rest of the framework is built around. The
-[Resolution precedence section](../reference/signals.md#resolution-precedence-within-a-turn)
-on the signals reference page restates the same list as a contract;
-this concept page is the prose explanation.
+Only a `message` turn reaches this phase. It is skipped under `silenced` unless you passed `{ reason, understand: true }`.
 
-## The directive bus
+Code first works out what there is to judge:
 
-Hooks, tools, and signal handlers all express their intent the same
-way: by emitting a [`Directive`](../reference/directive.md). The
-pipeline collects these emissions into a per-turn, in-memory **bus**
-and reduces them to a single applied directive at the end of each
-phase. Two phases, one merge function.
+- **Candidates**: the flow holding the floor, whatever its trigger, plus every `message` flow with a non-empty phrase list whose `if` holds and whose `repeat` allows a start, in flow order. `message: []` catch-alls are never scored.
+- **Mentions**: every `mention` flow with a non-empty list whose `repeat` allows a start.
+- **Branches**: the `when` branches of the asking step.
+- **Fields**: every unknown field with `extract: 'anywhere'` listed by any talk step of the floor's flow or of a candidate flow.
 
-### Pre-LLM phase
+Then the shortcuts, each worth zero calls:
 
-Sources, in fixed order:
+- Nothing to judge: no call. The catch-all or the idle speaker answers.
+- Exactly one eligible `message` flow, nobody on the floor, nothing else to judge: it starts without scoring.
+- A floor holder, no other candidate, nothing else to judge: there is nothing to compare.
 
-1. `agent.hooks.onEnter` (if the agent supports hooks at this level)
-2. `flow.hooks.onEnter` for the active flow
-3. `step.hooks.onEnter` for the resolved step
-4. `step.hooks.prepare`
-5. Any `ctx.dispatch` calls made inside the above hooks
+Otherwise one call, `schemaName: 'understand'`, with one envelope: `{ flows: { id: 0–100 }, mentions: { id: boolean }, extract: { id: { … } }, branches: { q1: boolean }, fields: { field: value } }`. Only the sections with something to judge are present; inside a section every property is required and nullable, so the model must answer each one. Branch keys travel as short aliases (`q1`, `q2`) because a run id is not a legal property name; they are mapped back to `${runId}/${stepId}/${index}` when the reply is parsed. A reply with no usable JSON is logged and treated as an empty judgement; the call still counts. A provider failure here throws `ProviderError`: nothing ran, nothing was saved, and the host retries the input.
 
-These return `Directive` — with the pre-LLM fields
-three pre-LLM-only fields (`appendPrompt`, `injectTools`, `halt`). The
-merged result feeds the prompt composer and tool manager before the
-LLM call:
+## 4. Decide
 
-- `halt: true` skips the LLM entirely (a `reply`, if any, becomes the
-  literal assistant message).
-- `appendPrompt[]` is concatenated into the system prompt for this
-  turn only.
-- `injectTools[]` is added to the available tool list for this turn
-  only.
-- Position fields, state writes, and `reply` carry forward exactly
-  as they would from any directive.
+Code applies the judgement in a fixed order.
 
-### Post-LLM phase
+1. **Routing**, skipped when a run took the floor in Ingest. With an asking run, another flow takes over only when its score is at least 40 and beats the asker's by at least 15. With no asker: a single eligible flow starts as is; otherwise the best score at 40 or above starts, else the first `message: []` catch-all, else nobody, and the idle speaker answers in phase 6. A `suspended` run of the chosen flow resumes instead of a new one starting.
+2. **Mention runs** start in flow order. A `mention: []` trigger is a code-only detector: it goes through the start checks on every message without the call, so a blocked `repeat` is logged as a skip. A trigger's `extract` values become the run's `input`.
+3. **The routed run** starts or resumes and holds the floor. A run that starts applies `clearOnStart` now, before extracted values land.
+4. **Fields** from the envelope are written one at a time, after validation. An unknown field name is dropped (`code: 'unknown-field'`), a value that does not fit the type is dropped (`code: 'bad-value'`), a value outside `enum` is dropped (`code: 'not-in-enum'`). Strings are coerced to numbers and booleans on the way in.
+5. **The first true branch** of the asking step takes its `then` (`code: 'branch'`): `if` branches by code, `when` branches from the envelope.
 
-Sources, in fixed order:
+## 5. Run
 
-1. Each `ToolResult.directive` returned during the tool loop
-2. Any `ctx.dispatch` calls inside tool handlers
-3. `step.hooks.finalize`
-4. `flow.hooks.onComplete` (when the flow finished this turn)
-5. The `then` branch of any matched `step.branches` entry whose `then`
-   was a full `Directive` (not just a step id)
+If no run is asking, the most recently suspended one returns to asking. Then every live run is moved in turn; a child started by `then: { flow }` joins the queue. A run moves only if it can: `waiting` and `suspended` runs stay put, and an asking run re-speaks only on a message, never on a wake or an event.
 
-These return `Directive`. Pre-LLM-only fields here are
-dropped with a debug warning — `halt` after the fact has no meaning,
-and `appendPrompt` / `injectTools` could not influence a call that
-has already happened.
+Before a run moves, its premise is re-checked with this turn's context: `while` when the flow has one, otherwise the trigger's `if`. A false premise ends the run: `code: 'premise-changed'`. A silence-started run moved by a wake also ends when the customer has written since it started: `code: 'customer-replied'`. A flow the agent no longer has ends the run with `code: 'flow-gone'`; a missing step, `code: 'step-gone'`.
 
-### Why a bus
+Then the run walks its steps until one stops it.
 
-Two reasons. First, multiple emitters are normal: a `prepare` hook
-might add a sentence to the prompt while a tool result writes
-collected data while a `finalize` hook completes the flow. The bus
-makes "who wrote what" explicit and the merge rules deterministic.
-Second, observability: `AgentResponse.directiveChain` returns the full
-list of emitted directives in order with their sources, so traces
-explain themselves without bisecting hook code.
+- **Talk** (`prompt` / `collect`). Pending is `collect` minus known minus at `maxAsks`. A collect step with nothing pending is skipped with no call (`code: 'already-known'`) and the run continues. Under `silenced`, a resuming asker stays asking and any other run ends `code: 'silenced'` (`detail` = your reason). Otherwise every other asking run is suspended, this run becomes `asking`, and it is the turn's speaker, unless speaking already happened this turn, in which case it waits for the next message.
+- **Say.** The text goes to `messages[]` as `kind: 'verbatim'` with the pending `afterMs`. `once` writes a claim; a repeat is `code: 'already-sent'`. Under `silenced` the run ends `code: 'silenced'` (`detail` = your reason).
+- **Do.** The action runs now, with `with` rendered against `data`, `context` and `input`, under `key = ${runId}:${stepId}:${visit}`. `{ ok }` continues (`spoke: true` makes this run the one that answered); `{ skipped }` continues (`code: 'action-skipped'`); `{ failed }` takes `onFail` or continues (`code: 'action-failed'`); `{ defer }` parks the run under a new wake and re-runs the same step, same key, when it fires. An unknown action is `code: 'action-failed'` with `detail: 'unknown action "notify"'`; a thrown error is `code: 'action-failed'`, the error message in `detail`.
+- **Wait** (timer). Ten seconds or less, when the next step is a `say` or a talk step: the delay rides on that message as `afterMs` (`code: 'inline-delay'`, `detail: '3000ms'`). Anything else parks the run and adds `{ key, at }` to `schedule[]`, with `at` moved forward to the next business hour when the step sets `businessHours: true`.
+- **Wait** (event). Parks until the event arrives or `upTo` passes (default 30 days).
+- **If.** `then` when the predicate holds, else `else` (default `'end'`).
 
-The bus is purely in-memory and lasts one turn. Nothing about the bus
-itself is persisted; only the *applied* directive's effects (state
-writes, position changes, `pendingDirective` for the next turn) cross
-the persistence boundary.
+Caps: 50 steps per run per turn (`code: 'step-loop'`), 5 hops of flow-to-flow chaining (`code: 'hop-limit'`).
 
-## Algorithm 4 — merge rules
+## 6. Speak
 
-When the bus has more than one directive in a phase, the pipeline
-folds them into a single `Directive` (with pre-LLM fields honored in the pre-LLM
-phase) using the following rules. Same rules in both phases; the
-pre-LLM phase additionally folds the three augmentation fields.
+One speaker per turn. It is the talk step phase 5 queued or, on a message with no run asking and nothing said yet, the idle speaker: `idle` on the agent, a prompt; `'silent'` mutes it; left unset, it answers with no guideline of its own. Under `silenced` nobody speaks and no call is made.
 
-### Position fields — winner-takes-all by precedence
+One rule protects the customer from two answers: when a run other than the floor holder already answered the message this turn (a `say`, or a `do` that returned `spoke: true`), the floor's talk is skipped (`code: 'another-reply'`) and that run stays asking for the next message. A run's own `say` never silences its own talk.
 
-Exactly one position field can apply per phase. The winner is chosen
-by the precedence:
+The prompt is built per call, in `src/core/Speak.ts`, in this order:
 
-```
-abort > complete > goTo / goToStep > reset
-```
+- identity: name, persona, goal
+- the knowledge base
+- the flow's name and description
+- the step's `prompt`, or a default guideline
+- the pending fields with their `ask`
+- the known fields, as settled facts
+- the instructions whose `if` holds: agent, then flow, then step
+- the customer's message, or, on anything but a message (a wake, an event, a start), a note that there is no new message and the assistant speaks first
+- the response format
 
-- **`abort` always wins.** A handler that aborts the conversation
-  cannot be overridden by a later "go somewhere else" — there is no
-  somewhere else.
-- **`complete` beats `goTo` / `goToStep`.** The flow is ending; any
-  follow-up jump belongs in `complete.next`, not as a competing
-  position field.
-- **`goTo` and `goToStep` share a tier.** `goTo` is the cross-flow
-  hop; `goToStep` is the within-flow hop. Both express "next position
-  is here." Among same-tier emissions, last-wins.
-- **`reset` is lowest.** Any explicit jump out of the current flow
-  beats a "restart this flow" emitted earlier in the phase.
+The envelope is `{ message, ...pending fields of this step }`, every property required and nullable, so one call both answers and extracts. Tools run in rounds. Each round is one call; the model may call tools, their results go back as history, and it is asked again. After `maxToolLoops` rounds (default 5; `0` disables tools) it is asked once more without tools, so a message always comes back. Field values merge across rounds, last one wins. A provider failure or an empty message returns `deferred` instead of throwing; phase 7 re-parks the step.
 
-Within the same precedence tier, **last emission wins**. The pipeline
-logs a debug-level warning naming all conflicting sources so a noisy
-turn is diagnosable.
+## 7. Settle
 
-### `reply` — last-wins
+The one place the spoken result is applied.
 
-`reply` is a verbatim assistant utterance — the LLM is bypassed for
-the message body. If two emitters set `reply`, the second wins. The
-pipeline logs a debug warning so the override is visible.
+**Spoken.** The message goes to `messages[]` as `kind: 'ai'` with `key = ${runId}:${stepId}:${visit}`, or `idle:<trigger key>` for the idle speaker. Envelope values are validated and written like phase 4; tool `data` patches are written as given. Pending is recomputed. Each field still pending gets `asked + 1` and the run stays `asking`. Nothing pending: a field that hit `maxAsks` is reported (`code: 'max-asks'`, one line per field), the run takes `then` and keeps moving this turn, except that a talk step reached now waits for the next message.
 
-`reply` and `abort` are mutually exclusive at apply time: an aborted
-conversation cannot deliver a reply, and the pipeline rejects the
-combination as a `FlowConfigurationError`.
+**Deferred.** The talk step is re-parked under `${runId}:${stepId}:${visit}:retry:${atMs}`: one minute out, then five, then fifteen on later failures, outcome `code: 'provider-unavailable'`. The session is saved with everything phase 5 did. The retry wake re-runs the step under the same key, so the `do` steps before it do not run again.
 
-### `dataUpdate` and `contextUpdate` — shallow-merge in emit order
+Then three bookkeeping moves. `lastAssistantAt` is set when anything went out. The most recently suspended run resumes when nobody is asking. And when the assistant spoke last, every `silence` flow whose `if` and `repeat` allow it gets a wake at `lastAssistantAt + silence`, key `silence:${flowId}:${sessionId}:${lastAssistantAtMs}`, with `replaces` naming the previous one.
 
-State writes are *additive*: every emitter contributes its slice and
-the merger shallow-merges them in declaration order, last write wins
-on key collision. The `Object.assign({}, a, b)` semantics — top-level
-keys overwrite, nested objects are not deep-merged.
+## 8. Return
 
-This is the rule that lets a flow-level `onEnter` set a default while
-a step-level `prepare` overrides one field on top, without the two
-hooks needing to know about each other.
+`TurnResult`: `session` (version unchanged; the host bumps it on save), `changed`, `messages` in emission order, `schedule`, `outcomes`, `started`, `ended` (each with a reason), `skipped` (triggers that matched but did not start, with the reason), `llmCalls`. `changed` is `false` when the input was ignored — a repeated message id, a wake with no session, a wake nothing is waiting for — or when the session came back identical with no message, no wake, no outcome and no skip to show for the turn.
 
-After merging, the combined `dataUpdate` is validated against
-`agent.schema` *atomically* — every field across every emitter is
-checked together, and the session is not mutated unless the whole set
-passes. A failure throws `DataValidationError` with the offending
-field and emitter listed.
+## The budget
 
-### `appendPrompt` and `injectTools` — concatenate, then dedupe
+Every row but the last is asserted by a scenario in `tests/scenarios/`; the compaction row is read off `Agent.compacted` in `src/core/Agent.ts`. The mock provider in the scenarios throws when it runs out of scripted replies, so a turn that spends one call too many fails loudly.
 
-Pre-LLM only. Both fields are arrays; the merger concatenates them in
-emit order and then deduplicates:
+| Turn | Calls | Why | Scenario |
+|---|---|---|---|
+| A message with a floor holder or several candidate flows | 2 | understand, then speak | S1 |
+| A message when one flow is eligible and nothing else needs judging | 1 | speak only | S0, S1 |
+| A message with no flows, answered by the idle speaker | 1 | speak only | S9 |
+| A message where a mention flow's `say` answers | 1 | understand only; the floor's talk is skipped | S4 |
+| Each tool round | +1 | one more speak call | S8, S9 |
+| A wake or start that reaches a talk step | 1 | speak only; there is no message to understand | S2, S5, S12 |
+| A wake or start that runs only `do`, `wait` and `if` steps | 0 | code only | S5 (the start; its defer test covers the wake) |
+| Any input under `silenced` (a plain reason) | 0 | `do` steps run, nobody speaks; `{ reason, understand: true }` still spends the understand call | S2, S12 |
+| A message with `idle: 'silent'` and no eligible flow | 0 | nothing to judge, nobody speaks | S9 |
+| A compaction summary | +1 | once per turn, before both calls | `Agent.ts` |
 
-- **`appendPrompt`** is concatenated and rendered into the prompt's
-  per-turn appendage slot. No deduplication — duplicates from
-  different sources are preserved (a flow-level "be polite" plus a
-  step-level "be polite" is acceptable redundancy).
-- **`injectTools`** is concatenated and deduped by `Tool.id`. When
-  two emitters inject a tool with the same id, the *later* definition
-  wins — typically a step-level injection overriding a flow-level
-  default.
-
-Both arrays apply only for this turn; they are stripped before
-`session.pendingDirective` is written, and they cannot be persisted.
-
-### `halt` — logical-OR
-
-Pre-LLM only. If *any* pre-phase emitter set `halt: true`, the merged
-directive halts. There is no "vote" — a single emitter is enough. The
-LLM is not called; if a `reply` is also set, that becomes the literal
-assistant message; otherwise the turn ends with an empty body and
-`stoppedReason: 'halt'`.
-
-`halt` is the framework's circuit breaker: a hook that detects an
-unresolvable state can stop the turn outright without competing with
-other emitters.
-
-## One turn end-to-end
-
-The same shape, traced as a sequence. Lanes are *User*, *Agent*
-(`agent.respond`), *Pipeline* (the internal turn pipeline),
-*Provider* (the AI), and *Adapter* (the persistence layer).
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Agent
-    participant Pipeline
-    participant Provider
-    participant Adapter
-
-    User->>Agent: respond("I want to book a hotel")
-    Agent->>Adapter: load session
-    Adapter-->>Agent: SessionState (with pendingDirective?)
-
-    alt session.pendingDirective is set
-        Agent->>Pipeline: applyDirective(pendingDirective)
-        Pipeline->>Pipeline: clear pendingDirective
-    else
-        par Parallel
-            Agent->>Pipeline: runPreSignalPhase()
-            Pipeline->>Provider: classifier call (batched signals)
-            Provider-->>Pipeline: matched + extracted
-        and
-            Agent->>Pipeline: FlowRouter.decide()
-            Pipeline->>Provider: routing call
-            Provider-->>Pipeline: { flow, step }
-        end
-        Pipeline->>Pipeline: merge pre-signal bus<br/>halt? position? augment? none?
-    end
-
-    Pipeline->>Pipeline: walk auto-step chain
-    Pipeline->>Pipeline: evaluate step.branches
-    Pipeline->>Pipeline: select successor / linear chain
-
-    Pipeline->>Pipeline: onEnter + prepare hooks<br/>(pre-LLM bus)
-    Pipeline->>Provider: generate(prompt + tools + history)
-
-    loop tool loop
-        Provider-->>Pipeline: tool call
-        Pipeline->>Pipeline: ToolManager.execute<br/>(may emit Directive)
-        Pipeline->>Provider: tool result
-    end
-
-    Provider-->>Pipeline: assistant message
-    Pipeline->>Pipeline: finalize hook<br/>(post-LLM bus)
-    Pipeline->>Pipeline: collect + merge directives<br/>(Algorithm 4)
-    Pipeline->>Pipeline: applyDirective(merged)
-
-    Pipeline->>Pipeline: runPostSignalPhase()
-    Pipeline->>Provider: extraction call (if signals declared)
-    Provider-->>Pipeline: matched + extracted
-    Pipeline->>Pipeline: post-phase position?<br/>arm pendingDirective for next turn
-
-    Pipeline->>Adapter: persist session
-    Pipeline-->>Agent: AgentResponse
-    Agent-->>User: assistant message
-```
-
-A few things this diagram makes precise that the high-level graph
-elides:
-
-- The session is loaded *before* the pending-directive check, because
-  `pendingDirective` lives on the session itself.
-- The pre-signal classifier call and the routing call are issued in
-  parallel; the merge step decides whether the routing result is used
-  or discarded.
-- The tool loop is internal to the LLM phase. Tools that emit
-  directives feed the *post-LLM* bus, not the pre-LLM one — they ran
-  during a call, not before it.
-- The post-signal phase happens *after* directive apply, before
-  persistence. That's the only window in which post-phase handlers
-  can see the fully-applied turn state.
-- Persistence is the last write. Anything that did not survive the
-  applied directive (the bus contents, the pre-LLM augmentation
-  arrays, `halt`) is gone by the time the adapter is called.
-
-## Where to go next
-
-The pipeline is the *what happens*. The directive is the *how
-handlers ask for things to happen*. The next concept page covers the
-flat shape, the position field rules, the inheritance chain
-`Directive → SignalDirective`, and the `flow`
-namespace helpers (`flow.isDirective`, `flow.merge`, `flow.validate`)
-that make the bus introspectable from user code.
-
-**Next:** [Directives](./directives.md)
+`llmCalls` is on every `TurnResult`, and on the outcome line of the talk or idle step that spent it.

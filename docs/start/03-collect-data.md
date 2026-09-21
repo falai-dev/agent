@@ -1,231 +1,126 @@
 ---
 title: "Collect data"
-description: "Use the agent's schema to extract city, dates, and party size from one message — without asking three questions in a row."
+description: "Give Ana four fields, let them land in any order, cap how often she asks, and confirm before moving on."
 type: tutorial
 order: 3
 ---
 
 # Collect data
 
-One schema, three steps, one completion gate. The engine extracts what it can in a single pass, skips steps whose data is already present, and finishes the flow the moment every required field lands. This page shows the pattern end to end — from a user who types everything in one sentence to a user who answers one field at a time.
+Ana's job is to screen the customer: find out who is writing, from which company, how big the company is, and check that she got it right. That is four fields and five steps. The flow is now called `triagem`; everything else from the last page stays.
 
-In [Your first agent](./02-first-agent.md), the agent answered a single message. This page extends that scaffold into something more useful: a hotel-booking agent that lifts structured fields out of a user's message and skips any question it already has the answer to.
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-You will define a schema, write three steps that each `collect` one field, gate the confirmation step with `requires`, bypass already-answered steps with `skip`, and seal the flow with `requiredFields`. By the end of the page, a single sentence — *"I want a hotel in Lisbon for two people next Friday"* — will populate every field in one turn and land the agent on the confirmation step before the user types again.
-
-Keep the file from the previous tutorial open. Everything here is one continuous edit.
-
-## Define the schema
-
-The schema is the single source of truth for everything the agent collects across the whole conversation. It lives at the agent level, not the flow level, and every `collect` site below references keys defined here.
-
-Add a `BookingData` type and pass a matching `schema` to `createAgent`:
-
-```typescript
-import { createAgent, GeminiProvider } from "@falai/agent";
-
-interface BookingData {
-  city: string;
-  checkIn: string;
-  guests: number;
-}
-
-const agent = createAgent<unknown, BookingData>({
-  name: "BookingBot",
-  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
-  schema: {
-    type: "object",
-    properties: {
-      city: {
-        type: "string",
-        description: "Destination city the user wants to stay in.",
-      },
-      checkIn: {
-        type: "string",
-        description: "Check-in date as ISO yyyy-mm-dd.",
-      },
-      guests: {
-        type: "integer",
-        description: "Number of people staying. Defaults to 1 if not stated.",
-      },
-    },
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome da pessoa, sem tom de formulário." },
+  empresa: { type: "string", ask: "Pergunte de qual empresa a pessoa fala." },
+  tamanho: {
+    type: "string",
+    enum: ["1-10", "11-50", "51-200", "200+"],
+    ask: "Pergunte quantas pessoas trabalham lá e ofereça as faixas.",
   },
-  flows: [/* added in the next section */],
+  confirmado: { type: "boolean", ask: "Resuma em uma frase o que anotou e pergunte se está tudo certo." },
 });
-```
 
-The `description` strings inside `properties` are not decoration. The provider sees them on every turn and uses them to extract fields from the user's message. Spend a sentence on each one — it pays back at extraction time. Especially for ambiguous fields (a date format, an ID prefix, a unit), the description is the only place you can tell the extractor what "valid" looks like.
-
-Two type parameters flow through `createAgent`: `TContext` (ambient data, ignored here) and `TData` (the booking shape). They propagate to every step's `collect` array and every tool handler. Misspell a key in `collect: ["citi"]` and the type checker objects at the call site.
-
-## Collect one field per step
-
-A `Step` declares which schema fields it is responsible for through its `collect` array. The engine reads that array on every turn — if any listed key is already populated in `session.data`, the step is skipped automatically. That is the core of pre-extraction: the engine will not ask a question whose answer it already has.
-
-Add a `Booking` flow with three collection steps:
-
-```typescript
-flows: [
-  {
-    title: "Booking",
-    description: "Book a hotel by collecting destination, date, and party size.",
-    when: "the user wants to book a hotel",
-    requiredFields: ["city", "checkIn", "guests"],
-    steps: [
-      {
-        id: "ask_city",
-        prompt: "Find out which city the user wants to stay in.",
-        collect: ["city"],
-      },
-      {
-        id: "ask_check_in",
-        prompt: "Find out which date the user wants to check in.",
-        collect: ["checkIn"],
-        requires: ["city"],
-      },
-      {
-        id: "ask_guests",
-        prompt: "Find out how many people are travelling.",
-        collect: ["guests"],
-        requires: ["city", "checkIn"],
-        skip: ({ data }) => typeof data.guests === "number",
-      },
-      {
-        id: "confirm",
-        prompt:
-          "Read back the city, check-in date, and guest count. Ask the user to confirm.",
-        requires: ["city", "checkIn", "guests"],
-      },
-    ],
-  },
-],
-```
-
-Three things deserve a closer look.
-
-`collect` is an instruction to the extractor, not a question gate. When the user message contains a city, the extractor populates `city` and the engine moves past `ask_city` whether or not that step ran a prompt. The step exists for the case where the field is still missing on entry — it asks the question that produces the value.
-
-`requires` is the prerequisite gate. The engine refuses to enter a step until every key listed in `requires` is present in `session.data`. Without `requires: ["city"]` on `ask_check_in`, a user who messages "next Friday" first would stall the flow — the engine would extract `checkIn`, see no `city`, and have nothing to do.
-
-`skip` is the bypass. It accepts a code predicate that runs on every turn; when it returns `true`, the step is skipped regardless of whether its `collect` set is satisfied. The example above demonstrates the pattern but is functionally redundant — the `collect: ["guests"]` already covers the same case. Use `skip` when the bypass condition is *not* about a `collect` field — for example, "skip the verification step if the user is already authenticated."
-
-## Gate completion with `requiredFields`
-
-The flow's `requiredFields` is the contract for "this flow is done." When every field listed there is present in `session.data`, the engine fires the flow's completion path on the next turn boundary. Pre-extraction, sequential steps, and one-shot collection all converge on the same gate.
-
-The `confirm` step in the snippet above does not collect anything — it only requires. Its job is to read the booking back to the user before the flow completes. This pattern is common: collection steps populate the schema, a final non-collecting step closes the loop.
-
-```typescript
-{
-  id: "confirm",
-  prompt:
-    "Read back the city, check-in date, and guest count. Ask the user to confirm.",
-  requires: ["city", "checkIn", "guests"],
-},
-```
-
-The flow ends here implicitly. There is no terminus marker, no end-of-flow constant, no return value — the last step in `steps[]` is the implicit terminus. When `requiredFields` is satisfied, the flow completes; if a flow with no `requiredFields` reaches its last step, the same path runs.
-
-A field that the flow can use but does not need belongs in `optionalFields` instead. It is descriptive only — never gates completion, but appears alongside `requiredFields` in re-entry resets if the flow is reentrant. For this tutorial, every field is required, so `optionalFields` stays empty.
-
-## The data fields at a glance
-
-Three field-related properties show up in the snippets above. They look similar but answer different questions:
-
-| Property | Lives on | Question it answers | Cost |
-|----------|----------|---------------------|------|
-| `schema.properties` | Agent | What can be extracted at all? | One extraction call per turn. |
-| `step.collect` | Step | Which fields does this step want this turn? | Free — engine inspects `session.data`. |
-| `step.requires` | Step | Which fields must already be present to enter this step? | Free — engine inspects `session.data`. |
-| `step.skip` | Step | Should this step be bypassed regardless of `collect`? | Free — code predicate. |
-| `flow.requiredFields` | Flow | When is the flow done? | Free — engine inspects `session.data`. |
-
-The pattern is consistent: the schema describes the universe of possible data, every other property describes a slice over that universe. Pre-extraction is what stitches them together — without it, every step would have to ask its question regardless of what the user already said.
-
-## Watch pre-extraction work
-
-Run the file with a single message that contains all three fields:
-
-```typescript
-const response = await agent.respond({
-  history: [
-    { role: "user", content: "I want a hotel in Lisbon for two people next Friday." },
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "triagem",
+      name: "Triagem",
+      on: [{ message: [] }],
+      steps: [
+        { id: "quem", prompt: "Descubra quem é e de onde fala.", collect: ["nome", "empresa"] },
+        { id: "porte", collect: ["tamanho"], maxAsks: 2 },
+        { id: "confirma", collect: ["confirmado"] },
+        { id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado"] } },
+        { id: "tchau", prompt: "Agradeça e diga que um vendedor continua daqui." },
+      ],
+    }),
   ],
 });
 
-console.log(response.message);
-console.log(response.session?.data);
-console.log(response.session?.currentStep?.id);
-```
+const first = await agent.turn({ sessionId: "demo", message: "Oi, quero saber como funciona" });
+console.log(first.messages[0]?.text); // Ana asks who she is talking to, and from which company
 
-The output is roughly:
-
-```
-> Just to confirm: a hotel in Lisbon, checking in 2025-11-21, for 2 guests. Shall I book it?
-{ city: "Lisbon", checkIn: "2025-11-21", guests: 2 }
-confirm
-```
-
-Three things happened in one turn:
-
-1. **Pre-extraction ran first.** Before any step prompt or LLM step call, the extractor read the user message against the agent's schema and populated `city`, `checkIn`, and `guests` in `session.data`. The check-in date was normalized to the ISO format the schema described.
-2. **The first three steps skipped.** `ask_city`, `ask_check_in`, and `ask_guests` each have a `collect` array whose every key was already present after extraction. The engine skipped them in order without calling the LLM for any of them.
-3. **The engine landed on `confirm`.** Its `requires` were satisfied, its `collect` was empty, and its prompt asked for confirmation. That is the only LLM step that ran for the turn.
-
-Try a message with one missing field:
-
-```typescript
-await agent.respond({
-  history: [
-    { role: "user", content: "I want a hotel in Lisbon" },
-    { role: "assistant", content: "Sure — when do you travel?" },
-    { role: "user", content: "Book me a hotel in Lisbon next Friday." },
-  ],
+const second = await agent.turn({
+  sessionId: "demo",
+  session: first.session,
+  message: "Sou a Bia, da Acme. Somos uns 30.",
 });
+console.log(second.session.data); // { nome: "Bia", empresa: "Acme", tamanho: "11-50" }
+console.log(second.outcomes.map((o) => [o.stepId, o.status, o.code]));
+// [ ["quem", "ok", undefined], ["porte", "skipped", "already-known"], ["confirma", "ok", undefined] ]
 ```
 
-The extractor populates `city` and `checkIn`. `ask_city` and `ask_check_in` both skip — their `collect` keys are present. `ask_guests` does *not* skip — `guests` is undefined — so the engine enters it and the assistant asks how many people are travelling.
+One message gave three fields, one of them belonging to a step Ana had not reached. `quem` finished, `porte` was skipped without a model call, and `confirma` spoke: Ana repeats what she noted and asks if it is right.
 
-Try the inverse: a message with only one field.
+## Fields
 
-```typescript
-await agent.respond({
-  history: [
-    { role: "user", content: "I'd like to go to Lisbon." },
-  ],
-});
+Each field has a `type` (`string`, `number`, `integer` or `boolean`) and, optionally, an `ask`, an `enum` and a `description`. A field a step collects needs an `ask` or a step `prompt`, or the model has nothing to go on; a field a tool fills needs neither.
+
+`tamanho` has an `enum`. The model sees the list and must pick from it; "somos uns 30" becomes `"11-50"`. A value outside the list is dropped, and `r.outcomes` gets a line saying `code: 'not-in-enum'`. Code enforces the list, not the prompt.
+
+`confirmado` is a boolean. Booleans are read only from the reply to the step that asks for them, so a "sim" said at any other moment never confirms anything. More on this below.
+
+## A step asks only for what is missing
+
+Every turn, code computes what a talk step still needs:
+
+> pending = `collect` − fields already known − fields asked `maxAsks` times
+
+When a run enters a step with nothing pending, the step is skipped with no model call and the log says `code: 'already-known'`. That is why `porte` was skipped above: `tamanho` had landed one step early. The step that was asking (`quem`) and got its fields from the reply completes instead: its line is `ok`, no detail.
+
+Known fields are never asked again and never read again. Once `nome` is `"Bia"`, no later message changes it unless a step clears it.
+
+## maxAsks
+
+A customer who will not answer must not block the flow. `maxAsks` on a step caps how many times each of its fields is asked; the default is 3. `porte` uses 2: after two replies without a size, the log says `code: 'max-asks'` with `tamanho` in `detail`, `tamanho` stays unknown, and the run moves on to `confirma`.
+
+Read `r.outcomes` when something surprises you. Every skip and every drop is one line there, with a `code` you can switch on and an English `message` beside it. A skip carries the step id; a dropped value does not — it is read before any step runs.
+
+## Confirmation
+
+Confirmation is a field plus a fork:
+
+```ts fragment
+{ id: "confirma", collect: ["confirmado"] },
+{ id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado"] } },
 ```
 
-The extractor populates `city` only. `ask_city` skips, `ask_check_in` enters next (its `requires: ["city"]` is satisfied), and the assistant asks for the check-in date. Three turns later, the same `confirm` step runs.
+`confirma` is a normal talk step: its `ask` tells Ana to repeat what she noted and ask if it is right. The reply lands in `confirmado` as `true` or `false`.
 
-The same flow handles every shape of message — one field at a time, three at once, two-then-one — because `collect`, `requires`, and `skip` describe what the step needs rather than how many turns the conversation will take.
+`ok` is an `if` step: code, no model call. `if` is a yes-or-no test on the data; `{ equals: { confirmado: true } }` is its JSON form. When it passes, the run takes `then`, which defaults to the next step (`tchau`). When it fails, the run takes `else`:
 
-### Routing skip
+- `{ step: "quem", clear: ["confirmado"] }` forgets `confirmado` and jumps back to `quem`.
+- `quem` and `porte` still have their fields, so they are skipped again, and `confirma` asks a second time.
 
-One detail worth knowing: when pre-extraction populates a field listed in the *current* step's `collect`, the engine treats that as confirmation that the user is answering this step rather than asking for something new. It skips the flow router entirely for that turn and stays in the active flow. The tradeoff is small — if the user both answers the step and signals new intent in the same message, the new intent is recovered on the next turn. In return, a user who is mid-form does not get bounced into a different flow because their answer happened to share a few words with another flow's `when`.
+To let the customer fix a value, clear it too. If "no" usually means the company is wrong, clear `empresa` as well, and only `empresa` is asked again:
 
-## Why this works
+```ts fragment
+{ id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado", "empresa"] } },
+```
 
-`TData` is agent-level. The schema is declared once and every `collect` site references it; the extractor sees the full schema on every turn and lifts whatever it can in a single pass. Steps then act as filters over `session.data`: a step whose `collect` set is satisfied vanishes from the conversation, and a step whose `requires` set is missing refuses to run.
+An `if` step with no `else` ends the run when the test fails. The test can also be a plain function: `if: ({ data }) => data.confirmado === true`. [Conditions](../guides/conditions.md) covers both forms.
 
-The split between AI work and code work is visible at every site:
+## Why a boolean is safe here
 
-- **Extraction** (AI): given a user message and the schema, populate as many fields as possible.
-- **Skip / require / completion** (code): given the populated `session.data`, decide whether each step runs, whether the flow continues, and whether `requiredFields` is satisfied.
+Fields have an `extract` mode: `"anywhere"` (the default for strings and numbers) lets any message fill them, which is how "Somos uns 30" filled `tamanho` before `porte` asked. `"asked"` (the default for booleans) fills the field only from the reply to the step that lists it. So the customer can say "sim, pode ser" while answering `quem` and `confirmado` stays empty until `confirma` actually asks.
 
-The framework spends one extraction call per turn on the AI side and pure data inspection on the code side. There is no separate "form mode" or "completion check" — the same step shape works whether the user fills the form one field at a time or pastes a full request in a single sentence.
+Set `extract` on a field to override either default.
 
-## Recap
+## A step's own wording
 
-You added four things to the agent from the previous tutorial:
+A step may phrase a field its own way without changing the field:
 
-- A typed `BookingData` schema, declared at the agent level.
-- Three collection steps, each with its own `collect` array.
-- A `requires` chain to gate the order in which steps may enter.
-- A `requiredFields` list on the flow to define completion.
+```ts fragment
+{ id: "porte", collect: ["tamanho"], maxAsks: 2, ask: { tamanho: "Pergunte quantas pessoas a {{data.empresa}} tem hoje." } },
+```
 
-The pre-extraction property is what makes the rest worthwhile. A user who knows what they want types one sentence; a user who needs guidance types one field at a time; the same flow handles both because every step describes its own contract over `session.data` rather than its position in a conversation.
+`{{data.empresa}}` is filled in before the text reaches the model. The field's own `ask` stays the default for every other step.
 
-Two things are missing from the booking flow before it can do anything in the real world. There is no booking action — `confirm` ends with the user agreeing, and nothing happens. There is also no way to redirect when something goes wrong (the user is not eligible, the inventory is empty, the date is in the past). The next page adds tools to handle both.
+A flow can also start clean: `clearOnStart: ["confirmado"]` on the flow forgets those fields every time a run starts, which matters once a flow can run more than once per session. [Collection](../concepts/collection.md) has the whole model.
 
-**Next:** [Add tools](./04-add-tools.md)
+Next: [Add tools](./04-add-tools.md) lets Ana look up a price and warns the seller when a customer is qualified.

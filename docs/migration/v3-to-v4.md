@@ -5,7 +5,7 @@ type: migration
 order: 4
 ---
 
-# v3 → v4 Migration
+# v3 → v4 migration
 
 **Version:** 4.0.0 — One model for flows, automations and signals. `agent.turn()` takes any input (a message, a timer, a host event, a manual start) and returns the messages to send and the timers to set.
 
@@ -13,15 +13,15 @@ order: 4
 
 v4 is a **clean break**. There are no aliases and no shims: every old name is gone and the new one has a different shape. A 3.x program does not compile against 4.0.
 
-The mental model got smaller. A **Flow** is a trigger plus an ordered list of steps. The trigger says when a run starts: the customer asks for it (`message`), mentions it (`mention`), goes quiet (`silence`), something happens in your system (`event`), or you start it by hand. Each step is one of five things: the AI talks (`prompt` / `collect`), a fixed text goes out (`say`), your code does something (`do`), the run waits (`wait`), or the code forks (`if`). Fields live on the agent with their own "how to ask", land in any order, and a step ends when its fields are known.
+The mental model got smaller. A **Flow** is a trigger plus an ordered list of steps. The trigger says when a run starts: the customer asks for it (`message`), mentions it (`mention`), goes quiet (`silence`), something happens in your system (`event`), or you start it by hand. Each step is one of five things: the model talks (`prompt` / `collect`), a fixed text goes out (`say`), your code does something (`do`), the run waits (`wait`), or the code forks (`if`). Fields live on the agent with their own `ask`, can come in any order, and a step ends when its fields are known.
 
-Everything that used to live beside the framework in your app (automation rules, signal rules, follow-up schedulers, a second prompt composer) is now a flow with a different trigger. The framework never sends, never sleeps and never saves: it returns what to send and when to wake up, and you do those three things after a successful save.
+Everything that used to live beside the framework in your app (automation rules, signal rules, follow-up schedulers, a second prompt composer) is now a flow with a different trigger. The framework never sends, never sleeps and never saves. It returns what to send and when to wake up; you save the session, then send the messages and set the timers.
 
-Budget: a text turn costs at most two model calls (understand, then speak) plus one per tool round. Every result carries `llmCalls`.
+Budget: a text turn costs at most two model calls (understand, then speak), plus one per tool round and one more when `compaction` summarizes the history. Every result carries `llmCalls`.
 
 ---
 
-## Table of Contents
+## Contents
 
 1. [Entry point: `turn()` replaces `respond()`](#1-entry-point-turn-replaces-respond)
 2. [`falai()` replaces `createAgent()` and the schema](#2-falai-replaces-createagent-and-the-schema)
@@ -43,22 +43,34 @@ Budget: a text turn costs at most two model calls (understand, then speak) plus 
 
 `respond({ history, session })` took one user message and returned one string. `turn()` takes whatever just happened and returns everything the host must do.
 
-```typescript
+```ts fragment
 // ─── v3 ───
 const r = await agent.respond({ history, session });
 await send(r.message);
 await save(r.session);
+```
 
+```ts
 // ─── v4 ───
-const r = await agent.turn({ sessionId, session, context, history, message: text, id: messageId, at });
-if (r.changed) {
-  await store.save(r.session, session?.version ?? 0);   // throws SessionConflictError on a race: discard, replay
-  for (const m of r.messages) await send(m.text, { after: m.afterMs, key: m.key });
-  for (const s of r.schedule) await queue.add({ jobId: s.key, at: s.at });
+import type { Agent, History, Store } from '@falai/agent';
+
+declare const agent: Agent;   // your f.agent(...)
+declare const store: Store;   // one of the seven stores
+declare const send: (text: string, opts: { after: number; key: string }) => Promise<void>;
+declare const queue: { add(job: { jobId: string; at: Date }): Promise<void> };
+
+async function onMessage(sessionId: string, context: unknown, history: History, text: string, messageId: string, at: string) {
+  const session = (await store.load(sessionId)) ?? undefined;
+  const r = await agent.turn({ sessionId, session, context, history, message: text, id: messageId, at });
+  if (r.changed) {
+    await store.save(r.session, session?.version ?? 0);   // throws SessionConflictError when another turn saved first: drop this result and run the turn again
+    for (const m of r.messages) await send(m.text, { after: m.afterMs, key: m.key });
+    for (const s of r.schedule) await queue.add({ jobId: s.key, at: s.at });
+  }
 }
 ```
 
-Input kinds, one of: `{ message, id?, at? }`, `{ wake }` (a key from `schedule[]`), `{ event, payload, key }`, `{ start: { flow, input?, key } }`. Pass `context` and `history` on every call, wakes included. Pass `silenced: 'motivo'` whenever the assistant must not speak (a human owns the conversation, the channel window is closed, no credits): `do` steps still run, nothing is phrased, zero calls.
+Input kinds, one of: `{ message, id?, at? }`, `{ wake }` (a key from `schedule[]`), `{ event, payload?, key }`, `{ start: { flow, input?, key } }`. Pass `context` and `history` on every call, wakes included. Pass `silenced: 'reason'` whenever the assistant must not speak (a human owns the conversation, the channel window is closed, no credits): `do` steps still run, zero model calls, and nothing is said. A run that was already asking stays asking and speaks on the first turn that is not silenced; a run that reaches a new talk or `say` step ends, and the step's outcome is `code: 'silenced'` with your reason in `detail`. Pass `silenced: { reason, understand: true }` to keep the understand call (extraction, mentions) while muting speech.
 
 `respondStream()` is `turnStream()`: yields `{ delta }` chunks and one `{ done: true, result }`.
 
@@ -68,31 +80,40 @@ Input kinds, one of: `{ message, id?, at? }`, `{ wake }` (a key from `schedule[]
 
 ## 2. `falai()` replaces `createAgent()` and the schema
 
-The agent's context type is the only generic you write. Fields are declared once, with their own wording, and bind the collected-data type for everything downstream.
+You write one generic: the agent's context type. Fields are declared once, each with its own `ask`, and set the collected-data type everywhere fields are used.
 
-```typescript
+```ts fragment
 // ─── v3 ───
 const agent = createAgent<Ctx, Data>({
   name, provider,
   schema: { type: 'object', properties: { nome: { type: 'string', description: 'nome' } } },
   flows: [...], signals: [...], tools, instructions, knowledgeBase, persona, goal,
 });
+```
 
+```ts
 // ─── v4 ───
+import { falai, type AiProvider, type DataOf } from '@falai/agent';
+
+type Ctx = { lead: { owner: 'ai' | 'human' } };
+declare const provider: AiProvider;
+declare function nextWorkingTime(at: Date, context: Ctx): Date;
+
 const f = falai<Ctx>().fields({
   nome: { type: 'string', ask: 'Pergunte o nome de um jeito leve, sem tom de formulário.' },
 });
 type Data = DataOf<typeof f>;
 
 const agent = f.agent({
-  name, provider, flows: [...], actions, events, conditions, tools, instructions, knowledgeBase, persona, goal,
-  idle: { prompt: 'Responda pela empresa; não invente preços.' },   // speaks when no flow holds the floor; 'silent' mutes it
+  name: 'Ana', provider, flows: [/* f.flow(...) */], actions: {}, events: {}, conditions: {},
+  // tools, instructions, knowledgeBase, persona, goal: unchanged
+  idle: { prompt: 'Responda pela empresa; não invente preços.' },   // speaks when no flow is asking a question (no flow holds the floor); 'silent' mutes it
   clock: () => new Date(),                                          // tests pass fakeClock()
   businessHours: (at, { context }) => nextWorkingTime(at, context),  // snaps timers forward; optional
 });
 ```
 
-`f.flow()`, `f.action()`, `f.event()` and `f.condition()` give you typed values; `collect`, `ask`, `clearOnStart` and `ctx.set` are checked against the field slugs at compile time. Action, event and condition names inside a flow are strings and are checked when the agent is built, the same way a JSON flow is.
+`f.flow()`, `f.action()`, `f.event()` and `f.condition()` give you typed values; `collect`, `ask`, `clearOnStart` and `ctx.set` are checked against the field names at compile time. Action, event and condition names inside a flow are strings and are checked when the agent is built, the same way a JSON flow is.
 
 One `Agent` serves every session. `context`, `session` and `history` no longer live on the instance; they arrive on each `turn()`. `contextProvider`, `hooks`, `initialData`, `sessionId`, `flowSwitchMargin`, `maxAutoStepsPerTurn`, `maxDirectiveChain`, `routerMode`, `signals` and `signalBatchSize` are gone.
 
@@ -100,7 +121,7 @@ One `Agent` serves every session. `context`, `session` and `history` no longer l
 
 ## 3. Flows: triggers replace `when`, steps get kinds
 
-```typescript
+```ts fragment
 // ─── v3 ───
 {
   title: 'Triagem', when: ['quer saber como funciona', 'pede um orçamento'],
@@ -111,9 +132,14 @@ One `Agent` serves every session. `context`, `session` and `history` no longer l
     { id: 'tchau', reply: 'Um vendedor continua daqui.' },
   ],
 }
+```
 
+```ts
 // ─── v4 ───
-f.flow({
+import { falai } from '@falai/agent';
+const f = falai().fields({ nome: { type: 'string' }, empresa: { type: 'string' } });
+
+const triagem = f.flow({
   id: 'triagem', name: 'Triagem',
   on: [{ message: ['quer saber como funciona', 'pede um orçamento'] }],   // repeat: 'once' per session by default
   steps: [
@@ -122,7 +148,7 @@ f.flow({
     { id: 'tchau', say: 'Um vendedor continua daqui.' },
   ],
   onEnd: 'end',   // or 'stay' (repeat the last step) or 'reset' (first step, data kept)
-})
+});
 ```
 
 | v3 | v4 |
@@ -143,18 +169,32 @@ Step ids are required and unique; `end` is reserved.
 
 ## 4. Collection: `ask` and `maxAsks` replace `requires`, `requiredFields`, `skip`
 
-Out-of-order data was already the behaviour in 3.x (extraction read the whole schema); the step logic just never used it. In v4 a talk step's fields are `pending = collect − known − at maxAsks`, computed by code every turn. A step whose fields are all known is skipped with zero calls; a step stays asking until they are known, a branch fires, or a field hits `maxAsks` (default 3; the execution log shows `campo pulado: perguntado 3 vezes`).
+Out-of-order data was already the behaviour in 3.x (extraction read the whole schema); the step logic just never used it. In v4 a talk step's fields are `pending = collect − known − at maxAsks`, computed by code every turn. A step whose fields are all known is skipped with zero calls; a step stays asking until they are known, a branch fires, or a field hits `maxAsks` (default 3; the step's outcome is then `code: 'max-asks'`, with the field's slug in `detail`).
 
-```typescript
+```ts fragment
 // ─── v3 ─── the step held position until `requires` was met; nothing collected it → deadlock
 { id: 'confirma', prompt: 'Confirme os dados.', requires: ['nome', 'empresa'] }
-
-// ─── v4 ─── confirmation is a collected boolean behind an `if`; a "no" clears it and re-asks
-{ id: 'confirma', collect: ['confirmado'] },
-{ id: 'ok', if: { equals: { confirmado: true } }, else: { step: 'quem', clear: ['confirmado'] } },
 ```
 
-Per-field wording lives on the field (`ask`); a step may override it (`ask: { nome: '...' }`). `extract: 'anywhere' | 'asked'` says whether a field may be harvested from any message (default for strings and numbers) or only from the reply to the step that lists it (default for booleans, so a stray "sim" never opens a gate). `{ collect: [...] }` alone asks using the field's `ask`.
+```ts
+// ─── v4 ─── confirmation is a collected boolean behind an `if`; a "no" clears it and re-asks
+import { falai } from '@falai/agent';
+const f = falai().fields({
+  nome: { type: 'string' }, empresa: { type: 'string' },
+  confirmado: { type: 'boolean', ask: 'Confirme nome e empresa com a pessoa.' },
+});
+
+const triagem = f.flow({
+  id: 'triagem', name: 'Triagem',
+  steps: [
+    { id: 'quem', collect: ['nome', 'empresa'] },
+    { id: 'confirma', collect: ['confirmado'] },
+    { id: 'ok', if: { equals: { confirmado: true } }, else: { step: 'quem', clear: ['confirmado'] } },
+  ],
+});
+```
+
+Per-field wording lives on the field (`ask`); a step may override it (`ask: { nome: '...' }`). `extract: 'anywhere' | 'asked'` says whether a field may be taken from any message (default for strings and numbers) or only from the reply to the step that lists it (default for booleans, so a stray "sim" is never read as a confirmation). `{ collect: [...] }` alone asks using the field's `ask`.
 
 ---
 
@@ -162,47 +202,63 @@ Per-field wording lives on the field (`ask`); a step may override it (`ask: { no
 
 `goTo`, `goToStep`, `complete`, `abort`, `reset`, `dispatch()`, `pendingDirective`, `flow.merge()`, `flow.validate()`, `BranchMap`, and the `Directive` type are gone. Every position change is a `then` or `else` on a step:
 
-```typescript
+```ts fragment
 type Next = string /* step id or 'end' */ | { step: string; clear?: string[] } | { flow: string; input?: unknown };
 ```
 
-Branches stay on talk and `wait` steps, judged while the step is asking: `{ when: '...', then }` for the AI, `{ if: pred, then }` for code. There is no standalone AI-judged step: the model forks only where fresh customer text exists.
+Branches stay on talk steps, judged while the step is asking: `{ when: '...', then }` for the model, `{ if: pred, then }` for code. A `wait` step takes `if` branches only, judged when the customer replies, and only when the step also has an `else`; a `when` branch on a wait never fires. There is no standalone AI-judged step: the model forks only where fresh customer text exists.
 
-```typescript
+```ts fragment
 // ─── v3 ───
 branches: [{ when: 'quer falar com humano', then: { goTo: 'handoff' } }]
 tools: [{ id: 'cancel', handler: (ctx) => ({ directive: { goTo: 'cancelamento' } }) }]
+```
 
+```ts
 // ─── v4 ───
-branches: [{ when: 'quer falar com humano', then: { flow: 'handoff' } }]
+import { falai } from '@falai/agent';
+const f = falai().fields({ nome: { type: 'string' } });
+
+const triagem = f.flow({
+  id: 'triagem', name: 'Triagem', on: [{ message: ['quer saber como funciona'] }],
+  steps: [{
+    id: 'quem', collect: ['nome'],
+    branches: [{ when: 'quer falar com humano', then: { flow: 'handoff' } }],
+  }],
+});
 // a tool cannot move the run; give the flow an `if` step or a branch, or let the host `start` a flow
 ```
 
-**Why:** five appliers implemented the same five verbs five ways. One `advance()` implements `then`.
+**Why:** five separate code paths each moved the run in their own way. Now one function, `advance()`, applies every `then` and `else`.
 
 ---
 
 ## 6. Signals become `mention` flows
 
-A signal was a detector plus a handler. In v4 it is a flow whose trigger is `mention`: the AI judges it inside the same understand call that routes the message, and the run reacts beside the conversation without taking it over.
+A signal was a detector plus a handler. In v4 it is a flow whose trigger is `mention`: the model judges it inside the same understand call that routes the message, and the run reacts beside the conversation without taking it over.
 
-```typescript
+```ts fragment
 // ─── v3 ───
 {
   id: 'concorrente', when: ['cita um concorrente', '!fala do nosso produto'], phase: 'post',
   behavior: 'once', extract: { trecho: { type: 'string' } },
   handler: ({ extracted, context }) => notify(context.lead, extracted.trecho),
 }
+```
 
+```ts
 // ─── v4 ───
-f.flow({
+import { falai } from '@falai/agent';
+const f = falai().fields({ nome: { type: 'string' } });
+
+const concorrente = f.flow({
   id: 'concorrente', name: 'Lead falou de concorrente',
   on: [{ mention: ['o lead cita ou compara com um concorrente'], extract: { trecho: { type: 'string' } }, repeat: 'once' }],
   steps: [
     { id: 'tag',   do: 'add_tags', with: { tags: ['concorrente'] } },
     { id: 'avisa', do: 'notify', with: { recipient: 'owner', message: '{{data.nome}} falou de concorrente: "{{input.trecho}}"' } },
   ],
-})
+});
 ```
 
 | Signal facet | v4 |
@@ -224,8 +280,13 @@ f.flow({
 
 New in v4; nothing in 3.x maps to these.
 
-```typescript
-f.flow({
+```ts
+import { falai } from '@falai/agent';
+
+type Ctx = { lead: { owner: 'ai' | 'human' } };
+const f = falai<Ctx>().fields({ nome: { type: 'string' } });
+
+const retomar = f.flow({
   id: 'retomar', name: 'Retomar quem sumiu',
   on: [{ silence: '24h', businessHours: true, if: ({ context }) => context.lead.owner === 'ai' }],
   anchor: 'lead',   // one active run per lead, across that lead's conversations
@@ -236,26 +297,40 @@ f.flow({
     { id: 'w2', wait: '3d', else: 'end' },
     { id: 'n1', do: 'notify', with: { recipient: 'owner', message: '{{data.nome}} não respondeu.' } },
   ],
-})
+});
 ```
 
-- `wait: '3s'` (10 s or less) rides as `afterMs` on the next message of the same turn; longer waits park the run and put `{ key, at }` in `schedule[]`. Enqueue the wake with `jobId = key` and call `turn({ wake: key })` when it fires. A stale wake is ignored (`changed: false`); nothing is ever cancelled.
+- `wait: '3s'` (10 s or less, and the next step is a `say` or a talk step) becomes `afterMs` on that message in the same turn; every other wait parks the run (stops it until a wake) and puts `{ key, at }` in `schedule[]`. Enqueue the wake with `jobId = key` and call `turn({ wake: key })` when it fires. The framework never cancels a wake itself: a stale one is ignored (`changed: false`). A re-armed silence wake names the one it supersedes in `replaces`; removing that job is optional.
 - `on: [{ event: 'stage_entered', after: '1h' }]` starts a run when your code calls `turn({ event, payload, key })`. Declare events with `f.event<Payload>({ direction? })`: `inbound` counts as the customer speaking, `outbound` as the assistant.
 - `wait: { event: 'meeting_booked', upTo: '7d' }` parks until the event arrives.
 - Runs inside a session are concurrent; at most one is asking a question. A timer-started talk step suspends the current asker and hands the floor back when it is done.
 
-Host contract, in one line each: one `turn` per session at a time; fresh `context`, `history`, `anchors` and `claims` on every input; save + outbox + schedules in one transaction after the turn; `do` handlers run at-least-once and must be idempotent on `ctx.key`.
+What your host must do:
+
+- run one `turn` per session at a time
+- pass fresh `context`, `history`, `anchors` and `claims` on every input
+- after the turn, save the session, queue the messages and the schedules in one transaction
+- make `do` handlers idempotent on `ctx.key`; they run at least once
 
 ---
 
 ## 8. Tools return `{ value, data }`
 
-```typescript
+```ts fragment
 // ─── v3 ───
 handler: async (ctx, args) => ({ data: slots, dataUpdate: { horario: slots[0] }, directive: { goTo: 'confirmar' } })
+```
 
+```ts
 // ─── v4 ───
-handler: async (args, ctx) => ({ value: slots, data: { horario: slots[0] } })
+import { falai, type DataOf, type Tool } from '@falai/agent';
+const f = falai().fields({ horario: { type: 'string' } });
+declare const slots: string[];
+
+const horarios: Tool<undefined, DataOf<typeof f>> = {
+  id: 'horarios',
+  handler: async (args, ctx) => ({ value: slots, data: { horario: slots[0] } }),
+};
 ```
 
 `value` is what the model reads back; `data` is written to the collected data. Argument order flips to `(args, ctx)`. `ToolContext` is `ToolCtx { context, data, history, run?, now }`: no `updateContext`, `updateData`, `setField`, `dispatch`. The gates (`validateInput`, `checkPermissions`, `isConcurrencySafe`, `isReadOnly`, `isDestructive`, `maxResultSizeChars`) stay. `ToolManager`, `ToolScope`, `DataEnrichmentConfig`, `ValidationConfig`, `ApiCallConfig`, `ComputationConfig` are gone.
@@ -264,16 +339,16 @@ handler: async (args, ctx) => ({ value: slots, data: { horario: slots[0] } })
 
 ## 9. Persistence: `Store` replaces `PersistenceAdapter`
 
-```typescript
+```ts fragment
 interface Store<D> {
   load(id: string): Promise<Session<D> | null>;
   save(session: Session<D>, expectedVersion: number): Promise<Session<D>>;   // 0 = insert if absent; stale → SessionConflictError
 }
 ```
 
-The seven adapters survive as `Store` implementations with the same client seams: `MemoryStore`, `PostgresStore`, `PrismaStore`, `RedisStore`, `MongoStore`, `SQLiteStore`, `OpenSearchStore`. They persist the v4 blob and a version, nothing else; message repositories, `SessionRepository`, `status`, `currentFlow` / `currentStep` columns, `PersistenceManager`, `autoSave`, `schemaVersion` and `restoreSession` are gone. The framework never calls a store: you `load`, `turn`, `save`.
+The seven adapters survive as `Store` implementations and take the same client you passed before: `MemoryStore`, `PostgresStore`, `PrismaStore`, `RedisStore`, `MongoStore`, `SQLiteStore`, `OpenSearchStore`. They persist the v4 blob and a version, nothing else; message repositories, `SessionRepository`, `status`, `currentFlow` / `currentStep` columns, `PersistenceManager`, `autoSave`, `schemaVersion` and `restoreSession` are gone. The framework never calls a store: you `load`, `turn`, `save`.
 
-**Use a fresh table.** The default names are the 3.x ones (`agent_sessions`, `agent:` prefix), but the columns are new, and a v4 store pointed at a live 3.x table throws `InvalidSessionError` on every load. Create the new table (`initialize()` does it for PostgreSQL, SQLite and OpenSearch), then migrate rows on first load as §10 shows.
+**Use a fresh table.** The default names are the 3.x ones (`agent_sessions`, `agent:` prefix), so pass a new one (`tables.sessions` on Postgres, SQLite and Prisma, `collections.sessions` on Mongo, `indices.sessions` on OpenSearch, `keyPrefix` on Redis) or drop the old table first; `initialize()` (Postgres, SQLite, OpenSearch) only creates the table or index when it is missing, and does nothing while one of that name exists. A v4 store read against a live 3.x row fails loudly: Redis, Mongo, Prisma and OpenSearch throw `InvalidSessionError` (no `blob`), Postgres and SQLite fail on the missing `blob` column. Create the new table, then migrate rows on first load as §10 shows.
 
 | Store | Where a session lives |
 |---|---|
@@ -281,7 +356,7 @@ The seven adapters survive as `Store` implementations with the same client seams
 | `PrismaStore` | model `AgentSession { id String @id; version Int; blob Json; createdAt DateTime; updatedAt DateTime }`, names remappable with `fieldMappings.sessions` |
 | `MongoStore` | one document: `_id`, `version`, `blob` (JSON text, so claim keys with dots survive), `createdAt`, `updatedAt` |
 | `RedisStore` | one hash at `${keyPrefix}session:${id}` with `version`, `blob`, `createdAt`, `updatedAt`; the compare-and-swap is one Lua script, so the client needs `hgetall`, `eval` and `quit` |
-| `OpenSearchStore` | one document with `version`, `blob` (`enabled: false`, never indexed), `createdAt`, `updatedAt` |
+| `OpenSearchStore` | one document with `id`, `version`, `blob` (`enabled: false`, never indexed), `createdAt`, `updatedAt` |
 
 Every store rejects a row whose blob is not a v4 session for that id, so a corrupt row is a loud error, never a fresh conversation.
 
@@ -289,10 +364,12 @@ Every store rejects a row whose blob is not a v4 session for that id, so a corru
 
 ## 10. The session blob: `migrateSession`
 
-The 3.x `SessionState` (`currentFlow`, `currentStep`, `flowHistory`, `signals`, `pendingDirective`) becomes `Session { v: 4, version, data, runs, claims, inputs, lastUserAt, lastAssistantAt, history?, metadata }`. Migrate once, lazily, where you deserialize:
+The 3.x `SessionState` (`currentFlow`, `currentStep`, `flowHistory`, `signals`, `pendingDirective`) becomes `Session { id, v: 4, version, data, runs, claims, inputs, lastUserAt?, lastAssistantAt?, history?, metadata }`. Migrate once, lazily, where you deserialize:
 
-```typescript
+```ts
 import { migrateSession } from '@falai/agent';
+declare const rowBlob: unknown;   // the row as your store returns it
+declare const sessionId: string;
 
 const session = migrateSession(rowBlob, {
   sessionId,
@@ -313,7 +390,9 @@ Add a test that loads one real (anonymised) row per product and asserts the run'
 
 ## 11. Stored flows as JSON: `FlowSpec`
 
-The object you store in a database is the framework's own JSON form: a `Flow` with a flat step `{ id, kind: 'prompt' | 'collect' | 'say' | 'do' | 'wait' | 'waitEvent' | 'if', ...props, then?, else? }` and predicates in JSON (`{ equals: {...} }`, `{ known: [...] }`, `{ silenced: true }`, `{ myCondition: arg }`). `fromSpec(spec)` / `toSpec(flow)` convert; `validateFlow(spec, registries)` throws `FlowConfigurationError` naming the unknown field, action, event, condition or step; `flowSpecSchema(registries)` returns the closed JSON schema to use as the response schema when you let a model write a flow.
+The object you store in a database is the framework's own JSON form: a `Flow` whose steps are flat, `{ id, kind: 'prompt' | 'collect' | 'say' | 'do' | 'wait' | 'waitEvent' | 'if', ...props, then?, else? }`, with predicates in JSON (`{ equals: {...} }`, `{ known: [...] }`, `{ silenced: true }`, `{ myCondition: arg }`).
+
+`fromSpec(spec)` and `toSpec(flow)` convert both ways. `validateFlow(spec, registries)` throws `FlowConfigurationError` naming the unknown field, action, event, condition or step, and returns `{ warnings }` for what runs but probably not as intended. `flowSpecSchema(registries)` returns the closed JSON schema to use as the response schema when a model writes a flow.
 
 Host actions, events and conditions are registered once on the agent and referenced by name, so a flow typed in a chat, a flow drawn in an editor and a flow written in TypeScript are the same object.
 
@@ -353,7 +432,14 @@ Find every site to touch:
 rg -n "createAgent|\.respond\(|respondStream|dispatch\(|pendingDirective|goTo|requiredFields|optionalFields|requires:|reentrant|auto: true|reply:|signals:|Signal<|phase: '(pre|post)'|PersistenceAdapter|restoreSession|SessionState|updateData|dataUpdate|directive" src
 ```
 
-Then, in this order: convert stored flows and signal rules to `FlowSpec` rows (keep talk-step ids; give migrated signal flows `id = signal key`); register your actions, events and conditions on the agent; replace the `respond` call site with load → `turn` → transactional save + outbox + schedules; wire wakes (`jobId = key`, `turn({ wake })` at fire time) and host events; put `migrateSession` in your deserializer and make it throw on garbage; delete the automation engine, the follow-up sweep and the second composer.
+Then, in this order:
+
+1. Convert stored flows and signal rules to `FlowSpec` rows. Keep talk-step ids; give each migrated signal flow `id = signal key`.
+2. Register your actions, events and conditions on the agent.
+3. Replace the `respond` call site with load → `turn` → save + messages + schedules in one transaction.
+4. Wire wakes (`jobId = key`, `turn({ wake })` at fire time) and host events.
+5. Put `migrateSession` in your deserializer and let it throw on garbage.
+6. Delete the automation engine, the follow-up sweep and the second composer.
 
 Check:
 

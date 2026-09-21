@@ -1,179 +1,125 @@
 ---
 title: "Instruction"
-description: "Unified behavioral primitive that shapes how the agent responds, with a kind discriminator (must / never / should) and agent / flow / step scoping."
+description: "One rule the model follows while it speaks, gated by an AI-judged `when` or a code-judged `if`, at agent, flow, step or idle scope."
 type: reference
-order: 5
+order: 8
 ---
 
 # Instruction
 
-> **Where this is introduced:** [Instructions](../guides/instructions.md)
+An instruction is one sentence the model obeys while it speaks: "never invent prices", "answer in three sentences". It has a `kind` (`must`, `never`, `should`), a `prompt`, and two optional tests: `when`, a string the model judges, and `if`, a predicate your code judges, which costs no model call. The same shape goes on the agent, a flow, a talk step or the idle speaker; only its place in the configuration changes.
 
-An `Instruction` is a single statement of behavior the agent should follow. v2 collapses three v1 types into one — every instruction now carries a `kind` discriminator (`'must'`, `'never'`, or `'should'`) and a `prompt` that is rendered into the system prompt with a scope caption. The same shape works at agent, flow, and step scope; only its position in the configuration changes.
-
-The set of instructions actually rendered into a given turn's prompt is reported back on the response as `appliedInstructions` — observability is deterministic, derived from rendering, not self-reported by the model. For instructions with a textual `when`, this means the condition was presented to the model, not that the model reported a match.
+Source: `src/types/flow.ts`, `src/core/Runner.ts` (`speakRequest`), `src/core/Prompt.ts` (`instructionsSection`).
 
 ## Signature
 
-```typescript
-interface Instruction<TContext = unknown, TData = unknown> {
+```ts fragment
+interface Instruction<C = unknown, D = unknown> {
   id?: string;
-  kind?: 'must' | 'never' | 'should';        // default: 'should'
-  when?: ConditionWhen;                       // AI strings: positives OR, ! exclusions inhibit
-  if?: ConditionIf<TContext, TData>;          // code-evaluated function(s), AND semantics
-  prompt: Template<TContext, TData>;
-  enabled?: boolean;                          // default: true
-  tags?: string[];
-  metadata?: Record<string, unknown>;
-}
-
-interface ScopedInstructions<TContext = unknown, TData = unknown> {
-  global: Instruction<TContext, TData>[];
-  flow?: { flowTitle: string; items: Instruction<TContext, TData>[] };
-  step?: { stepId: string; items: Instruction<TContext, TData>[] };
-}
-
-interface AppliedInstruction {
-  id: string;
-  scope: 'global' | 'flow' | 'step';
-  scopeRef?: string;                          // flowTitle for flow, stepId for step
+  kind?: "must" | "never" | "should";
+  when?: string | string[];
+  if?: Pred<C, D>;
+  prompt: Template;
 }
 ```
 
 ## Fields
 
-### `Instruction`
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | `string` | none | Yours. The framework carries it and never reads it. |
+| `kind` | `"must" \| "never" \| "should"` | `"should"` | How hard the rule is. `must` is a hard rule, `never` a hard ban, `should` a preference. The word is written into the prompt as is. |
+| `when` | `string \| string[]` | none | When the rule applies, judged by the model from the conversation. Several strings are alternatives (OR). Rendered into the prompt as text; it never costs a call of its own. |
+| `if` | `Pred<C, D>` | none | When the rule applies, judged by code. A function or a JSON `ConditionSpec`. False: the instruction is left out of this call. |
+| `prompt` | `Template` | required | The rule. `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are filled in first. |
 
-| Field | Type | Required | Default | Notes |
-|-------|------|----------|---------|-------|
-| `prompt` | `Template<TContext, TData>` | yes | — | Behavioral text rendered into the prompt under the `## Instructions` section. |
-| `kind` | `'must' \| 'never' \| 'should'` | no | `'should'` | Severity. `'must'` = absolute do, `'never'` = absolute don't, `'should'` = conditional nudge. |
-| `when` | `ConditionWhen` | no | — | AI-evaluated activation string or array. Non-`!` entries are OR alternatives. `!` entries are OR exclusions; any matching exclusion inhibits the instruction. Functions are not allowed here; use `if`. |
-| `if` | `ConditionIf<TContext, TData>` | no | — | Code-evaluated activation function (or array). Free to evaluate. When both `when` and `if` are set, `if` runs first; `when` is only evaluated if `if` passes. |
-| `id` | `string` | no | auto | Stable identifier used in `AppliedInstruction.id`. Auto-generated when omitted. |
-| `enabled` | `boolean` | no | `true` | Set `false` to skip the instruction without removing it from configuration. |
-| `tags` | `string[]` | no | — | Free-form tags for filtering and grouping. |
-| `metadata` | `Record<string, unknown>` | no | — | Free-form per-instruction metadata. |
+## Scopes
 
-### `AppliedInstruction`
+| Scope | Where | Applies |
+|---|---|---|
+| Agent | `AgentOptions.instructions` | On every speak call, talk steps and the idle speaker alike. |
+| Flow | `Flow.instructions` | While a talk step of that flow speaks. |
+| Step | `TalkStep.instructions` | While that step speaks. |
+| Idle | `Idle.instructions` (`idle: { prompt, instructions }`) | While the idle speaker answers. |
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `id` | `string` | The `Instruction.id` that fired. |
-| `scope` | `'global' \| 'flow' \| 'step'` | Where the instruction was declared. |
-| `scopeRef` | `string \| undefined` | `flowTitle` for `flow`, `stepId` for `step`, `undefined` for `global`. |
+The list the model sees is built in this order: agent, then flow, then step. For the idle speaker: agent, then idle. Duplicates are kept: the same sentence in two scopes appears twice.
 
-## Scoping
+## Behaviour
 
-The same `Instruction` shape attaches at three positions:
+- Instructions reach the **speak call only**. The understand call (routing, mentions, branches, extraction) never sees them.
+- `if` is judged by code when the speak request is built, with a `PredCtx` of `{ context, data, input, run, silenced, now }`. `run` is the speaking run; while the idle speaker answers, `run` is absent and `input` is `undefined` for every instruction it judges — agent-level and `idle`-level alike. Write `if` predicates on the agent and on `idle` so they work without a run.
+- `when` is not judged by code. It is appended to the line as `(apply only when: a OR b)` and the model decides.
+- Each surviving instruction becomes one line under a `## Instructions` heading, in this exact form:
 
-- **Agent (global):** `AgentOptions.instructions` — always considered, on every turn, for every flow.
-- **Flow:** `FlowOptions.instructions` — considered when the active flow matches.
-- **Step:** `StepOptions.instructions` — considered when the active step matches.
+  ```text
+  - [should] [Always] Responda em até três frases.
+  - [must] [Always] Reconheça o problema antes de explicar qualquer coisa. (apply only when: a pessoa está irritada)
+  ```
 
-At prompt-build time the composer renders each eligible instruction as a single bullet:
+  The first bracket is `kind` (or `should` when absent). The second is the group caption. Every scope goes into one group captioned `[Always]`, so the caption does not say which scope a line came from.
+- `prompt` is rendered with the turn's `data`, `context` and the run's `input`, then trimmed. A line that renders to nothing is dropped. When no line survives, the whole section is left out.
+- Instructions have no effect on movement, extraction or which flow starts. They shape wording only.
+- In a stored flow (`FlowSpec`) an instruction is an `InstructionSpec`: the same fields with `if` in JSON form. `flowSpecSchema` lets a model write flow-level instructions and leaves step-level ones out.
 
-```
-- [<kind>] [<scope-caption>] <prompt> (apply only when: <when-clause> OR <when-clause>; do not apply when: <exclusion-clause>)
-```
+## Example
 
-The parenthesized condition is omitted when `when` is not set. If `when` contains only `!` exclusions, the suffix uses only `do not apply when: ...`. Code-evaluated `if` predicates run first; a failing predicate removes the entire bullet before the prompt reaches the model.
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-Scope captions are fixed by where the instruction was declared:
+interface Ctx {
+  plano: "gratis" | "pro";
+  horaLocal: number;
+}
 
-| Scope | Caption |
-|-------|---------|
-| Agent | `[Always]` |
-| Flow | `[In: <FlowTitle>]` |
-| Step | `[Step: <stepId>]` |
+const f = falai<Ctx>().fields({
+  duvida: { type: "string", ask: "Pergunte qual é a dúvida, em uma frase." },
+});
 
-Example block in the rendered prompt:
-
-```
-## Instructions
-
-- [must] [Always] Always greet by name
-- [never] [Always] Promise delivery dates you cannot guarantee
-- [should] [In: Booking] Confirm dates before calling book_hotel
-- [should] [Step: payment] If the card is declined, never retry without confirmation
-```
-
-## Examples
-
-### 1. Agent-level absolutes plus a step-level nudge
-
-```typescript
-import { createAgent, GeminiProvider } from '@falai/agent';
-
-const agent = createAgent({
-  name: 'BookingBot',
-  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
+const agent = f.agent({
+  name: "Bia",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
   instructions: [
-    { kind: 'must', prompt: 'Validate dates are in the future before booking.' },
-    { kind: 'never', prompt: 'Promise rates you have not looked up.' },
-  ],
-  flows: [
+    { kind: "never", prompt: "Nunca invente preços ou prazos." },
+    // The model judges `when` from the conversation.
+    { kind: "must", when: "a pessoa está irritada", prompt: "Reconheça o problema antes de explicar qualquer coisa." },
+    // Code judges `if`; it costs nothing. No `run` here, so read only `context` and `data`.
     {
-      title: 'Booking',
-      instructions: [
-        { kind: 'should', prompt: 'Offer to compare two options before committing.' },
-      ],
-      steps: [
-        {
-          id: 'payment',
-          prompt: 'Take payment.',
-          instructions: [
-            { kind: 'must', prompt: 'If the card is declined, never retry without confirmation.' },
-          ],
-        },
-      ],
+      kind: "should",
+      if: ({ context }) => context.horaLocal >= 18 || context.horaLocal < 9,
+      prompt: "Avise que o suporte humano volta às 9h.",
     },
   ],
+  flows: [
+    f.flow({
+      id: "duvidas",
+      name: "Dúvidas",
+      on: [{ message: [] }], // no examples: the catch-all, starts when no other message flow wins
+      // Applies to every talk step of this flow.
+      instructions: [{ kind: "should", prompt: "Responda em até três frases." }],
+      steps: [
+        { id: "qual", collect: ["duvida"] },
+        {
+          id: "resposta",
+          prompt: "Responda a dúvida.",
+          // Applies to this step only.
+          instructions: [{ kind: "must", prompt: "Termine perguntando se ficou claro." }],
+        },
+      ],
+    }),
+  ],
 });
+
+const r = await agent.turn({
+  sessionId: "demo",
+  context: { plano: "gratis", horaLocal: 21 },
+  message: "quanto custa o plano pro?",
+});
+console.log(r.messages[0]?.text);
 ```
 
-### 2. Conditional activation with `when` and `if`
+## See also
 
-```typescript
-import type { Instruction } from '@falai/agent';
-
-type Ctx = { tier: 'free' | 'pro' };
-type Data = { hasQuoted: boolean };
-
-const concise: Instruction<Ctx, Data> = {
-  kind: 'should',
-  when: 'User asks a simple yes/no question',
-  prompt: 'Answer in one sentence.',
-};
-
-const proOnly: Instruction<Ctx, Data> = {
-  kind: 'must',
-  if: (ctx) => ctx.context.tier === 'pro',
-  prompt: 'Offer to export the conversation as PDF.',
-};
-```
-
-### 3. Reading `appliedInstructions` from a response
-
-```typescript
-const response = await agent.respond('Hi, I want to book a room.');
-
-for (const a of response.appliedInstructions ?? []) {
-  console.log(`${a.scope}${a.scopeRef ? `:${a.scopeRef}` : ''} → ${a.id}`);
-}
-// global → ins_validate_dates
-// flow:Booking → ins_offer_two_options
-```
-
-## Errors
-
-- `FlowConfigurationError` — duplicate `id` across instructions in the same scope, or `kind` set to a value other than `'must' | 'never' | 'should'`.
-- `DataValidationError` — a `Template` `prompt` references a `data` field not declared in the agent `schema`.
-
-## Related
-
-- [Instructions](../guides/instructions.md) — recipe for shaping behavior with `must` / `never` / `should`
-- [Architecture](../concepts/architecture.md) — where Instruction fits among the six primitives
-- [createAgent](./create-agent.md) — `AgentOptions.instructions`
-- [Flow](./flow.md) — `FlowOptions.instructions`
-- [Step](./step.md) — `StepOptions.instructions`
+- [Instructions](../guides/instructions.md): choosing a scope and a kind.
+- [Conditions](../guides/conditions.md): `when` versus `if`.
+- [Actions, events, conditions](./actions-events-conditions.md): `Pred`, `PredCtx` and `ConditionSpec`.
+- [Agent](./agent.md): `AgentOptions.instructions`, `idle`, `persona` and `goal`.

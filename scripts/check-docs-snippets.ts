@@ -4,7 +4,10 @@
  *
  * A fence that shows a shape rather than a program opens as ```ts fragment
  * and is skipped. Snippets without an import or export get `export {}` so
- * two of them never share a global scope. Run: bun run check:docs
+ * two of them never share a global scope.
+ *
+ * Run: bun run check:docs                      every doc
+ *      bun run check:docs docs/guides/*.md     just these; concurrent runs get their own folder
  */
 
 import { spawnSync } from "node:child_process";
@@ -12,7 +15,8 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync }
 import { join, relative } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
-const OUT = join(ROOT, ".snippets");
+const only = process.argv.slice(2).map((arg) => relative(ROOT, join(ROOT, arg)));
+const OUT = join(ROOT, ".snippets", only.length ? only.join("_").replace(/[^a-zA-Z0-9]+/g, "_").slice(0, 80) : "all");
 const SKIP = ["docs/rfc/", "docs/migration/v1-to-v2.md", "docs/migration/v2-3-to-v2-4.md", "docs/migration/v2-6-to-v2-7.md"];
 const FENCE = /^```(?:ts|typescript)([^\n]*)\n([\s\S]*?)^```/gm;
 
@@ -27,12 +31,12 @@ function markdownFiles(dir: string): string[] {
 }
 
 rmSync(OUT, { recursive: true, force: true });
-mkdirSync(OUT);
+mkdirSync(OUT, { recursive: true });
 
 const origin = new Map<string, string>();
-const files = [join(ROOT, "README.md"), ...markdownFiles(join(ROOT, "docs"))].filter(
-  (file) => !SKIP.some((skip) => relative(ROOT, file).startsWith(skip)),
-);
+const files = [join(ROOT, "README.md"), ...markdownFiles(join(ROOT, "docs"))]
+  .filter((file) => !SKIP.some((skip) => relative(ROOT, file).startsWith(skip)))
+  .filter((file) => !only.length || only.includes(relative(ROOT, file)));
 let checked = 0;
 let skipped = 0;
 for (const file of files) {
@@ -60,8 +64,8 @@ writeFileSync(
   join(OUT, "tsconfig.json"),
   JSON.stringify(
     {
-      extends: "../examples/tsconfig.json",
-      compilerOptions: { baseUrl: ".", paths: { "@falai/agent": ["../src/index.ts"] }, noUnusedLocals: false, noUnusedParameters: false },
+      extends: "../../examples/tsconfig.json",
+      compilerOptions: { baseUrl: ".", paths: { "@falai/agent": ["../../src/index.ts"] }, noUnusedLocals: false, noUnusedParameters: false },
       include: ["./*.ts"],
     },
     null,
@@ -74,9 +78,9 @@ const report = `${tsc.stdout}${tsc.stderr}`
   .split("\n")
   .filter((line) => line.trim())
   .map((line) =>
-    line.replace(/^\.snippets\/([^(]+)\((\d+),(\d+)\)/, (_, name: string, row: string, col: string) => {
+    line.replace(/^\.snippets\/[^/]+\/([^(]+)\((\d+),(\d+)\)/, (_, name: string, row: string, col: string) => {
       const from = origin.get(name);
-      if (!from) return `.snippets/${name}(${row},${col})`;
+      if (!from) return `${relative(ROOT, OUT)}/${name}(${row},${col})`;
       const [doc, start] = from.split(":");
       return `${doc}:${Number(start) + Number(row) - 1}:${col}`;
     }),

@@ -1,415 +1,275 @@
 ---
 title: "Flow control"
-description: "Redirect, complete, abort, or speak verbatim from a tool, hook, or webhook by emitting a directive."
+description: "Every way a run moves, and the outcome line each move writes."
 type: guide
-order: 3
+order: 4
 ---
 
 # Flow control
 
-> **Where this is introduced:** [Directives](../concepts/directives.md)
+A run walks its flow's steps in order. `then` changes where it goes next; `else` and `onFail` cover a step's other exit. That is the whole vocabulary.
 
-Most steps run, ask the model, write fields, and move on. Some don't.
-A permission tool finds the caller is not eligible. A booking tool
-finishes its work and wants the flow to end without the LLM phrasing a
-confirmation. A webhook decides the next turn should start in a
-different flow than where the user left off. Every one of these is the
-same primitive: emit a [`Directive`](../reference/directive.md).
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-This guide is a tour of the recipes. Each section is a task and a
-code-block that does it. The shape stays the same across all of them;
-what changes is which fields you set and where the directive comes
-from. The [Directive reference](../reference/directive.md) is the
-canonical contract for every shorthand, object form, and validation
-rule.
+const f = falai().fields({});
 
-## The shape
+const agent = f.agent({
+  name: "Ana",
+  // Set GEMINI_API_KEY in your environment before running this.
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "aviso",
+      name: "Aviso",
+      steps: [
+        { id: "a", say: "Oi. Aqui é da loja." },
+        { id: "b", say: "Chegou o iPhone 17, pronta entrega.", then: "end" },
+        // Only here to show that `then: 'end'` stops before it.
+        { id: "c", say: "Este passo nunca sai." },
+      ],
+    }),
+  ],
+});
 
-```typescript
-import type { Directive } from "@falai/agent";
-
-const d: Directive = {
-  goTo: "Booking",                     // position (one max)
-  reply: "Routing you to booking.",    // verbatim utterance
-  dataUpdate: { source: "tool" },      // state write
-};
+const r = await agent.turn({ sessionId: "s1", start: { flow: "aviso", key: "k1" } });
+console.log(r.messages.map((m) => m.text)); // ["Oi. Aqui é da loja.", "Chegou o iPhone 17, pronta entrega."]
+console.log(r.outcomes.map((o) => [o.stepId, o.next])); // [["a", undefined], ["b", "end"]]
+console.log(r.ended[0]?.reason); // "end"
 ```
 
-Every field is optional. State writes (`dataUpdate`,
-`contextUpdate`) and `reply` ride alongside any position field.
+## Which exit a step takes
 
-## Position fields and precedence
+Every step has `then`. Without it, the run goes to the next step in the list; after the last step, `onEnd` decides. What "then" means depends on the kind:
 
-Position answers "where does the conversation go after this turn?"
+| Step | `then` is taken when | Other exit |
+|---|---|---|
+| talk (`prompt`, `collect`) | its fields are known, or a `prompt` without `collect` has spoken once | `branches[].then` while it asks |
+| `say` | right after the message is queued | none |
+| `do` | the action returned `ok` or `skipped` | `onFail` when it returned `failed` |
+| `wait: '2d'` | the time passed | `else` when the customer replied first; `branches[].then` on that reply |
+| `wait: { event }` | the event came | `else` when `upTo` passed (default 30 days) |
+| `if` | the predicate holds | `else` when it does not (default `'end'`) |
 
-| Field      | Effect                                                                |
-|------------|-----------------------------------------------------------------------|
-| `goTo`     | Jump to another flow.                                                 |
-| `goToStep` | Jump to a step (within this flow, or — in object form — another flow).|
-| `complete` | Mark the current flow done. Run the flow's completion path.           |
-| `abort`    | End the conversation. Optionally clear the session.                   |
-| `reset`    | Restart the current flow. Optionally clear its declared fields.       |
+Each exit is a `Next`, and every outcome line records where it went in `next`.
 
-The fields are **mutually exclusive** — at most one per directive.
-Setting two throws `FlowConfigurationError`. When more than one
-emitter writes a position field on the same turn, the per-turn merge
-picks one winner by precedence:
+## The four forms of `Next`
 
-```
-abort > complete > goTo / goToStep > reset
-```
+### A step id
 
-`abort` always wins — there's no "somewhere else" after the
-conversation has ended. `complete` beats `goTo` — if a follow-up
-jump belongs after completion, put it in `complete.next`. `goTo` and
-`goToStep` share a tier (last emission wins). `reset` is lowest.
-
-State writes and `reply` ride alongside whichever position wins.
-
-## Recipe 1 — Redirect from a tool
-
-Tools have two ways to emit a directive: imperative (`ctx.dispatch`)
-mid-handler, or declarative (`ToolResult.directive`) on return. Both
-land on the same per-turn bus and merge identically.
-
-### Imperative — `ctx.dispatch`
-
-```typescript
-import type { Tool } from "@falai/agent";
-
-const checkEligibility: Tool<{ userId: string }, BookingData, { ok: boolean }> = {
-  id: "check_eligibility",
-  description: "Verify the caller is allowed to book this destination.",
-  isReadOnly: () => true,
-  async handler(ctx) {
-    const ok = await isEligible(ctx.context.userId, ctx.data.destination);
-    if (!ok) {
-      ctx.dispatch({
-        goTo: "Denial",
-        reply: "Sorry — you're not eligible to book that destination.",
-        dataUpdate: { denialReason: "ineligible" },
-      });
-      return { ok: false };
-    }
-    return { ok: true };
-  },
-};
+```ts fragment
+{ id: "sem-humanos", say: "Nossa equipe está fora agora.", then: "dados" }
 ```
 
-Multiple `dispatch` calls in one handler are allowed — they
-concatenate alongside emissions from other tools and hooks before the
-merge runs.
+Jumps to that step of the same flow. Entering a step mints a new visit, so the messages and actions it produces get new keys (`suporte#m1:dados:2`). The step must exist; `validateFlow` refuses the flow otherwise. Jumping backward to a collect step whose fields are known skips it (`code: 'already-known'`), which is why the next form exists.
 
-### Declarative — `ToolResult.directive`
+### `{ step, clear }`
 
-```typescript
-async handler(ctx) {
-  const ok = await isEligible(ctx.context.userId, ctx.data.destination);
-  if (!ok) {
-    return {
-      data: { ok: false },
-      directive: {
-        goTo: "Denial",
-        reply: "Sorry — you're not eligible to book that destination.",
-      },
-    };
-  }
-  return { data: { ok: true } };
-}
-```
+```ts
+import { falai } from "@falai/agent";
 
-Reach for **imperative** when the handler still has work after the
-decision. Reach for **declarative** when there's a single return
-point.
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome." },
+  confirmado: { type: "boolean", ask: "Resuma o que anotou e pergunte se está certo." },
+});
 
-## Recipe 2 — Complete with a chained next
-
-A booking tool reserved the room. The flow is done, and the next
-thing the agent should do is open a feedback flow. `complete` accepts
-an object form whose `next` field is **another directive** applied
-immediately after the flow's completion path runs:
-
-```typescript
-import type { Tool, Directive } from "@falai/agent";
-
-const bookHotel: Tool<unknown, BookingData, { id: string }> = {
-  id: "book_hotel",
-  description: "Reserve the hotel for the collected fields.",
-  async handler(ctx, args) {
-    const id = await reserve(args);
-    const directive: Directive = {
-      complete: {
-        reason: "reservation confirmed",
-        next: { goTo: "Feedback", reply: "Booked. Mind a quick survey?" },
-      },
-      dataUpdate: { bookingId: id },
-    };
-    return { data: { id }, directive };
-  },
-};
-```
-
-What runs, in order: the tool's directive lands on the bus, the merge
-picks `complete`, the flow's `hooks.onComplete` runs, then
-`complete.next` is applied — `goTo: "Feedback"` redirects with the
-verbatim reply as that turn's assistant message.
-
-`complete.next` is one level deep on purpose — chains do not nest.
-For the simple case, the shorthand `complete: true` is the right
-call:
-
-```typescript
-return { data, directive: { complete: true, dataUpdate: { bookingId: id } } };
-```
-
-## Recipe 3 — Abort on a permission failure
-
-`abort` ends the conversation. Use it when there's no flow to
-redirect *to*:
-
-```typescript
-import type { Tool, Directive } from "@falai/agent";
-
-const verifyAccess: Tool = {
-  id: "verify_access",
-  isReadOnly: () => true,
-  async handler(ctx) {
-    const allowed = await acl.check(ctx.context.userId);
-    if (!allowed) {
-      const directive: Directive = {
-        abort: { reason: "caller is not on the allow-list", clearSession: true },
-      };
-      return { data: { allowed: false }, directive };
-    }
-    return { data: { allowed: true } };
-  },
-};
-```
-
-Two things to know:
-
-- **`abort` cannot co-exist with `reply`.** Aborted conversations
-  don't deliver replies. To say something on the way out, use
-  `complete` plus `reply` instead.
-- **`clearSession: true`** purges the session at the next persistence
-  write. Without it, the aborted session sticks around for traces.
-
-## Recipe 4 — Reply verbatim from a finalize hook
-
-Some utterances should be exact: confirmations, bridges, refusals,
-boilerplate at flow boundaries. `reply: string` skips the LLM and
-emits the literal text — no templating, no model rephrasing.
-
-```typescript
-import type { Directive } from "@falai/agent";
-
-const step = {
-  id: "confirm_handoff",
-  prompt: "Confirm the handoff if the queue is clear.",
-  hooks: {
-    finalize: ({ data }): Directive | void => {
-      if (data.handoffReady) {
-        return { reply: "Connecting you with a specialist now." };
-      }
-    },
-  },
-};
-```
-
-The turn ends with `stoppedReason: "reply"` and the literal string as
-`response.message`. State writes and a position field can ride
-alongside:
-
-```typescript
-finalize: ({ data }) => {
-  if (data.bookingId) {
-    return {
-      reply: `Booked. Confirmation: ${data.bookingId}.`,
-      dataUpdate: { confirmedAt: new Date().toISOString() },
-      complete: true,
-    };
-  }
-}
-```
-
-That single directive does three things at once. They're orthogonal
-payloads — `reply`, `dataUpdate`, and the position field don't
-compete for the same slot.
-
-To skip the LLM **before** it runs (rather than from a finalize hook
-*after*), return a `Directive` from a prepare hook with `halt: true`
-— see below.
-
-## Pre-LLM fields (pre-LLM hooks only)
-
-Pre-LLM hooks (`flow.hooks.onEnter`, `step.hooks.onEnter`,
-`step.hooks.prepare`) return a `Directive` — the same type as
-post-LLM hooks, but with three fields that only take effect before
-this turn's LLM call.
-
-```typescript
-interface Directive {
-  // ...all position/state/reply fields...
-  appendPrompt?: string[];
-  injectTools?: Tool[];
-  halt?: boolean;
-}
-```
-
-Lifetime is one turn. None of the three fields persist on
-`session.pendingDirective` — they're stripped before the write.
-Returning a Directive with these fields from a post-LLM hook ignores
-them with a WARN log.
-
-### `appendPrompt` — nudge the system prompt
-
-```typescript
-const flow = {
-  title: "Booking",
-  hooks: {
-    onEnter: (ctx) => {
-      if (ctx.context.user.tier === "vip") {
-        return { appendPrompt: ["Caller is a VIP — confirm preferences first."] };
-      }
-    },
-  },
-};
-```
-
-Each string is appended to the system prompt for this turn only.
-Multiple emitters' arrays concatenate in emission order; duplicates
-are preserved.
-
-### `injectTools` — one-shot tool surface
-
-```typescript
-const step = {
-  id: "verify",
-  prompt: "Verify the caller before proceeding.",
-  hooks: {
-    prepare: async (ctx) => {
-      if (!ctx.data.verified) return { injectTools: [lookupAccount] };
-    },
-  },
-};
-```
-
-Tools listed here are added for this turn only. Multiple emitters'
-arrays concatenate, then dedupe by `Tool.id` (last definition wins).
-
-### `halt` — skip the LLM call
-
-```typescript
-prepare: async (ctx) => {
-  if (ctx.data.alreadyVerified) {
-    return { halt: true, reply: "Already verified. How can I help?" };
-  }
-}
-```
-
-When any pre-phase emitter sets `halt: true`, the LLM call is
-skipped. With `reply`, the turn ends `stoppedReason: "reply"`. Without
-`reply`, the turn ends `stoppedReason: "halt"` and an empty body.
-Multiple emitters merge by logical-OR.
-
-## Recipe 5 — Dispatch from outside a turn
-
-Tools and hooks emit directives onto the **per-turn** bus. Sometimes
-the redirect comes from outside any turn — a webhook fires, a
-scheduled job notices an idle session, an external system marks a
-caller upgraded. There's no turn running, so there's no bus.
-
-`Agent.dispatch(target, session)` writes a `pendingDirective` onto
-the session without invoking a turn. The directive is consumed at the
-**start of the next** `respond` call — before routing, before
-pre-extraction, before any phase runs.
-
-```typescript
-// Webhook handler: redirect a session from outside a turn.
-import type { Directive } from "@falai/agent";
-
-app.post("/webhook/account-upgraded", async (req, res) => {
-  const session = await agent.session.getOrCreate(req.body.sessionId);
-  await agent.dispatch(
-    { goTo: "VipFlow", reply: "You've been upgraded. Let's start fresh." },
-    session
-  );
-  res.sendStatus(204);
+const triagem = f.flow({
+  id: "triagem",
+  name: "Triagem",
+  on: [{ message: ["quer saber como funciona"] }],
+  steps: [
+    { id: "quem", collect: ["nome"] },
+    { id: "confirma", collect: ["confirmado"] },
+    { id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado", "nome"] } },
+    { id: "tchau", prompt: "Agradeça e diga que um vendedor continua daqui." },
+  ],
 });
 ```
 
-Two forms:
+Deletes the listed fields from the collected data, then jumps. The steps that collect them ask again. Without `clear`, a backward edge logs a warning when the agent is built, because the run would skip straight past the steps you jumped to.
 
-```typescript
-// String shorthand — desugars to { goTo: "Feedback" }
-await agent.dispatch("Feedback", session);
+### `'end'`
 
-// Full directive
-await agent.dispatch({ goTo: "Billing", reply: "Transferring you now." }, session);
+Ends the run now. `onEnd` (below) says what the flow does about it. `'end'` is a reserved word: no step may use it as an id.
+
+### `{ flow, input }`
+
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
+
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome." },
+});
+
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  actions: {
+    send_template: f.action({
+      parameters: { templateId: { type: "string" } },
+      run: (params) => {
+        console.log(`enviando ${params.templateId}`);
+        return { ok: true, spoke: true };
+      },
+    }),
+  },
+  flows: [
+    f.flow({
+      id: "campanha",
+      name: "Campanha",
+      steps: [
+        { id: "envio", do: "send_template", with: { templateId: "{{input.templateId}}" } },
+        // The customer answered: hand the conversation to the flow named in the start input.
+        { id: "espera", wait: "1d", else: { flow: "{{input.flowId}}" } },
+        { id: "nudge", prompt: "Cutuque de leve: pergunte se a pessoa viu a mensagem." },
+      ],
+    }),
+    f.flow({ id: "funil", name: "Funil", steps: [{ id: "q", collect: ["nome"] }] }),
+  ],
+});
+
+const t1 = await agent.turn({ sessionId: "s1", start: { flow: "campanha", input: { templateId: "t1", flowId: "funil" }, key: "camp:1" } });
+// The customer replies before the day is over:
+const t2 = await agent.turn({ sessionId: "s1", session: t1.session, message: "vi sim, me conta mais", id: "m1" });
+console.log(t2.ended.map((run) => [run.flowId, run.reason])); // [["campanha", "flow"]]
+console.log(t2.started.map((s) => s.runId)); // ["funil#campanha#camp:1:espera:1"]
+console.log(t2.session.runs[0]?.hop); // 1
 ```
 
-The call validates the directive (`flow.validate`), confirms any
-`goTo`-named flow exists (throws `FlowConfigurationError` if not),
-strips pre-LLM-only fields, writes `pendingDirective` onto the
-session, and returns the updated session. With a persistence adapter
-configured (and `autoSave` on — the default), dispatch also persists
-immediately, so a webhook's redirect survives even if the next turn
-runs in a different process; the save compare-and-swaps on the session
-version, so a stale copy throws `SessionConflictError` rather than
-clobbering another writer. Without an adapter (or with
-`autoSave: false`) the directive is memory-only until the next turn's
-auto-save — persisting sooner is then the caller's job.
+Ends this run with `reason: 'flow'` and starts the other flow in the same turn. The child:
 
-`pendingDirective` is **single-shot** — consumed exactly once and
-cleared. Calling `dispatch` again before the next turn overwrites the
-previous one (last-wins). To merge with a pending directive instead
-of overwriting, use `flow.merge`:
+- has the id `<childFlowId>#<parentRunId>:<stepId>:<visit>` and `trigger.kind: 'flow'`;
+- gets `input` if you pass it, otherwise the parent's `input`, so `{{input.x}}` keeps working;
+- takes the floor and moves in this same turn; a talk step reached this way speaks now;
+- has `hop` one higher than the parent. A chain deeper than 5 stops: the child is skipped with `code: 'hop-limit'`.
+- repeats by default (`'always'`), so a flow may be chained into many times; its claim carries the parent's step key.
 
-```typescript
-import { flow } from "@falai/agent";
+`flow` is a template: `{{input.flowId}}` resolves against the run's input and context. A flow id that does not exist lands in `skipped[]` with `code: 'flow-gone'`; a child flow with a live run for the same anchor is skipped with `code: 'already-running'`. This is how one flow hands the conversation to another: the last step of a qualifying flow can `then: { flow: 'agendamento' }`.
 
-const merged = flow.merge(
-  session.pendingDirective ?? {},
-  { dataUpdate: { tier: "vip" } }
-);
-await agent.dispatch(merged, session);
+## `onEnd`: after the last step
+
+| `onEnd` | What happens | `ended[].reason` |
+|---|---|---|
+| `'end'` (default) | the run ends; the session is idle | `'end'` |
+| `'stay'` | the run stays at its last step and runs it again on the next message; each repetition mints a new key | none: the run does not end |
+| `'reset'` | the run ends and a fresh run of the same flow starts at the first step, data kept, one hop deeper | `'reset'` |
+
+```ts
+import { falai } from "@falai/agent";
+
+const f = falai().fields({});
+
+// Every later question lands on the same step, with a new message key each time.
+const faq = f.flow({
+  id: "faq",
+  name: "Dúvidas",
+  on: [{ message: ["tem uma dúvida sobre o produto"] }],
+  onEnd: "stay",
+  steps: [{ id: "r", prompt: "Responda a dúvida com base no que sabe e pergunte se ficou claro." }],
+});
 ```
 
-## Picking the right tool
+`'reset'` is a chain into the same flow, so it costs a hop: a flow with no talk step that resets forever stops at the hop cap instead of spinning.
 
-Where to emit:
+## `while`: the run's premise
 
-| You're in a... | Type | Use |
-|----------------|------|-----|
-| Tool handler, mid-flight | `Directive` | `ctx.dispatch(d)` |
-| Tool handler, on return | `Directive` | `return { data, directive: d }` |
-| `prepare` / `onEnter` hook | `Directive` | `return d` (pre-LLM fields honored) |
-| `finalize` / `onComplete` hook | `Directive` | `return d` |
-| Branch `then` target | `Directive` | `then: d` (see [Branching](./branching.md)) |
-| Outside a turn (webhook, job) | `Directive` | `await agent.dispatch(d, session)` |
+`while` is a code predicate re-checked every time the run is about to move, including right after it starts. When it stops holding, the run ends with `code: 'premise-changed'` and `reason: 'skipped'`, without speaking.
 
-Which position field:
+```ts
+import { falai } from "@falai/agent";
 
-- Inside the same flow → `goToStep`.
-- Another flow → `goTo` (or `goToStep` with `flow:` set).
-- Work is done → `complete` (with `complete.next` for follow-ups).
-- No path forward → `abort` (`clearSession: true` if reuse is unsafe).
-- Start the flow over → `reset`.
+interface Ctx {
+  lead: { etapa: string };
+}
 
-Code or model speaking:
+const f = falai<Ctx>().fields({});
 
-- Verbatim → set `reply`.
-- From the model → leave `reply` unset; let the LLM call run.
+const proposta = f.flow({
+  id: "proposta",
+  name: "Acompanhar proposta",
+  on: [{ event: "entrou_na_etapa", after: "1h", if: ({ context }) => context.lead.etapa === "proposta" }],
+  // The run only makes sense while the deal is still here. Without `while`, the trigger's `if` is re-checked instead.
+  while: ({ context }) => context.lead.etapa === "proposta",
+  steps: [{ id: "fala", prompt: "Pergunte se a proposta chegou bem e se há dúvidas." }],
+});
+```
 
-## See also
+Without `while`, the trigger's `if` is the premise. The run holds while any trigger of the same kind would still fire. A flow started by hand or by a chain has no such trigger, so its premise always holds. A run a silence trigger started has one more premise on a wake: if the customer wrote since the run started, the run ends with `code: 'customer-replied'`.
 
-- [Directive reference](../reference/directive.md) — every field,
-  every shorthand, every validation rule.
-- [Directives concept](../concepts/directives.md) — the mental model
-  and the inheritance chain.
-- [Branching](./branching.md) — when the redirect is source-local
-  rather than dynamic.
-- [Turn pipeline](../concepts/pipeline.md) — when and where directives
-  apply within a turn.
+## `onFail` on a `do` step
 
-**Next:** [Instructions](./instructions.md)
+An action that returns `{ failed }` writes `code: 'action-failed'` and the run follows `onFail`. Without `onFail` the run continues as if the action had succeeded, so give a step that matters an `onFail`.
+
+```ts
+import { falai } from "@falai/agent";
+
+const f = falai().fields({
+  cep: { type: "string", ask: "Pergunte o CEP." },
+  cidade: { type: "string" },
+});
+
+const entrega = f.flow({
+  id: "entrega",
+  name: "Prazo de entrega",
+  on: [{ message: ["quer saber o prazo de entrega"] }],
+  steps: [
+    { id: "cep", collect: ["cep"] },
+    { id: "cidade", do: "buscarCidade", with: { cep: "{{data.cep}}" }, onFail: "cep_errado" },
+    { id: "prazo", prompt: "Informe o prazo de entrega para {{data.cidade}}.", then: "end" },
+    { id: "cep_errado", prompt: "Diga que não achou o CEP e peça de novo.", then: { step: "cep", clear: ["cep"] } },
+  ],
+});
+```
+
+The action side of this, `ctx.set` included, is in [Actions and events](actions-and-events.md).
+
+## The caps
+
+- **50 steps per run per turn.** A run that moves 50 times without stopping to ask or wait ends with `code: 'step-loop'` and `reason: 'failed'`. Two `if` steps pointing at each other hit it.
+- **Hop 5.** `{ flow }`, `onEnd: 'reset'` and `turn({ start, hop })` each add one; at 5 the start is skipped with `code: 'hop-limit'`.
+
+## When the flow changed under a live run
+
+Flows are read from the agent on every turn, so a run may wake up in a flow you have since edited:
+
+- The flow is gone (disabled or removed): the run ends with `code: 'flow-gone'`.
+- The step is gone: the run ends with `code: 'step-gone'`.
+
+Keep the ids of talk steps stable when you edit a flow that has live runs.
+
+## Every outcome line, in one place
+
+| `code` | Written when |
+|---|---|
+| none, `next` set | a step finished normally and moved |
+| `branch` | a branch fired on an asking step |
+| `code: 'already-known'` | a collect step's fields were already known |
+| `code: 'max-asks'` (`detail` = the field) | a field hit `maxAsks` and was given up |
+| `code: 'already-sent'` | a `say` with `once: true` had already gone out |
+| `code: 'another-reply'` | another run's `say` or spoke action answered this message |
+| `code: 'silenced'` (`detail` = your reason) | a talk or `say` step was reached while the host had silenced the assistant |
+| `code: 'action-skipped'` | a `do` returned `skipped` |
+| `code: 'action-failed'` | a `do` returned `failed` or threw |
+| `code: 'replied'`, `code: 'no-reply'`, `code: 'inline-delay'` | a timer `wait` ended by a reply, by the timer, or rode on the next message |
+| `code: 'awaiting-event'`, `code: 'event-arrived'`, `code: 'no-event'` | an event `wait` parked, resumed, or timed out |
+| `code: 'awaiting-trigger'` | an event trigger's `after` parked the new run |
+| `code: 'premise-changed'` | `while` (or the trigger's `if`) stopped holding |
+| `code: 'customer-replied'` | a silence run woke after the customer wrote |
+| `code: 'flow-gone'`, `code: 'step-gone'` | the flow or step no longer exists |
+| `code: 'step-loop'` | the 50-step cap |
+| `code: 'action-deferred'`, with `until` set | a `do` returned `{ defer }` |
+| `code: 'provider-unavailable'` | the speak call failed; the step is parked under a retry wake |
+| `code: 'no-session'`, `code: 'duplicate-input'`, `code: 'stale-wake'`, `code: 'silence-broken'` | the input was a no-op; the turn returns `changed: false` |
+| `code: 'unknown-field'`, `code: 'bad-value'`, `code: 'not-in-enum'` | an extracted value was dropped instead of written |
+
+Trigger-level skips (`code: 'already-claimed'`, `code: 'cooldown'`, `code: 'already-running'`, `code: 'hop-limit'`) go to `skipped[]` instead. The full list with every field is in [Outcomes](../reference/outcomes.md).
+
+## Coming from 3.x
+
+Every position change is now a `then` or `else` on a step. A tool cannot move the run; an `if` step, a branch or a host `start` does that. Code that ran around a step is a `do` step at that position. The before-and-after is in [v3 → v4 migration](../migration/v3-to-v4.md#5-movement-then--else-replace-directives-and-hooks).
+
+## Read next
+
+- [Branching](branching.md): `when` and `if` branches on an asking step.
+- [Runs and waits](../concepts/runs-and-waits.md): the floor, suspended runs, wakes and keys.
+- [Step reference](../reference/step.md): every step kind and `Next`.

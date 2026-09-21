@@ -1,238 +1,150 @@
 ---
-title: Flow
-description: A goal-shaped sequence of steps with shared schema, conditions, and completion semantics.
+title: "Flow"
+description: "Every Flow field with its type and default, what the runtime does with each one, and what validateFlow rejects."
 type: reference
 order: 2
 ---
 
 # Flow
 
-> **Where this is introduced:** [Architecture](../concepts/architecture.md)
-
-A `Flow` is one of the six primitives in `@falai/agent`. It models a single conversational goal — booking a hotel, escalating a complaint, onboarding a teammate — as an ordered set of steps that share the agent's typed `TData` schema. Flows declare what data they need (`requiredFields`), what extra data they can use (`optionalFields`), when they should activate (`when` for AI strings, `if` for code), and what happens when they finish (`onComplete` or `hooks.onComplete`). The router selects exactly one flow per turn; once the active flow's required fields are satisfied, the engine fires its completion path.
+A flow is a trigger plus an ordered list of steps. Its `on` list says when a run starts; its `steps` say what the run does; `onEnd` says what happens after the last step. A run is one live execution of a flow inside a session. Flows are plain objects, so the same shape round-trips through JSON as a [FlowSpec](flow-spec.md).
 
 ## Signature
 
-```typescript
-interface FlowOptions<TContext = unknown, TData = unknown> {
-  id?: string;
-  title: string;
+```ts fragment
+interface Flow<C = unknown, D = unknown> {
+  id: string;
+  name: string;
   description?: string;
-
-  when?: ConditionWhen;                                // string | string[]
-  if?: ConditionIf<TContext, TData>;                   // predicate | predicate[]
-
-  instructions?: Instruction<TContext, TData>[];
-  tools?: (string | Tool<TContext, TData>)[];
-
-  routingExtrasSchema?: StructuredSchema;
-  responseOutputSchema?: StructuredSchema;
-
-  requiredFields?: (keyof TData)[];
-  optionalFields?: (keyof TData)[];
-  initialData?: Partial<TData>;
-
-  steps?: StepOptions<TContext, TData>[];
-
-  onComplete?: string;                                 // top-level: string sugar only
-  reentrant?: boolean;                                 // default false
-
-  hooks?: FlowLifecycleHooks<TContext, TData>;
-}
-
-class Flow<TContext = unknown, TData = unknown> {
-  readonly id: string;
-  readonly title: string;
-  readonly description?: string;
-  readonly when?: ConditionWhen;
-  readonly if?: ConditionIf<TContext, TData>;
-  readonly initialStep: Step<TContext, TData>;
-  readonly requiredFields?: (keyof TData)[];
-  readonly optionalFields?: (keyof TData)[];
-  readonly initialData?: Partial<TData>;
-  readonly onComplete?: string;
-  readonly reentrant: boolean;
-  readonly hooks?: FlowLifecycleHooks<TContext, TData>;
-
-  constructor(options: FlowOptions<TContext, TData>, parentAgent?: Agent<TContext, TData>);
-
-  addStep(options: StepOptions<TContext, TData>): Step<TContext, TData>;
-  getSteps(): Step<TContext, TData>[];
-  getStep(stepId: string): Step<TContext, TData> | undefined;
-  getInstructions(): Instruction<TContext, TData>[];
-  getTools(): Tool<TContext, TData>[];
-
-  isComplete(data: Partial<TData>): boolean;
-  getMissingRequiredFields(data: Partial<TData>): (keyof TData)[];
-  getCompletionProgress(data: Partial<TData>): number;
+  on?: Trigger<C, D>[];
+  anchor?: string;
+  while?: Pred<C, D>;
+  clearOnStart?: (keyof D & string)[];
+  steps: Step<C, D>[];
+  onEnd?: "end" | "stay" | "reset";
+  instructions?: Instruction<C, D>[];
+  tools?: string[];
 }
 ```
 
 ## Fields
 
-### `FlowOptions`
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | `string` | required | Unique across the agent. Part of every run id (`${id}#${triggerKey}`) and every claim key. Keep it stable once sessions exist: a run whose flow id is gone ends with `code: 'flow-gone'`. |
+| `name` | `string` | required | The human name. The model reads it when routing and when speaking. |
+| `description` | `string` | none | When this flow should be used. The model reads it when scoring flows and while speaking. |
+| `on` | `Trigger<C, D>[]` | none | What starts a run. Absent or empty: only `turn({ start })` or another flow's `then: { flow }` starts it. See [Trigger](trigger.md). |
+| `anchor` | `string` | `'session'` | What a run is keyed to. `'session'` uses the session id. Any other name reads `input.anchors[name].key`, and falls back to the session id when the host did not pass that anchor. |
+| `while` | `Pred<C, D>` | the trigger's `if` | Re-checked before the run moves. When it stops holding, the run ends with `code: 'premise-changed'`. |
+| `clearOnStart` | `(keyof D & string)[]` | none | Fields forgotten when a run of this flow starts, so a second run asks for them again. |
+| `steps` | `Step<C, D>[]` | required | In order. A run enters `steps[0]` and moves to the next step unless `then` says otherwise. See [Step](step.md). |
+| `onEnd` | `'end' \| 'stay' \| 'reset'` | `'end'` | What the run does after its last step. |
+| `instructions` | `Instruction<C, D>[]` | none | Rules that apply while a step of this flow speaks. See [Instruction](instruction.md). |
+| `tools` | `string[]` | every agent tool | Tools the model may call while a step of this flow speaks. A step's own `tools` list wins over this one. |
 
-| Field                 | Type                                              | Required | Default | Notes                                                                                                                                              |
-| --------------------- | ------------------------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                  | `string`                                          | no       | derived from `title` | Stable identifier. Auto-generated deterministically from the title when omitted.                                                                                 |
-| `title`               | `string`                                          | yes      | —       | Human-readable name. Shown to the router and used as the default flow id.                                                                          |
-| `description`         | `string`                                          | no       | —       | One-line summary surfaced to the router prompt.                                                                                                    |
-| `when`                | `string \| string[]`                              | no       | —       | AI-evaluated activation condition(s). Strings only — functions belong on `if`. Non-`!` strings are OR alternatives; `!` strings are OR exclusions where any match inhibits activation.                         |
-| `if`                  | `(ctx) => boolean \| Promise<boolean>` or array   | no       | —       | Code-evaluated activation condition(s). Free to evaluate. When both are set, `if` runs first; `when` only evaluates if `if` passes.                |
-| `instructions`        | `Instruction<TContext, TData>[]`                  | no       | `[]`    | Flow-scoped instructions. Apply only while this flow is active. See [Instruction](./instruction.md).                                               |
-| `tools`               | `(string \| Tool)[]`                              | no       | `[]`    | Tool ids (resolved via the agent's tool registry) or inline `Tool` objects. Available only while this flow is active.                              |
-| `routingExtrasSchema` | `StructuredSchema`                                | no       | —       | Optional extra fields the router may extract during routing.                                                                                       |
-| `responseOutputSchema`| `StructuredSchema`                                | no       | —       | Optional structured response shape for this flow's assistant messages.                                                                             |
-| `requiredFields`      | `(keyof TData)[]`                                 | no       | —       | Fields that must be present in `session.data` for the flow to complete. Drives `isComplete` and progress calculation.                              |
-| `optionalFields`      | `(keyof TData)[]`                                 | no       | —       | Fields the flow uses but doesn't require. Tracked for re-entry resets and progress visibility only.                                                |
-| `initialData`         | `Partial<TData>`                                  | no       | —       | Pre-populated values applied when the flow is entered. Merged into `session.data`.                                                                 |
-| `steps`               | `StepOptions<TContext, TData>[]`                  | no       | —       | Sequential steps. The first becomes the initial step; the rest are chained as linear successors. The last step is the implicit terminus.           |
-| `onComplete`          | `string`                                          | no       | —       | **String only.** Sugar for `hooks.onComplete = () => ({ goTo: '<id>' })`. For dynamic completion logic, use `hooks.onComplete`.                    |
-| `reentrant`           | `boolean`                                         | no       | `false` | If `true`, the router may select this flow again after it has completed in the current session. On re-entry, declared `requiredFields` and `optionalFields` are cleared. |
-| `hooks`               | `FlowLifecycleHooks<TContext, TData>`             | no       | —       | Lifecycle hooks: `onEnter`, `onExit`, `onComplete`, `onDataUpdate`, `onContextUpdate`. See below.                                                   |
+## Behaviour
 
-### `FlowLifecycleHooks`
+**Starting a run.** Whatever the trigger, a run starts in one order.
 
-| Hook              | Returns                                | Phase    | Notes                                                                                                                  |
-| ----------------- | -------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `onEnter`         | `void \| Directive`                    | pre-LLM  | Fires when the flow is entered. May augment the prompt, inject tools, or `halt`. Pre-LLM fields honored here.|
-| `onExit`          | `void`                                 | post     | Informational. Receives an `ExitReason`; cannot influence flow control.                                                |
-| `onComplete`      | `void \| Directive`                    | post-LLM | Handler form of completion. Mutually exclusive with top-level `onComplete: string` — setting both throws.              |
-| `onDataUpdate`    | `Partial<TData>`                       | post     | Mutate or enrich the data update before it is committed to `session.data`.                                             |
-| `onContextUpdate` | `void`                                 | post     | Informational reaction to context updates while this flow is active.                                                   |
+1. The trigger's `if` is judged.
+2. The claim is checked against `repeat` (`code: 'already-claimed'`, `code: 'cooldown'`).
+3. The chain depth is checked (`code: 'hop-limit'` at 5 hops).
+4. One live run per flow and anchor is enforced (`code: 'already-running'`). The one exception: a run still parked on an event trigger's `after` ends with reason `'replaced'` and the new run takes its place.
+5. The claim is written, `clearOnStart` fields are deleted, and the run is added with `stepId: null`.
 
-### `Flow` instance methods
+It enters `steps[0]` in the same turn unless the trigger has `after`. Keys and skip reasons are in [Trigger](trigger.md).
 
-| Method                                       | Returns                          | Notes                                                                                              |
-| -------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `addStep(options)`                           | `Step<TContext, TData>`          | Imperatively append a step as the successor of the current last step. Same validations as `steps[]`. |
-| `getSteps()`                                 | `Step<TContext, TData>[]`        | All steps reachable from the initial step via BFS traversal.                                       |
-| `getStep(stepId)`                            | `Step \| undefined`              | Look up a step by id.                                                                              |
-| `getInstructions()`                          | `Instruction[]`                  | Flow-scoped instructions (a copy).                                                                 |
-| `getTools()`                                 | `Tool[]`                         | Flow-scoped tools (a copy).                                                                        |
-| `isComplete(data)`                           | `boolean`                        | `true` when all `requiredFields` are populated. Optional-only flows complete on terminus, not data. |
-| `getMissingRequiredFields(data)`             | `(keyof TData)[]`                | Fields from `requiredFields` not yet present in `data`.                                            |
-| `getCompletionProgress(data)`                | `number` (0–1)                   | Fraction of `requiredFields` satisfied. `0` when only `optionalFields` are declared.               |
+**`anchor`.** The anchor is part of the run's `dedupeKey` (`${flowId}:${anchor}:${nonce}`) and of the one-live-run rule. With `anchor: 'lead'` and `anchors: { lead: { key: 'lead:456' } }` on every turn, a flow runs once per customer even when the customer has several sessions, as long as the host also passes `claims` from the other sessions. `anchors.lead.lastInboundAt` also counts as "the customer wrote" when a silence wake fires and when a wait's wake decides whether the customer replied.
 
-### Completion semantics
+**`while`.** Checked every time the run is about to move: at the start of each turn's run phase for a running run, and when an asking run resumes on a message. A parked run (`waiting`) or a suspended one is not checked until it moves again. Without `while`, the check is the trigger's `if`: the run holds while any trigger of the same kind as the one that started it would still fire. A run started by `start` or by another flow has no such trigger, so without `while` it always holds. A silence run also ends, with `code: 'customer-replied'`, when a wake finds that the customer wrote after the run started.
 
-A flow finishes in one of three ways:
+**`clearOnStart`.** Applied at start for every trigger kind, `start` and `{ flow }` chains included. Not applied when `onEnd: 'reset'` restarts the flow: reset keeps the data.
 
-1. **All `requiredFields` are satisfied.** The engine marks the flow complete, fires `hooks.onComplete` (or the desugared `onComplete: string` transition), and applies the returned `Directive`.
-2. **The last step in `steps[]` runs and `requiredFields` is empty.** The terminus rule applies — the flow is implicitly complete, and the same completion path runs.
-3. **A `Directive` with `complete: true` is returned** from a tool, hook, or branch while the flow is active. Completion fires immediately regardless of field state.
+**`onEnd`.**
+- `'end'`: the run ends with reason `'end'`.
+- `'stay'`: the run re-enters the last step (a new visit, so new keys) and stays asking. It speaks that step again on the next message. Meant for a last talk step that answers follow-up questions.
+- `'reset'`: the run ends with reason `'reset'` and a fresh run of the same flow starts at `steps[0]`, data kept, one hop deeper. A flow that resets forever without asking anything stops at hop 5, with `code: 'hop-limit'`.
 
-`requiredFields` is the contract for "this flow is done." `optionalFields` is descriptive metadata — it never gates completion, but it's tracked for two reasons:
+**Instructions and tools while speaking.** The speak call sees the agent's instructions, then this flow's, then the step's, each already filtered by its `if`. Tools are the step's `tools`; without one, the flow's `tools`; without that, every agent tool.
 
-- **Re-entry resets.** When `reentrant: true` and the router re-selects this flow after it has completed, every field listed in `requiredFields` and `optionalFields` is cleared so the flow starts fresh.
-- **Progress visibility.** `getCompletionProgress` ignores optional fields by design — progress reflects what the flow is *blocked on*, not what it has *touched*.
+**Editing flows under live sessions.** A stored run names its flow and step by id. If the flow is gone, the run ends with `code: 'flow-gone'`; if its step is gone, with `code: 'step-gone'`. Renaming ids is a breaking change for sessions in flight.
 
-### `reentrant` behavior
+## What validateFlow rejects
 
-By default (`reentrant: false`), once a flow completes the router excludes it from candidate selection for the rest of the session. Set `reentrant: true` to support patterns like "book another?", "file another ticket?", or "search again". On re-entry:
+`f.agent()` runs `validateFlow(flow, registries)` on every flow. It throws `FlowConfigurationError` on the first of these:
 
-- All `requiredFields` and `optionalFields` are cleared from `session.data`.
-- Other fields in `session.data` are preserved.
-- The flow restarts from its initial step.
+- no `id`, or `steps` is not a list
+- a step with no `id`, the id `'end'`, or an id used twice
+- triggers with zero steps
+- an unknown field slug in `clearOnStart`, `collect`, `ask`, `equals`, `known` or a `clear` list
+- an unknown action in `do`; a `with` that misses a required parameter, names one the action does not have, or gives a value of the wrong type (`with` values are not coerced; a `{{template}}` string is accepted for any enum)
+- an unknown event in a trigger or in `wait: { event }`
+- an unknown condition name, or a malformed built-in (`equals` not an object, `known` not a list, `silenced` not a boolean); an `equals` value whose type does not match the field
+- an unknown tool in the flow's or a step's `tools`
+- a `silence`, `after`, `cooldown`, `wait` or `upTo` that is not a duration (`"30s"`, `"5m"`, `"24h"`, `"3d"`)
+- a `then`, `else`, `onFail` or branch `then` that points at a step that does not exist
+- a branch with neither `when` nor `if`
+- an `if` step whose `then` jumps backward with no `else`
 
-`onComplete` always wins over `reentrant`. If `onComplete` (or `hooks.onComplete`) returns a target, the session transitions there. `reentrant` is consulted only when the completion handler is absent or returns `undefined`.
+It returns warnings, logged by the agent, for two things that run but probably not as intended: a jump backward without `clear` (the fields collected since stay known, so those steps skip), and a `collect` step with no `prompt` and no `ask` on any of its fields.
 
-### Top-level `onComplete` vs `hooks.onComplete`
+`toSpec(flow)` throws `FlowConfigurationError` when a predicate is a function, because a function cannot be stored as JSON.
 
-The top-level `onComplete` is **string-only** sugar. Internally, the constructor desugars `onComplete: 'targetFlow'` into `hooks.onComplete = () => ({ goTo: 'targetFlow' })`. Use the handler form when you need conditional transitions, data writes, or any logic beyond a static target id.
+## Example
 
-| Use this           | When                                                                                |
-| ------------------ | ----------------------------------------------------------------------------------- |
-| `onComplete: 'id'` | You always want to chain into the same next flow when this one finishes.            |
-| `hooks.onComplete` | The next flow depends on collected data, or you want to write state on completion.  |
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-> Setting **both** the top-level `onComplete` and `hooks.onComplete` on the same flow throws `FlowConfigurationError` at construction time. Pick one.
-
-## Examples
-
-### Basic linear flow
-
-```typescript
-import { createAgent, Flow, GeminiProvider } from "@falai/agent";
-
-interface BookingData {
-  destination: string;
-  checkIn: string;
-  guests: number;
+interface Ctx {
+  lead: { etapa: string };
 }
 
-const bookHotel = new Flow<unknown, BookingData>({
-  title: "Book Hotel",
-  description: "Collect destination, check-in date, and party size, then book.",
-  when: "the user wants to book a hotel",
-  requiredFields: ["destination", "checkIn", "guests"],
+const f = falai<Ctx>().fields({
+  confirmado: { type: "boolean", ask: "Pergunte se a proposta chegou bem e se está tudo claro." },
+});
+
+const proposta = f.flow({
+  id: "proposta",
+  name: "Acompanhar proposta",
+  description: "Uma hora depois que a proposta foi enviada, enquanto o lead continua nessa etapa.",
+  on: [{ event: "entrou_na_etapa", after: "1h", if: { naEtapa: "proposta" } }],
+  anchor: "lead",
+  while: { naEtapa: "proposta" },
+  clearOnStart: ["confirmado"],
   steps: [
-    { description: "Greet and ask destination", collect: ["destination"] },
-    { description: "Ask check-in date",         collect: ["checkIn"] },
-    { description: "Ask guest count",           collect: ["guests"] },
+    { id: "chegou", collect: ["confirmado"] },
+    { id: "ok", if: { equals: { confirmado: true } }, else: "avisa" },
+    { id: "tchau", say: "Ótimo. Qualquer dúvida, é só chamar.", then: "end" },
+    { id: "avisa", do: "avisar", with: { texto: "Proposta não chegou bem para o lead em {{context.lead.etapa}}." } },
   ],
+  onEnd: "end",
 });
 
-const agent = createAgent<unknown, BookingData>({
-  schema: { /* ... */ },
-  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
-  flows: [bookHotel],
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  events: { entrou_na_etapa: f.event<{ etapa: string }>() },
+  conditions: { naEtapa: f.condition((ctx, etapa: string) => ctx.context.lead.etapa === etapa) },
+  actions: { avisar: f.action({ parameters: { texto: { type: "string" } }, run: () => ({ ok: true }) }) },
+  flows: [proposta],
 });
+
+const context: Ctx = { lead: { etapa: "proposta" } };
+const r = await agent.turn({
+  sessionId: "s1",
+  context,
+  anchors: { lead: { key: "lead:456" } },
+  event: "entrou_na_etapa",
+  payload: { etapa: "proposta" },
+  key: "stage:456:proposta",
+});
+console.log(r.started[0]?.dedupeKey, r.schedule[0]?.key); // 'proposta:lead:456:stage:456:proposta', 'proposta#stage:456:proposta:start:<ms>'
 ```
 
-### Completion handler with state writes and chained transition
+## See also
 
-```typescript
-import { Flow } from "@falai/agent";
-
-const bookHotel = new Flow<AppContext, BookingData>({
-  title: "Book Hotel",
-  requiredFields: ["destination", "checkIn", "guests"],
-  reentrant: true,                                          // allow "book another?" loops
-  steps: [/* ... */],
-  hooks: {
-    onComplete: ({ data }) => ({
-      dataUpdate: { lastBookedAt: new Date().toISOString() },
-      goTo: data.guests > 4 ? "Group Coordination" : "Confirmation",
-      reason: "booking finalized",
-    }),
-  },
-});
-```
-
-### Imperative `addStep` after construction
-
-```typescript
-const supportFlow = new Flow({
-  title: "Support",
-  steps: [{ description: "Capture issue summary", collect: ["issue"] }],
-});
-
-// Later — extend the flow programmatically.
-supportFlow.addStep({
-  description: "Triage severity",
-  collect: ["severity"],
-});
-```
-
-> Calling `addStep` after the agent has handled a turn emits a debug-level warning that the flow graph is being mutated mid-session. The new step is still registered and connected as the successor of the current last step.
-
-## Errors
-
-| Error                       | When it's thrown                                                                                                    |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `FlowConfigurationError`    | Both top-level `onComplete` and `hooks.onComplete` are set on the same flow.                                        |
-| `FlowConfigurationError`    | A function appears in `when` (functions belong on `if`).                                                            |
-| `FlowConfigurationError`    | A step inside `steps[]` violates auto-step or reply-step shape rules (raised from the underlying `Step` constructor). |
-
-All `FlowConfigurationError` messages follow the format `[FlowConfigurationError] <what>: <why>. <how to fix>.` See [Errors](./errors.md).
-
-## Related
-
-- [Architecture](../concepts/architecture.md) — where Flow fits among the six primitives
-- [Turn pipeline](../concepts/pipeline.md) — when flows are selected, entered, and completed
-- [Step](./step.md) — the inner DSL primitive flows are composed of
-- [Directive](./directive.md) — what `hooks.onComplete` returns
-- [Instruction](./instruction.md) — flow-scoped behavioral nudges
-- [Branching](../guides/branching.md) — explicit forks inside a flow
-- [Flow control](../guides/flow-control.md) — completion, dispatch, and verbatim replies
+- [Trigger](trigger.md) for `on`, `repeat`, keys and skip reasons
+- [Step](step.md) for the six step kinds and `Next`
+- [Flow spec](flow-spec.md) for the JSON form and `validateFlow`
+- [Flow control](../guides/flow-control.md) and [Runs and waits](../concepts/runs-and-waits.md)

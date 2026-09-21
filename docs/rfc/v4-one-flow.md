@@ -1,5 +1,5 @@
 ---
-title: "v4 design: one Flow"
+title: "@falai/agent v4 — one Flow (design v2)"
 description: "Design record for @falai/agent 4.0: flows, automations and signals become one Flow with triggers, runs, waits and per-field asks. Not part of the docs sidebar."
 type: concept
 order: 99

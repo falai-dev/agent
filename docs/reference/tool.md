@@ -1,84 +1,44 @@
 ---
 title: "Tool"
-description: "The function-call surface the AI can invoke, with optional metadata for safety, concurrency, validation, and permissions."
+description: "A typed function the model may call while it speaks; it returns a value for the model and data for the session, and never moves the run."
 type: reference
-order: 4
+order: 9
 ---
 
 # Tool
 
-> **Where this is introduced:** [Add tools](../start/04-add-tools.md)
+A tool is a function the model may call in the middle of phrasing a reply: look up a price, check a calendar, book a room. The model picks the tool and its arguments; your handler runs; the result goes back to the model; the model answers. A tool returns `{ value?, data? }` and nothing else. `value` is what the model reads. `data` is written into the session's collected fields. Movement between steps belongs to the flow, never to a tool.
 
-A `Tool` is a function the agent can invoke during a turn. v2 unifies tools into a single interface — every metadata field is optional. The handler receives a `ToolContext` (with `dispatch` for mid-handler redirection) and may return a plain value or a `ToolResult` (with an optional `directive` for declarative redirection on return).
-
-`Tool.id` is the sole identifier.
-
-Since v2.4 the generic defaults are `unknown` (previously `any`) on `Tool`, `ToolContext`, `ToolResult`, and `ToolHandler`. Pass explicit type parameters — or let inference flow from `createAgent`'s `schema` — to get typed `ctx.data` and `ctx.context`; untyped tool code that relied on implicit `any` needs explicit generics or a type guard.
+Source: `src/types/tool.ts`, `src/core/Speak.ts`, `src/core/Runner.ts` (`speakRequest`), `src/types/agent.ts` (`maxToolLoops`).
 
 ## Signature
 
-```typescript
-interface Tool<TContext = unknown, TData = unknown, TResult = unknown> {
-  // Identity
+```ts fragment
+interface Tool<C = unknown, D = unknown> {
   id: string;
   description?: string;
-  parameters?: unknown;
+  parameters?: StructuredSchema;
+  handler(args: Record<string, unknown>, ctx: ToolCtx<C, D>): ToolResult<D> | Promise<ToolResult<D>>;
 
-  // Handler
-  handler: ToolHandler<TContext, TData, TResult>;
-
-  // Optional metadata
-  isReadOnly?(input?: Record<string, unknown>): boolean;
-  isConcurrencySafe?(input?: Record<string, unknown>): boolean;
-  isDestructive?(input?: Record<string, unknown>): boolean;
-  interruptBehavior?(): 'cancel' | 'block';
+  isConcurrencySafe?(input: Record<string, unknown>): boolean;
+  isReadOnly?(input: Record<string, unknown>): boolean;
+  isDestructive?(input: Record<string, unknown>): boolean;
   maxResultSizeChars?: number;
-
-  validateInput?(
-    input: Record<string, unknown>,
-    context: ToolContext<TContext, TData>,
-  ): Promise<ToolValidationResult> | ToolValidationResult;
-
-  checkPermissions?(
-    input: Record<string, unknown>,
-    context: ToolContext<TContext, TData>,
-  ): Promise<ToolPermissionResult> | ToolPermissionResult;
+  validateInput?(input: Record<string, unknown>, ctx: ToolCtx<C, D>): ToolValidationResult | Promise<ToolValidationResult>;
+  checkPermissions?(input: Record<string, unknown>, ctx: ToolCtx<C, D>): ToolPermissionResult | Promise<ToolPermissionResult>;
 }
 
-type ToolHandler<TContext, TData, TResult> = (
-  ctx: ToolContext<TContext, TData>,
-  args?: Record<string, unknown>,
-) =>
-  | Promise<TResult | ToolResult<TResult, TContext, TData>>
-  | TResult
-  | ToolResult<TResult, TContext, TData>;
-
-interface ToolContext<TContext, TData> {
-  context: TContext;
-  data: Partial<TData>;
-  history: Event[];
-  step?: StepRef;
-  metadata?: Record<string, unknown>;
-
-  updateContext(updates: Partial<TContext>): Promise<void>;
-  updateData(updates: Partial<TData>): Promise<void>;
-  getField<K extends keyof TData>(key: K): TData[K] | undefined;
-  setField<K extends keyof TData>(key: K, value: TData[K]): Promise<void>;
-  hasField<K extends keyof TData>(key: K): boolean;
-
-  /** Imperative redirection — emit a directive mid-handler. */
-  dispatch(directive: Directive<TContext, TData>): void;
+interface ToolCtx<C = unknown, D = unknown> {
+  context: C;
+  data: Partial<D>;
+  history: History;
+  run?: Run;
+  now: Date;
 }
 
-interface ToolResult<TResultData, TContext, TData> {
-  data?: TResultData;
-  contextUpdate?: Partial<TContext>;
-  dataUpdate?: Partial<TData>;
-  success?: boolean;
-  error?: string;
-  meta?: Record<string, unknown>;
-  /** Declarative redirection — emit a directive on return. */
-  directive?: Directive<TContext, TData>;
+interface ToolResult<D = unknown> {
+  value?: unknown;
+  data?: Partial<D>;
 }
 
 interface ToolValidationResult {
@@ -90,191 +50,162 @@ interface ToolValidationResult {
 interface ToolPermissionResult {
   allowed: boolean;
   reason?: string;
-  canOverride?: boolean;
 }
 ```
 
-## Fields
+## Tool fields
 
-### `Tool`
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | `string` | required | The name the model calls, and the name a `tools: [...]` list uses to point at this tool. Ids are not checked for uniqueness: two tools with one id are both sent to the provider, and the first one's handler runs for any call under that id. |
+| `description` | `string` | none | What the tool does and when to use it, for the model. |
+| `parameters` | `StructuredSchema` | none | A JSON schema for `args`, passed to the provider as given. |
+| `handler` | `(args, ctx) => ToolResult \| Promise<ToolResult>` | required | Your code. Returning nothing counts as `{}`. |
+| `isReadOnly` | `(input) => boolean` | none | The call only reads. Used as the fallback for `isConcurrencySafe`. |
+| `isConcurrencySafe` | `(input) => boolean` | falls back to `isReadOnly`, then `false` | The call may run in parallel with other safe calls of the same round. |
+| `isDestructive` | `(input) => boolean` | none | The call cannot be undone. A destructive call never runs in parallel. |
+| `maxResultSizeChars` | `number` | none (no cut) | Longest `value` the model gets. Beyond it, the text is cut and ends with `[truncated: N chars total, showing the first M]`. |
+| `validateInput` | `(input, ctx) => ToolValidationResult` | none | Runs first. On `valid: false` the handler is skipped and the model reads `{"error":"Validation failed: <error>","correctedInput":…}`. |
+| `checkPermissions` | `(input, ctx) => ToolPermissionResult` | none | Runs after validation. On `allowed: false` the handler is skipped and the model reads `{"error":"Permission denied: <reason>"}`. |
 
-| Field | Type | Required | Default | Notes |
-|-------|------|----------|---------|-------|
-| `id` | `string` | yes | — | Unique identifier. The AI references this name when calling the tool. There is no separate `name` field. |
-| `handler` | `ToolHandler` | yes | — | The function the AI invokes. Receives `ctx` and optional `args`. |
-| `description` | `string` | no | — | Free-form description for AI tool discovery. |
-| `parameters` | `unknown` | no | — | Argument schema (provider-specific shape; pass through to the LLM). |
-| `isReadOnly` | `(input?) => boolean` | no | — | Returns `true` when the call has no side effects. Enables result caching and concurrency. |
-| `isConcurrencySafe` | `(input?) => boolean` | no | — | Returns `true` when this call may run in parallel with other concurrent-safe calls. |
-| `isDestructive` | `(input?) => boolean` | no | — | Returns `true` for irreversible operations. Surfaces to confirmation UIs. |
-| `interruptBehavior` | `() => 'cancel' \| 'block'` | no | `'cancel'` | How the tool reacts to abort signals. `'block'` waits for natural completion. |
-| `maxResultSizeChars` | `number` | no | — | Truncation cap for the serialized result, before history compaction. |
-| `validateInput` | `(input, ctx) => ToolValidationResult` | no | — | Pre-execution input check. May return `correctedInput` to repair the call. |
-| `checkPermissions` | `(input, ctx) => ToolPermissionResult` | no | — | Pre-execution gate. When `allowed: false`, the handler is **not** invoked. |
+## ToolCtx fields
 
-### `ToolContext`
+| Field | Type | Meaning |
+|---|---|---|
+| `context` | `C` | The host context of this turn. |
+| `data` | `Partial<D>` | The session's fields at the start of the speak call, plus every `data` patch earlier tool rounds of this same call returned. |
+| `history` | `History` | The history the model sees: the host's history for this turn, plus the assistant and tool items of earlier rounds in this call. |
+| `run` | `Run \| undefined` | The run whose talk step is speaking. Absent when the idle speaker is the one calling. |
+| `now` | `Date` | The agent's clock. |
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `context` | `TContext` | Ambient app data (user, env, services). |
-| `data` | `Partial<TData>` | Everything collected so far across the conversation. |
-| `history` | `Event[]` | Native multi-turn history (read-only). |
-| `step` | `StepRef \| undefined` | Identifies the current flow/step when the tool runs inside a flow. |
-| `metadata` | `Record<string, unknown> \| undefined` | Free-form per-call metadata. |
-| `updateContext` | `(updates) => Promise<void>` | Shallow-merge into `context`. Triggers context lifecycle hooks. |
-| `updateData` | `(updates) => Promise<void>` | Shallow-merge into `data`. Triggers data lifecycle hooks. |
-| `getField` / `setField` / `hasField` | `(key) => …` | Typed accessors over `data`. |
-| `dispatch` | `(directive) => void` | Imperative directive emit. May be called multiple times; emissions are merged by Algorithm 4 alongside other tool/hook directives this turn. |
+## ToolResult fields
 
-### `ToolResult`
+| Field | Type | What happens |
+|---|---|---|
+| `value` | `unknown` | Serialized for the model: a string as is, anything else through `JSON.stringify`, `undefined` as `{"ok":true}`. Cut at `maxResultSizeChars` when set. |
+| `data` | `Partial<D>` | Merged into the session's fields when the turn settles, as given: no type coercion, no `enum` check. A field a `collect` step is waiting for counts as known once a tool writes it, so the step can end without the customer saying it. |
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `data` | `TResultData` | The value the AI sees as the tool result. |
-| `contextUpdate` | `Partial<TContext>` | Shallow-merged into `context` after the call. |
-| `dataUpdate` | `Partial<TData>` | Shallow-merged into `data` after the call. |
-| `success` | `boolean` | When `false`, the executor treats this as a failed call and surfaces `error`. |
-| `error` | `string` | Failure message when `success === false`. |
-| `meta` | `Record<string, unknown>` | Free-form metadata (stored on the tool event). |
-| `directive` | `Directive` | Declarative redirection. Equivalent to calling `ctx.dispatch(directive)` once. |
+## Which tools the model sees
 
-### `ToolValidationResult`
+The list is an allow-list of tool ids, resolved once per speak call:
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `valid` | `boolean` | `false` blocks execution and surfaces `error` to the AI. |
-| `error` | `string` | Why validation failed. |
-| `correctedInput` | `Record<string, unknown>` | When present, the executor retries with this input instead of the original. |
+| Speaker | List used |
+|---|---|
+| A talk step | `step.tools`, else `flow.tools`, else every tool on the agent. |
+| The idle speaker | `idle.tools`, else every tool on the agent. |
 
-### `ToolPermissionResult`
+An empty list (`tools: []`) means no tools. Every name in a list must be a registered tool id; `validateFlow` throws `FlowConfigurationError` for a step or flow list, and the agent constructor throws for `idle.tools`.
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `allowed` | `boolean` | `false` blocks execution; the handler is never called. |
-| `reason` | `string` | Why permission was denied. |
-| `canOverride` | `boolean` | Hint to UIs: the user may grant a one-time override. |
+The agent's `maxToolLoops` (default 5, from `src/types/agent.ts`) caps the rounds. `maxToolLoops: 0` sends no tools at all, whatever the lists say.
 
-## Examples
+## Rounds
 
-### 1. Imperative redirection with `ctx.dispatch`
+One speak call is a loop of provider rounds:
 
-A tool that runs mid-flow and decides the rest of the turn is moot — for example, an eligibility check that fails and should jump straight to a denial flow.
+1. Each of the first `maxToolLoops` rounds offers the tools. The model may answer, call tools, or both.
+2. When it calls tools, each call goes through the gates below and its result becomes a `tool` history item. The model is asked again with that history.
+3. When it calls no tools, the loop ends and its message is the reply.
+4. After `maxToolLoops` rounds with calls, one more round runs with no tools and a "wrap up" section, so a message always comes back.
 
-```typescript
-import type { Tool } from "@falai/agent";
+Every round is one model call and counts in `TurnResult.llmCalls`. A text turn therefore costs one understand call plus one call per speak round: up to `maxToolLoops` rounds with tools and one to wrap up, so six speak calls with the default, seven model calls in all. A round that fails at the provider, or a final message that is empty, defers the talk step: see [Outcomes](./outcomes.md), `code: 'provider-unavailable'`.
 
-type Ctx = { userId: string };
-type Data = { country: string };
+Within a round, consecutive calls that are safe (not destructive, and `isConcurrencySafe` true; when `isConcurrencySafe` is not defined, `isReadOnly` true) run together with `Promise.all`; any other call runs alone, in order. `data` patches merge in call order, not in the order the calls finished. Field values the model reports in its structured reply are checked and coerced; tool `data` is not.
 
-export const checkEligibility: Tool<Ctx, Data, { ok: boolean }> = {
-  id: "check_eligibility",
-  description: "Verify the user can proceed with booking.",
-  isReadOnly: () => true,
-  async handler(ctx) {
-    const ok = await isEligible(ctx.context.userId, ctx.data.country);
+## Gates, in order
 
-    if (!ok) {
-      // Imperative: stop reasoning, jump to the denial flow.
-      ctx.dispatch({
-        goTo: "denial",
-        reply: "Sorry — you're not eligible for this service.",
-      });
-      return { ok: false };
-    }
+| Situation | What the model reads | Handler runs |
+|---|---|---|
+| The id is not in this call's list | `{"error":"Tool \"x\" is not available."}` | no |
+| `validateInput` returns `valid: false` | `{"error":"Validation failed: <error or 'invalid input'>","correctedInput":…}` | no |
+| `checkPermissions` returns `allowed: false` | `{"error":"Permission denied: <reason or 'not allowed'>"}` | no |
+| The handler throws | `{"error":"<message>"}` | yes, and failed |
+| The handler returns | `value`, serialized | yes |
 
-    return { ok: true };
-  },
-};
+Nothing a tool does reaches the host as an exception. The speak call never throws for a tool.
+
+## Tool rounds in the history
+
+Inside a call, a round is recorded as one assistant item with `tool_calls` (ids `call-<round>-<index>`, any text the model wrote beside the calls as `content`, else `null`) followed by one `tool` item per call. These items live for the duration of the speak call; the framework returns `messages[]`, not history, so your own history is what you save.
+
+The exported `ToolCall` type belongs to the event-style history the conversion helpers (`eventsToHistory`, `historyToEvents`) read and write:
+
+```ts fragment
+interface ToolCall<TArgs = unknown, TResult = unknown> {
+  tool_id: string;
+  arguments: TArgs;
+  result: { data: TResult; meta?: Record<string, unknown> };
+}
 ```
 
-### 2. Declarative redirection with `ToolResult.directive`
+It is a record of a call that already happened, for hosts that store history as events. The framework does not build it during a turn.
 
-The same tool, written as a value-returning handler. The directive rides back on the result and is merged identically.
+## Streaming
 
-```typescript
-export const checkEligibility: Tool<Ctx, Data, { ok: boolean }> = {
-  id: "check_eligibility",
-  description: "Verify the user can proceed with booking.",
-  isReadOnly: () => true,
-  async handler(ctx) {
-    const ok = await isEligible(ctx.context.userId, ctx.data.country);
+`agent.turnStream()` streams every round's text as it arrives. Tools run between rounds exactly as above; the last chunk carries the same `TurnResult`. Text the model writes beside a tool call reaches the stream but not the final message.
 
-    if (!ok) {
-      return {
-        data: { ok: false },
-        directive: {
-          goTo: "denial",
-          reply: "Sorry — you're not eligible for this service.",
-        },
-      };
-    }
+## Example
 
-    return { data: { ok: true } };
-  },
+```ts
+import { falai, GeminiProvider, type DataOf, type Tool } from "@falai/agent";
+
+const f = falai().fields({
+  cidade: { type: "string", ask: "Pergunte em qual cidade a pessoa quer ficar." },
+  reserva: { type: "string", description: "Código da reserva" },
+});
+
+// The smallest tool that works: one argument in, one value out. `value` is what the model reads back.
+const preco: Tool = {
+  id: "preco",
+  description: "Preço da diária em uma cidade.",
+  parameters: { type: "object", properties: { cidade: { type: "string" } }, required: ["cidade"] },
+  handler: () => ({ value: { precoNoite: 420 } }),
 };
-```
 
-### 3. Validation, permissions, and write semantics
+type Data = DataOf<typeof f>;
 
-A destructive tool that validates its input, checks permissions, and writes back into `data`.
-
-```typescript
-export const bookHotel: Tool<Ctx, Data, { id: string }> = {
-  id: "book_hotel",
-  description: "Reserve a hotel for the collected dates.",
+// A bigger one: it checks its input, never runs in parallel, and writes a field.
+const reservar: Tool<undefined, Data> = {
+  id: "reservar",
+  description: "Confirma a reserva e devolve o código.",
+  parameters: { type: "object", properties: { cidade: { type: "string" } }, required: ["cidade"] },
   isDestructive: () => true,
-  isConcurrencySafe: () => false,
-  maxResultSizeChars: 2_000,
-
-  validateInput(input) {
-    if (typeof input.nights !== "number" || input.nights < 1) {
-      return { valid: false, error: "`nights` must be a positive integer." };
-    }
-    return { valid: true };
-  },
-
-  checkPermissions(_input, ctx) {
-    if (!ctx.context.userId) {
-      return { allowed: false, reason: "Sign in required.", canOverride: false };
-    }
-    return { allowed: true };
-  },
-
-  async handler(ctx, args) {
-    const id = await api.book(ctx.context.userId, args);
-    return {
-      data: { id },
-      dataUpdate: { bookingId: id },
-      success: true,
-    };
+  validateInput: (args) =>
+    typeof args.cidade === "string" && args.cidade.length > 0
+      ? { valid: true }
+      : { valid: false, error: "Informe a cidade." },
+  handler: (_args, ctx) => {
+    const codigo = `RES-${ctx.now.getTime().toString(36).toUpperCase()}`;
+    // `data` lands in the session: the `confirma` step ends once `reserva` is known.
+    return { value: { codigo }, data: { reserva: codigo } };
   },
 };
+
+const agent = f.agent({
+  name: "Concierge",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  tools: [preco, reservar],
+  flows: [
+    f.flow({
+      id: "hospedagem",
+      name: "Hospedagem",
+      on: [{ message: ["quer reservar um quarto"] }],
+      steps: [
+        { id: "onde", collect: ["cidade"] },
+        // Only this step may call `preco`.
+        { id: "oferta", prompt: "Apresente o preço da diária. Pergunte se pode reservar.", tools: ["preco"] },
+        { id: "confirma", prompt: "Se a pessoa confirmou, reserve e informe o código.", collect: ["reserva"], tools: ["reservar"] },
+      ],
+    }),
+  ],
+});
+
+const r = await agent.turn({ sessionId: "demo", message: "Quero um quarto em Curitiba" });
+console.log(r.messages[0]?.text, r.llmCalls);
 ```
 
-## Directive wiring and turn semantics
+## See also
 
-Tool-emitted directives work end-to-end: both `ctx.dispatch(directive)` calls and `{ directive }` returns are collected during execution, merged via Algorithm 4, and delivered to the engine in the same turn.
-
-- **State fields** (`dataUpdate`, `contextUpdate`) apply immediately.
-- **A `reply` directive short-circuits the tool loop** — its verbatim text becomes the final assistant message with no follow-up LLM call.
-- **Control-flow fields** (`goTo`, `goToStep`, `reset`, …) queue on `session.pendingDirective` and steer the *next* turn (same deferred semantics as `agent.dispatch()`).
-
-A handler that **throws** (or a call to an unregistered tool) never crashes the turn: the executor reports a failure result *to the model* — a `role: "tool"` message shaped `{"success":false,"error":"…"}` — so it can react to the failed call instead of the framework fabricating a success.
-
-## Errors
-
-Misuse surfaces as typed errors from registration-time validation; execution-time problems degrade to failed tool results rather than thrown errors:
-
-- `ToolCreationError` — invalid tool definition at registration (missing id/handler, duplicate id, bad schema).
-- `FlowConfigurationError` — a returned `directive` is malformed (e.g., two position fields set, or `goTo` references an unknown flow/step).
-- Execution failures — a thrown handler, `success: false` return, permission denial, failed `validateInput`, timeout, or unknown tool name all become structured `success: false` tool results surfaced to the model, keeping the AI's reasoning loop intact.
-- `DataValidationError` — `dataUpdate` violates the agent schema (logged; the call reports failure instead of applying the write).
-
-## Related
-
-- [Add tools](../start/04-add-tools.md) — tutorial that introduces this type.
-- [Architecture](../concepts/architecture.md) — where Tool fits among the six primitives.
-- [Directives](../concepts/directives.md) — what `dispatch` and `directive` emit.
-- [Directive](./directive.md) — the flat shape used by both forms above.
-- [Flow control](../guides/flow-control.md) — recipes for redirecting from tools and hooks.
-- [Errors](./errors.md) — `ToolExecutionError` format contract.
+- [Add tools](../start/04-add-tools.md): tools the model calls versus actions the flow runs.
+- [Actions, events, conditions](./actions-events-conditions.md): the `do` step's side of the same line.
+- [Streaming](../guides/streaming.md): tool rounds inside `turnStream`.
+- [Agent](./agent.md): `tools`, `maxToolLoops` and `idle`.

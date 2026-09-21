@@ -1,243 +1,115 @@
 ---
 title: "Branches"
-description: "Explicit source-local forks declared on a step, evaluated in order with code-first short-circuit."
+description: "The Branch type, when versus if, the order branches are judged in, where they are legal, and how the understand call names them."
 type: reference
-order: 8
+order: 6
 ---
 
 # Branches
 
-> **Where this is introduced:** [Branching](../guides/branching.md)
-
-A **branch** is an explicit, source-local fork: from this step, here are the possible next steps and how each one is chosen. `step.branches` is an array of `BranchEntry` evaluated in declaration order — the first entry whose conditions pass wins, and its `then` resolves to a step id, a flow id, or a full `Directive`.
-
-Branches sit between code and AI. Use `if` (a function predicate) to skip LLM evaluation when the choice is purely a function of `data` and `context`. Use `when` (an AI-evaluated string) for choices that need intent classification. Combine both when both must agree — `if` runs first, free; `when` is only evaluated if `if` passes, saving tokens.
-
-Branches resolve **after** the step's post-LLM phase (tool execution, `finalize`) and **before** linear successor selection. They coexist with the implicit-fork pattern (multiple successor steps each carrying their own `step.when`); when `branches` is absent or no entry matches, resolution falls through to that path unchanged.
+A branch is an early exit from a step that is waiting on the customer. A talk step asks; a wait step waits for a reply. While either one is parked, the customer's next message is judged against the step's `branches`, in order, and the first branch that holds sends the run to its `then`. `when` is a question the model answers; `if` is code and costs nothing.
 
 ## Signature
 
-```typescript
-interface BranchEntry<TContext = unknown, TData = unknown> {
-  /** AI condition: positives OR, ! exclusions inhibit. */
-  when?: string | string[];
-
-  /** Code predicate. Function or array of functions (AND semantics). */
-  if?:
-    | BranchPredicate<TContext, TData>
-    | BranchPredicate<TContext, TData>[];
-
-  /**
-   * Where to go when this entry matches.
-   * - String matching a step id in the current flow → enter that step.
-   * - String matching a flow id/title → treated as { goTo: <string> }.
-   * - Directive object → applied directly.
-   */
-  then: string | Directive<TContext, TData>;
-
-  /** Optional label for event traces and flow visualization. */
-  label?: string;
-}
-
-type BranchMap<TContext = unknown, TData = unknown> =
-  Array<BranchEntry<TContext, TData>>;
-
-type BranchPredicate<TContext = unknown, TData = unknown> = (
-  ctx: BranchPredicateContext<TContext, TData>,
-) => boolean | Promise<boolean>;
-
-interface BranchPredicateContext<TContext = unknown, TData = unknown> {
-  /** Collected data (partial — null-check fields not in `requires`). */
-  data: Partial<TData>;
-  /** Agent-level context. */
-  context: TContext;
-  /** Full session state. */
-  session: SessionState<TData>;
-  /** Conversation history as events. */
-  history: Event[];
-}
+```ts fragment
+type Branch<C = unknown, D = unknown> = { then: Next<D> } & (
+  | { when: string }
+  | { if: Pred<C, D> }
+);
 ```
 
 ## Fields
 
-### `BranchEntry`
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `when` | `string` | one of `when` or `if` is required | A yes-or-no question about the customer's message, in plain words: `'a pessoa pede para falar com um humano'`. The understand call answers it. A template: `{{data.x}}` and `{{context.x}}` are filled in. |
+| `if` | `Pred<C, D>` | one of `when` or `if` is required | A function `(ctx) => boolean` or a `ConditionSpec` (`{ equals }`, `{ known }`, `{ silenced }`, or a registered condition by name). Judged by code. |
+| `then` | `Next<D>` | required | Where the run goes when the branch holds: a step id, `'end'`, `{ step, clear }` or `{ flow, input }`. See [Step](step.md#next). |
 
-| Field | Type | Required | Default | Notes |
-|-------|------|----------|---------|-------|
-| `when` | `string \| string[]` | no | — | AI-evaluated condition. Non-`!` strings are OR alternatives; `!` strings are OR exclusions where any match inhibits the branch. Reuses the same machinery as `step.when`. Only evaluated if `if` passes (or is absent). Costs LLM tokens. |
-| `if` | `BranchPredicate \| BranchPredicate[]` | no | — | Code predicate. Free to evaluate. When both `when` and `if` are set, `if` runs first; `when` is only evaluated if all `if` predicates pass. |
-| `then` | `string \| Directive` | yes | — | Target. See [Resolution of `then`](#resolution-of-then) below. |
-| `label` | `string` | no | — | Optional label surfaced in event traces and flow visualization. |
+## Behaviour
 
-An entry with neither `when` nor `if` is an unconditional fallback and is only legal as the **last** entry in the array.
+**On a talk step.** Branches are judged on a message turn, for the run that is asking, before the step speaks again:
+1. The understand call receives every `when` branch of the asking step as a question and answers true or false. `if` branches never reach the model.
+2. The framework walks `branches` in array order. An `if` branch holds when its predicate returns true; a `when` branch holds when the model answered true. The first one that holds wins.
+3. The run leaves the step with the outcome `code: 'branch'` (kind `prompt` or `collect`, status `ok`, `next` naming the target) and follows `then` in the same turn. Fields the understand call extracted from the same message are written first, so `then` may land on a step that is already satisfied.
+4. When no branch holds, the step continues as usual: pending fields are harvested and the step speaks again.
 
-### `BranchMap`
+A `when` branch costs the understand call; when it is the only thing to judge, that is one model call the turn would not otherwise spend. An `if` branch is judged on every message turn even when no understand call happens.
 
-A `BranchMap` is just `Array<BranchEntry>`. Entries are evaluated top-to-bottom; the first match wins. There is no separate object-syntax form — keeping the shape an array means declaration order and source position are the same thing.
+**On a wait step.** Only `if` branches are judged, and only when the customer writes before the time passes and the step has `else`. The first `if` branch that holds replaces `else` as the target (outcome `code: 'replied'`). A `when` branch on a wait step is never asked, because a reply to a wait step does not reach the understand call. When the wake fires, branches are not consulted: the run follows `then`, or `else` when the customer wrote after the wait was set.
 
-### `BranchPredicateContext`
+**Where branches are legal.** The types allow `branches` on a talk step and on a duration wait step. `say`, `do`, `if` and event wait steps have none; a fork after those is an `if` step.
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `data` | `Partial<TData>` | Collected data so far. Predicates must null-check any field not declared in the source step's `requires`. Fields covered by `requires` are guaranteed present when the predicate runs. |
-| `context` | `TContext` | Agent-level context (user, env, services). |
-| `session` | `SessionState<TData>` | Full session state — current flow, current step, history. |
-| `history` | `Event[]` | Conversation history as events (read-only). |
+**Construction checks.** Every branch must have `when` or `if`, its `then` must point at an existing step, `'end'` or a flow, and an `if` predicate in JSON form must name known fields and registered conditions. A `then` that jumps backward without `clear` logs a warning: the fields collected since stay known, so those steps skip.
 
-## Resolution
+**How the understand call names them.** Each `when` branch is keyed `${runId}/${stepId}/${index}` inside the framework. Run ids carry `#` and `:`, which the providers' schemas reject in property names, so every branch reaches the envelope's `branches` section under a short alias such as `q1`, `q2`, and the prompt lists the question next to that alias. Flow ids and field slugs keep their own names when they are made of letters, digits, `_` and `-`, and get an `f` or `d` alias otherwise. The reply is mapped back before anything is judged; a key the framework did not send is dropped.
 
-### Order
+## Example
 
-For each entry in declaration order:
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-1. If the entry has neither `when` nor `if`, it matches unconditionally (only legal as the last entry).
-2. If `if` is set, evaluate every predicate. If any returns falsy, skip the entry — `when` is **not** evaluated.
-3. If `when` is set, evaluate the AI condition. If it returns falsy, skip the entry.
-4. Otherwise the entry matches; return its `then`.
+interface Ctx {
+  atendentesOnline: number;
+}
 
-If no entry matches, branches return `undefined` and resolution falls through to linear `nextStep` / AI step selection. This is the same fall-through used when `branches` is omitted entirely.
+const f = falai<Ctx>().fields({
+  pedido: { type: "string", ask: "Pergunte o número do pedido." },
+});
 
-A matched entry outranks implicit flow completion. Branches are evaluated before the terminus check, so a step with no linear successor — normally the end of the flow — stays alive as long as one of its entries resolves a position. `then: '<own step id>'` is therefore how a flow parks: the step re-renders each turn until a condition sends the conversation elsewhere. Only a fall-through (no entry matched) or an explicit `then: { complete: true }` ends the flow there.
-
-The code-first ordering is deliberate: `if` is free, `when` costs tokens. Running `if` first short-circuits the AI call when the predicate already disqualifies the entry.
-
-### Resolution of `then`
-
-`then` accepts three forms, resolved in this order:
-
-1. **String matching a step id in the current flow** → enter that step directly.
-2. **String matching a flow id or title** → treated as `applyDirective({ goTo: then })`.
-3. **`Directive` object** → applied via `applyDirective(then)`.
-
-When a string matches both a local step id and a flow id (rare), the local step wins — step ids are scoped to the current flow.
-
-A bare string **never** resolves to a step in another flow, even if that step id is globally unique. To target a step in a different flow, use the `Directive` form: `then: { goToStep: { step: 'foo', flow: 'OtherFlow' } }`. This keeps the string lookup unambiguous and makes cross-flow intent explicit at the call site.
-
-## Examples
-
-### 1. Code-only fork (zero LLM cost)
-
-A routing step that picks a path based purely on collected data. Combined with `auto: true`, the entire decision happens without an LLM call.
-
-```typescript
-flow({
-  id: "plan_routing",
-  steps: [
-    {
-      id: "route_by_plan",
-      auto: true,
-      branches: [
-        { if: ({ data }) => data.plan === "enterprise", then: "enterprise_path", label: "enterprise" },
-        { if: ({ data }) => data.plan === "pro",        then: "pro_path",        label: "pro" },
-        { then: "free_path" }, // unconditional fallback (last entry)
+const agent = f.agent({
+  name: "Léo",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "suporte",
+      name: "Suporte a pedidos",
+      on: [{ message: ["problema com um pedido", "pedido atrasado ou errado"] }],
+      steps: [
+        {
+          id: "dados",
+          collect: ["pedido"],
+          branches: [
+            // judged first, by code, on every message while this step asks
+            { if: ({ context }) => context.atendentesOnline === 0, then: "sem-humanos" },
+            // judged by the understand call
+            { when: "a pessoa pede para falar com um humano", then: { flow: "humano" } },
+          ],
+        },
+        { id: "resolve", prompt: "Explique o próximo passo para o pedido {{data.pedido}}." },
+        {
+          id: "espera",
+          wait: "2d",
+          // the lead replied: hand over when someone is online, otherwise let the conversation run
+          else: "end",
+          branches: [{ if: ({ context }) => context.atendentesOnline > 0, then: { flow: "humano" } }],
+        },
+        { id: "lembra", prompt: "Pergunte se o problema foi resolvido.", then: "end" },
+        { id: "sem-humanos", say: "Nossa equipe atende das 9h às 18h. Deixe o número do pedido aqui e alguém te responde assim que abrir.", then: "end" },
       ],
-    },
-    { id: "enterprise_path", prompt: "A specialist will reach out." },
-    { id: "pro_path",        prompt: "Set up your pro account." },
-    { id: "free_path",       prompt: "Welcome to the free tier." },
+    }),
+    f.flow({
+      id: "humano",
+      name: "Passar para um humano",
+      steps: [{ id: "aviso", say: "Claro, vou chamar alguém da equipe. Um minuto." }],
+    }),
   ],
 });
+
+const context: Ctx = { atendentesOnline: 2 };
+
+// Turn 1 starts `suporte`; `dados` asks for the order id. Branches are not judged yet: no run was asking.
+const first = await agent.turn({ sessionId: "s1", context, message: "meu pedido veio errado", id: "m1" });
+
+// Turn 2: `dados` is asking, so its branches are judged against this message.
+const second = await agent.turn({ sessionId: "s1", session: first.session, context, message: "quero falar com uma pessoa", id: "m2" });
+console.log(second.ended.map((run) => `${run.flowId} → ${run.reason}`)); // [ 'suporte → flow', 'humano → end' ] when the model answers the `when` with true
+console.log(second.outcomes[0]?.code, second.messages[0]?.key); // 'branch', 'humano#suporte#m1:dados:1:aviso:1'
 ```
 
-### 2. Mixed targets (step id, flow id, full Directive)
+## See also
 
-One branch step covering local navigation, cross-flow handoff, cross-flow step targeting, and completion in a single source-local list.
-
-```typescript
-flow({
-  id: "router",
-  steps: [
-    {
-      id: "classify",
-      prompt: "How can I help?",
-      branches: [
-        // Step id in the current flow.
-        { if: ({ data }) => data.tier === "enterprise", then: "enterprise_path" },
-
-        // Flow id — sugar for { goTo: "CancellationFlow" }.
-        { when: "user wants to cancel", then: "CancellationFlow" },
-
-        // Full Directive — cross-flow with data carry.
-        {
-          when: "user is asking about a refund",
-          then: { goTo: { flow: "Refund", data: { source: "classify" } } },
-        },
-
-        // Cross-flow step reference (Directive required for cross-flow steps).
-        {
-          if: ({ data }) => data.escalate === true,
-          then: { goToStep: { step: "priority_intake", flow: "Escalation" } },
-        },
-
-        // Directive with a non-position field (state write + completion).
-        { if: ({ data }) => data.shouldComplete === true, then: { complete: true } },
-
-        // Unconditional fallback.
-        { then: "default_path" },
-      ],
-    },
-    { id: "enterprise_path", prompt: "..." },
-    { id: "default_path",    prompt: "..." },
-  ],
-});
-```
-
-### 3. Combined `if` + `when` (token-saving short-circuit)
-
-When both fields are set on the same entry, `if` runs first. `when` is only evaluated if `if` passes — so the LLM call only happens when the predicate hasn't already disqualified the branch.
-
-```typescript
-flow({
-  id: "pricing",
-  steps: [
-    {
-      id: "pricing_routing",
-      branches: [
-        {
-          // Free predicate runs first; AI condition only fires when it passes.
-          if: ({ data, context }) =>
-            data.country === "US" && context.featureFlags.enableUsPricing,
-          when: "user is asking about pricing",
-          then: "us_pricing",
-        },
-        {
-          when: "user is asking about pricing",
-          then: "global_pricing",
-        },
-        { then: "general_help" }, // fallback
-      ],
-    },
-    { id: "us_pricing",     prompt: "Here is US pricing." },
-    { id: "global_pricing", prompt: "Here is global pricing." },
-    { id: "general_help",   prompt: "I can help with that." },
-  ],
-});
-```
-
-## Errors
-
-Misuse of `branches` surfaces as `FlowConfigurationError` at flow construction or at first evaluation:
-
-- **Empty array.** `branches: []` is rejected — it signals a missing target.
-- **Unreachable fallback.** A non-last entry with neither `when` nor `if` is rejected (later entries would never run).
-- **Unknown step id.** A `then` string that matches neither a step in the current flow nor any flow id throws when first evaluated.
-- **Malformed Directive.** A `then` Directive with multiple position fields set, or an empty `goTo: {}`, fails the same `flow.validate(directive)` rules that apply to all directives.
-
-A `BranchPredicate` that throws or rejects is caught by the resolver, logged at `ERROR`, and treated as a falsy result for that entry — resolution proceeds to the next entry. Branch predicate errors never corrupt the session; the worst case degrades to fall-through (linear / AI step selection).
-
-## Coexistence with implicit forks
-
-The implicit-fork pattern (multiple successor steps each carrying their own `step.when`) is unchanged in v2. Both forms are first-class:
-
-- **Implicit** — fork by listing multiple steps with their own `when`. Reads as a linear flow that occasionally skips. Use when the fork is incidental.
-- **Explicit (`branches`)** — fork declared at the source step, all paths visible in one list. Reads as "this step is a routing point with N options." Use when the fork is the point.
-
-When both are present on the same step, branches take precedence: if a branch entry matches, the linear chain is bypassed. If branches return `undefined`, the linear chain runs.
-
-## Related
-
-- [Branching](../guides/branching.md) — the guide that introduces this primitive end-to-end.
-- [Step](./step.md) — where the `branches` field lives.
-- [Directive](./directive.md) — the flat shape `then` accepts as its third form.
-- [Conditions](../guides/conditions.md) — the `when` (AI) vs `if` (code) split shared with `Step` and `Flow`.
-- [Turn pipeline](../concepts/pipeline.md) — where branch resolution sits in the per-turn sequence.
+- [Branching](../guides/branching.md) for when to fork with a branch and when with an `if` step
+- [Conditions](../guides/conditions.md) for `when` versus `if`
+- [Step](step.md) for the talk and wait steps that carry branches
+- [Pipeline](../concepts/pipeline.md) for what the understand call judges

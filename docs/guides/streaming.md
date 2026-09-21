@@ -1,149 +1,85 @@
 ---
 title: "Streaming"
-description: "Stream the assistant's reply token by token, surface tool calls in flight, and cancel mid-turn with an `AbortSignal`."
+description: "turnStream: the reply arrives as text deltas, the full turn result arrives last, and everything else works exactly as in turn()."
 type: guide
-order: 6
+order: 9
 ---
 
 # Streaming
 
-`agent.respond` returns a single `AgentResponse` after the LLM and any tool calls have finished. That works for batch work, but a chat UI feels dead until the first character lands. `agent.respondStream` returns an `AsyncGenerator<AgentResponseStreamChunk>`, yielding the assistant's reply incrementally and finishing with one terminal chunk that carries all the metadata.
+`agent.turnStream()` is `agent.turn()` that yields the reply while the model writes it.
 
-This guide is a recipe: take a non-streaming call site, swap to `respondStream`, render tokens as they arrive, expose a "thinking" indicator while tools run, read instruction and signal telemetry off the final chunk, and wire an `AbortSignal` so the user can stop mid-turn.
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-## The shape
-
-`respondStream` takes the same `RespondParams` as `respond` — `history`, optional `session`, optional `contextOverride`, optional `signal` — and returns an async iterable of chunks.
-
-```typescript
-const stream = agent.respondStream({
-  history: [{ role: "user", content: "Book me a hotel in Lisbon." }],
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome." },
 });
 
-for await (const chunk of stream) {
-  process.stdout.write(chunk.delta);
-}
-```
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "boas-vindas",
+      name: "Boas-vindas",
+      on: [{ message: [] }],
+      steps: [{ id: "nome", collect: ["nome"] }],
+    }),
+  ],
+});
 
-Every chunk has the same shape:
-
-```typescript
-interface AgentResponseStreamChunk<TData> {
-  delta: string;        // Text added since the previous chunk
-  accumulated: string;  // Full text so far
-  done: boolean;        // True only on the terminal chunk
-  // ...metadata fields, populated on the final chunk
-}
-```
-
-`delta` is the new token(s); concatenating every `delta` reproduces the final reply unless a post-phase signal replaces the message on the terminal chunk. `accumulated` is the authoritative running total — useful when your renderer needs the full string each tick (e.g., a Markdown view that re-parses on every update). `done` flips to `true` exactly once, on the terminal chunk.
-
-## Render incrementally
-
-The simplest renderer prints every `delta` as it arrives and clears the line on `done`:
-
-```typescript
-for await (const chunk of agent.respondStream({ history })) {
-  if (chunk.delta) {
+for await (const chunk of agent.turnStream({ sessionId: "demo", message: "oi, sou o Rui" })) {
+  if ("delta" in chunk) {
     process.stdout.write(chunk.delta);
+    continue;
   }
-  if (chunk.done) {
-    process.stdout.write("\n");
-  }
+  process.stdout.write("\n");
+  console.log(chunk.result.llmCalls, chunk.result.session.data); // 1 { nome: 'Rui' }
 }
 ```
 
-For a UI, push the latest `accumulated` into your component state. React, Solid, Svelte — they all re-render off whichever value you give them, and `accumulated` is the cheapest to consume because it never requires the renderer to track partial state.
+The stream prints the reply one piece at a time, then the last chunk hands you the same `TurnResult` that `turn()` would have returned.
 
-A common rendering rule of thumb:
+## The chunks
 
-- Plain text view → append `delta`.
-- Markdown view that re-parses each frame → bind to `accumulated`.
-- Server-Sent Events transport → forward `{ delta, done }` per chunk; let the client reassemble.
-
-## Surface tool calls in flight
-
-Streaming works through tool calls transparently. When the LLM emits a tool call mid-reply, `respondStream` runs the tool, then resumes streaming the post-tool tokens — the consumer never sees the call boundary in the text. What you do get is a quiet gap while the tool executes, which is the right moment to show a "thinking" indicator.
-
-Detect the gap by watching for empty `delta` chunks after some text has already arrived, or — more robustly — toggle the indicator off as soon as the first non-empty `delta` lands:
-
-```typescript
-let thinking = true;
-let firstToken = true;
-
-for await (const chunk of agent.respondStream({ history })) {
-  if (chunk.delta) {
-    if (firstToken) {
-      thinking = false;
-      firstToken = false;
-      ui.hideSpinner();
-    }
-    ui.appendText(chunk.delta);
-  }
-}
+```ts fragment
+type TurnStreamChunk<D> =
+  | { delta: string }                      // a piece of the reply, in order
+  | { done: true; result: TurnResult<D> }; // always last, exactly once
 ```
 
-If you need finer-grained tool telemetry — which tool fired, with what arguments — read `chunk.toolCalls` on the terminal chunk. It mirrors the same field on the non-streaming `AgentResponse`. For per-tool progress UI, attach observability to the [tool's `handler`](../reference/tool.md) directly; the streaming chunk shape stays clean.
+Every `delta` is plain message text. Joined together they add up to the reply. The `done` chunk carries the whole result: `session`, `changed`, `messages[]`, `schedule[]`, `outcomes[]`, `started`, `ended`, `skipped`, `llmCalls`. Read [the agent reference](../reference/agent.md) for the fields.
 
-When a step uses [verbatim `reply`](../reference/step.md) or a `halt` directive, the engine skips the LLM entirely and yields a single chunk with `done: true` and the full text in `accumulated`. The renderer above handles that case without a special branch — there is just no spinner gap.
+## What streams and what does not
 
-## The terminal chunk
+Only the speak call streams: the one call that phrases the reply. Everything else in the turn is code or a call that never streams.
 
-The chunk where `done: true` carries every observability field that lives on `AgentResponse`. Three matter for most call sites:
+| Source | Arrives as |
+|---|---|
+| the talk step's reply, or the idle speaker's | `delta` chunks, then in `result.messages[]` as one `kind: "ai"` message |
+| a `say` step's text | `result.messages[]` only, `kind: "verbatim"` |
+| the understand call (routing, mentions, extraction) | nothing visible; it finishes before the first delta |
+| actions, waits, `if` steps | `result.outcomes[]`, `result.schedule[]` |
 
-```typescript
-for await (const chunk of agent.respondStream({ history })) {
-  // ...render delta...
-  if (chunk.done) {
-    console.log("flow complete:", chunk.isFlowComplete);
-    console.log("instructions rendered:", chunk.appliedInstructions);
-    console.log("signals fired:", chunk.triggeredSignals);
-  }
-}
-```
+The provider streams a JSON envelope, not bare text: `{"message":"Oi, Rui! Em que posso"…` followed by the collected fields. The framework unwraps it as it arrives (`src/utils/streamingMessage.ts`), so a `delta` never contains a brace, a quote or a field name, and a field the model writes before the message is skipped rather than leaked. A provider that streams plain text passes through as it is.
 
-- **`appliedInstructions`** — the [instructions](../reference/instruction.md) whose conditions passed and were rendered into this turn's prompt. Deterministic; derived from rendering, not from LLM self-report. Empty on intermediate chunks; populated only when `done: true`.
-- **`triggeredSignals`** — the [signals](../reference/signals.md) that fired during this turn (pre- and post-phase), in fire order. Same population rule.
-- **`isFlowComplete`** — `true` when this turn finished the flow. Use it to decide whether to clear the conversation, show a summary card, or transition the UI.
+## Tool calls during a stream
 
-The terminal chunk also carries `executedSteps`, `stoppedReason`, `metadata` (model, token usage), and the updated `session`. These are the same fields you would read off `AgentResponse` — swapping between APIs does not change observability.
+A speak call may run in rounds: the model calls tools, the results go back as history, and the model is asked again. This happens inside the stream, before the `done` chunk. Each round streams. If the model writes something beside a tool call ("deixa eu ver"), that preamble reaches the stream, while `result.messages[0].text` holds only the final round's message. A UI that shows deltas as they come should replace what it showed with `result.messages[0].text` when `done` arrives, so both paths end on the same text.
 
-## Cancel mid-stream
+Rounds are capped by `maxToolLoops` on the agent, default 5; after the cap the model is asked once more with no tools so a message always comes back. Each round is one model call and counts in `result.llmCalls`.
 
-Pass an `AbortSignal` through `respondStream` and abort the controller to cancel. The generator stops yielding, the in-flight LLM call is cancelled at the provider boundary, and any tool execution unwinds cleanly.
+## A provider failure mid-stream
 
-```typescript
-const controller = new AbortController();
+The stream never throws for a speak failure. You get zero or more deltas and then the `done` chunk, whose result carries a `deferred` outcome and a retry wake, exactly as `turn()` would report it.
 
-// User clicks Stop, or a 5s ceiling fires.
-const timer = setTimeout(() => controller.abort(), 5000);
+A failure mid-stream leaves the person looking at half a reply. Nothing of that half reaches `result.messages[]`, so the deltas you showed are its only trace: clear them when `done` carries a `deferred` outcome, and leave a short line saying the reply is coming. The retry wake fires a minute later, speaks that step again from the start, and its reply arrives as an ordinary message carrying the key the first attempt would have used.
 
-try {
-  for await (const chunk of agent.respondStream({
-    history,
-    signal: controller.signal,
-  })) {
-    process.stdout.write(chunk.delta);
-  }
-} finally {
-  clearTimeout(timer);
-}
-```
+A failure in the understand call, before any delta, throws from the `for await` like `turn()` does. See [error handling](./error-handling.md).
 
-When the signal aborts, the loop exits cleanly — no exception is thrown by the generator itself. If the LLM provider surfaces the cancellation as an error, it lands as a [`ResponseGenerationError`](../reference/errors.md) and you handle it the way you would any other turn-level error.
+## The same settle, the same result
 
-For a Stop button, store the `controller` reference for the active stream on the UI side and call `controller.abort()` from the click handler. For server-side hard ceilings, wrap `respondStream` with an `AbortController` whose `setTimeout` fires at your SLO budget.
+`turnStream` runs the same eight phases as `turn()` and applies the reply the same way. With the same provider output, the two return identical results: the same message keys, the same data written, the same schedule. Stream when you show text to a person as it is written. When the messages leave through a channel you send to yourself, `turn()` is simpler, because it gives you the messages after the save and nothing before it.
 
-If the turn fails — the generator surfaces an error chunk — it has no lasting effect: the in-memory session rolls back to its pre-turn snapshot (the user message added by `stream()` before the turn is retained), and persisted state is whatever the previous turn saved. Retrying is always safe.
-
-## Reliability: retries, backups, and the first-chunk deadline
-
-Streaming inherits the same resilience machinery as non-streaming calls — provider `retryConfig` and `backupModels` — with stream-specific rules:
-
-- **Retry only before the first chunk.** A stream that fails before yielding anything (a connection error, an empty completion, a stalled open) is retried on the same model up to `retryConfig.retries` times. Once a delta has reached your renderer, the stream is committed: any later failure propagates instead of retrying, so a retry can never emit a token your consumer has already seen.
-- **First-chunk deadline.** `retryConfig.timeout` doubles as the time-to-first-token budget. If the provider opens a stream but produces no first chunk within it, the attempt counts as failed and the retry and backup machinery takes over. Only the first chunk is bounded — later chunks are unbounded, so a long-but-healthy stream is never cut off.
-- **Transparent backup-model switch.** With `backupModels` configured, a model that fails mid-stream — even after deltas were delivered — falls through to the next model, whose chunks flow through unchanged. The switchover happens between chunks; no error reaches the consumer unless every model fails.
-
-These knobs live on the provider constructor, not on `respondStream` — see [Providers](../reference/providers.md) for `retryConfig` and `backupModels`.
-
-**Next:** [Errors](./error-handling.md)
+Save and send are still yours, and still in that order: the `done` chunk's `result.session` is what you save with the version you loaded, and a `SessionConflictError` means you replay the same input; see [persistence](./persistence.md). With a stream the person has already seen the text by then, which is fine in a chat window and is the reason to prefer `turn()` on a channel.

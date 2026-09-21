@@ -1,170 +1,75 @@
 ---
 title: "Compaction"
-description: "Keep prompts within token limits across long sessions by layering tool-result budgeting, micro-compaction, and LLM summarization in cost order."
+description: "Keep a long history inside the model's window: three layers in cost order, applied once per turn to what both calls see."
 type: guide
-order: 8
+order: 10
 ---
 
 # Compaction
 
-> **Where this is introduced:** [Errors](./error-handling.md)
+A long conversation grows a long history. `compaction` trims the copy the model reads once the history passes a token budget you set.
 
-Long-running sessions accumulate history. Tool calls return verbose
-JSON, turns pile up, and at some point the next provider call runs
-out of token budget. Compaction is the framework's answer: a layered
-strategy that trims and summarizes `session.history` before each turn
-so the prompt fits without dropping anything load-bearing. Layers run
-in cost order — character-level truncation first, an LLM summarization
-call only when nothing cheaper closes the gap.
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-This guide is task-shaped: enable compaction, choose a budget, and
-understand which layer fires when.
+const f = falai().fields({});
 
-## Enable compaction
-
-Compaction is opt-in. Set `AgentOptions.compaction` and the agent
-validates the config at construction time, then runs the engine
-deterministically at end-of-turn finalize on every `respond()` /
-`chat()` / `stream()` call — and additionally whenever a message is
-appended via `session.addMessage()`. Since v2.4 the finalize run is
-guaranteed, so respond-only integrations that never call
-`addMessage()` get bounded history too (previously compaction only
-ran inside `addMessage()`).
-
-```typescript
-import { createAgent, GeminiProvider } from "@falai/agent";
-
-const agent = createAgent({
-  name: "Concierge",
-  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
-  schema: { /* ... */ },
-  flows: [/* ... */],
-
-  compaction: {
-    maxTokens: 32_000,           // total token budget for the prompt
-    compactionThreshold: 0.8,    // fire when history hits 80% of maxTokens (default)
-    preserveRecentCount: 4,      // never touch the last 4 history items (default)
-    maxToolResultChars: 5_000,   // global cap per tool message (default)
-    // enabled: true,            // default true when `compaction` is provided
-  },
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  idle: { prompt: "Responda pela empresa." },
+  compaction: { maxTokens: 2000 },
 });
+
+const history = Array.from({ length: 400 }, (_, i) => ({ role: "user" as const, content: `mensagem antiga número ${i}` }));
+const r = await agent.turn({ sessionId: "demo", history, message: "oi" });
+console.log(r.llmCalls); // 2: one call to summarize the old messages, one to reply
 ```
 
-The four knobs map onto the
-[`AgentCompactionConfig`](../reference/create-agent.md) interface.
-`maxTokens` is the only required field; the rest fall back to the
-defaults shown above. The agent calls `validateOptions` synchronously
-at construction, so misvalued thresholds (`compactionThreshold` outside
-`[0.5, 0.95]`, `preserveRecentCount < 2`, `maxToolResultChars <= 0`)
-throw immediately rather than silently no-oping at runtime.
+With `maxTokens: 2000` the turn compacts when the history is estimated at 1600 tokens or more (80% of 2000). These 400 short messages estimate at close to 3000, so the oldest ones are summarized before the reply is phrased, and that summary is one model call. Below the threshold nothing happens and nothing is spent.
 
-A second knob lives on every `Tool`: `maxResultSizeChars`. That value
-is enforced by the tool executor the moment a tool returns, before the
-result enters history at all. It and the agent-level `maxToolResultChars`
-work together — per-tool first, global later.
+## The option
 
-## How a turn checks the budget
+`AgentCompactionConfig`, from `src/types/agent.ts`; the defaults are applied in `src/core/Agent.ts`:
 
-At the end of every turn (and on each `session.addMessage()`), the
-engine runs
-`CompactionEngine.checkAndCompact(session.history, options)`. The
-compacted history is what gets persisted and carried into the next
-turn's prompt. The engine estimates the current token count using a
-character-based heuristic (~4 characters per token), compares against
-`maxTokens * compactionThreshold`, and applies the cheapest layer that
-brings history below the threshold. If even the most expensive layer
-cannot, an aggressive truncation fallback removes the oldest items
-until the budget fits.
+| Field | Meaning | Default |
+|---|---|---|
+| `maxTokens` | the token budget for the history | required |
+| `compactionThreshold` | compact when the estimate reaches this share of `maxTokens`; between 0.5 and 0.95 | `0.8` |
+| `preserveRecentCount` | the newest messages are never changed or removed; at least 2 | `4` |
+| `maxToolResultChars` | characters kept of a tool result before it is cut; more than 0 | `5000` |
+| `enabled` | `false` turns compaction off without removing the config | `true` when the config is present |
 
-`preserveRecentCount` is honored by every layer. The trailing N items
-of `session.history` are never modified, summarized, or removed —
-recent turns are the one piece of context the engine refuses to spend.
+A value out of range throws at construction, as a plain `Error`: `compactionThreshold must be between 0.5 and 0.95, got 2`, `preserveRecentCount must be >= 2, got 1`, `maxToolResultChars must be > 0, got 0`.
 
-## Layer 1 — tool-result budgeting
+## When it runs
 
-`tool_result_budget` is the cheapest layer. It walks history, finds
-items with `role: "tool"`, and truncates any whose stringified content
-exceeds `maxToolResultChars`. Truncated items get a deterministic
-notice appended:
+Once per turn, before the understand call and before the speak call, so both read the same trimmed history. The framework reads `input.history`, or `session.history` when the host passes none, and only acts when there is one. The trimmed copy lives for that turn: your stored history is never rewritten by the framework. The next turn compacts again from whatever you pass.
 
-```text
-[Truncated: 12834 chars total, showing first 5000]
-```
+Tokens are estimated, not counted: the characters of every message's content, plus its `name` when it has one (a tool result always does), plus 4 per message for its role, divided by 4 and rounded up. The estimate is deterministic, so the same history compacts the same way every time.
 
-Character-level and synchronous — no LLM call, no network. It fires
-whenever history crosses the threshold and at least one tool message
-is oversized. For agents that orchestrate verbose APIs (search, SQL,
-web fetches) this layer alone usually keeps the prompt in budget.
+## The three layers, cheapest first
 
-The per-tool counterpart is `Tool.maxResultSizeChars`. Set it on
-high-volume tools to truncate at execution time, before the result
-ever lands in history. Combine the two: a tight per-tool cap on a
-known-chatty tool, plus a global ceiling at the agent level.
+The engine tries each layer in order and stops at the first one that brings the estimate under the threshold. Under the threshold it runs none of them and reports `none`. The newest `preserveRecentCount` messages stay untouched through all three.
 
-## Layer 2 — micro-compaction
+| Strategy | What it does | Model calls |
+|---|---|---|
+| `tool_result_budget` | cuts every tool result longer than `maxToolResultChars`, appending `[Truncated: N chars total, showing first M]` | 0 |
+| `micro_compact` | collapses runs of whitespace inside older tool results | 0 |
+| `auto_compact` | asks the model to summarize every message older than the preserved window, and replaces them with one `system` item that starts with `[Conversation Summary]` | 1 |
 
-If `tool_result_budget` is not enough, `micro_compact` runs over the
-already-budgeted history. It compresses verbose tool outputs inline
-by collapsing whitespace runs to a single space and trimming the
-edges. Tool results are the only target — user, assistant, and system
-messages pass through unchanged.
+The first two layers touch tool results only, because that is where a history gets long without saying much. A conversation of plain user and assistant text goes straight to `auto_compact` when it passes the threshold.
 
-Still LLM-free and deterministic. Most effective on tool results that
-contain pretty-printed JSON or multiline text where formatting is
-whitespace-heavy. The recent-N tail (`preserveRecentCount`) is
-preserved verbatim during this pass; the cutoff is `history.length -
-preserveRecentCount`, and only items before that cutoff are
-compressed.
+`auto_compact` is one model call and adds one to `result.llmCalls`. It is the only call in a turn that is neither understand nor speak; the summary prompt is sent with no `schemaName`. When that call fails, the engine drops the oldest messages instead until the rest fit, without another call; the turn goes on and the failed call still counts.
 
-## Layer 3 — LLM summarization
+The preserved window is a target, not a hard cut: its left edge moves left when it would otherwise open on a tool result whose calling assistant message was cut away, because providers reject such a history at the next request.
 
-When neither character-level layer brings the prompt under threshold,
-`auto_compact` dispatches a single `provider.generateMessage` call
-asking the agent's own LLM to summarize the older portion. The result
-becomes one synthetic system message:
+## Turning it off
 
-```text
-[Conversation Summary]
-<summary text from the provider>
-```
+Leave `compaction` out, or set `enabled: false`. Either way the model sees the full history you pass, and the `context` kind of `ProviderError` is what tells you the window overflowed; see [error handling](./error-handling.md).
 
-That synthetic item replaces every history item before the
-`preserveRecentCount` tail. The recent tail is appended unchanged. If
-the provider call fails — quota, network, any caught exception — the
-engine falls back to `aggressiveTruncate`: walk older messages newest
-to oldest, keep as many as fit under `maxTokens * compactionThreshold`,
-drop the rest. The strategy field on the result still reads
-`"auto_compact"` so callers can see that summarization was attempted.
+## What compaction is not
 
-This layer costs a real provider round-trip. It only fires when
-character-level layers cannot close the gap — in practice, sessions
-with hundreds of long turns or tools that return narrative prose
-rather than structured data.
+It is not memory. The collected fields live in `session.data` and are never compacted; the model is told what is already known on every call a talk step makes (the idle speaker's prompt does not restate them). It is not persistence: what you store is up to you, and the summary the engine writes is not kept anywhere unless you keep the trimmed history yourself.
 
-## When each layer fires
-
-The `compactionThreshold` ratio is the gate for all three layers. Below
-threshold, `checkAndCompact` returns `strategy: "none"` and history
-passes through untouched. At or above threshold, the engine attempts
-each layer in order and stops as soon as the result drops below the
-threshold:
-
-| Estimated tokens | Strategy that fires |
-|------------------|---------------------|
-| `< maxTokens * compactionThreshold` | `none` |
-| `≥ threshold`, oversized tool messages exist | `tool_result_budget` |
-| `≥ threshold` after budgeting | `micro_compact` |
-| `≥ threshold` after micro-compaction | `auto_compact` (LLM call) |
-| LLM call failed | `auto_compact` (truncation fallback) |
-
-The result's `messagesCompacted` count and optional `summary` field
-are logged at `info` level so production logs show which layer fired
-on which turn.
-
-A practical defaults sketch: set `maxTokens` to ~80% of the model's
-context window, leave `compactionThreshold` at the 0.8 default, and
-put a tight per-tool `maxResultSizeChars` on any tool that talks to
-a search API or a database. Pick the budget, set the caps, let the
-layers absorb the noise.
-
-**Next:** [Architecture](../concepts/architecture.md)
+See [the pipeline](../concepts/pipeline.md) for where the compaction step sits among the eight phases.

@@ -5,7 +5,7 @@ type: migration
 order: 1
 ---
 
-# v1 → v2 Migration
+# v1 → v2 migration
 
 **Version:** 2.0.0 — Clean break (no shims, no aliases)
 

@@ -126,7 +126,7 @@ All providers implement the `AiProvider` interface:
 - **Strict TypeScript** — `strict: true`, no implicit any, no unused locals/params, no implicit returns.
 - **No `as any`** — Fix the underlying type mismatch. Tests may use `as unknown as T` with justification.
 - **ESLint** — `@typescript-eslint/recommended-type-checked` rules. `no-floating-promises: error`, `no-explicit-any: warn`.
-- **Error format:** `[ErrorClass] what: why. how to fix.` — typed error classes (`FlowConfigurationError`, `ToolCreationError`, `ToolExecutionError`, `SessionConflictError`, `InvalidSessionError`).
+- **Error format:** `[ErrorClass] what: why. how to fix.` — typed error classes (`FlowConfigurationError`, `SessionConflictError`, `InvalidSessionError`, plus `ProviderError` re-exported from `@providerkit/core`).
 - **Naming:** Classes are PascalCase, files match their default export. Utilities are camelCase.
 - **Exports:** Everything public goes through `src/index.ts`. No deep imports from consumers.
 - **No path aliases.** `tsconfig.json` used to declare six (`@core/*`, `@utils/*`, one of them
@@ -141,7 +141,7 @@ All providers implement the `AiProvider` interface:
 - `agent.turn(input)` for every input kind; `agent.turnStream(input)` yields `{ delta }` chunks then `{ done, result }`.
 - The host loop: `load` → `turn` → if `changed`, `save(session, loadedVersion)` → send `messages[]` (honouring `afterMs`, keyed) → enqueue `schedule[]` with `jobId = key` → at fire time `turn({ wake: key })`.
 - `silenced: 'reason'` is the one gate: `do` steps still run, nothing is phrased, zero calls.
-- Outcome `detail` strings are pt-BR (`campo pulado: perguntado 3 vezes`, `IA indisponível`); prompt scaffolding is English.
+- Outcome lines carry a stable `code` (`already-known`, `stale-wake`, `max-asks`, …) and the English `message` the framework copies from `OUTCOME_MESSAGES` in `src/utils/outcomes.ts`. Add a code there and the compiler forces a sentence for it. `detail` is only ever text someone else wrote: the host's `silenced` reason, an action's own words, the field a line is about. The package emits no Portuguese; a product maps the code to its own copy.
 - `migrateSession(blob, { sessionId, flowIdOf })` at the host's deserialisation choke point; it throws on garbage.
 
 ## What NOT to Do

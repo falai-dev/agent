@@ -1,276 +1,208 @@
 ---
 title: "Add tools"
-description: "Extend the booking agent with tools that book the room, gate eligibility, and redirect on failure."
+description: "Give Ana a tool the model may call to answer a price question, and an action the flow runs to warn the seller."
 type: tutorial
 order: 4
 ---
 
 # Add tools
 
-So far the agent talks. Now it acts. You will add a tool that books a hotel room and a tool that checks whether the user is allowed to book at all. Along the way you will see how `ctx.dispatch` and `ToolResult.directive` both land on the same directive bus, and why most tools only need an `id` and a `handler` to start.
+Two kinds of code run during a conversation, and they answer different questions.
 
-So far the agent only collects fields. This page adds two tools:
+- A **tool** is a function the model may call while it speaks. The model decides, based on what the customer said. "Quanto custa?" → look up the price.
+- An **action** is a function the flow runs at a fixed step. Code decides, every time a run gets there. Customer confirmed → warn the seller.
 
-- `book_hotel` — runs once the required fields are in, returns a
-  booking id, and (optionally) finishes the flow with a directive.
-- `check_eligibility` — runs early and redirects to a denial flow
-  when the caller is not allowed. You'll see both forms of
-  redirection: imperative (`ctx.dispatch`) and declarative
-  (`ToolResult.directive`).
+Ana gets one of each. The tool first: this is the agent from the last page with a price table added.
 
-You'll also meet the optional metadata fields — `isReadOnly`,
-`validateInput`, `checkPermissions` — that let tools opt into safer
-defaults when you need them.
+```ts
+import { falai, GeminiProvider, type Tool } from "@falai/agent";
 
-> Tool surface used here is the canonical [Tool reference](../reference/tool.md).
-> `Tool.id` is the sole identifier — there's no separate `name`.
+const precos: Record<string, number> = { "1-10": 190, "11-50": 490, "51-200": 1290, "200+": 2900 };
 
-## Recap: where we left off
-
-`docs/start/03-collect-data.md` left us with a `Book Hotel` flow that
-collects `destination`, `checkIn`, and `guests`, and a `confirm` step
-that waits until all three are populated. We'll hand the `confirm`
-step a tool that actually books the room, plus an eligibility check
-to gate it.
-
-```typescript
-interface BookingData {
-  destination: string;
-  checkIn: string;
-  guests: number;
-  bookingId?: string;
-}
-```
-
-## 1. Add `book_hotel`
-
-A tool is an object with an `id`, an optional `description` and
-`parameters` schema, and a `handler` that returns the result the AI
-will see. The handler receives a `ToolContext` (`ctx`) — the read
-surface over `data`, `context`, and the session.
-
-```typescript
-import type { Tool } from "@falai/agent";
-
-const bookHotel: Tool<unknown, BookingData, { bookingId: string }> = {
-  id: "book_hotel",
-  description: "Reserve the hotel for the collected destination, dates, and guest count.",
+// A tool: the model calls it when the lead asks about price.
+const tabelaDePrecos: Tool = {
+  id: "tabela_de_precos",
+  description: "Preço mensal do plano para uma faixa de tamanho de empresa.",
   parameters: {
     type: "object",
-    properties: {
-      destination: { type: "string" },
-      checkIn:     { type: "string" },
-      guests:      { type: "number" },
-    },
-    required: ["destination", "checkIn", "guests"],
+    properties: { tamanho: { type: "string", enum: ["1-10", "11-50", "51-200", "200+"] } },
+    required: ["tamanho"],
   },
-  async handler(ctx, args) {
-    const bookingId = await reserve(args);
-    return {
-      data: { bookingId },
-      dataUpdate: { bookingId },
-    };
-  },
+  handler: (args) => ({ value: { precoMensal: precos[String(args.tamanho)] ?? null, moeda: "BRL" } }),
 };
-```
 
-The handler returns a `ToolResult`:
-
-- `data` is what the AI sees as the tool result (used to compose the
-  next assistant message).
-- `dataUpdate` is shallow-merged into `session.data`, so the booking
-  id sticks for the rest of the conversation.
-
-Wire the tool to the `confirm` step:
-
-```typescript
-{
-  id: "confirm",
-  prompt: "Confirm the trip and call book_hotel.",
-  requires: ["destination", "checkIn", "guests"],
-  tools: [bookHotel],
-}
-```
-
-The AI now has the tool available on `confirm`. Once the three
-fields are set, it can call `book_hotel`, get the id back, and
-confirm the booking in the reply.
-
-### Optional: finish the flow declaratively
-
-If you want the tool itself to close the flow — instead of relying
-on the next turn to notice `requiredFields` are satisfied — return a
-`directive` alongside the data:
-
-```typescript
-async handler(ctx, args) {
-  const bookingId = await reserve(args);
-  return {
-    data: { bookingId },
-    directive: {
-      complete: { reason: "reservation confirmed" },
-      dataUpdate: { bookingId },
-    },
-  };
-}
-```
-
-`ToolResult.directive` is the **declarative** form of redirection: a
-directive returned with the result. Whatever you can say with
-`ctx.dispatch` mid-handler, you can say with `directive` on return.
-They merge identically. See [Directives](../concepts/directives.md)
-for the full shape.
-
-## 2. Add `check_eligibility` — imperative form
-
-Some destinations are off-limits for some users. We want a tool that
-runs before the AI starts pitching options, decides whether the
-caller can proceed, and — when not — bails out into a denial flow.
-
-The imperative form uses `ctx.dispatch` to emit a directive
-mid-handler:
-
-```typescript
-const checkEligibilityImperative: Tool<{ userId: string }, BookingData, { ok: boolean }> = {
-  id: "check_eligibility",
-  description: "Verify the caller is allowed to book this destination.",
-  isReadOnly: () => true,
-  async handler(ctx) {
-    const ok = await isEligible(ctx.context.userId, ctx.data.destination);
-
-    if (!ok) {
-      // Stop reasoning down this path — jump to the denial flow.
-      ctx.dispatch({
-        goTo: "Denial",
-        reply: "Sorry — you're not eligible to book that destination.",
-      });
-      return { ok: false };
-    }
-
-    return { ok: true };
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome da pessoa, sem tom de formulário." },
+  empresa: { type: "string", ask: "Pergunte de qual empresa a pessoa fala." },
+  tamanho: {
+    type: "string",
+    enum: ["1-10", "11-50", "51-200", "200+"],
+    ask: "Pergunte quantas pessoas trabalham lá e ofereça as faixas.",
   },
-};
+  confirmado: { type: "boolean", ask: "Resuma em uma frase o que anotou e pergunte se está tudo certo." },
+});
+
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  tools: [tabelaDePrecos],
+  flows: [
+    f.flow({
+      id: "triagem",
+      name: "Triagem",
+      on: [{ message: [] }],
+      steps: [
+        { id: "quem", prompt: "Descubra quem é e de onde fala.", collect: ["nome", "empresa"] },
+        { id: "porte", collect: ["tamanho"], maxAsks: 2 },
+        { id: "confirma", collect: ["confirmado"] },
+        { id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado"] } },
+        { id: "tchau", prompt: "Agradeça e diga que um vendedor continua daqui." },
+      ],
+    }),
+  ],
+});
+
+const r = await agent.turn({ sessionId: "demo", message: "Oi! Quanto custa para uma empresa de 30 pessoas?" });
+console.log(r.messages[0]?.text); // Ana gives the price for 11-50 people and asks who she is talking to
+console.log(r.llmCalls); // 2 when the model called the tool once; 1 when it did not
 ```
 
-What just happened:
+## The tool
 
-- `ctx.dispatch(directive)` puts the directive on this turn's
-  directive bus. Algorithm 4 picks it up alongside any other
-  emissions.
-- `goTo: "Denial"` redirects to a sibling flow named `"Denial"`.
-- `reply` is the verbatim assistant utterance — the LLM call this
-  turn is skipped and the literal string is what the user sees.
-- The handler still returns `{ ok: false }` so the trace is honest
-  about what the tool did.
+A tool is a plain object with the `Tool` shape:
 
-For the redirect to work, the agent needs a `Denial` flow. It can
-be as small as:
+| Field | What it is |
+|---|---|
+| `id` | The name the model calls it by. |
+| `description` | When to use it. The model reads this to decide. |
+| `parameters` | A JSON schema for the arguments. |
+| `handler(args, ctx)` | Your function. Returns `{ value?, data? }`. |
 
-```typescript
-{
-  title: "Denial",
-  steps: [{ id: "explain",
-            prompt: "Explain why the booking is not possible and offer help." }],
+`value` is what the model reads back. Return whatever helps it answer: an object, a string, a list. Undefined is fine too; the model then sees `{"ok":true}`.
+
+`data` writes collected fields. A step ends when its fields are known, so a tool can finish a step. A CNPJ lookup that fills `empresa` looks like this:
+
+```ts fragment
+handler: async (args) => {
+  const empresa = await buscaCnpj(String(args.cnpj));
+  return { value: { razaoSocial: empresa.nome }, data: { empresa: empresa.nome } };
 },
 ```
 
-Wire the eligibility check on the `confirm` step (or earlier — your
-call):
+To have that `data` checked against Ana's fields, give the tool its two types. `Tool<undefined, Data>` says: no host context, because `falai()` was called without one, and `data` from Ana's field list. `DataOf` reads that list off the toolkit, so it follows every field you add:
 
-```typescript
-{
-  id: "confirm",
-  prompt: "Confirm the trip and call book_hotel.",
-  requires: ["destination", "checkIn", "guests"],
-  tools: [checkEligibilityImperative, bookHotel],
-}
+```ts fragment
+type Data = DataOf<typeof f>;
+
+const tabelaDePrecos: Tool<undefined, Data> = { /* as above */ };
 ```
 
-## 3. Same tool — declarative form
+`ctx` carries `context`, `data` (what is known so far), `history`, `run` (when a run is speaking) and `now`. A tool cannot move the run to another step; movement belongs to the flow.
 
-Many handlers don't need to dispatch mid-flight. They can compute
-the answer, build the directive, and return it on the result.
-`ToolResult.directive` is identical in effect to `ctx.dispatch` —
-same merge, same precedence, same shape.
+### Where the model may call it
 
-```typescript
-const checkEligibilityDeclarative: Tool<{ userId: string }, BookingData, { ok: boolean }> = {
-  id: "check_eligibility",
-  description: "Verify the caller is allowed to book this destination.",
-  isReadOnly: () => true,
-  async handler(ctx) {
-    const ok = await isEligible(ctx.context.userId, ctx.data.destination);
+`tools: [tabelaDePrecos]` on the agent offers the tool on every talk step. To narrow that, list tool ids on a step or on a flow:
 
-    if (!ok) {
-      return {
-        data: { ok: false },
-        directive: {
-          goTo: "Denial",
-          reply: "Sorry — you're not eligible to book that destination.",
-        },
-      };
-    }
+```ts fragment
+{ id: "quem", prompt: "Descubra quem é e de onde fala.", collect: ["nome", "empresa"], tools: ["tabela_de_precos"] },
+```
 
-    return { data: { ok: true } };
+A step's list wins over the flow's, and the flow's over "every agent tool". An id that is not registered on the agent fails when the agent is built.
+
+### What it costs
+
+Each round of tool calls is one more model call: it asks for the tool, your handler runs, the result goes back as history, and the model is asked again. `r.llmCalls` counts them all. `maxToolLoops` on the agent caps the rounds at 5 by default; after the cap the model is asked once more without tools, so a message always comes back. `maxToolLoops: 0` turns tools off.
+
+`isReadOnly`, `isDestructive`, `validateInput` and `checkPermissions` are optional gates on the same object. [Tool](../reference/tool.md) lists them.
+
+## The action
+
+Now the other half: warn the seller once the customer confirmed. `f.action({ parameters, run })` builds an action, `actions` registers it under a name, and a `do` step calls it by that name. The tool from above slots in unchanged and is left out for space.
+
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
+
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome da pessoa, sem tom de formulário." },
+  empresa: { type: "string", ask: "Pergunte de qual empresa a pessoa fala." },
+  tamanho: {
+    type: "string",
+    enum: ["1-10", "11-50", "51-200", "200+"],
+    ask: "Pergunte quantas pessoas trabalham lá e ofereça as faixas.",
   },
-};
+  confirmado: { type: "boolean", ask: "Resuma em uma frase o que anotou e pergunte se está tudo certo." },
+});
+
+async function avisarVendedor(texto: string): Promise<void> {
+  console.log("[vendedor]", texto); // your Slack, e-mail or CRM call goes here
+}
+
+const avisar_vendedor = f.action({
+  description: "Manda um resumo do lead para o vendedor.",
+  parameters: { mensagem: { type: "string" } },
+  run: async ({ mensagem }) => {
+    await avisarVendedor(mensagem);
+    return { ok: true };
+  },
+});
+
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  actions: { avisar_vendedor },
+  flows: [
+    f.flow({
+      id: "triagem",
+      name: "Triagem",
+      on: [{ message: [] }],
+      steps: [
+        { id: "quem", prompt: "Descubra quem é e de onde fala.", collect: ["nome", "empresa"] },
+        { id: "porte", collect: ["tamanho"], maxAsks: 2 },
+        { id: "confirma", collect: ["confirmado"] },
+        { id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado"] } },
+        {
+          id: "avisa",
+          do: "avisar_vendedor",
+          with: { mensagem: "Lead qualificado: {{data.nome}} ({{data.empresa}}), {{data.tamanho}} pessoas." },
+        },
+        { id: "tchau", prompt: "Agradeça e diga que um vendedor continua daqui." },
+      ],
+    }),
+  ],
+});
 ```
 
-When to reach for which:
+`parameters` use the same `type`, `enum` and `description` as fields (plus `optional: true`), and `run` receives them already typed: `mensagem` is a `string` above, nothing to check.
 
-- **Imperative** — you need to dispatch before the handler is done
-  (e.g. an early branch decides the rest of the work is moot but
-  the result payload still has to be computed for the trace).
-- **Declarative** — single return point, directive next to the data
-  it goes with. Easier to read; preferred when there's no reason to
-  split.
+`with` fills the parameters. `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are replaced before the action runs. A placeholder whose value is unknown stays as written, so a skipped `tamanho` reaches the seller as `{{data.tamanho}}`. Word the message without it, or fork first with an `if` step on `{ known: ["tamanho"] }`. A `do` step never talks to the model: zero calls.
 
-Both forms can co-exist. Multiple `dispatch` calls plus a `directive`
-on the return value all land on the same bus and merge identically
-(see [Directives](../concepts/directives.md)).
+The name and the parameters are checked when the agent is built. An unknown action, or a `with` missing a required parameter, throws `FlowConfigurationError` at startup with the step id and the fix.
 
-## 4. Optional metadata, briefly
+### What `run` returns
 
-Every metadata field on `Tool` is optional. Reach for them only when
-you want the safer default they buy you.
+| Return | What the run does next |
+|---|---|
+| `{ ok: true }` | Takes `then` (the next step by default). `detail` adds a note to the log. |
+| `{ skipped: "motivo" }` | Takes `then`. The log says `code: 'action-skipped'`, `detail: 'motivo'`. |
+| `{ failed: "motivo" }` | Takes the step's `onFail` (a step id, `'end'` or `{ flow }`, like `then`) when it has one, else `then`. The log says `code: 'action-failed'`, `detail: 'motivo'`. |
+| `{ defer: "10m", detail: "..." }` | Parks the run and runs the action again when the wake fires, with the same key. |
 
-```typescript
-isReadOnly: () => true;                                                 // safe to cache and parallelize
-validateInput: (input) => ({ valid: typeof input.guests === "number" }); // repair or reject bad args
-checkPermissions: (_, ctx) => ({ allowed: !!ctx.context.userId });       // gate access; handler skipped on deny
-```
+A handler that throws counts as `failed` with the error's message.
 
-Four more live on the same surface — `isConcurrencySafe`,
-`isDestructive`, `interruptBehavior`, `maxResultSizeChars`. See the
-[Tool reference](../reference/tool.md) for the full list and exact
-contracts.
+### Run it twice, get it once
 
-## 5. Run it
+Actions run at least once, never exactly once: when a save loses a race, the same input is replayed and the action runs again. `ctx.key` is `${runId}:${stepId}:${visit}` and is the same on the replay. Make the handler idempotent, which means: store the key with the side effect, and skip a key you already handled. `ctx.set(patch)` writes collected fields from inside the action, and `ctx.silenced` tells you when Ana is not allowed to speak right now.
 
-A user message like
+## Which one do I write?
 
-> "Book me a room in Lisbon for 2 adults, checking in March 14."
+| Question | Answer |
+|---|---|
+| Does the customer's wording decide whether it runs? | Tool. |
+| Must it run every time a run reaches this point? | Action. |
+| Does it only read (price, stock, a slot)? | Usually a tool. |
+| Does it change something outside (CRM, tag, notify)? | Usually an action, so the flow decides when and code proves it ran. |
+| Should its result move the run? | Action: `onFail`, `defer`. A tool cannot move the run. |
 
-now flows through:
+[Actions and events](../guides/actions-and-events.md) adds events, the other way the host talks to a flow.
 
-1. **Pre-extraction.** The router pulls `destination: "Lisbon"`,
-   `checkIn: "March 14"`, `guests: 2` out of the message in one shot.
-2. **Step selection.** The `ask` step is satisfied — every `collect`
-   field is set — so the engine skips it and enters `confirm`.
-3. **Eligibility.** The AI calls `check_eligibility`. If allowed,
-   the tool returns `{ ok: true }` and we move on. If not, the
-   dispatched directive jumps to the `Denial` flow and the verbatim
-   `reply` becomes the assistant message — no LLM call this turn.
-4. **Booking.** The AI calls `book_hotel`, gets a `bookingId`, and
-   composes the confirmation reply.
-5. **Completion.** With every required field present (and a
-   `bookingId` in `data`), the flow finishes.
-
-## What's next
-
-You have an agent that collects data, runs tools, gates access, and
-redirects on failure. The remaining concern is shipping it: swapping
-`MemoryAdapter` for `PrismaAdapter`, streaming responses, and
-dropping the agent behind an HTTP endpoint.
-
-**Next:** [Go to production](./05-go-to-production.md)
+Next: [Go to production](./05-go-to-production.md) puts Ana behind a real channel: a database, the save loop and timers.

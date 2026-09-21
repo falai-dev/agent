@@ -4,7 +4,7 @@
 
 **Typed conversations where code stays in charge.**
 
-Define flows, steps, and tools in TypeScript; the framework calls the LLM only for the parts that need language — routing, extraction, and generation.
+Define flows, steps and tools in TypeScript; the framework calls the AI only where language is needed: to understand what the customer wrote and to write the reply.
 
 [![npm](https://img.shields.io/npm/v/@falai/agent.svg)](https://www.npmjs.com/package/@falai/agent)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
@@ -12,51 +12,58 @@ Define flows, steps, and tools in TypeScript; the framework calls the LLM only f
 
 </div>
 
-> The AI understands. The code is in control.
-
-```typescript
-import { createAgent, GeminiProvider } from "@falai/agent";
-
-const agent = createAgent({
-  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY! }),
-  schema: { type: "object", properties: { name: { type: "string" } } },
-  flows: [{
-    title: "Greet",
-    requiredFields: ["name"],
-    steps: [{ id: "ask_name", prompt: "What's your name?", collect: ["name"] }],
-  }],
-});
-
-const response = await agent.respond({ history: [{ role: "user", content: "Hi, I'm Alice" }] });
-console.log(response.message);
+```ts fragment
+const r = await agent.turn({ sessionId: "demo", message: "oi" });
+console.log(r.messages[0]?.text); // the AI asks for a name, something like "Oi! Como posso te chamar?"
 ```
 
-## Primitives
+The `agent` behind that call, in full:
 
-### Agent
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-**Bind schema to provider.**
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) throw new Error("Set GEMINI_API_KEY before running this example.");
 
-The top-level object. Owns the schema, the provider, the flows, the tools, and the session. One agent serves many conversations.
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome da pessoa, sem tom de formulário." },
+});
 
-### Flow
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey, model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "boas-vindas",
+      name: "Boas-vindas",
+      on: [{ message: [] }],
+      steps: [
+        { id: "nome", collect: ["nome"] },
+        { id: "ajuda", prompt: "Agradeça pelo nome e pergunte como pode ajudar." },
+      ],
+    }),
+  ],
+});
 
-**Collect until done.**
+const r = await agent.turn({ sessionId: "demo", message: "oi" });
+console.log(r.messages[0]?.text);
+```
 
-A goal made of ordered steps. Declares which schema fields it needs; the engine completes the flow when every required field has been collected.
+## The model
 
-### Tool
-
-**Run code, redirect flow.**
-
-A typed function the AI can call. Receives a `ToolContext` with session data, can dispatch directives to redirect the conversation, and returns a typed result.
+- A flow is a trigger plus an ordered list of steps; a flow that has started is a run.
+- A step is one of five things: the AI talks (`prompt` / `collect`), a fixed text goes out (`say`), your code runs (`do`), the run waits (`wait`), or the code forks (`if`).
+- Fields live on the agent, each with its own `ask`. The customer can give them in any order, and a step whose fields are already known is skipped.
+- One `agent.turn()` takes every kind of input: a customer message, a timer, an event from your system, or a start you call by hand.
+- It returns the messages to send, the timers to set and one outcome line per step. The framework never sends, never sleeps and never saves. You save the session, then send the messages and set the timers.
+- A text turn costs at most two model calls (understand, then speak) plus one per tool round, and one more when `compaction` summarizes the history. `r.llmCalls` says how many it spent.
 
 ## Where to go next
 
 - **Build your first agent** → [docs/start/01-install.md](./docs/start/01-install.md)
-- **Explore the docs** → [docs/](./docs/README.md)
-- **Examples** → [examples/](./examples/)
-- **Upgrading** → [docs/migration/](./docs/migration/README.md) (v3 → v4, v2.6 → v2.7, v2.3 → v2.4, v1 → v2)
+- **Read the docs** → [docs/](./docs/README.md)
+- **Examples** → [examples/](./examples/), nine runnable files from a quickstart to flows stored as JSON
+- **Upgrading** → [docs/migration/](./docs/migration/README.md); v4 is a clean break from 3.x
 
 ## Install
 
@@ -72,7 +79,7 @@ Requires Node 22.12+ or Bun 1.0+. Set a provider API key in your environment (fo
 
 ## License
 
-MIT © 2025
+MIT © 2026
 
 <div align="center">
 

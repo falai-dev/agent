@@ -1,265 +1,176 @@
 ---
 title: "Branching"
-description: "Add an explicit, source-local fork to a step with `branches`, mixing code predicates and AI conditions and pointing at step ids, flow ids, or full directives."
+description: "Leave a step early while it asks: a when branch the model judges, an if branch code judges, and the if step for a plain code fork."
 type: guide
-order: 2
+order: 3
 ---
 
 # Branching
 
-Most flows are linear: ask, collect, confirm, complete. A few aren't. Sometimes the conversation arrives at a step that has to choose between three or four next moves — and the choice is the point of the step, not an aside. This guide shows how to express that fork with `step.branches`.
+A branch is an early exit from a step that is asking. The model judges `when`; code judges `if`. The first branch that holds moves the run.
 
-You already know the [`when` / `if` split](./conditions.md): `when` is an AI-evaluated string, `if` is a code predicate, and the two compose so that code runs first for free and the AI only fires when the predicate already passed. `branches` reuses that vocabulary in a list-shaped form. Each entry says "here is a possible next step, and here is how to choose it." Entries evaluate top-to-bottom; the first one whose conditions pass wins.
+```ts
+import { falai, GeminiProvider } from "@falai/agent";
 
-By the end of this page you will have written four branch points: a pure-code fork that costs zero tokens, an AI-only fork that classifies intent, a combined fork that short-circuits the LLM call, and a cross-flow fork that hands control to a different flow with state carry.
-
-## The shape
-
-`step.branches` is an array of `BranchEntry` objects. Each entry has up to four fields:
-
-```typescript
-interface BranchEntry<TContext, TData> {
-  /** AI-evaluated condition. String or array of strings (OR). */
-  when?: string | string[];
-
-  /** Code predicate. Function or array of functions (AND). */
-  if?: BranchPredicate<TContext, TData> | BranchPredicate<TContext, TData>[];
-
-  /**
-   * Where to go when this entry matches. One of:
-   *  - A string matching a step id in the current flow.
-   *  - A string matching a flow id (sugar for `{ goTo: <flowId> }`).
-   *  - A full Directive (cross-flow step targets, state writes, completion).
-   */
-  then: string | Directive<TContext, TData>;
-
-  /** Optional label surfaced in event traces and flow visualization. */
-  label?: string;
+interface Ctx {
+  atendentesOnline: number;
 }
-```
 
-Three rules govern how a `branches` array is read:
-
-1. **Declaration order is evaluation order.** The first entry whose conditions pass wins. Later entries don't run.
-2. **Code-first short-circuit.** When an entry has both `if` and `when`, `if` runs first. `when` is only evaluated when `if` passes — saving the LLM call when the predicate already disqualifies the entry.
-3. **An entry with neither `when` nor `if` is an unconditional fallback.** It's only legal as the last entry in the array. Putting it earlier is a `FlowConfigurationError` because every later entry would be unreachable.
-
-If no entry matches, branches return `undefined` and resolution falls through to the linear `nextStep` chain or AI step selection — exactly as if `branches` were absent. That is the same fall-through that backs the implicit-fork pattern, so the two forms compose cleanly.
-
-## A code-only fork
-
-The cheapest fork is one that doesn't call the LLM at all. When the choice is purely a function of `data` and `context`, every entry uses `if` and the whole decision runs in pure TypeScript.
-
-```typescript
-flow({
-  id: "plan_routing",
-  steps: [
-    {
-      id: "route_by_plan",
-      auto: true,
-      branches: [
-        { if: ({ data }) => data.plan === "enterprise", then: "enterprise_path", label: "enterprise" },
-        { if: ({ data }) => data.plan === "pro",        then: "pro_path",        label: "pro" },
-        { then: "free_path" }, // unconditional fallback (last entry)
-      ],
-    },
-    { id: "enterprise_path", prompt: "A specialist will reach out." },
-    { id: "pro_path",        prompt: "Set up your pro account." },
-    { id: "free_path",       prompt: "Welcome to the free tier." },
-  ],
+const f = falai<Ctx>().fields({
+  pedido: { type: "string", ask: "Pergunte o número do pedido." },
 });
-```
 
-Two things matter here. First, `auto: true` on the source step removes the LLM call that would otherwise run for `route_by_plan` itself — the step asks no question, only routes. Combined with code-only branches, the entire decision is a pure compute node in the graph. Second, the unconditional fallback at the end is what guarantees a target. Without it, a `data.plan` value the engine doesn't know about would fall through to linear succession instead of landing on `free_path`.
-
-The `BranchPredicate` receives `{ data, context, session, history }`. `data` is `Partial<TData>` — predicates have to null-check any field not declared in the source step's `requires`. Fields covered by `requires` are guaranteed present.
-
-## An AI-only fork
-
-Some forks need intent classification. The user said something; the agent has to decide whether they want to cancel, ask about billing, or get technical help. None of that lives in `data` yet, and writing a regex would lose the point of the framework.
-
-```typescript
-flow({
-  id: "support",
-  steps: [
-    {
-      id: "classify_request",
-      prompt: "How can I help?",
-      branches: [
-        { when: "user wants to cancel their account", then: "cancel_flow" },
-        { when: "user is asking about billing",        then: "billing_flow" },
-        { when: "user is asking a technical question", then: "tech_support" },
-        { then: "general_help" }, // fallback
-      ],
-    },
-    { id: "tech_support", prompt: "What are you running into?" },
-    { id: "general_help", prompt: "I can help with that." },
-    // cancel_flow and billing_flow are top-level flows resolved via goTo.
-  ],
-});
-```
-
-`when` strings reuse the same machinery as `step.when`. One LLM call evaluates each entry's condition in declaration order; the first match wins. Conditions are written from the agent's perspective — `"user wants to cancel"` reads naturally and matches the prompts the model already speaks. Don't try to compress them into keywords; the AI is doing classification, not pattern matching.
-
-When one branch has several alternative phrasings, use an array. Non-`!` entries use OR semantics: any one match activates the branch. Prefix an entry with `!` to make it an exclusion; any matching exclusion prevents that branch from activating.
-
-The fallback at the end is doing real work too. When the model can't classify the message into any of the three buckets — say the user typed "hi" — `general_help` catches it instead of dropping the user into AI step selection.
-
-## Combining `if` and `when`
-
-When an entry has both fields set, code runs first and the AI call only fires when the predicate already passed. This is the same short-circuit you saw in the [conditions guide](./conditions.md), now scoped to a single branch entry.
-
-```typescript
-flow({
-  id: "pricing",
-  steps: [
-    {
-      id: "pricing_routing",
-      branches: [
+const agent = f.agent({
+  name: "Léo",
+  // Set GEMINI_API_KEY in your environment before running this.
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "suporte",
+      name: "Suporte a pedidos",
+      on: [{ message: ["problema com um pedido"] }],
+      steps: [
         {
-          // Free predicate runs first; AI condition only fires when it passes.
-          if: ({ data, context }) =>
-            data.country === "US" && context.featureFlags.enableUsPricing,
-          when: "user is asking about pricing",
-          then: "us_pricing",
+          id: "dados",
+          collect: ["pedido"],
+          branches: [
+            // The model answers this about the customer's next message.
+            { when: "a pessoa pede para falar com um humano", then: { flow: "humano" } },
+            // Code answers this. It costs nothing.
+            { if: ({ context }) => context.atendentesOnline === 0, then: "fora" },
+          ],
         },
-        {
-          when: "user is asking about pricing",
-          then: "global_pricing",
-        },
-        { then: "general_help" }, // fallback
+        { id: "resolve", prompt: "Explique o próximo passo para o pedido {{data.pedido}}.", then: "end" },
+        { id: "fora", say: "Nossa equipe está fora agora. Deixe o número do pedido que retornamos assim que alguém entrar." },
       ],
-    },
-    { id: "us_pricing",     prompt: "Here is US pricing." },
-    { id: "global_pricing", prompt: "Here is global pricing." },
-    { id: "general_help",   prompt: "I can help with that." },
+    }),
+    f.flow({
+      id: "humano",
+      name: "Passar para um humano",
+      steps: [{ id: "aviso", say: "Claro, vou chamar alguém da equipe. Um minuto." }],
+    }),
   ],
 });
+
+const context: Ctx = { atendentesOnline: 2 };
+const t1 = await agent.turn({ sessionId: "s1", context, message: "meu pedido veio errado", id: "m1" });
+// t1: the step asks for the order number. No branch is judged yet: the step has to speak first.
+const t2 = await agent.turn({ sessionId: "s1", context, session: t1.session, message: "quero falar com uma pessoa", id: "m2" });
+console.log(t2.ended.map((run) => run.reason)); // ["flow", "end"]: the when branch fired and chained into "humano", which then ran to its end
+console.log(t2.messages.map((m) => m.text)); // ["Claro, vou chamar alguém da equipe. Um minuto."]
 ```
 
-For users outside the US — or with the feature flag off — `if` returns `false` immediately and the entry is skipped without ever evaluating `when`. The second entry then evaluates `when` once and routes to `global_pricing`. A US user with the flag on passes `if`, and only then does the AI call evaluate "user is asking about pricing." When both pass, the entry wins.
+## Where branches live
 
-The cost difference is real. Without the short-circuit, every turn would pay one LLM call to evaluate `when` for every entry that names it. With it, the framework spends tokens on the entries it can't dispose of for free.
+`branches` is allowed on two step kinds:
 
-## Resolving `then`
+- A talk step that collects (`collect`, with or without a `prompt`). Both `when` and `if` branches work while it asks. A `prompt` step with no `collect` speaks once and moves on in the same turn, so its branches are only judged in the rare turn where it is still asking: the last step of an `onEnd: 'stay'` flow, or a turn where another run answered the customer first.
+- A timer `wait` step (`wait: '2d'`). Only `if` branches are judged there.
 
-`then` accepts three forms, resolved in this order:
+`say`, `do`, `if` and `wait: { event }` steps have no branches. A code fork between them is an `if` step.
 
-1. **A step id in the current flow** — the engine enters that step directly. Same effect as `nextStep: <id>` would have on a linear chain.
-2. **A flow id** — sugar for `applyDirective({ goTo: <flowId> })`. The string is desugared into a flow transition with no data carry.
-3. **A `Directive` object** — applied via `applyDirective` directly. This is the form to use whenever you need anything more than a bare jump: cross-flow steps, data writes, completion, or verbatim replies.
+## When a branch is judged
 
-When a string matches both a local step id and a flow id (rare; you'd have to name them the same thing), the local step wins. Step ids are scoped to the current flow, so the lookup is unambiguous.
+**On a talk step**, the branches are judged on the customer's next message, while the step is asking. Not when the step is first reached (it has to speak first), not on a wake, not on an event. In that turn:
 
-A bare string **never** resolves to a step in a different flow, even when that step id is globally unique. Cross-flow step targets require the `Directive` form:
+1. The understand call answers every `when` branch of the asking step, true or false, alongside routing and extraction. The extracted fields land in the data.
+2. The branches are checked in the order you wrote them. An `if` branch is evaluated by code with this turn's context and data; a `when` branch uses the model's answer. The first one that holds wins.
+3. The step writes `code: 'branch'` and `next` to its outcome line, and the run follows the branch's `then` in the same turn. It does not speak again.
 
-```typescript
-{
-  if: ({ data }) => data.escalate === true,
-  then: { goToStep: { step: "priority_intake", flow: "Escalation" } },
+If no branch holds, the step carries on: it speaks again with what is still pending, or completes when its fields are known.
+
+**On a `wait` step**, the branches are judged only when the customer replies while the run is parked, which is also when `else` applies. The first `if` branch that holds wins over `else`. A `wait` with no `else` ignores the reply, branches included. When the timer fires, branches are not consulted: the run takes `then`, or `else` if the customer wrote after the wait was set. The outcome line reads `code: 'replied'` or `code: 'no-reply'`.
+
+```ts
+import { falai } from "@falai/agent";
+
+interface Ctx {
+  lead: { owner: "ai" | "human" };
 }
-```
 
-This is intentional. Keeping the string-form lookup confined to "current flow's steps or any flow id" means a glance at the source tells you what the string means without needing to know whether some unrelated flow happens to define a step by the same name. When you mean to cross flows, the `Directive` form makes that explicit at the call site.
+const f = falai<Ctx>().fields({
+  nome: { type: "string", ask: "Pergunte o nome." },
+});
 
-## A mixed-target router
-
-Most real branch points combine forms. One entry tests data, another classifies intent, a third writes state and completes. The `branches` array reads top-to-bottom as a list of cases:
-
-```typescript
-flow({
-  id: "router",
+const retomar = f.flow({
+  id: "retomar",
+  name: "Retomar quem sumiu",
+  on: [{ silence: "24h" }],
   steps: [
+    { id: "p1", prompt: "Retome a conversa de forma leve." },
     {
-      id: "classify",
-      prompt: "How can I help?",
-      branches: [
-        // Step id in the current flow.
-        { if: ({ data }) => data.tier === "enterprise", then: "enterprise_path" },
-
-        // Flow id — sugar for { goTo: "CancellationFlow" }.
-        { when: "user wants to cancel", then: "CancellationFlow" },
-
-        // Full Directive — cross-flow with data carry.
-        {
-          when: "user is asking about a refund",
-          then: { goTo: { flow: "Refund", data: { source: "classify" } } },
-        },
-
-        // Cross-flow step reference (Directive required).
-        {
-          if: ({ data }) => data.escalate === true,
-          then: { goToStep: { step: "priority_intake", flow: "Escalation" } },
-        },
-
-        // Directive with completion + state write.
-        {
-          if: ({ data }) => data.shouldComplete === true,
-          then: { complete: true, dataUpdate: { closedAt: new Date().toISOString() } },
-        },
-
-        // Unconditional fallback.
-        { then: "default_path" },
-      ],
+      id: "w1",
+      wait: "2d",
+      // The customer replied. If a human took over meanwhile, step aside quietly; otherwise thank them.
+      branches: [{ if: ({ context }) => context.lead.owner === "human", then: "end" }],
+      else: "obrigada",
     },
-    { id: "enterprise_path", prompt: "..." },
-    { id: "default_path",    prompt: "..." },
+    { id: "p2", prompt: "Última tentativa, curta e sem pressão.", then: "end" },
+    { id: "obrigada", prompt: "Agradeça a resposta e retome de onde parou." },
   ],
 });
 ```
 
-The mix is the point. Code-only entries pay nothing, AI entries pay one classification, the Directive entries reach across flows or write completion state. Everything declarative is in one list at the source step. There is no separate router file, no decision tree spread across `step.when` clauses on five different successors.
+## `then`: where a branch goes
 
-## Coexisting with the implicit fork
+`then` is a `Next`, the same type every step uses:
 
-Branches don't replace the implicit-fork pattern (multiple successor steps each carrying their own `step.when`). Both forms stay first-class. Choose by intent:
+| `then` | Effect |
+|---|---|
+| `'fora'` (any step id) | jump to that step of this flow |
+| `'end'` | end the run; the flow's `onEnd` decides what happens next |
+| `{ step: 'quem', clear: ['nome'] }` | forget those fields, then jump |
+| `{ flow: 'humano', input? }` | end this run and start that flow; it takes the floor |
 
-- **Implicit fork** when the flow reads as a linear chain that occasionally skips. The fork is incidental — the bulk of the flow is "do A, then B, then maybe C, then D."
-- **Explicit fork (`branches`)** when the source step is a routing point. The fork is the point — the step exists to choose between N targets and the targets are owned by the source.
+All four are covered in [Flow control](flow-control.md).
 
-When both are present on the same step, branches take precedence. If a branch entry matches, the linear chain is bypassed entirely. If `branches` returns `undefined` — no entry matched — the linear chain runs as if `branches` were absent.
+## The `if` step
 
-```typescript
-flow({
-  id: "support",
+When the question has nothing to do with the latest message, do not wait for one. An `if` step is a code fork that runs the moment the run reaches it, with zero model calls.
+
+```ts
+import { falai } from "@falai/agent";
+
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome." },
+  confirmado: { type: "boolean", ask: "Resuma o que anotou e pergunte se está certo." },
+});
+
+const triagem = f.flow({
+  id: "triagem",
+  name: "Triagem",
+  on: [{ message: ["quer saber como funciona"] }],
   steps: [
-    {
-      id: "intake",
-      prompt: "How can I help?",
-      // Branches handle the obvious cases up-front.
-      branches: [
-        { if: ({ data }) => data.priority === "P0", then: "fast_path" },
-        { when: "user is asking a billing question", then: "billing" },
-      ],
-    },
-    // Linear successors with their own `when` — the implicit-fork pattern.
-    // These only run if no branch entry matched on `intake`.
-    { id: "tech",      when: "user is asking a technical question", prompt: "..." },
-    { id: "general",   prompt: "I can help with that." },
-    // ...
-    { id: "fast_path", prompt: "..." },
-    { id: "billing",   prompt: "..." },
+    { id: "quem", collect: ["nome"] },
+    { id: "confirma", collect: ["confirmado"] },
+    // true: fall through to "tchau". false: forget the answer and ask again from "quem".
+    { id: "ok", if: { equals: { confirmado: true } }, else: { step: "quem", clear: ["confirmado", "nome"] } },
+    { id: "tchau", prompt: "Agradeça e diga que um vendedor continua daqui." },
   ],
 });
 ```
 
-The combination here is deliberate. Branches catch the cases that have an explicit short-circuit (P0 priority is in `data`, billing is unambiguous to classify). Everything else falls through to the implicit fork, which the AI step selector picks among. Neither pattern is forced into doing what the other does better.
+`then` is taken when the predicate holds; it defaults to the next step. `else` is taken when it does not; it defaults to `'end'`. The outcome line is `{ kind: 'if', status: 'ok', next: 'quem' }`.
+
+The `if` step is where a collected boolean becomes a decision. `confirmado` is a boolean, so it is harvested only from the reply to the step that asks for it (`extract: 'asked'`); a stray "sim" earlier in the conversation cannot open the gate. [Collection](../concepts/collection.md) has the rules.
+
+## Backward edges and `clear`
+
+Known fields are never asked twice. A branch or `else` that jumps back to a collect step whose fields are already known does not re-ask them: the step is skipped with `code: 'already-known'` and the run moves on. To ask again, clear the fields on the way: `{ step: 'quem', clear: ['nome'] }`.
+
+`validateFlow` runs on every flow when the agent is built and logs a warning for a `then`, `else`, `onFail` or branch `then` that points backward without `clear`: `jumps back to "quem" without clear; the fields collected since stay known and those steps skip. Add clear: [...] to re-ask them.` An `if` step whose `then` points backward with no `else` is refused outright, because its false case would have nowhere to go.
+
+A jump backward re-enters the step, which mints a new visit and a new message key (`triagem#m1:quem:2`). A run that moves 50 steps in one turn without stopping ends with `code: 'step-loop'`.
 
 ## What you get back
 
-When a branch entry's `then` is applied, the response surfaces it the same way it would surface any other position decision. The active step changes, `currentStep.id` reflects the new step, and `appliedInstructions` is recomputed for the new scope. If the entry's `then` was a `Directive` that included `dataUpdate` or `contextUpdate`, those writes are visible on the response too — branches participate in state writes through the same `applyDirective` machinery as tools and hooks.
+- `outcomes[]`: the asking step's line with `code: 'branch'` and `next` set to the step id, `end`, or `flow:<id>`.
+- `ended[]`: when `then` was `'end'` (`reason: 'end'`) or `{ flow }` (`reason: 'flow'`).
+- `started[]`: the chained run, when `then` was `{ flow }`.
+- `messages[]`: whatever the run said after moving, in order.
 
-The optional `label` field on each entry doesn't affect resolution; it's surfaced in event traces and in flow visualization tools so you can see which branch fired without having to read the predicate. Use it on entries whose `if`/`when` conditions are long enough to be hard to skim at a glance.
+## Read next
 
-## Recap
-
-Four moves cover almost every fork you'll write:
-
-- **Code-only** when the choice is in `data` or `context`. Free, deterministic, and combinable with `auto: true` for zero-LLM routing nodes.
-- **AI-only** when the choice is intent classification. One LLM call, declared at the source step instead of scattered across target-step `when` clauses.
-- **Combined `if + when`** when both must agree. Code runs first, AI runs only when code passed.
-- **Directive in `then`** when the target is in another flow, when state needs to be written, or when the branch should complete or abort the flow.
-
-`branches` doesn't add a new control-flow primitive. It reuses `when`, `if`, and `Directive` in a list shape that makes the fork visible at the source step. Pair it with the implicit-fork pattern when the linear chain is the natural read; pair it with `auto: true` when the routing decision shouldn't speak.
-
-**Next:** [Flow control](./flow-control.md)
+- [Conditions](conditions.md): what `if` and `when` see, in code and in JSON.
+- [Flow control](flow-control.md): every form of `then`, `onEnd`, `while`, the caps.
+- [Branches reference](../reference/branches.md): the `Branch` type.
