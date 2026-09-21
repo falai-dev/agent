@@ -140,6 +140,33 @@ A string closes the gate: `do` steps still run, nothing is phrased, zero model c
 | `ended` | `Array<Run & { reason: EndReason }>` | Runs that ended, with the run's last state and why: `'end'`, `'flow'`, `'reset'`, `'skipped'`, `'failed'` or `'replaced'`. |
 | `skipped` | `Array<{ flowId; anchor; triggerKey; code; message }>` | Triggers that matched but did not start a run, and why (`code: 'already-claimed'`, `code: 'cooldown'`, `code: 'already-running'`, `code: 'hop-limit'`, `code: 'flow-gone'`). |
 | `llmCalls` | `number` | Model calls this turn: at most one understand call, plus one speak call and one per tool round, plus one when compaction summarized. |
+| `usage` | `TokenUsage` | What those calls cost, added up. Absent when the turn spent no call, and when the provider reported no counts. |
+
+### TokenUsage
+
+```ts
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  cachedInputTokens: number;
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `promptTokens` | `number` | Tokens read, the cached ones included. |
+| `completionTokens` | `number` | Tokens written. Thinking tokens count here. |
+| `cachedInputTokens` | `number` | The part of `promptTokens` the provider served from its cache, billed far cheaper. `0` when the provider caches nothing or the prefix was cold. |
+
+The counts are the providers' own, summed over every call the turn made. `usage` is absent rather than zero when nobody counted, so an unreported turn never looks free:
+
+```ts fragment
+const r = await agent.turn({ sessionId: "s1", message: "oi" });
+if (r.usage) {
+  const fresh = r.usage.promptTokens - r.usage.cachedInputTokens;
+  console.log(`${r.llmCalls} call(s): ${fresh} read, ${r.usage.cachedInputTokens} cached, ${r.usage.completionTokens} written`);
+}
+```
 
 ### OutboundMessage
 
@@ -165,6 +192,7 @@ A string closes the gate: `do` steps still run, nothing is phrased, zero model c
 - **Construction validates everything.** `f.agent()` throws `FlowConfigurationError` when:
   - two flows share an id
   - `idle.tools` names a tool that is not registered
+  - a tool's `parameters` is not a JSON Schema object (`{ type: "object", properties, required }`) — the shape a function declaration needs, and easy to confuse with an action's `{ name: { type } }` map
   - `validateFlow` rejects any flow (see [Flow](flow.md#what-validateflow-rejects))
 
   Warnings — a backward jump without `clear`, a `collect` with no prompt and no `ask` — are logged with the `[Agent]` prefix. Compaction options outside their ranges throw a plain `Error`.

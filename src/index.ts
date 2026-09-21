@@ -122,6 +122,7 @@ export type {
   Flow,
   GenerateMessageInput,
   GenerateMessageOutput,
+  TokenUsage,
   GenerateMessageStreamChunk,
   History,
   HistoryItem,

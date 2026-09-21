@@ -9,6 +9,7 @@
  */
 
 import type { AgentOptions, EndReason, TurnInput, TurnResult } from "../types/agent.js";
+import type { TokenUsage } from "../types/ai.js";
 import type { ActionResult, Branch, DoStep, Duration, Flow, IfStep, Next, Pred, PredCtx, Repeat, SayStep, Step, StepBase, TalkStep, Trigger, WaitEventStep, WaitStep } from "../types/flow.js";
 import type { History } from "../types/history.js";
 import type { Run, Session, StepOutcome, StepOutcomeCode, StepOutcomeKind, TriggerKind } from "../types/session.js";
@@ -17,7 +18,8 @@ import { parseDuration } from "../utils/duration.js";
 import { OUTCOME_MESSAGES } from "../utils/outcomes.js";
 import { coerceField, DEFAULT_MAX_ASKS, extractMode, isKnown, pendingFields } from "../utils/schema.js";
 import { render, renderDeep } from "../utils/template.js";
-import type { IdleRequest, InputKind, SpeakOutcome, SpeakRequest, Spoken, TalkRequest, UnderstandRequest, Understanding } from "./contracts.js";
+import { addUsage } from "../utils/usage.js";
+import type { Deferral, IdleRequest, InputKind, SpeakOutcome, SpeakRequest, Spoken, TalkRequest, UnderstandRequest, Understanding } from "./contracts.js";
 import { deepEqual, evaluate } from "./predicate.js";
 
 /** A `wait` this short rides as `afterMs` on the next message instead of a real wake. */
@@ -26,7 +28,14 @@ const MAX_STEPS_PER_TURN = 50;
 const MAX_HOP = 5;
 /** Kept always-claims per flow and anchor, kept input ids, kept outcomes per run. */
 const KEEP = 50;
-const RETRY_BACKOFF: Duration[] = ["1m", "5m", "15m"];
+/**
+ * How long a talk step waits after the provider failed, and how many times. The
+ * ladder used to be three rungs clamped by `Math.min`, which meant it never
+ * ran out: a stuck session re-ran understand AND speak every fifteen minutes
+ * for as long as it existed. It now ends after the last rung, so one outage
+ * costs at most five retries spread over seven hours instead of forever.
+ */
+const RETRY_BACKOFF: Duration[] = ["1m", "5m", "15m", "1h", "6h"];
 const DEFAULT_EVENT_WAIT: Duration = "30d";
 const ROUTE_MIN = 40;
 const ROUTE_STICKY = 15;
@@ -62,6 +71,7 @@ export interface Turn<C = unknown, D = unknown> {
   ended: TurnResult<D>["ended"];
   skipped: TurnResult<D>["skipped"];
   llmCalls: number;
+  usage?: TokenUsage;
   // ── internals ──
   /** The run holding the floor this turn: resolved in Ingest, routed in Decide, or the asker. */
   floorRunId?: string;
@@ -579,6 +589,7 @@ export class Runner<C = unknown, D = unknown> {
   decide(turn: Turn<C, D>, understanding: Understanding | null): void {
     if (turn.ignored || turn.what.kind !== "message") return;
     turn.llmCalls += understanding?.llmCalls ?? 0;
+    turn.usage = addUsage(turn.usage, understanding?.usage);
     const key = turn.triggerKey;
     const asker = this.asker(turn);
 
@@ -1044,11 +1055,13 @@ export class Runner<C = unknown, D = unknown> {
     turn.talk = undefined;
     if (outcome && "deferred" in outcome) {
       turn.llmCalls += outcome.llmCalls;
-      if (talk) this.deferTalk(turn, talk);
-      else this.outcome(turn, undefined, { kind: "idle", status: "deferred", code: outcome.deferred, llmCalls: outcome.llmCalls });
+      turn.usage = addUsage(turn.usage, outcome.usage);
+      if (talk) this.deferTalk(turn, talk, outcome.deferred);
+      else this.outcome(turn, undefined, { kind: "idle", status: "deferred", code: outcome.deferred.code, llmCalls: outcome.llmCalls });
     } else if (outcome) {
       const { spoken } = outcome;
       turn.llmCalls += spoken.llmCalls;
+      turn.usage = addUsage(turn.usage, spoken.usage);
       if (talk) {
         this.applySpoken(turn, talk, spoken);
         await this.drain(turn);
@@ -1094,16 +1107,36 @@ export class Runner<C = unknown, D = unknown> {
     if (turn.session.runs.includes(run) && run.status === "running") turn.queue.push(run);
   }
 
-  /** The provider failed: re-park the talk step under a retry wake, +1m, +5m, then +15m. */
-  private deferTalk(turn: Turn<C, D>, talk: TalkRequest<C, D>): void {
+  /** The provider failed: park the talk step under a retry wake, or stop trying. */
+  private deferTalk(turn: Turn<C, D>, talk: TalkRequest<C, D>, deferred: Deferral): void {
     const { run, step } = talk;
+    const key = this.stepKey(run, step);
     let attempt = 0;
     for (let i = run.outcomes.length - 1; i >= 0 && run.outcomes[i].status === "deferred" && run.outcomes[i].stepId === step.id; i--) attempt++;
-    const backoff = RETRY_BACKOFF[Math.min(attempt, RETRY_BACKOFF.length - 1)];
-    const at = new Date(turn.now.getTime() + parseDuration(backoff));
+
+    const at = this.retryAt(turn, deferred, attempt);
+    if (!at) {
+      // A wrong key, a prompt past the context window or a spent balance is not
+      // going to be different in fifteen minutes. End the run and let the host
+      // read the code, rather than burning two model calls against the same
+      // wall until someone notices.
+      this.outcome(turn, run, { kind: talkKind(step), status: "failed", key, code: deferred.code });
+      this.endRun(turn, run, "failed");
+      return;
+    }
     const visit = run.visits[step.id] ?? 0;
     this.park(turn, run, { kind: "timer", key: `${run.id}:${step.id}:${visit}:retry:${at.getTime()}` }, at);
-    this.outcome(turn, run, { kind: talkKind(step), status: "deferred", key: this.stepKey(run, step), code: "provider-unavailable", until: at.toISOString() });
+    this.outcome(turn, run, { kind: talkKind(step), status: "deferred", key, code: deferred.code, until: at.toISOString() });
+  }
+
+  /** When to try again, or `null` when trying again cannot help. */
+  private retryAt(turn: Turn<C, D>, deferred: Deferral, attempt: number): Date | null {
+    if (!deferred.retryable || attempt >= RETRY_BACKOFF.length) return null;
+    const ladder = turn.now.getTime() + parseDuration(RETRY_BACKOFF[attempt]);
+    // The provider said when its window reopens. One wake then beats climbing a
+    // ladder measured in minutes inside a limit measured in hours.
+    const reset = deferred.resetAtMs;
+    return new Date(reset !== undefined && reset > ladder ? reset : ladder);
   }
 
   /** The assistant spoke last: every silence flow passing `if` and `repeat` gets a wake. */
@@ -1132,11 +1165,11 @@ export class Runner<C = unknown, D = unknown> {
   // ── Return (design §4.8) ──────────────────────────────────────────────
 
   finish(turn: Turn<C, D>): TurnResult<D> {
-    const { session, messages, schedule, outcomes, started, ended, skipped, llmCalls } = turn;
+    const { session, messages, schedule, outcomes, started, ended, skipped, llmCalls, usage } = turn;
     const changed =
       !turn.ignored &&
       (!turn.original || !deepEqual(session, turn.original) || messages.length > 0 || schedule.length > 0 || outcomes.length > 0 || skipped.length > 0);
-    return { session, changed, messages, schedule, outcomes, started, ended, skipped, llmCalls };
+    return { session, changed, messages, schedule, outcomes, started, ended, skipped, llmCalls, ...(usage ? { usage } : {}) };
   }
 }
 

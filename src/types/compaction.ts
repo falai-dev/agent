@@ -2,7 +2,7 @@
  * Context compaction types for managing conversation history size
  */
 
-import type { AiProvider } from "./ai.js";
+import type { AiProvider, TokenUsage } from "./ai.js";
 import type { HistoryItem } from "./history.js";
 
 /**
@@ -49,4 +49,6 @@ export interface CompactionResult {
     messagesCompacted: number;
     /** Summary text (if auto-compact was used) */
     summary?: string;
+    /** What the summarising call cost, when one was made and counted. */
+    usage?: TokenUsage;
 }

@@ -7,6 +7,7 @@
  * Runner (code)  ──SpeakRequest──────▶  Speak (≤1 call + tools) ──SpeakOutcome──▶  Runner
  */
 
+import type { TokenUsage } from "../types/ai.js";
 import type { Idle } from "../types/agent.js";
 import type { FieldDef, Flow, Instruction, StepBase, TalkStep } from "../types/flow.js";
 import type { History } from "../types/history.js";
@@ -48,6 +49,7 @@ export interface Understanding {
   /** field → raw value the lead gave, or nothing. */
   fields: Record<string, unknown>;
   llmCalls: number;
+  usage?: TokenUsage;
 }
 
 // ── Speak ───────────────────────────────────────────────────────────────
@@ -87,9 +89,23 @@ export interface Spoken {
   data: Record<string, unknown>;
   toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   llmCalls: number;
+  usage?: TokenUsage;
 }
 
-/** `deferred` is the provider failing; Runner re-parks the step under a retry wake and writes the code on the outcome. */
-export type SpeakOutcome = { spoken: Spoken } | { deferred: StepOutcomeCode; llmCalls: number };
+/**
+ * Why a speak call failed, and whether a later wake could still fix it. A kind
+ * no wake can fix — wrong key, a prompt past the context window, a spent
+ * balance with no stated reset — ends the step instead of re-running two model
+ * calls against the same wall every fifteen minutes.
+ */
+export interface Deferral {
+  code: StepOutcomeCode;
+  retryable: boolean;
+  /** When the provider said its limit reopens. Beats the backoff ladder. */
+  resetAtMs?: number;
+}
+
+/** `deferred` is the provider failing; Runner re-parks the step under a retry wake, or ends it. */
+export type SpeakOutcome = { spoken: Spoken } | { deferred: Deferral; llmCalls: number; usage?: TokenUsage };
 
 export type SpeakStreamChunk = { delta: string } | { done: true; outcome: SpeakOutcome };

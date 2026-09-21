@@ -18,14 +18,16 @@
  */
 
 import type { AgentOptions } from "../types/agent.js";
+import type { GenerateMessageOutput, TokenUsage } from "../types/ai.js";
 import type { FieldDef, FieldDefs, Flow, ParamDef, ParamDefs } from "../types/flow.js";
 import type { StructuredSchema } from "../types/schema.js";
 import { extractEmbeddedJSONObject, isRecord } from "../utils/json.js";
 import { logger } from "../utils/logger.js";
 import { coerceField, isKnown, pendingFields, toWireSchema } from "../utils/schema.js";
 import { render, type TemplateScope } from "../utils/template.js";
+import { readUsage } from "../utils/usage.js";
 import type { UnderstandRequest, Understanding } from "./contracts.js";
-import { describeField, factsSection, identitySection, joinSections, knowledgeSection } from "./Prompt.js";
+import { describeField, factsSection, joinSections, stablePrefix } from "./Prompt.js";
 
 export const UNDERSTAND_SCHEMA_NAME = "understand";
 
@@ -50,11 +52,12 @@ export class Understand<C = unknown, D = unknown> {
 
     const aliases = new Aliases();
     const jsonSchema = buildEnvelope(req, candidates, aliases);
-    const prompt = this.buildPrompt(req, candidates, aliases, jsonSchema);
+    const { system, turn: prompt } = this.buildPrompt(req, candidates, aliases, jsonSchema);
 
     // Provider failures propagate: in this phase the turn throws and the host retries the input.
     const out = await this.options.provider.generateMessage<C, unknown>({
       prompt,
+      ...(system ? { system } : {}),
       history: req.history,
       context: req.context,
       parameters: { jsonSchema, schemaName: UNDERSTAND_SCHEMA_NAME },
@@ -66,9 +69,9 @@ export class Understand<C = unknown, D = unknown> {
         `[Understand] The reply had no usable structure, so nothing was judged this turn. ` +
           `Reply started with: ${out.message.slice(0, 200)}`,
       );
-      return empty(1);
+      return empty(1, readUsage(out.metadata));
     }
-    return parseReply(reply, aliases);
+    return { ...parseReply(reply, aliases), ...usageOf(out.metadata) };
   }
 
   private buildPrompt(
@@ -76,13 +79,15 @@ export class Understand<C = unknown, D = unknown> {
     candidates: Flow<C, D>[],
     aliases: Aliases,
     schema: StructuredSchema,
-  ): string {
+  ): { system: string | null; turn: string } {
     const scope: TemplateScope = { data: req.data, context: req.context };
     const t = (text: string): string => render(text, scope);
     const data = isRecord(req.data) ? req.data : {};
-    return joinSections(
-      identitySection(this.options, scope),
-      knowledgeSection(this.options.knowledgeBase),
+    const { system, inline } = stablePrefix(this.options, scope);
+    return {
+      system,
+      turn: joinSections(
+      inline,
       taskSection(),
       floorSection(req, this.options.fields, data, t),
       factsSection(this.options.fields, data),
@@ -92,7 +97,8 @@ export class Understand<C = unknown, D = unknown> {
       fieldsSection(req.fields, aliases),
       messageSection(req.text),
       outputSection(schema),
-    );
+      ),
+    };
   }
 }
 
@@ -355,8 +361,14 @@ function describeParam(name: string, def: ParamDef): string {
 
 // ── Reply parsing ───────────────────────────────────────────────────────
 
-function empty(llmCalls: number): Understanding {
-  return { flows: {}, mentions: {}, extract: {}, branches: {}, fields: {}, llmCalls };
+function empty(llmCalls: number, usage?: TokenUsage): Understanding {
+  return { flows: {}, mentions: {}, extract: {}, branches: {}, fields: {}, llmCalls, ...(usage ? { usage } : {}) };
+}
+
+/** `{ usage }` when the provider counted, `{}` when it did not — `exactOptionalPropertyTypes`. */
+function usageOf(metadata: GenerateMessageOutput["metadata"]): { usage?: TokenUsage } {
+  const usage = readUsage(metadata);
+  return usage ? { usage } : {};
 }
 
 /** A reply is usable when it is an object carrying at least one envelope section. */

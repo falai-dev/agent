@@ -147,8 +147,13 @@ function shouldTryBackup(error: unknown): boolean {
 }
 
 /** History plus the composed prompt, as the seam's messages. */
-export function toMessages(history: HistoryItem[], prompt: string): ChatMessage[] {
+export function toMessages(history: HistoryItem[], prompt: string, system?: string): ChatMessage[] {
   const out: ChatMessage[] = [];
+  // First, and before any history: a cached prefix is only a prefix if nothing
+  // precedes it. Anthropic-shape hoists every system item into one top-level
+  // block, so a host that also puts system items in its history joins them to
+  // this one — fine while those are stable, and the host's to keep stable.
+  if (system?.trim()) out.push({ role: "system", content: system });
   for (const item of history) {
     switch (item.role) {
       case "system":
@@ -351,7 +356,7 @@ export abstract class ProviderAdapter implements AiProvider {
   async *generateMessageStream<TContext = unknown, TStructured = AgentStructuredResponse>(
     input: GenerateMessageInput<TContext>,
   ): AsyncGenerator<GenerateMessageStreamChunk<TStructured>> {
-    const messages = toMessages(input.history, input.prompt);
+    const messages = toMessages(input.history, input.prompt, input.system);
     const tools = toTools(input.tools);
     const json = toJsonOutput(input);
     const acc: Accumulator = { text: "", model: this.primaryModel, reasoning: "", calls: new Map() };

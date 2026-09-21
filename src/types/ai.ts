@@ -23,8 +23,13 @@ export interface ReasoningConfig {
  * Input for AI message generation
  */
 export interface GenerateMessageInput<TContext = unknown> {
-  /** The constructed prompt */
+  /** The constructed prompt, sent as the final user turn. */
   prompt: string;
+  /**
+   * The part of the prompt that is the same every turn, sent as a leading
+   * system message. Split out so providers can cache it — see `stablePrefix`.
+   */
+  system?: string;
   /** Interaction history */
   history: HistoryItem[];
   /** Context data */
@@ -77,6 +82,19 @@ export interface AgentStructuredResponse extends Record<string, unknown> {
 }
 
 /**
+ * What a call cost, as the provider counted it. A turn spends several calls,
+ * so `TurnResult.usage` is their sum. Absent when no provider reported any.
+ */
+export interface TokenUsage {
+  /** Tokens read, the cached ones included. */
+  promptTokens: number;
+  /** Tokens written. Thinking tokens count here. */
+  completionTokens: number;
+  /** The part of `promptTokens` served from a cache, billed far cheaper. */
+  cachedInputTokens: number;
+}
+
+/**
  * Output from AI message generation
  */
 export interface GenerateMessageOutput<TStructured = AgentStructuredResponse> {
@@ -90,6 +108,12 @@ export interface GenerateMessageOutput<TStructured = AgentStructuredResponse> {
     tokensUsed?: number;
     /** Finish reason */
     finishReason?: string;
+    /** Tokens in the prompt, as the provider counted them. */
+    promptTokens?: number;
+    /** Tokens generated. */
+    completionTokens?: number;
+    /** The part of `promptTokens` the provider served from its cache, billed far cheaper. */
+    cachedInputTokens?: number;
     /** Additional provider-specific data */
     [key: string]: unknown;
   };
@@ -117,6 +141,12 @@ export interface GenerateMessageStreamChunk<
     tokensUsed?: number;
     /** Finish reason */
     finishReason?: string;
+    /** Tokens in the prompt, as the provider counted them. */
+    promptTokens?: number;
+    /** Tokens generated. */
+    completionTokens?: number;
+    /** The part of `promptTokens` the provider served from its cache, billed far cheaper. */
+    cachedInputTokens?: number;
     /** Additional provider-specific data */
     [key: string]: unknown;
   };

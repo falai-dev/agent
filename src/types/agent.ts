@@ -2,7 +2,7 @@
  * Agent options and the one entry point: `turn`.
  */
 
-import type { AiProvider } from "./ai.js";
+import type { AiProvider, TokenUsage } from "./ai.js";
 import type {
   ActionMap,
   ConditionMap,
@@ -146,6 +146,11 @@ export interface TurnResult<D = unknown> {
   /** Triggers that matched but did not start a run, with the reason. */
   skipped: Array<{ flowId: string; anchor: string; triggerKey: string; code: StepOutcomeCode; message: string }>;
   llmCalls: number;
+  /**
+   * What those calls cost, added up. Absent when the turn spent none, or when
+   * the provider reported no counts.
+   */
+  usage?: TokenUsage;
 }
 
 export type TurnStreamChunk<D = unknown> = { delta: string } | { done: true; result: TurnResult<D> };

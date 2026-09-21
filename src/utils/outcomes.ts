@@ -48,5 +48,9 @@ export const OUTCOME_MESSAGES = {
   "bad-value": "the value did not fit the field's type",
   "not-in-enum": "the value is not one of the field's options",
 
+  "provider-quota": "the provider's usage limit is spent",
+  "provider-context": "the conversation outgrew the model's context window",
+  "provider-auth": "the provider rejected the credentials",
+  "provider-invalid": "the provider rejected the request",
   "provider-unavailable": "the model call failed or came back empty",
 } as const satisfies Record<StepOutcomeCode, string>;

@@ -8,6 +8,7 @@ import {
   joinSections,
   knowledgeSection,
   pendingSection,
+  stablePrefix,
 } from "../src/core/Prompt.js";
 import type { FieldDefs } from "../src/types/flow.js";
 
@@ -71,5 +72,40 @@ describe("Prompt sections", () => {
 
   test("joinSections drops empty parts", () => {
     expect(joinSections("a", null, "  ", undefined, "b")).toBe("a\n\nb");
+  });
+});
+
+describe("stablePrefix: what can be cached", () => {
+  const knowledgeBase = { horario: "9h às 18h" };
+
+  test("plain identity and the knowledge base become the system message", () => {
+    const { system, inline } = stablePrefix({ name: "Ana", persona: "Você fala pela Acme.", knowledgeBase }, {});
+    expect(inline).toBeNull();
+    expect(system).toContain('You are "Ana"');
+    expect(system).toContain("Você fala pela Acme.");
+    expect(system).toContain("- horario: 9h às 18h");
+  });
+
+  test("a persona that interpolates a field stays inline", () => {
+    // Cached, it would pay the write every turn and never read: the text
+    // changes the moment `nome` lands.
+    const { system, inline } = stablePrefix(
+      { name: "Ana", persona: "Você atende {{data.nome}}.", knowledgeBase },
+      { data: { nome: "Bia" } },
+    );
+    expect(inline).toContain("Você atende Bia.");
+    expect(system).toBe("## Knowledge base\n- horario: 9h às 18h");
+    expect(system).not.toContain("Bia");
+  });
+
+  test("a templated goal moves identity inline too", () => {
+    const { system, inline } = stablePrefix({ name: "Ana", goal: "Qualificar {{context.tipo}}." }, { context: { tipo: "leads" } });
+    expect(inline).toContain("Qualificar leads.");
+    expect(system).toBeNull();
+  });
+
+  test("with nothing stable to say there is no system message at all", () => {
+    expect(stablePrefix({ name: "Ana" }, {}).system).toContain('You are "Ana"');
+    expect(stablePrefix({ name: "Ana", persona: "{{data.x}}" }, {}).system).toBeNull();
   });
 });

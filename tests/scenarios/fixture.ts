@@ -77,6 +77,8 @@ export interface BuildOptions {
   idle?: AgentOptions<Ctx, Data>["idle"];
   instructions?: AgentOptions<Ctx, Data>["instructions"];
   businessHours?: AgentOptions<Ctx, Data>["businessHours"];
+  /** Have the mock provider report token counts; see `MockOptions.usage`. */
+  usage?: boolean;
 }
 
 export function build(flows: Flow<Ctx, Data>[], options: BuildOptions = {}): Harness {
@@ -90,7 +92,7 @@ export function build(flows: Flow<Ctx, Data>[], options: BuildOptions = {}): Har
         return options.reply ? options.reply(name, calls.length, params) : { ok: true };
       },
     });
-  const provider = mockProvider(options.script);
+  const provider = mockProvider(options.script, options.usage ? { usage: true } : {});
   const agent = f.agent({
     name: "Ana",
     persona: "Vendedora simpática e direta.",

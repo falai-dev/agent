@@ -14,11 +14,14 @@
  * field values come back raw for Runner to validate.
  */
 
-import type { GenerateMessageInput } from "../types/ai.js";
+import { ProviderError, classify, type ErrorKind } from "@providerkit/core";
+
+import type { GenerateMessageInput, TokenUsage } from "../types/ai.js";
 import type { AgentOptions } from "../types/agent.js";
 import type { FieldDefs } from "../types/flow.js";
 import type { History } from "../types/history.js";
 import type { StructuredSchema } from "../types/schema.js";
+import type { StepOutcomeCode } from "../types/session.js";
 import type { Tool, ToolCtx, ToolResult } from "../types/tool.js";
 import { assistantMessage, toolMessage } from "../utils/history.js";
 import { extractEmbeddedJSONObject, isRecord, tryParseJSONResponse } from "../utils/json.js";
@@ -26,21 +29,58 @@ import { logger } from "../utils/logger.js";
 import { isKnown, toWireSchema } from "../utils/schema.js";
 import { StreamingMessageDecoder } from "../utils/streamingMessage.js";
 import { render, type TemplateScope } from "../utils/template.js";
-import type { SpeakOutcome, SpeakRequest, SpeakStreamChunk } from "./contracts.js";
+import { addUsage, readUsage } from "../utils/usage.js";
+import type { Deferral, SpeakOutcome, SpeakRequest, SpeakStreamChunk } from "./contracts.js";
 import {
   describeField,
   factsSection,
-  identitySection,
   instructionsSection,
   joinSections,
-  knowledgeSection,
   pendingSection,
+  stablePrefix,
 } from "./Prompt.js";
 
 const DEFAULT_MAX_TOOL_LOOPS = 5;
-/** The outcome detail Runner shows when the provider failed or said nothing. */
-/** The one reason this call can fail from the Runner's point of view; it becomes the outcome's `code`. */
-const UNAVAILABLE = "provider-unavailable";
+
+/**
+ * Every provider failure used to arrive here as one word, and Runner re-parked
+ * the step on a 1m/5m/15m ladder that never ended. So a spent balance, a wrong
+ * key or a prompt past the context window re-ran understand AND speak every
+ * fifteen minutes forever, and the customer was never answered. The kind says
+ * which of those it is; `RETRY_KINDS` says which are worth waking for at all.
+ */
+const DEFER_CODE = {
+  aborted: "provider-unavailable",
+  timeout: "provider-unavailable",
+  network: "provider-unavailable",
+  overload: "provider-unavailable",
+  rate: "provider-unavailable",
+  unknown: "provider-unavailable",
+  quota: "provider-quota",
+  entitlement: "provider-auth",
+  auth: "provider-auth",
+  model: "provider-invalid",
+  invalid: "provider-invalid",
+  content: "provider-invalid",
+  context: "provider-context",
+} as const satisfies Record<ErrorKind, StepOutcomeCode>;
+
+/** Kinds a later wake can fix on its own. Everything else needs a human. */
+const RETRY_KINDS: ReadonlySet<ErrorKind> = new Set<ErrorKind>(["timeout", "network", "overload", "rate", "unknown"]);
+
+/** The provider said nothing usable, which is not an error object. Always worth one more try. */
+const UNAVAILABLE: Deferral = { code: "provider-unavailable", retryable: true };
+
+/** What kind of wall this was, and whether waiting at it helps. */
+function deferralOf(error: unknown): Deferral {
+  const kind = classify(error);
+  const reset = error instanceof ProviderError ? error.resetAtMs : undefined;
+  // A usage window that says when it reopens is worth exactly one wake, then.
+  // Without that number, waiting is guessing, and the ladder guesses in minutes
+  // at a limit measured in hours.
+  const retryable = RETRY_KINDS.has(kind) || (kind === "quota" && reset !== undefined);
+  return { code: DEFER_CODE[kind], retryable, ...(reset !== undefined ? { resetAtMs: reset } : {}) };
+}
 /** Gemini rejects any other envelope property name. */
 const WIRE_NAME = /^[a-zA-Z0-9_-]+$/;
 
@@ -63,6 +103,7 @@ interface ToolCall {
 interface Reply {
   message: string;
   structured: unknown;
+  usage?: TokenUsage;
 }
 
 /** The model's own record of how it reached a tool round, replayed on the next. */
@@ -105,7 +146,7 @@ export class Speak<C = unknown, D = unknown> {
   private async *rounds(req: SpeakRequest<C, D>, streaming: boolean): AsyncGenerator<string, SpeakOutcome> {
     const talk = req.talk;
     const envelope = buildEnvelope(this.options.fields, "idle" in talk ? [] : talk.pending);
-    const prompt = buildPrompt(this.options, req, envelope);
+    const { system, turn: prompt } = buildPrompt(this.options, req, envelope);
     const maxLoops = this.options.maxToolLoops ?? DEFAULT_MAX_TOOL_LOOPS;
     const tools = maxLoops > 0 ? req.tools : [];
     const wireTools = tools.map((t) => ({ id: t.id, name: t.id, description: t.description, parameters: t.parameters }));
@@ -115,12 +156,14 @@ export class Speak<C = unknown, D = unknown> {
     const data: Record<string, unknown> = {};
     const toolCalls: ToolCall[] = [];
     let llmCalls = 0;
+    let usage: TokenUsage | undefined;
     let message = "";
 
     for (let round = 0; ; round++) {
       const offerTools = wireTools.length > 0 && round < maxLoops;
       const input: GenerateMessageInput<C> = {
         prompt: joinSections(prompt, offerTools ? TOOLS_SECTION : round > 0 ? FINAL_SECTION : null),
+        ...(system ? { system } : {}),
         history,
         context: req.context,
         tools: offerTools ? wireTools : undefined,
@@ -136,9 +179,12 @@ export class Speak<C = unknown, D = unknown> {
         // is coming, once providers report that before the end of the stream.
         reply = yield* this.call(input, streaming);
       } catch (error) {
-        logger.warn(`[Speak] provider failed on call ${llmCalls}: ${describeError(error)}`);
-        return { deferred: UNAVAILABLE, llmCalls };
+        const deferred = deferralOf(error);
+        logger.warn(`[Speak] provider failed on call ${llmCalls} (${deferred.code}): ${describeError(error)}`);
+        // A round that threw still bills the rounds before it.
+        return { deferred, llmCalls, ...(usage ? { usage } : {}) };
       }
+      usage = addUsage(usage, reply.usage);
 
       const read = readReply(reply, envelope);
       message = read.message;
@@ -160,27 +206,30 @@ export class Speak<C = unknown, D = unknown> {
 
     if (!message.trim()) {
       logger.warn(`[Speak] the model returned no message after ${llmCalls} call(s); deferring.`);
-      return { deferred: UNAVAILABLE, llmCalls };
+      return { deferred: UNAVAILABLE, llmCalls, ...(usage ? { usage } : {}) };
     }
-    return { spoken: { message, fields, data, toolCalls, llmCalls } };
+    return { spoken: { message, fields, data, toolCalls, llmCalls, ...(usage ? { usage } : {}) } };
   }
 
   /** One provider call. Streaming yields clean message deltas; both paths return the same shape. */
   private async *call(input: GenerateMessageInput<C>, streaming: boolean): AsyncGenerator<string, Reply> {
     if (!streaming) {
       const out = await this.options.provider.generateMessage<C, unknown>(input);
-      return { message: out.message, structured: out.structured };
+      return { message: out.message, structured: out.structured, usage: readUsage(out.metadata) };
     }
     const decoder = new StreamingMessageDecoder();
     let message = "";
     let structured: unknown;
+    // The counts ride on the terminal chunk, so the last one that carries any wins.
+    let usage: TokenUsage | undefined;
     for await (const chunk of this.options.provider.generateMessageStream<C, unknown>(input)) {
       const clean = decoder.push(chunk.accumulated);
       if (clean.delta) yield clean.delta;
       message = clean.message;
       if (chunk.structured !== undefined) structured = chunk.structured;
+      usage = readUsage(chunk.metadata) ?? usage;
     }
-    return { message, structured };
+    return { message, structured, usage };
   }
 
   /**
@@ -251,7 +300,11 @@ export class Speak<C = unknown, D = unknown> {
 
 // ── Prompt ──────────────────────────────────────────────────────────────
 
-function buildPrompt<C, D>(options: AgentOptions<C, D>, req: SpeakRequest<C, D>, envelope: Envelope): string {
+function buildPrompt<C, D>(
+  options: AgentOptions<C, D>,
+  req: SpeakRequest<C, D>,
+  envelope: Envelope,
+): { system: string | null; turn: string } {
   const talk = req.talk;
   const scope: TemplateScope = { data: req.data, context: req.context, input: "idle" in talk ? undefined : talk.run.input };
   const guideline = (text: string) => `${GUIDELINE_HEADING}\n${render(text, scope)}`;
@@ -265,14 +318,17 @@ function buildPrompt<C, D>(options: AgentOptions<C, D>, req: SpeakRequest<C, D>,
           // `Partial<D>` is a mapped type; the guard is how it reaches an index-signature parameter without a cast.
           factsSection(options.fields, isRecord(req.data) ? req.data : {}),
         ];
-  return joinSections(
-    identitySection(options, scope),
-    knowledgeSection(options.knowledgeBase),
-    ...body,
-    instructionsSection([{ caption: "[Always]", items: req.instructions }], scope),
-    inputSection(req.input),
-    formatSection(envelope, options.fields),
-  );
+  const { system, inline } = stablePrefix(options, scope);
+  return {
+    system,
+    turn: joinSections(
+      inline,
+      ...body,
+      instructionsSection([{ caption: "[Always]", items: req.instructions }], scope),
+      inputSection(req.input),
+      formatSection(envelope, options.fields),
+    ),
+  };
 }
 
 /** The customer's latest text, quoted. Without one, on anything but a message, the assistant opens the exchange. */

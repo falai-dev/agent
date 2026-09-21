@@ -23,7 +23,12 @@ export type Scripted = Structured | ((input: GenerateMessageInput) => Structured
 
 export interface MockCall {
   schemaName: string;
+  /** The trailing user turn: everything that changes between turns. */
   prompt: string;
+  /** The leading system message: the stable half, split out so it can be cached. */
+  system: string | undefined;
+  /** Both halves as the model reads them, for assertions that only care that it was told. */
+  seen: string;
   input: GenerateMessageInput;
 }
 
@@ -41,7 +46,17 @@ const CAPABILITIES: ProviderCapabilities = {
   supportsPromptCaching: false,
 };
 
-export function mockProvider(script: Record<string, Scripted[]> = {}): MockProvider {
+export interface MockOptions {
+  /**
+   * Report token counts on every call's metadata. Off by default, so a test
+   * asserting the exact shape of an `Understanding` or an outcome is not
+   * about tokens; on, the counts are characters read and written — real
+   * enough to tell one call's tally from another's.
+   */
+  usage?: boolean;
+}
+
+export function mockProvider(script: Record<string, Scripted[]> = {}, options: MockOptions = {}): MockProvider {
   const queues = new Map<string, Scripted[]>(
     Object.entries(script).map(([name, replies]) => [name, [...replies]]),
   );
@@ -49,7 +64,7 @@ export function mockProvider(script: Record<string, Scripted[]> = {}): MockProvi
 
   function next<TStructured>(input: GenerateMessageInput): GenerateMessageOutput<TStructured> {
     const schemaName = input.parameters?.schemaName ?? "(unnamed)";
-    calls.push({ schemaName, prompt: input.prompt, input });
+    calls.push({ schemaName, prompt: input.prompt, system: input.system, seen: [input.system, input.prompt].filter(Boolean).join("\n\n"), input });
     const queue = queues.get(schemaName);
     const scripted = queue?.shift();
     if (scripted === undefined) {
@@ -60,7 +75,17 @@ export function mockProvider(script: Record<string, Scripted[]> = {}): MockProvi
     }
     const structured = typeof scripted === "function" ? scripted(input) : scripted;
     const message = typeof structured.message === "string" ? structured.message : JSON.stringify(structured);
-    return { message, structured: structured as TStructured, metadata: { model: "mock" } };
+    const metadata = {
+      model: "mock",
+      ...(options.usage
+        ? {
+            promptTokens: (input.system?.length ?? 0) + input.prompt.length,
+            completionTokens: message.length,
+            cachedInputTokens: 0,
+          }
+        : {}),
+    };
+    return { message, structured: structured as TStructured, metadata };
   }
 
   return {

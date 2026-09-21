@@ -27,6 +27,37 @@ export function identitySection(
   return lines.join("\n");
 }
 
+/**
+ * Split the prompt's opening into the half that repeats every turn and the
+ * half that does not.
+ *
+ * The stable half goes out as a system message so a provider can cache it: on
+ * Anthropic that block is the one thing carrying a `cache_control` marker, and
+ * a cache read is a tenth the price of the tokens it replaces. Sent as part of
+ * the trailing user turn — which is where the whole prompt used to go — it sat
+ * behind text that changes every turn, so nothing was ever cached and both
+ * calls of every turn re-billed the identity and the knowledge base in full.
+ *
+ * The line is drawn at "does this text interpolate", not at "is this identity".
+ * `persona` and `goal` render through the turn's scope, so a persona that
+ * mentions a collected field changes the moment that field lands: cached, it
+ * would pay the write every turn and never read. Those go back inline.
+ */
+export function stablePrefix(
+  options: Pick<AgentOptions, "name" | "persona" | "goal" | "knowledgeBase">,
+  scope: TemplateScope,
+): { system: string | null; inline: string | null } {
+  const identity = identitySection(options, scope);
+  const knowledge = knowledgeSection(options.knowledgeBase);
+  const varies = isTemplated(options.persona) || isTemplated(options.goal);
+  if (varies) return { system: knowledge, inline: identity };
+  return { system: joinSections(identity, knowledge) || null, inline: null };
+}
+
+function isTemplated(text: string | undefined): boolean {
+  return typeof text === "string" && text.includes("{{");
+}
+
 /** Any JSON the agent should know, as nested bullets. */
 export function knowledgeSection(knowledge: Record<string, unknown> | undefined): string | null {
   if (!knowledge || Object.keys(knowledge).length === 0) return null;

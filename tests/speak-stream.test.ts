@@ -117,7 +117,7 @@ describe("Speak.stream", () => {
     const provider = jsonStreamProvider([]);
     const { deltas, outcome } = await collect(new Speak(agentOptions(provider)).stream(talkRequest()));
     expect(deltas).toEqual([]);
-    expect(outcome).toEqual({ deferred: "provider-unavailable", llmCalls: 1 });
+    expect(outcome).toEqual({ deferred: { code: "provider-unavailable", retryable: true }, llmCalls: 1 });
   });
 
   test("a plain-text stream passes through as one delta", async () => {

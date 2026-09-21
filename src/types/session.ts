@@ -95,7 +95,11 @@ export type StepOutcomeCode =
   | "bad-value"
   | "not-in-enum"
   // The model
-  | "provider-unavailable";
+  | "provider-unavailable"
+  | "provider-quota"
+  | "provider-context"
+  | "provider-auth"
+  | "provider-invalid";
 
 export interface StepOutcome {
   runId?: string;

@@ -67,7 +67,9 @@ describe("Speak.run: talk step", () => {
 
     expect(call.prompt).toContain('You are "Ana"');
     expect(call.prompt).toContain("Você fala pela Acme.");
-    expect(call.prompt).toContain("- horario: 9h às 18h");
+    // The knowledge base is the same every turn, so it travels as the system
+    // message where a provider can cache it, not in the turn's own text.
+    expect(call.system).toContain("- horario: 9h às 18h");
     expect(call.prompt).toContain("## Flow\nTriagem: Quem chega querendo saber se serve");
     expect(call.prompt).toContain(
       "## Guideline for your reply (adapt to the conversation)\nDescubra quem é e de onde fala, em nome da Acme.",
@@ -76,7 +78,7 @@ describe("Speak.run: talk step", () => {
     expect(call.prompt).toContain(
       "- tamanho (string) [1-10 | 11-50]: Pessoas na empresa\n  How to ask: Pergunte quantas pessoas trabalham lá; ofereça as faixas.",
     );
-    expect(call.prompt).not.toContain("Pergunte o porte.");
+    expect(call.seen).not.toContain("Pergunte o porte.");
     expect(call.prompt).toContain("## Already known");
     expect(call.prompt).toContain("- orcamento: 1500");
     expect(call.prompt).toContain("- [never] [Always] Não invente preços. (apply only when: o cliente pergunta preço)");
@@ -84,8 +86,8 @@ describe("Speak.run: talk step", () => {
     expect(call.prompt).toContain('- "nome": nome (string). The value the customer gave, or null when they did not give one.');
 
     expect(call.input.history).toEqual(history);
-    expect(call.prompt).not.toContain("mensagem antiga do cliente");
-    expect(call.prompt).not.toContain("resposta antiga da Ana");
+    expect(call.seen).not.toContain("mensagem antiga do cliente");
+    expect(call.seen).not.toContain("resposta antiga da Ana");
   });
 
   test("a wake adds the you-speak-first line; a message quotes the text", async () => {
@@ -97,9 +99,9 @@ describe("Speak.run: talk step", () => {
     expect(provider.calls[0].prompt).toContain(
       "There is no new message from the customer. You speak first: open naturally, do not answer a question nobody asked.",
     );
-    expect(provider.calls[0].prompt).not.toContain("Customer's latest message");
+    expect(provider.calls[0].seen).not.toContain("Customer's latest message");
     expect(provider.calls[1].prompt).toContain('## Customer\'s latest message\n"oi, sou o João"');
-    expect(provider.calls[1].prompt).not.toContain("You speak first");
+    expect(provider.calls[1].seen).not.toContain("You speak first");
   });
 
   test("a slug Gemini rejects rides under an alias and maps back; a slug without a definition is a string", async () => {
@@ -142,9 +144,9 @@ describe("Speak.run: idle", () => {
       "## Guideline for your reply (adapt to the conversation)\nResponda pela empresa; não invente preços.",
     );
     expect(call.prompt).toContain("- [should] [Always] Seja breve.");
-    expect(call.prompt).not.toContain("## Flow");
-    expect(call.prompt).not.toContain("## Still to collect");
-    expect(call.prompt).not.toContain("Rules for the field properties");
+    expect(call.seen).not.toContain("## Flow");
+    expect(call.seen).not.toContain("## Still to collect");
+    expect(call.seen).not.toContain("Rules for the field properties");
   });
 });
 
@@ -304,7 +306,7 @@ describe("Speak.run: tool rounds", () => {
     const provider = mockProvider({ speak: [{ message: "Oi!" }] });
     await new Speak(agentOptions(provider, { maxToolLoops: 0 })).run(talkRequest({ tools: [orcamento] }));
     expect(provider.calls[0].input.tools).toBeUndefined();
-    expect(provider.calls[0].prompt).not.toContain("## Tools");
+    expect(provider.calls[0].seen).not.toContain("## Tools");
   });
 
   test("the loop cap forces a final call without tools", async () => {
@@ -337,18 +339,18 @@ describe("Speak.run: fallbacks", () => {
   test("a provider failure on the first round defers", async () => {
     const provider = mockProvider();
     const out = await new Speak(agentOptions(provider)).run(talkRequest());
-    expect(out).toEqual({ deferred: "provider-unavailable", llmCalls: 1 });
+    expect(out).toEqual({ deferred: { code: "provider-unavailable", retryable: true }, llmCalls: 1 });
   });
 
   test("a provider failure on a tool follow-up round defers with both calls counted", async () => {
     const provider = mockProvider({ speak: [{ toolCalls: [{ toolName: "orcamento", arguments: { pessoas: 30 } }] }] });
     const out = await new Speak(agentOptions(provider)).run(talkRequest({ tools: [orcamento] }));
-    expect(out).toEqual({ deferred: "provider-unavailable", llmCalls: 2 });
+    expect(out).toEqual({ deferred: { code: "provider-unavailable", retryable: true }, llmCalls: 2 });
   });
 
   test("an empty message defers", async () => {
     const provider = mockProvider({ speak: [{ message: "   " }] });
     const out = await new Speak(agentOptions(provider)).run(talkRequest());
-    expect(out).toEqual({ deferred: "provider-unavailable", llmCalls: 1 });
+    expect(out).toEqual({ deferred: { code: "provider-unavailable", retryable: true }, llmCalls: 1 });
   });
 });

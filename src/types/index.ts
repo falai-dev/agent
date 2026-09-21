@@ -76,6 +76,7 @@ export type {
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
+  TokenUsage,
   GenerateMessageStreamChunk,
   ProviderCapabilities,
   ReasoningConfig,

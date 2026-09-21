@@ -59,7 +59,7 @@ interface ToolPermissionResult {
 |---|---|---|---|
 | `id` | `string` | required | The name the model calls, and the name a `tools: [...]` list uses to point at this tool. Ids are not checked for uniqueness: two tools with one id are both sent to the provider, and the first one's handler runs for any call under that id. |
 | `description` | `string` | none | What the tool does and when to use it, for the model. |
-| `parameters` | `StructuredSchema` | none | A JSON schema for `args`, passed to the provider as given. |
+| `parameters` | `StructuredSchema` | none | A JSON Schema **object** for `args`, passed to the provider as given: `{ type: "object", properties: { … }, required: [ … ] }`. An action's shorthand map (`{ cidade: { type: "string" } }`) is not one, and `f.agent()` rejects it — most providers accept the malformed declaration and simply never call the tool. |
 | `handler` | `(args, ctx) => ToolResult \| Promise<ToolResult>` | required | Your code. Returning nothing counts as `{}`. |
 | `isReadOnly` | `(input) => boolean` | none | The call only reads. Used as the fallback for `isConcurrencySafe`. |
 | `isConcurrencySafe` | `(input) => boolean` | falls back to `isReadOnly`, then `false` | The call may run in parallel with other safe calls of the same round. |

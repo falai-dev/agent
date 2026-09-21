@@ -10,7 +10,9 @@
 
 import log from "loglevel";
 import type { HistoryItem } from "../types/history.js";
+import type { TokenUsage } from "../types/ai.js";
 import type { CompactionOptions, CompactionResult } from "../types/compaction.js";
+import { readUsage } from "../utils/usage.js";
 
 export class CompactionEngine {
     /**
@@ -152,7 +154,7 @@ export class CompactionEngine {
     private static async summarizeMessages(
         messages: HistoryItem[],
         options: CompactionOptions
-    ): Promise<string | null> {
+    ): Promise<{ text: string; usage: TokenUsage | undefined } | null> {
         try {
             const messagesText = messages
                 .map((m) => {
@@ -174,7 +176,7 @@ export class CompactionEngine {
                 },
             });
 
-            return result.message;
+            return { text: result.message, usage: readUsage(result.metadata) };
         } catch {
             return null;
         }
@@ -322,7 +324,7 @@ export class CompactionEngine {
         if (summary !== null) {
             const summaryItem: HistoryItem = {
                 role: "system",
-                content: `[Conversation Summary]\n${summary}`,
+                content: `[Conversation Summary]\n${summary.text}`,
             };
             const finalHistory = [summaryItem, ...recentMessages];
             return {
@@ -330,7 +332,8 @@ export class CompactionEngine {
                 strategy: "auto_compact",
                 estimatedTokens: CompactionEngine.estimateTokens(finalHistory),
                 messagesCompacted: oldMessages.length,
-                summary,
+                summary: summary.text,
+                ...(summary.usage ? { usage: summary.usage } : {}),
             };
         }
 

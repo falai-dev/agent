@@ -43,13 +43,14 @@ describe("S12: a wake-reached prompt through the one agent", () => {
     const t2 = await agent.turn({ sessionId: "s1", context: ai, session: saved(t1), wake: t1.schedule[0].key, history: [] });
     expect(t2.llmCalls).toBe(1);
     expect(calls).toEqual([{ action: "notify", key: "lembrete#meet:9:n:1", dedupeKey: "lembrete:s1:meet:9", params: { recipient: "leadAssignee", message: "Reunião ev-9 confirmada." } }]);
-    const { prompt, input } = provider.calls[0];
-    expect(prompt).toContain("Ana");
+    const { prompt, seen, input } = provider.calls[0];
+    // Identity is untemplated here, so it rides in the cacheable system half.
+    expect(seen).toContain("Ana");
     expect(prompt).toContain("There is no new message from the customer");
     expect(prompt).toContain("Nunca prometa desconto.");
     expect(prompt).toContain("Cite a data e a hora exatas da reunião.");
     expect(prompt).toContain("Só para VIPs: ofereça o gerente.");
-    expect(prompt).not.toContain("Nunca aparece.");
+    expect(seen).not.toContain("Nunca aparece.");
     expect(input.tools?.map((t) => t.name)).toEqual(["agendaLink"]);
     expect(t2.messages.map((m) => [m.text, m.kind, m.key])).toEqual([["Sua reunião está confirmada para amanhã às 10h: https://meet.example/abc", "ai", "lembrete#meet:9:p:1"]]);
     expect(t2.ended.map((r) => [r.flowId, r.reason])).toEqual([["lembrete", "end"]]);

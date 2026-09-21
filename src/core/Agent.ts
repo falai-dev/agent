@@ -8,9 +8,11 @@
  */
 
 import type { AgentOptions, TurnInput, TurnResult, TurnStreamChunk } from "../types/agent.js";
+import type { TokenUsage } from "../types/ai.js";
 import type { CompactionOptions } from "../types/compaction.js";
 import { FlowConfigurationError } from "../types/errors.js";
 import { logger, LoggerLevel } from "../utils/logger.js";
+import { addUsage } from "../utils/usage.js";
 import { CompactionEngine } from "./CompactionEngine.js";
 import type { IdleRequest, SpeakOutcome, TalkRequest } from "./contracts.js";
 import { validateFlow } from "./FlowSpec.js";
@@ -60,21 +62,25 @@ export class Agent<C = unknown, D = unknown> {
     const compacted = await this.compacted(input);
     const turn = runner.begin(compacted.input);
     turn.llmCalls += compacted.llmCalls;
+    turn.usage = addUsage(turn.usage, compacted.usage);
     const request = runner.understandRequest(turn);
     runner.decide(turn, request ? await this.understand.run(request) : null);
     return { turn, talk: await runner.advance(turn) };
   }
 
   /** With `compaction` set, the history both calls see is trimmed once per turn; a summarization is one model call. */
-  private async compacted(input: TurnInput<C, D>): Promise<{ input: TurnInput<C, D>; llmCalls: number }> {
+  private async compacted(
+    input: TurnInput<C, D>,
+  ): Promise<{ input: TurnInput<C, D>; llmCalls: number; usage?: TokenUsage }> {
     const history = input.history ?? input.session?.history;
     if (!this.compaction || !history?.length) return { input, llmCalls: 0 };
     const result = await CompactionEngine.checkAndCompact(history, this.compaction);
     const llmCalls = result.strategy === "auto_compact" ? 1 : 0;
-    if (result.history === history) return { input, llmCalls };
+    const usage = result.usage ? { usage: result.usage } : {};
+    if (result.history === history) return { input, llmCalls, ...usage };
     const trimmed: TurnInput<C, D> = Object.assign({}, input);
     trimmed.history = result.history;
-    return { input: trimmed, llmCalls };
+    return { input: trimmed, llmCalls, ...usage };
   }
 }
 
@@ -103,6 +109,18 @@ function validate<C, D>(options: AgentOptions<C, D>): void {
     }
     ids.add(flow.id);
     for (const warning of validateFlow(flow, options).warnings) logger.warn(`[Agent] ${warning}`);
+  }
+  for (const tool of options.tools ?? []) {
+    // A function's parameters are a JSON Schema object, so anything else is a
+    // mistake — most often the action's `{ name: { type } }` map written in a
+    // tool. Only DeepSeek rejects it on the wire; everywhere else the tool is
+    // simply never callable, and nothing says so.
+    if (tool.parameters && tool.parameters.type !== "object") {
+      throw new FlowConfigurationError(
+        `[FlowConfigurationError] tool "${tool.id}": parameters must be a JSON Schema object. ` +
+          `Write { type: "object", properties: { ... }, required: [...] }.`,
+      );
+    }
   }
   const { idle } = options;
   if (idle && idle !== "silent") {

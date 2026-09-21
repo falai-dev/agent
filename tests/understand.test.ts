@@ -185,7 +185,7 @@ describe("Understand full request", () => {
   test("the prompt names every flow, phrase, branch question, field and the message", async () => {
     const provider = mockProvider({ understand: [{ flows: {} }] });
     await understand(provider).run(full);
-    const { prompt } = provider.calls[0];
+    const { seen } = provider.calls[0];
     const needles = [
       'You are "Ana"',
       "Você fala pela Zeta.",
@@ -220,7 +220,7 @@ describe("Understand full request", () => {
       // the shape restated for prompt-only providers
       '{"flows":{"triagem":0,"agendar":0,"humano":0},"mentions":{"concorrente":false},"extract":{"concorrente":{"trecho":null}},"branches":{"q1":false,"q2":false},"fields":{"empresa":null,"tamanho":null,"orcamento":null}}',
     ];
-    for (const needle of needles) expect(prompt).toContain(needle);
+    for (const needle of needles) expect(seen).toContain(needle);
   });
 
   test("the envelope is strict, every leaf nullable, every key safe for Gemini", async () => {
