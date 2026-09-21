@@ -16,7 +16,7 @@
 
 import type { GenerateMessageInput } from "../types/ai.js";
 import type { AgentOptions } from "../types/agent.js";
-import type { FieldDefs, Instruction } from "../types/flow.js";
+import type { FieldDefs } from "../types/flow.js";
 import type { History } from "../types/history.js";
 import type { StructuredSchema } from "../types/schema.js";
 import type { Tool, ToolCtx, ToolResult } from "../types/tool.js";
@@ -263,15 +263,10 @@ function buildPrompt<C, D>(options: AgentOptions<C, D>, req: SpeakRequest<C, D>,
     identitySection(options, scope),
     knowledgeSection(options.knowledgeBase),
     ...body,
-    instructionsSection([{ caption: "[Always]", items: promptFacing(req.instructions) }], scope),
+    instructionsSection([{ caption: "[Always]", items: req.instructions }], scope),
     inputSection(req.input),
     formatSection(envelope, options.fields),
   );
-}
-
-/** Runner already judged `if`; the shared section is typed on the bare Instruction, so only the prompt-facing keys cross. */
-function promptFacing<C, D>(items: Instruction<C, D>[]): Instruction[] {
-  return items.map(({ id, kind, when, prompt }) => ({ id, kind, when, prompt }));
 }
 
 /** The customer's latest text, quoted. Without one, on anything but a message, the assistant opens the exchange. */

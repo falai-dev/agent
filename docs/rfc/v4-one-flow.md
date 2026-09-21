@@ -37,6 +37,9 @@ sidebar: false
 > - `Condition` is `{ check(ctx, arg) }` and `Action` is `{ parameters, run(params, ctx) }`, as
 >   method signatures: method bivariance lets a heterogeneous map type without `any`.
 > - `Store.save` returns the saved session, with the bumped version, instead of `void`.
+> - A mention trigger's `extract` is a flat map of parameter definitions (`{ trecho: { type:
+>   'string' } }`), the S7 form, not a JSON schema object: one shape for fields, action
+>   parameters and extraction, and `toWireSchema` applies to all three.
 > - Tool handlers take `(args, ctx)`, the order every provider SDK uses.
 > - Prompt scaffolding (section headings, envelope instructions, routing rules) is written in
 >   English; the authored content it carries (prompts, `ask` texts, instructions, knowledge) and

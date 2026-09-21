@@ -3,7 +3,6 @@ import fc from "fast-check";
 
 import { FlowConfigurationError } from "../src/types/errors.js";
 import type { FieldDefs } from "../src/types/flow.js";
-import type { StructuredSchema } from "../src/types/schema.js";
 import {
   buildSchema,
   coerceField,
@@ -12,6 +11,7 @@ import {
   pendingFields,
   toWireSchema,
 } from "../src/utils/schema.js";
+import { isStrictSchema } from "./helpers.js";
 
 const fields: FieldDefs = {
   nome: { type: "string", ask: "Pergunte o nome." },
@@ -124,13 +124,3 @@ describe("buildSchema", () => {
 });
 
 /** Every object is closed and requires all of its properties. */
-function isStrictSchema(schema: StructuredSchema): boolean {
-  if (schema.type !== "object" && !(Array.isArray(schema.type) && schema.type.includes("object"))) return true;
-  const keys = Object.keys(schema.properties ?? {});
-  const required = new Set(schema.required ?? []);
-  return (
-    schema.additionalProperties === false &&
-    keys.every((k) => required.has(k)) &&
-    Object.values(schema.properties ?? {}).every(isStrictSchema)
-  );
-}

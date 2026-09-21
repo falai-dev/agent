@@ -68,7 +68,7 @@ export interface InstructionGroup<C = unknown, D = unknown> {
 }
 
 /** Behavioural statements with their kind and AI-judged `when`. */
-export function instructionsSection(groups: InstructionGroup[], scope: TemplateScope): string | null {
+export function instructionsSection<C, D>(groups: InstructionGroup<C, D>[], scope: TemplateScope): string | null {
   const lines: string[] = [];
   for (const group of groups) {
     for (const item of group.items) {

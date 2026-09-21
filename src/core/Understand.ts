@@ -18,7 +18,7 @@
  */
 
 import type { AgentOptions } from "../types/agent.js";
-import type { FieldDef, FieldDefs, Flow, ParamDef, ParamDefs, ScalarType } from "../types/flow.js";
+import type { FieldDef, FieldDefs, Flow, ParamDef, ParamDefs } from "../types/flow.js";
 import type { StructuredSchema } from "../types/schema.js";
 import { extractEmbeddedJSONObject } from "../utils/json.js";
 import { logger } from "../utils/logger.js";
@@ -33,8 +33,6 @@ const SECTIONS = ["flows", "mentions", "extract", "branches", "fields"] as const
 
 /** Gemini rejects any other character in a property name. */
 const SAFE_KEY = /^[a-zA-Z0-9_-]+$/;
-
-const SCALAR_TYPES: readonly ScalarType[] = ["string", "number", "integer", "boolean"];
 
 export class Understand<C = unknown, D = unknown> {
   constructor(private readonly options: AgentOptions<C, D>) {}
@@ -189,42 +187,12 @@ function keyed(keys: string[], def: FieldDef): FieldDefs {
   return Object.fromEntries(keys.map((key) => [key, def]));
 }
 
-/**
- * The mention trigger's `extract` as parameter definitions. Accepts the JSON
- * schema form (`{ properties: {...} }`) and the flat form the design's S7
- * uses (`{ trecho: { type: 'string' } }`).
- */
+/** The mention trigger's `extract` definitions, when the flow has any. */
 function extractDefs<C, D>(flow: Flow<C, D>): ParamDefs | undefined {
-  const trigger = flow.on?.find((t) => "mention" in t && t.extract !== undefined);
-  const schema = trigger && "mention" in trigger ? trigger.extract : undefined;
-  if (!schema) return undefined;
-  const source: Record<string, unknown> = isRecord(schema.properties) ? schema.properties : schema;
-  const defs: ParamDefs = {};
-  for (const [name, raw] of Object.entries(source)) {
-    if (isRecord(raw)) defs[name] = toParamDef(raw);
+  for (const trigger of flow.on ?? []) {
+    if ("mention" in trigger && trigger.extract && Object.keys(trigger.extract).length) return trigger.extract;
   }
-  return Object.keys(defs).length ? defs : undefined;
-}
-
-function toParamDef(raw: Record<string, unknown>): ParamDef {
-  const description = typeof raw.description === "string" ? raw.description : undefined;
-  if (isScalarType(raw.type)) return { type: raw.type, description, enum: enumOf(raw.enum) };
-  if (raw.type === "array" && isRecord(raw.items) && isScalarType(raw.items.type)) {
-    return { type: "array", items: { type: raw.items.type, enum: enumOf(raw.items.enum) }, description };
-  }
-  // ponytail: nested objects inside `extract` come back as one string. The ceiling is a
-  // structured extraction; the upgrade is a recursive wire builder in utils/schema.
-  return { type: "string", description };
-}
-
-function isScalarType(value: unknown): value is ScalarType {
-  return typeof value === "string" && SCALAR_TYPES.some((t) => t === value);
-}
-
-function enumOf(value: unknown): (string | number)[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const options = value.filter((v): v is string | number => typeof v === "string" || typeof v === "number");
-  return options.length ? options : undefined;
+  return undefined;
 }
 
 // ── Prompt sections ─────────────────────────────────────────────────────

@@ -82,7 +82,7 @@ const proposta = f.flow({
 const concorrente = f.flow({
   id: "concorrente",
   name: "Falou de concorrente",
-  on: [{ mention: ["cita ou compara com um concorrente"], extract: { type: "object", properties: { trecho: { type: "string" } } } }],
+  on: [{ mention: ["cita ou compara com um concorrente"], extract: { trecho: { type: "string" } } }],
   steps: [
     { id: "tag", do: "etiquetar", with: { tags: ["concorrente"] } },
     { id: "avisa", do: "avisar", with: { para: "vendedor", texto: 'Falou de concorrente: "{{input.trecho}}"' } },

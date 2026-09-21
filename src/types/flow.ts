@@ -8,7 +8,6 @@
  * agent's fields with `InferData`.
  */
 
-import type { StructuredSchema } from "./schema.js";
 import type { Run } from "./session.js";
 
 // ── Scalars ─────────────────────────────────────────────────────────────
@@ -155,7 +154,7 @@ export type Trigger<C = unknown, D = unknown> = { repeat?: Repeat } & (
   /** The lead asks for this; the run takes the conversation. `[]` = catch-all. */
   | { message: string[]; if?: Pred<C, D> }
   /** The lead mentions this; the run reacts beside the conversation. `[]` + `if` = code-only. */
-  | { mention: string[]; extract?: StructuredSchema; if?: Pred<C, D> }
+  | { mention: string[]; extract?: ParamDefs; if?: Pred<C, D> }
   /** The lead has been quiet since the assistant last spoke. */
   | { silence: Duration; if?: Pred<C, D>; businessHours?: boolean }
   /** The host reported an event; its payload is the run's `input`. */

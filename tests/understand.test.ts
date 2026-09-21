@@ -16,6 +16,7 @@ import type { FieldDefs, Flow } from "../src/types/flow.js";
 import type { StructuredSchema } from "../src/types/schema.js";
 import type { Run } from "../src/types/session.js";
 import { logger } from "../src/utils/logger.js";
+import { isStrictSchema } from "./helpers.js";
 import { mockProvider, type MockProvider } from "./mock-provider.js";
 
 interface Ctx {
@@ -143,16 +144,6 @@ const keysOf = (input: GenerateMessageInput, section: string): string[] =>
   Object.keys(schemaOf(input).properties?.[section]?.properties ?? {});
 
 /** Same helper as tests/schema.test.ts: every object is closed and requires all of its properties. */
-function isStrictSchema(schema: StructuredSchema): boolean {
-  if (schema.type !== "object" && !(Array.isArray(schema.type) && schema.type.includes("object"))) return true;
-  const keys = Object.keys(schema.properties ?? {});
-  const required = new Set(schema.required ?? []);
-  return (
-    schema.additionalProperties === false &&
-    keys.every((k) => required.has(k)) &&
-    Object.values(schema.properties ?? {}).every(isStrictSchema)
-  );
-}
 
 function leaves(schema: StructuredSchema): StructuredSchema[] {
   const props = Object.values(schema.properties ?? {});
