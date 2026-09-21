@@ -253,7 +253,10 @@ const f = falai().fields({ nome: { type: 'string' } });
 
 const concorrente = f.flow({
   id: 'concorrente', name: 'Lead falou de concorrente',
-  on: [{ mention: ['o lead cita ou compara com um concorrente'], extract: { trecho: { type: 'string' } }, repeat: 'once' }],
+  on: [{
+    mention: ['o lead cita ou compara com um concorrente', '!o lead fala do nosso próprio produto'],
+    extract: { trecho: { type: 'string' } }, repeat: 'once',
+  }],
   steps: [
     { id: 'tag',   do: 'add_tags', with: { tags: ['concorrente'] } },
     { id: 'avisa', do: 'notify', with: { recipient: 'owner', message: '{{data.nome}} falou de concorrente: "{{input.trecho}}"' } },
@@ -263,7 +266,7 @@ const concorrente = f.flow({
 
 | Signal facet | v4 |
 |---|---|
-| `when[]` with `!` exclusions | `mention: [...]`; write the exclusion into the phrase |
+| `when[]` with `!` exclusions | `mention: [...]`, exclusions and all — a `!` phrase still rules the trigger out. Copy the list across unchanged |
 | `if` | trigger `if`; sees `input` after `extract` |
 | `extract` | trigger `extract` → `run.input` → `{{input.x}}`; never written to `data` |
 | `phase: 'pre'` + `halt` + `reply` | a `say` first step; another run's `say` silences the floor's reply that turn |
