@@ -9,13 +9,16 @@
  *   --min 0.9      lowest flow agreement that passes (exit 1 below it)
  *   --repeat 3     judge every case N times; reports how often the decision was the same
  *   --only r01,f04 run these case ids only
- *   GEMINI_MODEL / ZAI_MODEL pick the model (defaults: gemini-2.5-flash, glm-5.3-flash)
+ *   GEMINI_MODEL / ZAI_MODEL / DEEPSEEK_MODEL / OPENROUTER_MODEL pick the model
+ *   (defaults: gemini-2.5-flash, glm-5.3-flash, deepseek-chat, z-ai/glm-5.3-flash)
  *
  * 4.0.0 ships only when every provider the products run on passes.
  */
 
 import {
+  DeepSeekProvider,
   GeminiProvider,
+  OpenRouterProvider,
   ZaiProvider,
   type AgentStructuredResponse,
   type AiProvider,
@@ -155,6 +158,16 @@ function providers(): Array<{ label: string; provider: AiProvider }> {
   if (zai) {
     const model = process.env.ZAI_MODEL ?? "glm-5.3-flash";
     out.push({ label: `zai (${model})`, provider: new ZaiProvider({ apiKey: zai, model }) });
+  }
+  const deepseek = process.env.DEEPSEEK_API_KEY;
+  if (deepseek) {
+    const model = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
+    out.push({ label: `deepseek (${model})`, provider: new DeepSeekProvider({ apiKey: deepseek, model }) });
+  }
+  const openrouter = process.env.OPENROUTER_API_KEY;
+  if (openrouter) {
+    const model = process.env.OPENROUTER_MODEL ?? "z-ai/glm-5.3-flash";
+    out.push({ label: `openrouter (${model})`, provider: new OpenRouterProvider({ apiKey: openrouter, model }) });
   }
   return out;
 }

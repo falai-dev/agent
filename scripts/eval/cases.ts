@@ -122,7 +122,10 @@ export const cases: Case[] = [
   { id: "r04", message: "meu login não está funcionando desde ontem", expect: { flow: "suporte" } },
   { id: "r05", message: "quero cancelar minha assinatura", expect: { flow: "cancelamento" } },
   { id: "r06", message: "posso falar com uma pessoa de verdade?", expect: { flow: "humano" } },
-  { id: "r07", message: "vcs atendem empresa de 200 funcionários? serve pra gente?", expect: { flow: "triagem", fields: { tamanho: "51-200" } } },
+  // 120, not 200: every provider reads a headcount ON the boundary as "200+",
+  // which "200 or more" allows, so the case graded the band's wording rather
+  // than whether the model put a stated headcount in the right band.
+  { id: "r07", message: "vcs atendem empresa de 120 funcionários? serve pra gente?", expect: { flow: "triagem", fields: { tamanho: "51-200" } } },
   { id: "r08", message: "tem desconto no plano anual?", expect: { flow: "precos" } },
   { id: "r09", message: "o relatório de vendas tá dando erro 500 aqui", expect: { flow: "suporte" } },
   { id: "r10", message: "não quero mais, pode encerrar minha conta", expect: { flow: "cancelamento" } },

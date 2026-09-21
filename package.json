@@ -58,7 +58,8 @@
     "release:major": "bun pm version major && bun publish",
     "release:alpha": "bun publish --tag alpha",
     "release": "bun publish",
-    "test": "bun test tests/*.test.ts tests/scenarios/*.test.ts"
+    "test": "bun test tests/*.test.ts tests/scenarios/*.test.ts",
+    "eval:live": "bun run scripts/eval/live.ts"
   },
   "keywords": [
     "ai",
@@ -75,8 +76,8 @@
     "framework",
     "flows",
     "schema",
-    "directives",
-    "signals"
+    "state-machine",
+    "automation"
   ],
   "author": "Gustavo Salomé <gusnips>",
   "license": "MIT",
