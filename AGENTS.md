@@ -78,7 +78,7 @@ src/
 │   ├── contracts.ts     # the seams: UnderstandRequest/Understanding, SpeakRequest/SpeakOutcome
 │   ├── FlowSpec.ts      # JSON form, fromSpec/toSpec, validateFlow, flowSpecSchema
 │   ├── Migrate.ts       # assertSession (v4 shape check), migrateSession (3.x blob → v4), InvalidSessionError
-│   └── CompactionEngine.ts, PromptSectionCache.ts
+│   └── CompactionEngine.ts
 ├── persistence/         # Store implementations: Memory, Postgres, Prisma, Redis, Mongo, SQLite, OpenSearch
 ├── providers/           # LLM adapters over @providerkit/core: Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, Z.ai
 ├── types/               # flow, session, agent, tool, ai, history, schema, errors

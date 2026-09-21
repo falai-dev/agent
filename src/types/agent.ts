@@ -13,7 +13,6 @@ import type {
   Template,
 } from "./flow.js";
 import type { History } from "./history.js";
-import type { PromptCacheConfig } from "./prompt-cache.js";
 import type { Run, Session, StepOutcome } from "./session.js";
 import type { Tool } from "./tool.js";
 
@@ -72,8 +71,8 @@ export interface AgentOptions<C = unknown, D = unknown> {
   businessHours?: BusinessHours<C>;
   /** Tool rounds per speak call. Default 5; 0 disables tools. */
   maxToolLoops?: number;
+  /** Trim the history both calls see, once per turn, when it grows past `maxTokens`. */
   compaction?: AgentCompactionConfig;
-  promptCache?: PromptCacheConfig;
   debug?: boolean;
 }
 

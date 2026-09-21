@@ -24,9 +24,11 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **Import surface.** The package exports `falai`, `Agent`, the seven stores, `migrateSession`, the `FlowSpec` helpers, the providers, the history helpers, the error classes and the types. Everything not on that list is gone, without aliases. The `rg` line in the guide finds every call site.
 
+- **`promptCache` and `PromptSectionCache` are gone.** Every prompt is built per call from that turn's request, so there is nothing to memoize across turns. The providers' own prompt caching (Anthropic, OpenRouter sticky routing) is untouched. `compaction` stays and now runs once per turn, on the history the host passes, before either model call; a summarization counts as one `llmCalls`.
+
 ### Unchanged
 
-- The providers (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, compaction, prompt caching and the history helpers.
+- The providers (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, the `compaction` option and the history helpers.
 
 ## [3.4.1]
 

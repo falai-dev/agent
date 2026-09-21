@@ -137,7 +137,6 @@ export type {
   Participant,
   Pred,
   PredCtx,
-  PromptCacheConfig,
   ProviderCapabilities,
   ReasoningConfig,
   Repeat,

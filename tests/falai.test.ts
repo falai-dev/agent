@@ -151,6 +151,24 @@ describe("falai()", () => {
     expect(r.started).toEqual([{ runId: "triagem#m1", flowId: "triagem", anchor: "s1", dedupeKey: "triagem:s1:" }]);
   });
 
+  test("compaction trims the history both calls see, once per turn; a summarization is one llmCall", async () => {
+    const provider = mockProvider({
+      "(unnamed)": [{ message: "Resumo: a Ana perguntou sobre preços e prazos." }],
+      understand: [{ flows: {}, fields: { nome: null } }],
+      speak: [{ message: "Oi! Como você se chama?", nome: null }],
+    });
+    const agent = f.agent({ name: "Ana", provider, actions: { notify }, conditions: { tagsAny }, flows: [triagem], compaction: { maxTokens: 300, preserveRecentCount: 2 } });
+    const history = Array.from({ length: 40 }, (_, i) => ({ role: "user" as const, content: `mensagem antiga número ${i} com bastante texto para pesar no orçamento de tokens` }));
+    const context: LeadContext = { lead: { id: "l1", tags: [], owner: "ai" } };
+    const r = await agent.turn({ sessionId: "s1", context, history, message: "oi", id: "m1" });
+    expect(provider.calls.map((c) => c.schemaName)).toEqual(["(unnamed)", "understand", "speak"]);
+    expect(provider.calls[2].input.history.length).toBeLessThan(history.length);
+    expect(JSON.stringify(provider.calls[2].input.history)).toContain("Resumo: a Ana perguntou");
+    expect(r.llmCalls).toBe(3);
+
+    expect(() => f.agent({ name: "Ana", provider, flows: [], compaction: { maxTokens: 300, compactionThreshold: 2 } })).toThrow("compactionThreshold");
+  });
+
   test("falai() without fields still builds an agent", () => {
     const loose = falai().agent({ name: "Ana", provider: mockProvider(), flows: [] });
     expect(loose.options.fields).toEqual({});

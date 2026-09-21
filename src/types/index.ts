@@ -101,7 +101,6 @@ export { EventKind, MessageRole } from "./history.js";
 
 export type { StructuredSchema } from "./schema.js";
 export type { CompactionOptions, CompactionResult } from "./compaction.js";
-export type { PromptCacheConfig, PromptSectionType, SectionCompute } from "./prompt-cache.js";
 
 export {
   FlowConfigurationError,

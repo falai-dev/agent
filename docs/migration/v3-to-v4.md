@@ -337,6 +337,7 @@ Host actions, events and conditions are registered once on the agent and referen
 | `Template` as a function, `TemplateContext`, `ConditionEvaluator`, `ConditionWhen`, `ConditionIf`, `!` exclusions | `Template = string` with `{{data.x}}` `{{context.x}}` `{{input.x}}`; `Pred` (function or JSON) |
 | `Term`, `terms` | put the glossary in `knowledgeBase` or an instruction |
 | `Instruction.enabled / tags / metadata` | filter before passing |
+| `promptCache`, `PromptSectionCache`, `PromptCacheConfig` | gone; every prompt is built per call. `compaction` stays and runs once per turn on the history you pass |
 | `generateFlowId`, `generateStepId`, `generateToolId`, `adaptEvent`, `convertHistoryToEvents` | ids are yours; `historyToEvents` / `eventsToHistory` stay |
 | `ResponseGenerationError`, `ToolCreationError`, `ToolExecutionError` | `ProviderError` (provider failures), `FlowConfigurationError` (bad config); a failing speak call re-parks the step instead of throwing |
 
