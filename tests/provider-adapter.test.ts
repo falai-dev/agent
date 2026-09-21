@@ -108,6 +108,21 @@ describe("history becomes the seam's messages", () => {
     });
   });
 
+  test("an assistant turn replays the reasoning that produced its tool call", () => {
+    const [assistant] = toMessages(
+      [
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "c1", name: "lookup", arguments: {} }],
+          reasoning: "preciso do clima",
+        },
+      ],
+      "p",
+    );
+    expect(assistant).toMatchObject({ role: "assistant", reasoning: "preciso do clima" });
+  });
+
   test("system turns stay system turns", () => {
     expect(toMessages([{ role: "system", content: "Be brief." }], "p")[0]).toEqual({
       role: "system",
@@ -142,6 +157,39 @@ describe("a stream becomes one accumulated turn", () => {
     expect(result.structured?.toolCalls).toEqual([
       { toolName: "lookup", arguments: { city: "Porto" } },
     ]);
+  });
+
+  test("arguments cut mid-stream keep the fields that closed", async () => {
+    // The stream ends after `city` but inside `note`. Parsed strictly this
+    // throws, and the tool used to run with `{}` — a lookup with no city.
+    const { fetchImpl } = scripted([
+      () =>
+        chat({
+          tool_calls: [{ index: 0, id: "c1", function: { name: "lookup", arguments: '{"city":"Porto","note":"o cliente di' } }],
+        }),
+    ]);
+    const result = await deepseek(fetchImpl).generateMessage(input());
+    // Salvage closes the open string rather than dropping it, so a cut value
+    // arrives short instead of absent. The tool's own `validateInput` is what
+    // decides whether that is good enough.
+    expect(result.structured?.toolCalls).toEqual([
+      { toolName: "lookup", arguments: { city: "Porto", note: "o cliente di" } },
+    ]);
+  });
+
+  test("the reasoning behind a tool call rides out with it", async () => {
+    // A thinking provider rejects the next round when the assistant turn that
+    // called the tool comes back without its own chain of thought.
+    const { fetchImpl } = scripted([
+      () =>
+        chat(
+          { reasoning_content: "preciso do clima " },
+          { reasoning_content: "antes de responder" },
+          { tool_calls: [{ index: 0, id: "c1", function: { name: "lookup", arguments: "{}" } }] },
+        ),
+    ]);
+    const result = await deepseek(fetchImpl).generateMessage(input());
+    expect(result.structured?.reasoning).toBe("preciso do clima antes de responder");
   });
 
   test("two parallel calls stay distinct and ordered by index", async () => {

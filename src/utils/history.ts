@@ -276,9 +276,10 @@ export function assistantMessage(
     id: string;
     name: string;
     arguments: Record<string, unknown>;
-  }>
+  }>,
+  thought?: { reasoning?: string; reasoningDetails?: unknown[] }
 ): HistoryItem {
-  return { role: "assistant", content, tool_calls: toolCalls };
+  return { role: "assistant", content, tool_calls: toolCalls, ...thought };
 }
 
 /**

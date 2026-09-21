@@ -65,6 +65,9 @@ interface Reply {
   structured: unknown;
 }
 
+/** The model's own record of how it reached a tool round, replayed on the next. */
+type Thought = { reasoning?: string; reasoningDetails?: unknown[] };
+
 /** What one tool call sends back to the model, plus the data it wrote. */
 interface CallResult<D> {
   content: string;
@@ -149,7 +152,7 @@ export class Speak<C = unknown, D = unknown> {
         run: "idle" in talk ? undefined : talk.run,
         now: req.now,
       };
-      const executed = await this.executeRound(read.toolCalls, tools, ctx, round, read.message);
+      const executed = await this.executeRound(read.toolCalls, tools, ctx, round, read.message, read.thought);
       history = [...history, ...executed.items];
       Object.assign(data, executed.data);
       toolCalls.push(...read.toolCalls);
@@ -191,6 +194,7 @@ export class Speak<C = unknown, D = unknown> {
     ctx: ToolCtx<C, D>,
     round: number,
     preamble: string,
+    thought: Thought,
   ): Promise<{ items: History; data: Record<string, unknown> }> {
     const safe = (call: ToolCall): boolean => {
       const tool = tools.find((t) => t.id === call.toolName);
@@ -210,6 +214,7 @@ export class Speak<C = unknown, D = unknown> {
       assistantMessage(
         preamble || null,
         calls.map((call, i) => ({ id: ids[i], name: call.toolName, arguments: call.arguments })),
+        thought,
       ),
       ...calls.map((call, i) => toolMessage(ids[i], call.toolName, results[i].content)),
     ];
@@ -325,7 +330,7 @@ function buildEnvelope(fields: FieldDefs, pending: string[]): Envelope {
 function readReply(
   reply: Reply,
   envelope: Envelope,
-): { message: string; fields: Record<string, unknown>; toolCalls: ToolCall[] } {
+): { message: string; fields: Record<string, unknown>; toolCalls: ToolCall[]; thought: Thought } {
   const parsed = isRecord(reply.structured) ? reply.structured : extractEmbeddedJSONObject(reply.message);
   const message = parsed ? (typeof parsed.message === "string" ? parsed.message : "") : reply.message;
   const fields: Record<string, unknown> = {};
@@ -333,7 +338,15 @@ function readReply(
     const value = parsed?.[name];
     if (isKnown(value)) fields[slug] = value;
   }
-  return { message, fields, toolCalls: parseToolCalls(parsed?.toolCalls) };
+  return { message, fields, toolCalls: parseToolCalls(parsed?.toolCalls), thought: readThought(parsed) };
+}
+
+/** What the model thought before it called a tool, if the provider sent it. */
+function readThought(parsed: Record<string, unknown> | undefined): Thought {
+  return {
+    ...(typeof parsed?.reasoning === "string" && parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
+    ...(Array.isArray(parsed?.reasoningDetails) ? { reasoningDetails: parsed.reasoningDetails } : {}),
+  };
 }
 
 function parseToolCalls(value: unknown): ToolCall[] {

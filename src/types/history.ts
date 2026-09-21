@@ -57,6 +57,13 @@ export type AssistantHistoryItem = {
     name: string;
     arguments: Record<string, unknown>;
   }>;
+  /** What the model thought before it called those tools. A thinking provider
+   *  rejects the next round without it. Set by the framework on its own tool
+   *  rounds; a host building history by hand leaves it out. */
+  reasoning?: string;
+  /** The same thing in the normalized shape OpenRouter sends. Replayed
+   *  verbatim, under the name the gateway gave it. */
+  reasoningDetails?: unknown[];
 };
 export type ToolHistoryItem = {
   role: "tool";

@@ -22,6 +22,8 @@ import {
   ProviderError,
   classify,
   isBackupEligible,
+  isCompleteJson,
+  parseToolArgs,
   probeJsonWithTools,
   requireContent,
   streamWatch,
@@ -159,6 +161,11 @@ export function toMessages(history: HistoryItem[], prompt: string): ChatMessage[
         out.push({
           role: "assistant",
           content: item.content ?? "",
+          // Anthropic-shape drops these on purpose (its thinking blocks are
+          // signed); OpenAI-shape replays them, which is what DeepSeek and the
+          // GLM endpoints require on a turn that called a tool.
+          ...(item.reasoning ? { reasoning: item.reasoning } : {}),
+          ...(item.reasoningDetails?.length ? { reasoningDetails: item.reasoningDetails } : {}),
           ...(item.tool_calls?.length
             ? {
                 toolCalls: item.tool_calls.map((call) => ({
@@ -212,6 +219,8 @@ function toJsonOutput(input: GenerateMessageInput<unknown>): StreamOptions["json
 interface Accumulator {
   text: string;
   model: string;
+  reasoning: string;
+  reasoningDetails?: unknown[];
   finishReason?: string;
   promptTokens?: number;
   completionTokens?: number;
@@ -229,6 +238,8 @@ function fold(acc: Accumulator, chunk: ProviderChunk): string {
     acc.cachedInputTokens = chunk.usage.cachedInputTokens;
   }
   if (chunk.finishReason) acc.finishReason = chunk.finishReason;
+  if (chunk.reasoning) acc.reasoning += chunk.reasoning;
+  if (chunk.reasoningDetails?.length) acc.reasoningDetails = chunk.reasoningDetails;
   for (const call of chunk.toolCalls ?? []) {
     const entry = acc.calls.get(call.index) ?? { name: "", arguments: "" };
     if (call.name) entry.name = call.name;
@@ -246,11 +257,18 @@ function toolCallsOf(acc: Accumulator, label: string): ToolCallList {
   const out: ToolCallList = [];
   for (const [, entry] of [...acc.calls.entries()].sort(([a], [b]) => a - b)) {
     if (!entry.name) continue;
-    let args: Record<string, unknown> = {};
-    try {
-      if (entry.arguments) args = JSON.parse(entry.arguments) as Record<string, unknown>;
-    } catch (error) {
-      logger.warn(`[${label}] Failed to parse tool call arguments:`, error);
+    // Arguments arrive in fragments and the last one can be cut: a stream that
+    // ended early, a model at its `max_tokens`, a gateway that double-escaped.
+    // `JSON.parse` on that string throws, and the tool then ran with NOTHING —
+    // a lookup with no id, a send with no recipient, behind one warn line.
+    // `parseToolArgs` recovers what the model did send, closing an open string
+    // rather than dropping it — so a cut value arrives short instead of absent,
+    // and the tool's own `validateInput` decides whether that is enough.
+    const args = entry.arguments ? parseToolArgs(entry.arguments) : {};
+    if (entry.arguments && !isCompleteJson(entry.arguments)) {
+      logger.warn(
+        `[${label}] ${entry.name}: arguments were cut mid-stream; kept ${Object.keys(args).length} field(s).`,
+      );
     }
     out.push({ toolName: entry.name, arguments: args });
   }
@@ -336,7 +354,7 @@ export abstract class ProviderAdapter implements AiProvider {
     const messages = toMessages(input.history, input.prompt);
     const tools = toTools(input.tools);
     const json = toJsonOutput(input);
-    const acc: Accumulator = { text: "", model: this.primaryModel, calls: new Map() };
+    const acc: Accumulator = { text: "", model: this.primaryModel, reasoning: "", calls: new Map() };
 
     const opts: StreamOptions = {
       ...this.defaults,
@@ -409,10 +427,15 @@ export abstract class ProviderAdapter implements AiProvider {
     const text = json && !structured && isJSONShaped(acc.text) ? "" : acc.text;
 
     if (toolCalls.length > 0) {
+      // The reasoning rides out with the tool calls it produced. A thinking
+      // provider rejects the next round when the assistant turn that called the
+      // tool comes back without it, so the caller has to be able to replay it.
       structured = {
         ...(structured ?? {}),
         message: (structured as AgentStructuredResponse | undefined)?.message || text,
         toolCalls,
+        ...(acc.reasoning ? { reasoning: acc.reasoning } : {}),
+        ...(acc.reasoningDetails ? { reasoningDetails: acc.reasoningDetails } : {}),
       } as TStructured;
     }
 

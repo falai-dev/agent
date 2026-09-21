@@ -72,6 +72,8 @@ export interface AgentStructuredResponse extends Record<string, unknown> {
   }>;
   /** Additional reasoning or internal thoughts (optional) */
   reasoning?: string;
+  /** OpenRouter's normalized reasoning payload, when the provider sent one. */
+  reasoningDetails?: unknown[];
 }
 
 /**
