@@ -102,13 +102,20 @@ export type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "c
 
 // ── fromSpec / toSpec ───────────────────────────────────────────────────
 
-export function fromSpec(spec: FlowSpec): Flow<unknown, LooseData> {
+/**
+ * A spec as a typed flow. The slugs and names inside a spec are strings from
+ * storage, so the result is typed by claim: `validateFlow` (which the agent
+ * runs on every flow it is built with) is what makes the claim true. The
+ * bound toolkit's `f.fromSpec(spec)` fills `C` and `D` in.
+ */
+export function fromSpec<C = unknown, D = LooseData>(spec: FlowSpec): Flow<C, D> {
   const clean = stripNulls(spec);
   if (!Array.isArray(clean.steps)) {
     throw problem(`flow "${clean.id}"`, "has no steps list", "Write steps as a list, even an empty one.");
   }
   const { steps, ...rest } = clean;
-  return { ...rest, steps: steps.map(fromStepSpec) };
+  const flow: Flow<unknown, LooseData> = { ...rest, steps: steps.map(fromStepSpec) };
+  return flow as Flow<C, D>;
 }
 
 function fromStepSpec(step: StepSpec): Step<unknown, LooseData> {

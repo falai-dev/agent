@@ -31,6 +31,7 @@ import type {
   PredCtx,
 } from "../types/flow.js";
 import { Agent } from "./Agent.js";
+import { type FlowSpec, fromSpec } from "./FlowSpec.js";
 
 /** The toolkit once fields are bound. `D` is the collected-data type. */
 export interface Falai<C, D, F extends FieldDefs> {
@@ -48,6 +49,8 @@ export interface Falai<C, D, F extends FieldDefs> {
   condition<Arg>(check: (ctx: PredCtx<C, D>, arg: Arg) => boolean): Condition<C, D, Arg>;
   /** A flow; returns it unchanged, typed. */
   flow(def: Flow<C, D>): Flow<C, D>;
+  /** A stored flow (JSON) as a typed flow. The agent validates it when built. */
+  fromSpec(spec: FlowSpec): Flow<C, D>;
   /** The agent; `fields` come from the toolkit. */
   agent(options: Omit<AgentOptions<C, D>, "fields">): Agent<C, D>;
 }
@@ -67,6 +70,7 @@ function toolkit<C, D, F extends FieldDefs>(fields: F): Falai<C, D, F> {
     event: (def = {}) => def,
     condition: (check) => ({ check }),
     flow: (def) => def,
+    fromSpec: (spec) => fromSpec<C, D>(spec),
     agent: (options) => new Agent<C, D>({ ...options, fields }),
   };
 }
