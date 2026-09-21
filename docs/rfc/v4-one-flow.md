@@ -23,6 +23,24 @@ sidebar: false
 > ship as `kind: 'system'` recipes; `criar_fluxo` keeps the host's generation call with
 > `flowSpecSchema`; session = conversation with `anchor: 'lead'`; migrated flows get
 > `onEnd: 'stay'` written explicitly.
+>
+> **Refined during implementation (slices 1–2, 2026-09-20):**
+> - The factory is a two-step chain: `falai<C>()` returns a root whose `.fields(defs)` binds the
+>   data type, and `flow` / `action` / `event` / `condition` / `agent` hang off that bound object,
+>   so `collect`, `ask`, `clearOnStart` and `ctx.set` are checked against the slugs. `f.agent()`
+>   passes the fields itself; `type Data = DataOf<typeof f>` replaces `InferData<typeof fields>`.
+>   TypeScript cannot infer one generic while another is written by hand, which is why §3's
+>   `const fields = f.fields(...)` then `f.agent({ fields })` shape was dropped.
+> - Action, event and condition names inside a flow are plain strings, checked when the agent is
+>   built, the same path a JSON `FlowSpec` takes. The mapped-type unions in §3 (`{ [K in keyof
+>   A]: ... }[keyof A]`) would have made every flow generic in four parameters.
+> - `Condition` is `{ check(ctx, arg) }` and `Action` is `{ parameters, run(params, ctx) }`, as
+>   method signatures: method bivariance lets a heterogeneous map type without `any`.
+> - `Store.save` returns the saved session, with the bumped version, instead of `void`.
+> - Tool handlers take `(args, ctx)`, the order every provider SDK uses.
+> - Prompt scaffolding (section headings, envelope instructions, routing rules) is written in
+>   English; the authored content it carries (prompts, `ask` texts, instructions, knowledge) and
+>   the outcome `detail` strings the host shows in *Execuções* stay in the product's language.
 
 # @falai/agent v4 — one Flow (design v2)
 
