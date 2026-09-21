@@ -4,6 +4,7 @@
  * replay, the step cap) and the host gate (`silenced`).
  */
 
+import { OUTCOME_MESSAGES } from "../src/index.js";
 import { describe, expect, test } from "bun:test";
 
 import { Runner } from "../src/core/Runner.js";
@@ -204,7 +205,7 @@ describe("S5: campaign start, deferred send, wake, reply into the funnel", () =>
     expect(child.asked).toEqual({ nome: 1 });
     expect(isTalk(t3.talk) && t3.talk.run.id).toBe("funil#campanha#camp:1:espera:1");
     expect(t3.result.messages).toEqual([{ text: "Qual seu nome?", kind: "ai", afterMs: 0, key: "funil#campanha#camp:1:espera:1:q:1", runId: "funil#campanha#camp:1:espera:1", stepId: "q" }]);
-    expect(t3.result.outcomes[0]).toMatchObject({ kind: "wait", status: "ok", detail: "respondeu", next: "flow:{{input.flowId}}" });
+    expect(t3.result.outcomes[0]).toMatchObject({ kind: "wait", status: "ok", code: "replied", next: "flow:{{input.flowId}}" });
     expect(t3.result.llmCalls).toBe(0);
   });
 
@@ -213,7 +214,7 @@ describe("S5: campaign start, deferred send, wake, reply into the funnel", () =>
     const t1 = await drive(runner, { sessionId: "s1", context: ai, start: { flow: "campanha", input: { templateId: "t1", flowId: "funil" }, key: "camp:1" } });
     const { result } = await drive(runner, { sessionId: "s1", context: ai, session: saved(t1.result), wake: "campanha#camp:1:envio:1" });
     expect(result.changed).toBe(false);
-    expect(result.outcomes).toEqual([{ kind: "wait", status: "skipped", detail: "ignorado: wake antigo", key: "campanha#camp:1:envio:1", at: T0 }]);
+    expect(result.outcomes).toEqual([{ kind: "wait", status: "skipped", code: "stale-wake", message: OUTCOME_MESSAGES["stale-wake"], key: "campanha#camp:1:envio:1", at: T0 }]);
   });
 });
 
@@ -265,7 +266,7 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
     const t2 = await drive(runner, message("quero falar com alguém", "m2", { session: saved(t1.result), context: humano }), { understanding: understood() });
     expect(t2.talk).toBeNull();
     expect(t2.result.messages.map((m) => m.text)).toEqual(["Já chamo alguém."]);
-    expect(t2.result.outcomes.find((o) => o.detail === "pulado: outra resposta já saiu")).toMatchObject({ kind: "collect", runId: "trid#m1" });
+    expect(t2.result.outcomes.find((o) => o.code === "another-reply")).toMatchObject({ kind: "collect", runId: "trid#m1" });
     expect(t2.result.session.runs.find((r) => r.flowId === "trid")?.status).toBe("asking");
   });
 });
@@ -322,8 +323,8 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
   test("a false if takes else, clears the field, re-enters the step with a new visit", async () => {
     const { runner } = setup([gate]);
     const { result, talk } = await drive(runner, { sessionId: "s1", context: ai, session: withData({ confirmado: false }), start: { flow: "gate", key: "k" } });
-    expect(result.outcomes.map((o) => [o.kind, o.status, o.detail, o.next])).toEqual([
-      ["collect", "skipped", "pulado: campos já conhecidos", undefined],
+    expect(result.outcomes.map((o) => [o.kind, o.status, o.code, o.next])).toEqual([
+      ["collect", "skipped", "already-known", undefined],
       ["if", "ok", undefined, "c1"],
     ]);
     expect(result.session.data).toEqual({});
@@ -367,7 +368,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
     expect(t1.result.session.runs[0].status).toBe("asking");
     const t2 = await drive(runner, message("oi", "m2", { session: saved(t1.result), context: { lead: { tags: [], owner: "ai" } } }));
     expect(t2.result.ended.map((r) => r.reason)).toEqual(["skipped"]);
-    expect(t2.result.outcomes[0]).toMatchObject({ kind: "collect", status: "skipped", detail: "pulado: premissa mudou", runId: "vip#m1" });
+    expect(t2.result.outcomes[0]).toMatchObject({ kind: "collect", status: "skipped", code: "premise-changed", runId: "vip#m1" });
     expect(t2.talk).toEqual({ idle: { prompt: "" } });
   });
 
@@ -376,7 +377,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
     const { runner, calls } = setup([flow]);
     const { result } = await drive(runner, message("x", "m1"));
     expect(calls).toEqual([]);
-    expect(result.outcomes.map((o) => o.detail)).toEqual(["pulado: premissa mudou"]);
+    expect(result.outcomes.map((o) => o.code)).toEqual(["premise-changed"]);
   });
 
   test("a replayed keyed input is a no-op with changed: false", async () => {
@@ -385,7 +386,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
     expect(t1.result.session.inputs).toEqual(["m1"]);
     const t2 = await drive(runner, message("oi", "m1", { session: saved(t1.result) }));
     expect(t2.result.changed).toBe(false);
-    expect(t2.result.outcomes.map((o) => o.detail)).toEqual(["ignorado: entrada repetida"]);
+    expect(t2.result.outcomes.map((o) => o.code)).toEqual(["duplicate-input"]);
     expect(t2.talk).toBeNull();
   });
 
@@ -394,7 +395,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
     const { runner } = setup([spin]);
     const { result } = await drive(runner, { sessionId: "s1", context: ai, start: { flow: "spin", key: "k" } });
     expect(result.ended.map((r) => r.reason)).toEqual(["failed"]);
-    expect(result.outcomes.at(-1)).toMatchObject({ kind: "if", status: "failed", detail: "falhou: laço de passos" });
+    expect(result.outcomes.at(-1)).toMatchObject({ kind: "if", status: "failed", code: "step-loop" });
     expect(result.outcomes).toHaveLength(51);
   });
 
@@ -408,7 +409,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
     };
     const { runner } = setup([gate]);
     const { result } = await drive(runner, message("oi", "m1", { session: stale }));
-    expect(result.outcomes.map((o) => o.detail)).toEqual(["pulado: fluxo desativado ou removido", "pulado: passo removido"]);
+    expect(result.outcomes.map((o) => o.code)).toEqual(["flow-gone", "step-gone"]);
   });
 });
 
@@ -444,11 +445,11 @@ describe("silenced: the host gate is one mouth", () => {
     const t2 = await drive(runner, { sessionId: "s1", context: ai, session: saved(t1.result), wake: t1.result.schedule[0].key, silenced: "pausa" });
     expect(t2.talk).toBeNull();
     expect(t2.result.ended.map((r) => [r.id, r.reason])).toEqual([["nudge#k", "skipped"]]);
-    expect(t2.result.outcomes.at(-1)).toMatchObject({ kind: "prompt", status: "skipped", detail: "silenciado: pausa", stepId: "p" });
+    expect(t2.result.outcomes.at(-1)).toMatchObject({ kind: "prompt", status: "skipped", code: "silenced", detail: "pausa", stepId: "p" });
 
     const t3 = await drive(runner, { sessionId: "s1", context: ai, session: saved(t2.result), start: { flow: "tarefa", key: "k2" }, silenced: "pausa" });
     expect(calls.map((c) => c.key)).toEqual(["tarefa#k2:n:1"]);
     expect(t3.result.messages).toEqual([]);
-    expect(t3.result.outcomes.map((o) => [o.kind, o.status, o.detail])).toEqual([["do", "ok", undefined], ["say", "skipped", "silenciado: pausa"]]);
+    expect(t3.result.outcomes.map((o) => [o.kind, o.status, o.code, o.detail])).toEqual([["do", "ok", undefined, undefined], ["say", "skipped", "silenced", "pausa"]]);
   });
 });

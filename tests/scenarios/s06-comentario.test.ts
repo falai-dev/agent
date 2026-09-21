@@ -4,6 +4,7 @@
  * host's lead key, and a second session for the same lead (WhatsApp) skips
  * the flow while the host reports it live there.
  */
+import { OUTCOME_MESSAGES } from "../../src/index.js";
 import { describe, expect, test } from "bun:test";
 
 import { ai, build, f } from "./fixture.js";
@@ -38,7 +39,7 @@ describe("S6: an anchored event flow across two sessions of one lead", () => {
       claims: { held: {}, active: ["comentario:lead:456"] },
     });
     expect(wa.started).toEqual([]);
-    expect(wa.skipped).toEqual([{ flowId: "comentario", anchor: "lead:456", triggerKey: "ig:c2", detail: "pulado: já em andamento" }]);
+    expect(wa.skipped).toEqual([{ flowId: "comentario", anchor: "lead:456", triggerKey: "ig:c2", code: "already-running", message: OUTCOME_MESSAGES["already-running"] }]);
     expect(wa.messages).toEqual([]);
     expect(calls).toHaveLength(1);
   });
@@ -57,7 +58,7 @@ describe("S6: an anchored event flow across two sessions of one lead", () => {
       anchors: { lead: { key: "lead:456" } },
       claims: { held: { "boas:lead:456:": "2026-09-19T10:00:00.000Z" }, active: [] },
     });
-    expect(r.skipped).toEqual([{ flowId: "boas", anchor: "lead:456", triggerKey: "ig:c9", detail: "pulado: já executado" }]);
+    expect(r.skipped).toEqual([{ flowId: "boas", anchor: "lead:456", triggerKey: "ig:c9", code: "already-claimed", message: OUTCOME_MESSAGES["already-claimed"] }]);
     expect(r.messages).toEqual([]);
   });
 });

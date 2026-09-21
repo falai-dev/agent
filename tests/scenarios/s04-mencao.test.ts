@@ -4,6 +4,7 @@
  * asking run stays asking; the `do` runs in the same turn; the next message
  * resumes triage. One call for the whole turn.
  */
+import { OUTCOME_MESSAGES } from "../../src/index.js";
 import { describe, expect, test } from "bun:test";
 
 import { build, f, message, saved, spoken, triagem, understood } from "./fixture.js";
@@ -36,10 +37,10 @@ describe("S4: mention → say silences the floor → do → triage resumes", () 
       { text: "Claro! Já chamo alguém da equipe para continuar com você.", kind: "verbatim", afterMs: 0, key: "pediu_humano#m2:s:1", runId: "pediu_humano#m2", stepId: "s" },
     ]);
     expect(calls).toEqual([{ action: "assign_lead", key: "pediu_humano#m2:a:1", dedupeKey: "pediu_humano:s1:", params: {} }]);
-    expect(t2.outcomes.map((o) => [o.runId, o.stepId, o.status, o.detail])).toEqual([
+    expect(t2.outcomes.map((o) => [o.runId, o.stepId, o.status, o.code])).toEqual([
       ["pediu_humano#m2", "s", "ok", undefined],
       ["pediu_humano#m2", "a", "ok", undefined],
-      ["triagem#m1", "quem", "skipped", "pulado: outra resposta já saiu"],
+      ["triagem#m1", "quem", "skipped", "another-reply"],
     ]);
     expect(t2.ended.map((r) => [r.flowId, r.reason])).toEqual([["pediu_humano", "end"]]);
     expect(t2.session.runs.map((r) => [r.flowId, r.status, r.stepId])).toEqual([["triagem", "asking", "quem"]]);
@@ -60,7 +61,7 @@ describe("S4: mention → say silences the floor → do → triage resumes", () 
     });
     const t1 = await agent.turn(message("quero um humano", "m1"));
     const t2 = await agent.turn(message("um humano, por favor", "m2", { session: saved(t1) }));
-    expect(t2.skipped).toEqual([{ flowId: "pediu_humano", anchor: "s1", triggerKey: "m2", detail: "pulado: já executado" }]);
+    expect(t2.skipped).toEqual([{ flowId: "pediu_humano", anchor: "s1", triggerKey: "m2", code: "already-claimed", message: OUTCOME_MESSAGES["already-claimed"] }]);
     expect(calls).toHaveLength(1);
     expect(t2.messages.map((m) => m.text)).toEqual(["Oi! Quem fala?"]);
   });

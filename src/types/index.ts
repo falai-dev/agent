@@ -62,6 +62,7 @@ export type {
   RunStatus,
   Session,
   StepOutcome,
+  StepOutcomeCode,
   StepOutcomeKind,
   StepOutcomeStatus,
   Store,

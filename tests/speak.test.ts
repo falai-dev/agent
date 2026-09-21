@@ -337,18 +337,18 @@ describe("Speak.run: fallbacks", () => {
   test("a provider failure on the first round defers", async () => {
     const provider = mockProvider();
     const out = await new Speak(agentOptions(provider)).run(talkRequest());
-    expect(out).toEqual({ deferred: "IA indisponível", llmCalls: 1 });
+    expect(out).toEqual({ deferred: "provider-unavailable", llmCalls: 1 });
   });
 
   test("a provider failure on a tool follow-up round defers with both calls counted", async () => {
     const provider = mockProvider({ speak: [{ toolCalls: [{ toolName: "orcamento", arguments: { pessoas: 30 } }] }] });
     const out = await new Speak(agentOptions(provider)).run(talkRequest({ tools: [orcamento] }));
-    expect(out).toEqual({ deferred: "IA indisponível", llmCalls: 2 });
+    expect(out).toEqual({ deferred: "provider-unavailable", llmCalls: 2 });
   });
 
   test("an empty message defers", async () => {
     const provider = mockProvider({ speak: [{ message: "   " }] });
     const out = await new Speak(agentOptions(provider)).run(talkRequest());
-    expect(out).toEqual({ deferred: "IA indisponível", llmCalls: 1 });
+    expect(out).toEqual({ deferred: "provider-unavailable", llmCalls: 1 });
   });
 });

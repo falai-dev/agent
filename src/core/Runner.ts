@@ -11,9 +11,10 @@
 import type { AgentOptions, EndReason, TurnInput, TurnResult } from "../types/agent.js";
 import type { ActionResult, Branch, DoStep, Duration, Flow, IfStep, Next, Pred, PredCtx, Repeat, SayStep, Step, StepBase, TalkStep, Trigger, WaitEventStep, WaitStep } from "../types/flow.js";
 import type { History } from "../types/history.js";
-import type { Run, Session, StepOutcome, StepOutcomeKind, TriggerKind } from "../types/session.js";
+import type { Run, Session, StepOutcome, StepOutcomeCode, StepOutcomeKind, TriggerKind } from "../types/session.js";
 import { cloneDeep } from "../utils/clone.js";
 import { parseDuration } from "../utils/duration.js";
+import { OUTCOME_MESSAGES } from "../utils/outcomes.js";
 import { coerceField, DEFAULT_MAX_ASKS, extractMode, isKnown, pendingFields } from "../utils/schema.js";
 import { render, renderDeep } from "../utils/template.js";
 import type { IdleRequest, InputKind, SpeakOutcome, SpeakRequest, Spoken, TalkRequest, UnderstandRequest, Understanding } from "./contracts.js";
@@ -194,7 +195,7 @@ export class Runner<C = unknown, D = unknown> {
       queue: [],
     };
     if (what.kind === "wake" && !input.session) {
-      this.ignore(turn, "ignorado: sessão inexistente", what.key);
+      this.ignore(turn, "no-session", what.key);
       return turn;
     }
     turn.ingesting = true;
@@ -209,7 +210,7 @@ export class Runner<C = unknown, D = unknown> {
       case "message": {
         if (what.id) {
           if (session.inputs.includes(what.id)) {
-            this.ignore(turn, "ignorado: entrada repetida", what.id);
+            this.ignore(turn, "duplicate-input", what.id);
             return;
           }
           session.inputs.push(what.id);
@@ -238,7 +239,7 @@ export class Runner<C = unknown, D = unknown> {
           run.status = "running";
           delete run.waiting;
           if (!flow || !step) continue; // move() reports the missing flow or step
-          this.outcome(turn, run, { kind: "wait", status: "ok", detail: "evento chegou", next: nextLabel(step.then) });
+          this.outcome(turn, run, { kind: "wait", status: "ok", code: "event-arrived", next: nextLabel(step.then) });
           this.follow(turn, run, flow, step, step.then);
           this.takeFloor(turn, run);
         }
@@ -253,7 +254,7 @@ export class Runner<C = unknown, D = unknown> {
       case "start": {
         const flow = this.flows.get(what.flow);
         if (!flow) {
-          turn.skipped.push({ flowId: what.flow, anchor: session.id, triggerKey: what.key, detail: "pulado: fluxo desativado ou removido" });
+          turn.skipped.push({ flowId: what.flow, anchor: session.id, triggerKey: what.key, code: "flow-gone", message: OUTCOME_MESSAGES["flow-gone"] });
           return;
         }
         this.startRun(turn, flow, "start", what.key, { payload: what.input, hop: what.hop });
@@ -273,7 +274,7 @@ export class Runner<C = unknown, D = unknown> {
       delete run.waiting;
       const branch = step.branches?.find((b) => "if" in b && this.holds(b.if, turn, run));
       const target = branch ? branch.then : step.else;
-      this.outcome(turn, run, { kind: "wait", status: "ok", detail: "respondeu", next: nextLabel(target) });
+      this.outcome(turn, run, { kind: "wait", status: "ok", code: "replied", next: nextLabel(target) });
       this.follow(turn, run, flow, step, target);
       this.takeFloor(turn, run);
     }
@@ -283,7 +284,7 @@ export class Runner<C = unknown, D = unknown> {
   private runWake(turn: Turn<C, D>, key: string): void {
     const run = turn.session.runs.find((r) => r.waiting?.key === key);
     if (!run) {
-      this.ignore(turn, "ignorado: wake antigo", key);
+      this.ignore(turn, "stale-wake", key);
       return;
     }
     const setAt = run.waiting?.setAt ?? run.startedAt;
@@ -298,12 +299,12 @@ export class Runner<C = unknown, D = unknown> {
       // The reply beat the job: the lead wrote after the wait was set.
       const replied = step.else !== undefined && this.leadWroteSince(turn, setAt, flow);
       const target = replied ? step.else : step.then;
-      this.outcome(turn, run, { kind: "wait", status: "ok", detail: replied ? "respondeu" : "sem resposta", next: nextLabel(target) });
+      this.outcome(turn, run, { kind: "wait", status: "ok", code: replied ? "replied" : "no-reply", next: nextLabel(target) });
       this.follow(turn, run, flow, step, target);
     } else if (isWaitEvent(step)) {
       // ponytail: an event wait that times out without `else` ends the run; nothing sensible follows an event that never came.
       const target = step.else ?? "end";
-      this.outcome(turn, run, { kind: "wait", status: "ok", detail: "sem evento", next: nextLabel(target) });
+      this.outcome(turn, run, { kind: "wait", status: "ok", code: "no-event", next: nextLabel(target) });
       this.follow(turn, run, flow, step, target);
     }
     // A deferred `do` or a retried talk step re-runs at the same visit in advance(): same key, same idempotency.
@@ -317,11 +318,11 @@ export class Runner<C = unknown, D = unknown> {
     const { lastAssistantAt } = turn.session;
     const flow = this.flows.get(flowId);
     if (!flow) {
-      turn.skipped.push({ flowId, anchor: turn.session.id, triggerKey: String(ms), detail: "pulado: fluxo desativado ou removido" });
+      turn.skipped.push({ flowId, anchor: turn.session.id, triggerKey: String(ms), code: "flow-gone", message: OUTCOME_MESSAGES["flow-gone"] });
       return;
     }
     if (!lastAssistantAt || Date.parse(lastAssistantAt) !== ms || this.leadWroteSince(turn, lastAssistantAt, flow)) {
-      this.ignore(turn, "ignorado: silêncio quebrado", key);
+      this.ignore(turn, "silence-broken", key);
       return;
     }
     const trigger = (flow.on ?? []).find((t) => "silence" in t);
@@ -329,9 +330,9 @@ export class Runner<C = unknown, D = unknown> {
     if (run) turn.floorRunId = run.id;
   }
 
-  private ignore(turn: Turn<C, D>, detail: string, key: string): void {
+  private ignore(turn: Turn<C, D>, code: StepOutcomeCode, key: string): void {
     turn.ignored = true;
-    turn.outcomes.push({ kind: "wait", status: "skipped", detail, key, at: turn.nowIso });
+    turn.outcomes.push({ kind: "wait", status: "skipped", code, message: OUTCOME_MESSAGES[code], key, at: turn.nowIso });
   }
 
   private takeFloor(turn: Turn<C, D>, run: Run): void {
@@ -370,23 +371,23 @@ export class Runner<C = unknown, D = unknown> {
       visits: {},
       outcomes: [],
     };
-    const skip = (detail: string): null => {
-      turn.skipped.push({ flowId: flow.id, anchor, triggerKey: key, detail });
+    const skip = (code: StepOutcomeCode): null => {
+      turn.skipped.push({ flowId: flow.id, anchor, triggerKey: key, code, message: OUTCOME_MESSAGES[code] });
       return null;
     };
     if (opts.trigger?.if && !this.holds(opts.trigger.if, turn, run)) return null;
     const heldAt = this.claimAt(turn, dedupeKey);
     if (heldAt !== undefined) {
-      if (typeof repeat === "string") return skip("pulado: já executado");
-      if (turn.now.getTime() - Date.parse(heldAt) < parseDuration(repeat.cooldown)) return skip("pulado: em cooldown");
+      if (typeof repeat === "string") return skip("already-claimed");
+      if (turn.now.getTime() - Date.parse(heldAt) < parseDuration(repeat.cooldown)) return skip("cooldown");
     }
-    if (hop >= MAX_HOP) return skip("pulado: limite de encadeamento");
+    if (hop >= MAX_HOP) return skip("hop-limit");
     const live = session.runs.find((r) => r.flowId === flow.id && r.anchor === anchor);
     if (live) {
       if (live.status === "waiting" && live.stepId === null) this.endRun(turn, live, "replaced");
-      else return skip("pulado: já em andamento");
+      else return skip("already-running");
     } else if (turn.input.claims?.active.includes(`${flow.id}:${anchor}`)) {
-      return skip("pulado: já em andamento");
+      return skip("already-running");
     }
     session.claims[dedupeKey] = { at: turn.nowIso };
     if (nonce) this.pruneAlwaysClaims(session, `${flow.id}:${anchor}:`);
@@ -400,7 +401,7 @@ export class Runner<C = unknown, D = unknown> {
     if (after) {
       const at = this.snap(turn, new Date(turn.now.getTime() + parseDuration(after)), opts.trigger && "event" in opts.trigger ? opts.trigger.businessHours : undefined);
       this.park(turn, run, { kind: "timer", key: `${run.id}:start:${at.getTime()}` }, at);
-      this.outcome(turn, run, { kind: "wait", status: "waiting", detail: "aguardando gatilho", until: at.toISOString() });
+      this.outcome(turn, run, { kind: "wait", status: "waiting", code: "awaiting-trigger", until: at.toISOString() });
     }
     return run;
   }
@@ -474,10 +475,11 @@ export class Runner<C = unknown, D = unknown> {
     return turn.session.runs.find((r) => r.status === "asking");
   }
 
-  private outcome(turn: Turn<C, D>, run: Run | undefined, line: Omit<StepOutcome, "at" | "runId" | "flowId" | "stepId"> & { stepId?: string }): void {
+  private outcome(turn: Turn<C, D>, run: Run | undefined, line: Omit<StepOutcome, "at" | "runId" | "flowId" | "stepId" | "message"> & { stepId?: string }): void {
     const full: StepOutcome = {
       ...(run ? { runId: run.id, flowId: run.flowId, stepId: line.stepId ?? run.stepId ?? undefined } : {}),
       ...line,
+      ...(line.code ? { message: OUTCOME_MESSAGES[line.code] } : {}),
       at: turn.nowIso,
     };
     if (full.stepId === undefined) delete full.stepId;
@@ -634,7 +636,7 @@ export class Runner<C = unknown, D = unknown> {
     const index = (step.branches ?? []).findIndex(hit);
     if (index < 0) return;
     const branch = (step.branches ?? [])[index];
-    this.outcome(turn, run, { kind: talkKind(step), status: "ok", key: this.stepKey(run, step), detail: "ramificação", next: nextLabel(branch.then) });
+    this.outcome(turn, run, { kind: talkKind(step), status: "ok", key: this.stepKey(run, step), code: "branch", next: nextLabel(branch.then) });
     run.status = "running";
     this.follow(turn, run, flow, step, branch.then);
   }
@@ -644,12 +646,12 @@ export class Runner<C = unknown, D = unknown> {
     if (raw === undefined || raw === null) return;
     const def = this.options.fields[field];
     if (!def) {
-      this.outcome(turn, undefined, { kind: "collect", status: "skipped", detail: "ignorado: campo desconhecido" });
+      this.outcome(turn, undefined, { kind: "collect", status: "skipped", code: "unknown-field", detail: field });
       return;
     }
     const coerced = coerceField(def, raw);
     if (!coerced.ok) {
-      this.outcome(turn, undefined, { kind: "collect", status: "skipped", detail: coerced.detail });
+      this.outcome(turn, undefined, { kind: "collect", status: "skipped", code: coerced.code, detail: field });
       return;
     }
     const data: Record<string, unknown> = turn.session.data;
@@ -705,7 +707,7 @@ export class Runner<C = unknown, D = unknown> {
     if (talk) {
       // Another run's say (or spoke: true) already answered the lead: the floor's talk waits; the run stays asking.
       if (turn.what.kind === "message" && [...turn.spokeBy].some((id) => id !== talk.run.id)) {
-        this.outcome(turn, talk.run, { kind: talkKind(talk.step), status: "skipped", key: this.stepKey(talk.run, talk.step), detail: "pulado: outra resposta já saiu" });
+        this.outcome(turn, talk.run, { kind: talkKind(talk.step), status: "skipped", key: this.stepKey(talk.run, talk.step), code: "another-reply" });
         turn.talk = undefined;
         return null;
       }
@@ -729,7 +731,7 @@ export class Runner<C = unknown, D = unknown> {
     if (run.status === "asking" && turn.what.kind !== "message") return;
     const flow = this.flows.get(run.flowId);
     if (!flow) {
-      this.endRun(turn, run, "skipped", "pulado: fluxo desativado ou removido");
+      this.endRun(turn, run, "skipped", "flow-gone");
       return;
     }
     if (!this.premiseHolds(turn, run, flow)) return;
@@ -744,12 +746,12 @@ export class Runner<C = unknown, D = unknown> {
     }
     for (let steps = 0; run.status === "running" && turn.session.runs.includes(run); steps++) {
       if (steps >= MAX_STEPS_PER_TURN) {
-        this.endRun(turn, run, "failed", "falhou: laço de passos");
+        this.endRun(turn, run, "failed", "step-loop");
         return;
       }
       const step = this.stepOf(flow, run.stepId);
       if (!step) {
-        this.endRun(turn, run, "skipped", "pulado: passo removido");
+        this.endRun(turn, run, "skipped", "step-gone");
         return;
       }
       await this.execute(turn, run, flow, step, resuming && steps === 0);
@@ -760,7 +762,7 @@ export class Runner<C = unknown, D = unknown> {
   private premiseHolds(turn: Turn<C, D>, run: Run, flow: Flow<C, D>): boolean {
     // A wake-driven move only: on a message turn the lead just wrote, and the flow's `wait ... else` says what to do about it.
     if (run.trigger.kind === "silence" && turn.what.kind === "wake" && this.leadWroteSince(turn, run.startedAt, flow)) {
-      this.endRun(turn, run, "skipped", "pulado: lead escreveu nesse meio-tempo");
+      this.endRun(turn, run, "skipped", "customer-replied");
       return false;
     }
     let ok: boolean;
@@ -771,7 +773,7 @@ export class Runner<C = unknown, D = unknown> {
       const same = (flow.on ?? []).filter((t) => triggerKind(t) === run.trigger.kind);
       ok = same.length === 0 || same.some((t) => !t.if || this.holds(t.if, turn, run));
     }
-    if (!ok) this.endRun(turn, run, "skipped", "pulado: premissa mudou");
+    if (!ok) this.endRun(turn, run, "skipped", "premise-changed");
     return ok;
   }
 
@@ -788,14 +790,14 @@ export class Runner<C = unknown, D = unknown> {
           this.reportMaxAsks(turn, run, step);
           this.outcome(turn, run, resuming
             ? { kind, status: "ok", key, next: nextLabel(step.then) }
-            : { kind, status: "skipped", key, detail: "pulado: campos já conhecidos", next: nextLabel(step.then) });
+            : { kind, status: "skipped", key, code: "already-known", next: nextLabel(step.then) });
           this.follow(turn, run, flow, step, step.then);
           return;
         }
       }
       if (turn.silenced !== undefined) {
         if (resuming) run.status = "asking"; // the gate is closed; it speaks when the gate opens
-        else this.endRun(turn, run, "skipped", `silenciado: ${turn.silenced}`, kind);
+        else this.endRun(turn, run, "skipped", "silenced", kind, turn.silenced);
         return;
       }
       for (const other of turn.session.runs) {
@@ -811,13 +813,13 @@ export class Runner<C = unknown, D = unknown> {
 
     if (isSay(step)) {
       if (turn.silenced !== undefined) {
-        this.endRun(turn, run, "skipped", `silenciado: ${turn.silenced}`, "say");
+        this.endRun(turn, run, "skipped", "silenced", "say", turn.silenced);
         return;
       }
       if (step.once) {
         const claim = `${flow.id}:${step.id}:${turn.session.id}`;
         if (this.claimAt(turn, claim) !== undefined) {
-          this.outcome(turn, run, { kind: "say", status: "skipped", key, detail: "pulado: já enviado", next: nextLabel(step.then) });
+          this.outcome(turn, run, { kind: "say", status: "skipped", key, code: "already-sent", next: nextLabel(step.then) });
           this.follow(turn, run, flow, step, step.then);
           return;
         }
@@ -863,16 +865,16 @@ export class Runner<C = unknown, D = unknown> {
         this.outcome(turn, run, { kind: "do", status: "ok", key, ...(result.detail ? { detail: result.detail } : {}), next: nextLabel(step.then) });
         this.follow(turn, run, flow, step, step.then);
       } else if ("skipped" in result) {
-        this.outcome(turn, run, { kind: "do", status: "skipped", key, detail: `pulado: ${result.skipped}`, next: nextLabel(step.then) });
+        this.outcome(turn, run, { kind: "do", status: "skipped", key, code: "action-skipped", detail: result.skipped, next: nextLabel(step.then) });
         this.follow(turn, run, flow, step, step.then);
       } else if ("failed" in result) {
         const target = step.onFail ?? step.then;
-        this.outcome(turn, run, { kind: "do", status: "failed", key, detail: `falhou: ${result.failed}`, next: nextLabel(target) });
+        this.outcome(turn, run, { kind: "do", status: "failed", key, code: "action-failed", detail: result.failed, next: nextLabel(target) });
         this.follow(turn, run, flow, step, target);
       } else {
         const at = new Date(turn.now.getTime() + parseDuration(result.defer));
         this.park(turn, run, { kind: "timer", key: `${run.id}:${step.id}:${at.getTime()}` }, at);
-        this.outcome(turn, run, { kind: "do", status: "deferred", key, detail: result.detail, until: at.toISOString() });
+        this.outcome(turn, run, { kind: "do", status: "deferred", key, code: "action-deferred", detail: result.detail, until: at.toISOString() });
       }
       return;
     }
@@ -884,7 +886,7 @@ export class Runner<C = unknown, D = unknown> {
         const next = this.peek(flow, step);
         if (next && (isSay(next) || isTalk(next))) {
           turn.afterMs += ms;
-          this.outcome(turn, run, { kind: "wait", status: "ok", key, detail: `${ms}ms`, next: nextLabel(step.then) });
+          this.outcome(turn, run, { kind: "wait", status: "ok", key, code: "inline-delay", detail: `${ms}ms`, next: nextLabel(step.then) });
           this.follow(turn, run, flow, step, step.then);
           return;
         }
@@ -898,7 +900,7 @@ export class Runner<C = unknown, D = unknown> {
     if (isWaitEvent(step)) {
       const at = new Date(turn.now.getTime() + parseDuration(step.wait.upTo ?? DEFAULT_EVENT_WAIT));
       this.park(turn, run, { kind: "event", event: step.wait.event, key: `${run.id}:${step.id}:${at.getTime()}` }, at);
-      this.outcome(turn, run, { kind: "wait", status: "waiting", key, detail: `aguardando ${step.wait.event}`, until: at.toISOString() });
+      this.outcome(turn, run, { kind: "wait", status: "waiting", key, code: "awaiting-event", detail: step.wait.event, until: at.toISOString() });
       return;
     }
 
@@ -923,7 +925,7 @@ export class Runner<C = unknown, D = unknown> {
     for (const field of step.collect ?? []) {
       const asked = run.asked[field] ?? 0;
       if (!isKnown(data[field]) && asked >= maxAsks) {
-        this.outcome(turn, run, { kind: "collect", status: "skipped", key: this.stepKey(run, step), detail: `campo pulado: perguntado ${asked} vezes` });
+        this.outcome(turn, run, { kind: "collect", status: "skipped", key: this.stepKey(run, step), code: "max-asks", detail: field });
       }
     }
   }
@@ -958,7 +960,7 @@ export class Runner<C = unknown, D = unknown> {
   private chain(turn: Turn<C, D>, flowId: string, key: string, input: unknown, hop: number, keepData = false): void {
     const child = this.flows.get(flowId);
     if (!child) {
-      turn.skipped.push({ flowId, anchor: turn.session.id, triggerKey: key, detail: "pulado: fluxo desativado ou removido" });
+      turn.skipped.push({ flowId, anchor: turn.session.id, triggerKey: key, code: "flow-gone", message: OUTCOME_MESSAGES["flow-gone"] });
       return;
     }
     const run = this.startRun(turn, child, "flow", key, { payload: input, hop, keepData });
@@ -970,7 +972,7 @@ export class Runner<C = unknown, D = unknown> {
 
   private jump(turn: Turn<C, D>, run: Run, flow: Flow<C, D>, stepId: string): void {
     if (this.stepOf(flow, stepId)) this.enter(run, stepId);
-    else this.endRun(turn, run, "skipped", "pulado: passo removido");
+    else this.endRun(turn, run, "skipped", "step-gone");
   }
 
   /** Entering a step is what mints a new visit, and with it new action and message keys (I4). */
@@ -1001,12 +1003,12 @@ export class Runner<C = unknown, D = unknown> {
     this.endRun(turn, run, "end");
   }
 
-  private endRun(turn: Turn<C, D>, run: Run, reason: EndReason, detail?: string, kind?: StepOutcomeKind): void {
+  private endRun(turn: Turn<C, D>, run: Run, reason: EndReason, code?: StepOutcomeCode, kind?: StepOutcomeKind, detail?: string): void {
     const index = turn.session.runs.indexOf(run);
     if (index >= 0) turn.session.runs.splice(index, 1);
-    if (detail) {
+    if (code) {
       const flow = this.flows.get(run.flowId);
-      this.outcome(turn, run, { kind: kind ?? kindOf(flow && this.stepOf(flow, run.stepId)), status: reason === "failed" ? "failed" : "skipped", detail });
+      this.outcome(turn, run, { kind: kind ?? kindOf(flow && this.stepOf(flow, run.stepId)), status: reason === "failed" ? "failed" : "skipped", code, ...(detail ? { detail } : {}) });
     }
     turn.ended.push({ ...run, reason });
     if (turn.talk?.run === run) turn.talk = undefined;
@@ -1041,7 +1043,7 @@ export class Runner<C = unknown, D = unknown> {
     if (outcome && "deferred" in outcome) {
       turn.llmCalls += outcome.llmCalls;
       if (talk) this.deferTalk(turn, talk);
-      else this.outcome(turn, undefined, { kind: "idle", status: "deferred", detail: "deferred: IA indisponível", llmCalls: outcome.llmCalls });
+      else this.outcome(turn, undefined, { kind: "idle", status: "deferred", code: outcome.deferred, llmCalls: outcome.llmCalls });
     } else if (outcome) {
       const { spoken } = outcome;
       turn.llmCalls += spoken.llmCalls;
@@ -1099,7 +1101,7 @@ export class Runner<C = unknown, D = unknown> {
     const at = new Date(turn.now.getTime() + parseDuration(backoff));
     const visit = run.visits[step.id] ?? 0;
     this.park(turn, run, { kind: "timer", key: `${run.id}:${step.id}:${visit}:retry:${at.getTime()}` }, at);
-    this.outcome(turn, run, { kind: talkKind(step), status: "deferred", key: this.stepKey(run, step), detail: "deferred: IA indisponível", until: at.toISOString() });
+    this.outcome(turn, run, { kind: talkKind(step), status: "deferred", key: this.stepKey(run, step), code: "provider-unavailable", until: at.toISOString() });
   }
 
   /** The assistant spoke last: every silence flow passing `if` and `repeat` gets a wake. */

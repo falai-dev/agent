@@ -62,7 +62,7 @@ describe("S1: triagem", () => {
     // Second miss on a `maxAsks: 2` field: the field is skipped, loud in the outcomes, and the run moves on.
     const t5 = await agent.turn(message("prefiro não dizer", "m5", { session: saved(t4) }));
     expect(t5.llmCalls).toBe(2);
-    expect(t5.outcomes.map((o) => o.detail)).toContain("campo pulado: perguntado 2 vezes");
+    expect(t5.outcomes.map((o) => [o.code, o.detail])).toContainEqual(["max-asks", "orcamento"]);
     expect(t5.session.runs[0].stepId).toBe("confirma");
     expect(t5.session.runs[0].asked.confirmado).toBe(1);
     expect(t5.session.data).not.toHaveProperty("orcamento");
@@ -133,10 +133,10 @@ describe("S1: triagem", () => {
     const t2 = await agent.turn(message("é Zeta Labs", "m3", { session: saved(t1) }));
     expect(t2.llmCalls).toBe(2);
     expect(t2.session.data.empresa).toBe("Zeta Labs");
-    expect(t2.outcomes.map((o) => [o.stepId, o.status, o.detail])).toEqual([
+    expect(t2.outcomes.map((o) => [o.stepId, o.status, o.code])).toEqual([
       ["quem", "ok", undefined],
-      ["porte", "skipped", "pulado: campos já conhecidos"],
-      ["grana", "skipped", "pulado: campos já conhecidos"],
+      ["porte", "skipped", "already-known"],
+      ["grana", "skipped", "already-known"],
       ["confirma", "ok", undefined],
     ]);
     expect(t2.messages[0].text).toBe("Corrigido: Zeta Labs. Confere agora?");

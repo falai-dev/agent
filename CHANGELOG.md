@@ -26,6 +26,16 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **`promptCache` and `PromptSectionCache` are gone.** Every prompt is built per call from that turn's request, so there is nothing to memoize across turns. The providers' own prompt caching (Anthropic, OpenRouter sticky routing) is untouched. `compaction` stays and now runs once per turn, on the history the host passes, before either model call; a summarization counts as one `llmCalls`.
 
+- **Outcome lines carry a code, not a sentence.** Every `StepOutcome` and every `TurnResult.skipped` entry now has `code`, one of 32 stable values (`already-known`, `stale-wake`, `max-asks`, `provider-unavailable`, …), plus `message`, the English sentence the framework copies from `OUTCOME_MESSAGES`. Switch on `code`: it survives a rewording, and a product renders it in its own language. `detail` is now only ever text someone else wrote: your `silenced` reason, an action's own words, or the field a line is about. The Brazilian Portuguese strings that used to fill `detail` are gone from the package; a product that wants them maps the code to its own copy. Two lines also got more useful: `max-asks` and `unknown-field` now name the field in `detail`.
+
+### Docs and tooling
+
+- **The docs are rewritten for v4**: a five-page tutorial, twelve task guides, four concept pages (the model, the turn, runs and waits, collection) and one reference page per public type, including the pt-BR outcome vocabulary a product team needs to build an execution log. The pages about directives, signals, `createAgent` and persistence adapters are gone with the things they described.
+
+- **`bun run check:docs`** typechecks every TypeScript fence in `README.md` and `docs/` as its own file against `src/index.ts`, so a snippet cannot drift from the API. A fence that shows a shape opens as ` ```ts fragment ` and is skipped. It runs in `prepublishOnly`.
+
+- **`bun run eval:understand`** replays 40 labelled Brazilian Portuguese messages through a real agent on every provider whose key is in the environment, with the speak call silenced so only the understand call runs. It reports how often the call agrees with the labels on routing, mentions and extraction, plus tokens and latency, and fails below `--min` (default 0.9). One call now does what 3.x spread over two to four.
+
 ### Unchanged
 
 - The providers (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, the `compaction` option and the history helpers.

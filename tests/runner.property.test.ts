@@ -101,7 +101,7 @@ describe("advance() invariants", () => {
             expect(lines).toEqual([]);
           } else {
             expect(result.ended.find((r) => r.id === run.id)?.reason).toBe("skipped");
-            expect(lines.map((o) => o.detail)).toEqual(["pulado: premissa mudou"]);
+            expect(lines.map((o) => o.code)).toEqual(["premise-changed"]);
           }
           expect(moved).not.toContain(run.id);
           expect(result.messages.some((m) => m.runId === run.id)).toBe(false);

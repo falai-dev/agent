@@ -23,6 +23,7 @@ export type { BranchSpec, FlowSpec, InstructionSpec, Registries, StepKind, StepS
 export { fakeClock, MemoryScheduler } from "./utils/clock.js";
 export type { FakeClock } from "./utils/clock.js";
 export { assertDuration, isDuration, parseDuration } from "./utils/duration.js";
+export { OUTCOME_MESSAGES } from "./utils/outcomes.js";
 
 // Sessions: reading stored blobs and the seven stores
 export { assertSession, InvalidSessionError, migrateSession } from "./core/Migrate.js";
@@ -153,6 +154,7 @@ export type {
   Step,
   StepBase,
   StepOutcome,
+  StepOutcomeCode,
   StepOutcomeKind,
   StepOutcomeStatus,
   Store,

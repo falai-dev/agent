@@ -4,6 +4,7 @@
  * W2 wake and a broken silence premise are ignored with `changed: false`.
  */
 
+import { OUTCOME_MESSAGES } from "../src/index.js";
 import { describe, expect, test } from "bun:test";
 
 import { Runner } from "../src/core/Runner.js";
@@ -108,7 +109,7 @@ describe("S10: wakes, versions and replays", () => {
     // Replay on v8: the reply takes w1.else, retomar ends, triage keeps the floor and asks again.
     const replay = await drive(runner, { ...text, session: v8 }, { understanding: understood(), speak: () => spoken("Legal! E o seu nome?") });
     expect(replay.result.ended.map((r) => [r.flowId, r.reason])).toEqual([["retomar", "end"]]);
-    expect(replay.result.outcomes[0]).toMatchObject({ runId: `retomar#${T0ms}`, stepId: "w1", kind: "wait", status: "ok", detail: "respondeu", next: "end" });
+    expect(replay.result.outcomes[0]).toMatchObject({ runId: `retomar#${T0ms}`, stepId: "w1", kind: "wait", status: "ok", code: "replied", next: "end" });
     expect(isTalk(replay.talk) && replay.talk.run.id).toBe("triagem#m1");
     expect(replay.result.messages.map((m) => m.key)).toEqual(["triagem#m1:quem:1"]);
     expect(replay.result.session.runs.map((r) => [r.id, r.status, r.asked])).toEqual([["triagem#m1", "asking", { nome: 2 }]]);
@@ -120,13 +121,13 @@ describe("S10: wakes, versions and replays", () => {
     clock.advance("2d");
     const stale = await drive(runner, { sessionId: "s1", context: ai, session: v9, wake: W2 });
     expect(stale.result.changed).toBe(false);
-    expect(stale.result.outcomes).toEqual([{ kind: "wait", status: "skipped", detail: "ignorado: wake antigo", key: W2, at: clock.now().toISOString() }]);
+    expect(stale.result.outcomes).toEqual([{ kind: "wait", status: "skipped", code: "stale-wake", message: OUTCOME_MESSAGES["stale-wake"], key: W2, at: clock.now().toISOString() }]);
     expect(stale.result.session).toEqual(v9);
 
     // A silence wake whose premise broke (the lead wrote after the assistant) is ignored too.
     const broken = await drive(runner, { sessionId: "s1", context: ai, session: v9, wake: `silence:retomar:s1:${Date.parse(T1)}` });
     expect(broken.result.changed).toBe(false);
-    expect(broken.result.outcomes.map((o) => o.detail)).toEqual(["ignorado: silêncio quebrado"]);
+    expect(broken.result.outcomes.map((o) => o.code)).toEqual(["silence-broken"]);
   });
 
   test("had the text arrived first, the wake finds lastUserAt > setAt and takes w1.else: no nudge", async () => {
@@ -145,7 +146,7 @@ describe("S10: wakes, versions and replays", () => {
     const raced = { ...saved(tw.result), lastUserAt: clock.now().toISOString() };
     const wake = await drive(runner, { sessionId: "s1", context: ai, session: raced, wake: W2 });
     expect(wake.result.ended.map((r) => [r.flowId, r.reason])).toEqual([["retomar", "end"]]);
-    expect(wake.result.outcomes[0]).toMatchObject({ stepId: "w1", detail: "respondeu", next: "end" });
+    expect(wake.result.outcomes[0]).toMatchObject({ stepId: "w1", code: "replied", next: "end" });
     expect(wake.result.messages).toEqual([]);
   });
 
@@ -153,7 +154,7 @@ describe("S10: wakes, versions and replays", () => {
     const { runner, clock, notified } = setup();
     const none = await drive(runner, { sessionId: "s1", context: ai, wake: "silence:retomar:s1:1" });
     expect(none.result.changed).toBe(false);
-    expect(none.result.outcomes.map((o) => o.detail)).toEqual(["ignorado: sessão inexistente"]);
+    expect(none.result.outcomes.map((o) => o.code)).toEqual(["no-session"]);
 
     // Human owns the lead: the gate routes to `lembra`, the seller is notified, zero messages.
     const t0 = await drive(runner, { sessionId: "s1", context: ai, message: "quer saber como funciona", id: "m1" }, { understanding: understood(), speak: () => spoken("Nome?") });

@@ -57,6 +57,6 @@ describe("S9: zero flows", () => {
     // The same channel id again is a no-op.
     const t2 = await agent.turn(message("oi", "m1", { session: saved(t1) }));
     expect(t2.changed).toBe(false);
-    expect(t2.outcomes.map((o) => o.detail)).toEqual(["ignorado: entrada repetida"]);
+    expect(t2.outcomes.map((o) => o.code)).toEqual(["duplicate-input"]);
   });
 });

@@ -49,7 +49,7 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
     expect(r.llmCalls).toBe(1);
     expect(provider.calls.map((c) => c.schemaName)).toEqual(["understand"]);
     expect(r.messages.map((m) => m.text)).toEqual(["Oi! Aqui é da TRID.", "Chegou o iPhone 17, pronta entrega."]);
-    expect(r.outcomes.at(-1)).toMatchObject({ stepId: "q", status: "skipped", detail: "pulado: campos já conhecidos" });
+    expect(r.outcomes.at(-1)).toMatchObject({ stepId: "q", status: "skipped", code: "already-known" });
     expect(r.ended.map((e) => [e.id, e.reason])).toEqual([["trid#m1", "end"]]);
     expect(r.session.data).toEqual({ modelo: "17 Pro" });
   });

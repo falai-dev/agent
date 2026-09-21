@@ -30,7 +30,7 @@ export function extractMode(def: FieldDef): "anywhere" | "asked" {
   return def.extract ?? (def.type === "boolean" ? "asked" : "anywhere");
 }
 
-export type Coerced = { ok: true; value: string | number | boolean } | { ok: false; detail: string };
+export type Coerced = { ok: true; value: string | number | boolean } | { ok: false; code: "bad-value" | "not-in-enum" };
 
 /**
  * Turn a raw value from the model into the field's type. Strings are coerced
@@ -39,9 +39,9 @@ export type Coerced = { ok: true; value: string | number | boolean } | { ok: fal
  */
 export function coerceField(def: ScalarDef, raw: unknown): Coerced {
   const value = coerceScalar(def, raw);
-  if (value === undefined) return { ok: false, detail: `campo descartado: valor inválido para ${def.type}` };
+  if (value === undefined) return { ok: false, code: "bad-value" };
   if (def.enum && !def.enum.includes(value as string | number)) {
-    return { ok: false, detail: "campo descartado: valor fora da lista" };
+    return { ok: false, code: "not-in-enum" };
   }
   return { ok: true, value };
 }

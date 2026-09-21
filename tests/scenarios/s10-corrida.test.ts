@@ -48,7 +48,7 @@ describe("S10: wake vs text, with versions", () => {
     const v2 = await store.load("s1");
     const replay = await agent.turn(message("faz sim", "m2", { session: v2 ?? undefined }));
     expect(replay.ended.map((r) => [r.flowId, r.reason])).toEqual([["retomar", "end"]]);
-    expect(replay.outcomes.find((o) => o.kind === "wait")).toMatchObject({ status: "ok", detail: "respondeu" });
+    expect(replay.outcomes.find((o) => o.kind === "wait")).toMatchObject({ status: "ok", code: "replied" });
     expect(replay.messages.map((m) => m.text)).toEqual(["Ótimo! E a empresa?"]);
     const v3 = await commit(replay, 2);
     expect(v3.version).toBe(3);
@@ -57,6 +57,6 @@ describe("S10: wake vs text, with versions", () => {
     clock.advance("2d");
     const stale = await agent.turn({ sessionId: "s1", context: ai, session: v3, wake: wake.schedule[0].key });
     expect(stale.changed).toBe(false);
-    expect(stale.outcomes.map((o) => o.detail)).toEqual(["ignorado: wake antigo"]);
+    expect(stale.outcomes.map((o) => o.code)).toEqual(["stale-wake"]);
   });
 });

@@ -42,14 +42,14 @@ describe("isKnown / pendingFields", () => {
 
 describe("coerceField", () => {
   test("coerces strings to numbers and booleans, enforces enums", () => {
-    expect(coerceField(fields.orcamento, "1.500,50")).toEqual({ ok: false, detail: "campo descartado: valor inválido para number" });
+    expect(coerceField(fields.orcamento, "1.500,50")).toEqual({ ok: false, code: "bad-value" });
     expect(coerceField(fields.orcamento, "1500,50")).toEqual({ ok: true, value: 1500.5 });
     expect(coerceField({ type: "integer" }, "7.9")).toEqual({ ok: true, value: 7 });
     expect(coerceField(fields.confirmado, "sim")).toEqual({ ok: true, value: true });
     expect(coerceField(fields.confirmado, "não")).toEqual({ ok: true, value: false });
     expect(coerceField(fields.confirmado, "talvez").ok).toBe(false);
     expect(coerceField(fields.tamanho, "11-50")).toEqual({ ok: true, value: "11-50" });
-    expect(coerceField(fields.tamanho, "200+")).toEqual({ ok: false, detail: "campo descartado: valor fora da lista" });
+    expect(coerceField(fields.tamanho, "200+")).toEqual({ ok: false, code: "not-in-enum" });
     expect(coerceField(fields.nome, 42)).toEqual({ ok: true, value: "42" });
     expect(coerceField(fields.nome, { a: 1 }).ok).toBe(false);
   });

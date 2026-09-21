@@ -13,7 +13,7 @@ import type {
   Template,
 } from "./flow.js";
 import type { History } from "./history.js";
-import type { Run, Session, StepOutcome } from "./session.js";
+import type { Run, Session, StepOutcome, StepOutcomeCode } from "./session.js";
 import type { Tool } from "./tool.js";
 
 /** Returns "now". Tests pass a fake clock. */
@@ -144,7 +144,7 @@ export interface TurnResult<D = unknown> {
   started: Array<{ runId: string; flowId: string; anchor: string; dedupeKey: string }>;
   ended: Array<Run & { reason: EndReason }>;
   /** Triggers that matched but did not start a run, with the reason. */
-  skipped: Array<{ flowId: string; anchor: string; triggerKey: string; detail: string }>;
+  skipped: Array<{ flowId: string; anchor: string; triggerKey: string; code: StepOutcomeCode; message: string }>;
   llmCalls: number;
 }
 

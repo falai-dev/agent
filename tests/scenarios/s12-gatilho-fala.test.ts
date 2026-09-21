@@ -64,7 +64,7 @@ describe("S12: a wake-reached prompt through the one agent", () => {
     expect(provider.calls).toEqual([]);
     expect(calls).toHaveLength(1);
     expect(t2.messages).toEqual([]);
-    expect(t2.outcomes.map((o) => [o.stepId, o.status, o.detail])).toEqual([["n", "ok", undefined], ["p", "skipped", "silenciado: janela de 24h fechada"]]);
+    expect(t2.outcomes.map((o) => [o.stepId, o.status, o.code, o.detail])).toEqual([["n", "ok", undefined, undefined], ["p", "skipped", "silenced", "janela de 24h fechada"]]);
     expect(t2.ended.map((r) => [r.flowId, r.reason])).toEqual([["lembrete", "skipped"]]);
   });
 });

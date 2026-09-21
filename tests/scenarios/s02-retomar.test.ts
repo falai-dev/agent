@@ -41,7 +41,7 @@ describe("S2: retomar quem sumiu", () => {
     clock.advance("3h");
     const t3 = await agent.turn(message("faz sim!", "m2", { session: saved(t2) }));
     expect(t3.ended.map((r) => [r.flowId, r.reason])).toEqual([["retomar", "end"]]);
-    expect(t3.outcomes.find((o) => o.kind === "wait")).toMatchObject({ status: "ok", detail: "respondeu", next: "end" });
+    expect(t3.outcomes.find((o) => o.kind === "wait")).toMatchObject({ status: "ok", code: "replied", next: "end" });
     expect(t3.messages.map((m) => m.text)).toEqual(["Ótimo! E de qual empresa?"]);
     expect(t3.llmCalls).toBe(2);
     expect(t3.schedule).toEqual([]);

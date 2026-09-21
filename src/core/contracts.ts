@@ -10,7 +10,7 @@
 import type { Idle } from "../types/agent.js";
 import type { FieldDef, Flow, Instruction, StepBase, TalkStep } from "../types/flow.js";
 import type { History } from "../types/history.js";
-import type { Run } from "../types/session.js";
+import type { Run, StepOutcomeCode } from "../types/session.js";
 import type { Tool } from "../types/tool.js";
 
 export type InputKind = "message" | "wake" | "event" | "start";
@@ -89,7 +89,7 @@ export interface Spoken {
   llmCalls: number;
 }
 
-/** `deferred` is the provider failing; Runner re-parks the step under a retry wake. */
-export type SpeakOutcome = { spoken: Spoken } | { deferred: string; llmCalls: number };
+/** `deferred` is the provider failing; Runner re-parks the step under a retry wake and writes the code on the outcome. */
+export type SpeakOutcome = { spoken: Spoken } | { deferred: StepOutcomeCode; llmCalls: number };
 
 export type SpeakStreamChunk = { delta: string } | { done: true; outcome: SpeakOutcome };

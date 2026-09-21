@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { Runner } from "../src/core/Runner.js";
-import { falai } from "../src/index.js";
+import { OUTCOME_MESSAGES, falai } from "../src/index.js";
 import type { Flow, Session, TurnInput } from "../src/index.js";
 import { fakeClock } from "../src/utils/clock.js";
 import { mockProvider } from "./mock-provider.js";
@@ -49,7 +49,7 @@ describe("repeat", () => {
     expect(keys).toEqual(["promo#m1:n:1"]);
     const t2 = await drive(runner, message("m2", { session: saved(t1.result) }));
     expect(t2.result.started).toEqual([]);
-    expect(t2.result.skipped).toEqual([{ flowId: "promo", anchor: "s1", triggerKey: "m2", detail: "pulado: já executado" }]);
+    expect(t2.result.skipped).toEqual([{ flowId: "promo", anchor: "s1", triggerKey: "m2", code: "already-claimed", message: OUTCOME_MESSAGES["already-claimed"] }]);
     expect(keys).toHaveLength(1);
   });
 
@@ -62,7 +62,7 @@ describe("repeat", () => {
     const e1 = await drive(runner, event("e1", { session: saved(t2.result) }));
     expect(e1.result.started.map((s) => s.runId)).toEqual(["ev#e1"]);
     const e1again = await drive(runner, event("e1", { session: saved(e1.result) }));
-    expect(e1again.result.skipped.map((s) => s.detail)).toEqual(["pulado: já executado"]);
+    expect(e1again.result.skipped.map((s) => s.code)).toEqual(["already-claimed"]);
   });
 
   test("always keeps the last 50 claims per flow and anchor", async () => {
@@ -83,7 +83,7 @@ describe("repeat", () => {
     const t1 = await drive(runner, message("m1"));
     clock.advance("10m");
     const t2 = await drive(runner, message("m2", { session: saved(t1.result) }));
-    expect(t2.result.skipped.map((s) => s.detail)).toEqual(["pulado: em cooldown"]);
+    expect(t2.result.skipped.map((s) => s.code)).toEqual(["cooldown"]);
     clock.advance("50m");
     const t3 = await drive(runner, message("m3", { session: saved(t2.result) }));
     expect(t3.result.started.map((s) => s.runId)).toEqual(["promo#m3"]);
@@ -94,7 +94,7 @@ describe("repeat", () => {
     const lead = f.flow({ id: "promo", name: "Promo", anchor: "lead", on: [{ mention: [] }], steps: [{ id: "n", do: "notify" }] });
     const { runner } = setup([lead]);
     const held = await drive(runner, message("m1", { anchors: { lead: { key: "lead:456" } }, claims: { held: { "promo:lead:456:": T0 }, active: [] } }));
-    expect(held.result.skipped).toEqual([{ flowId: "promo", anchor: "lead:456", triggerKey: "m1", detail: "pulado: já executado" }]);
+    expect(held.result.skipped).toEqual([{ flowId: "promo", anchor: "lead:456", triggerKey: "m1", code: "already-claimed", message: OUTCOME_MESSAGES["already-claimed"] }]);
     const fresh = await drive(runner, message("m1", { anchors: { lead: { key: "lead:456" } } }));
     expect(fresh.result.started[0]).toMatchObject({ anchor: "lead:456", dedupeKey: "promo:lead:456:" });
     // A named anchor the host did not pass falls back to the session id.
@@ -111,14 +111,14 @@ describe("one active run per (flow, anchor)", () => {
     const t1 = await drive(runner, event("e1"));
     expect(t1.result.session.runs.map((r) => r.status)).toEqual(["waiting"]);
     const t2 = await drive(runner, event("e2", { session: saved(t1.result) }));
-    expect(t2.result.skipped).toEqual([{ flowId: "agenda", anchor: "s1", triggerKey: "e2", detail: "pulado: já em andamento" }]);
+    expect(t2.result.skipped).toEqual([{ flowId: "agenda", anchor: "s1", triggerKey: "e2", code: "already-running", message: OUTCOME_MESSAGES["already-running"] }]);
     expect(t2.result.session.runs).toHaveLength(1);
   });
 
   test("a live run in another session (claims.active) blocks it too", async () => {
     const { runner } = setup([agenda]);
     const { result } = await drive(runner, event("e1", { claims: { held: {}, active: ["agenda:s1"] } }));
-    expect(result.skipped.map((s) => s.detail)).toEqual(["pulado: já em andamento"]);
+    expect(result.skipped.map((s) => s.code)).toEqual(["already-running"]);
     expect(result.changed).toBe(true); // the skip line still reaches the host's log
   });
 
@@ -156,11 +156,11 @@ describe("hop cap", () => {
   test("a start at hop 5 is skipped; a chain that crosses the cap stops at the child", async () => {
     const { runner, keys } = setup([a, b]);
     const capped = await drive(runner, { sessionId: "s1", start: { flow: "a", key: "k", hop: 5 } });
-    expect(capped.result.skipped).toEqual([{ flowId: "a", anchor: "s1", triggerKey: "k", detail: "pulado: limite de encadeamento" }]);
+    expect(capped.result.skipped).toEqual([{ flowId: "a", anchor: "s1", triggerKey: "k", code: "hop-limit", message: OUTCOME_MESSAGES["hop-limit"] }]);
     const chain = await drive(runner, { sessionId: "s1", start: { flow: "a", key: "k", hop: 4 } });
     expect(keys).toEqual(["a#k:n:1"]);
     expect(chain.result.ended.map((r) => [r.id, r.reason])).toEqual([["a#k", "flow"]]);
-    expect(chain.result.skipped).toEqual([{ flowId: "b", anchor: "s1", triggerKey: "a#k:n:1", detail: "pulado: limite de encadeamento" }]);
+    expect(chain.result.skipped).toEqual([{ flowId: "b", anchor: "s1", triggerKey: "a#k:n:1", code: "hop-limit", message: OUTCOME_MESSAGES["hop-limit"] }]);
     const ok = await drive(runner, { sessionId: "s1", start: { flow: "a", key: "k2" } });
     expect(ok.result.started.map((s) => [s.runId, s.dedupeKey])).toEqual([["a#k2", "a:s1:k2"], ["b#a#k2:n:1", "b:s1:a#k2:n:1"]]);
     expect(ok.result.session.runs).toEqual([]);

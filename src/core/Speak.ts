@@ -39,7 +39,8 @@ import {
 
 const DEFAULT_MAX_TOOL_LOOPS = 5;
 /** The outcome detail Runner shows when the provider failed or said nothing. */
-const UNAVAILABLE = "IA indisponível";
+/** The one reason this call can fail from the Runner's point of view; it becomes the outcome's `code`. */
+const UNAVAILABLE = "provider-unavailable";
 /** Gemini rejects any other envelope property name. */
 const WIRE_NAME = /^[a-zA-Z0-9_-]+$/;
 

@@ -47,7 +47,7 @@ describe("S5: campaign start → template → nudge → reply chains into the fu
     const t2 = await agent.turn({ sessionId: "s1", context: ai, session: saved(t1), wake: t1.schedule[0].key, history: [] });
     expect(t2.llmCalls).toBe(1);
     expect(t2.messages.map((m) => [m.text, m.key])).toEqual([["Oi! Viu minha mensagem de ontem?", "campanha#camp:1:nudge:1"]]);
-    expect(t2.outcomes.map((o) => [o.stepId, o.status, o.detail])).toEqual([["espera", "ok", "sem resposta"], ["nudge", "ok", undefined], ["espera2", "waiting", undefined]]);
+    expect(t2.outcomes.map((o) => [o.stepId, o.status, o.code])).toEqual([["espera", "ok", "no-reply"], ["nudge", "ok", undefined], ["espera2", "waiting", undefined]]);
     expect(t2.session.runs[0]).toMatchObject({ stepId: "espera2", status: "waiting" });
 
     clock.advance("2h");

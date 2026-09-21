@@ -41,7 +41,7 @@ describe("S3: event + after + while", () => {
     expect(t2.llmCalls).toBe(0);
     const at = Date.parse(T0) + 3_600_000;
     expect(t2.schedule).toEqual([{ key: `interesse#stage:7:start:${at}`, at: new Date(at) }]);
-    expect(t2.outcomes).toEqual([expect.objectContaining({ runId: "interesse#stage:7", kind: "wait", status: "waiting", detail: "aguardando gatilho", until: new Date(at).toISOString() })]);
+    expect(t2.outcomes).toEqual([expect.objectContaining({ runId: "interesse#stage:7", kind: "wait", status: "waiting", code: "awaiting-trigger", until: new Date(at).toISOString() })]);
     expect(t2.session.runs.map((r) => [r.flowId, r.status, r.stepId])).toEqual([["triagem", "asking", "quem"], ["interesse", "waiting", null]]);
 
     clock.advance("1h");
@@ -68,7 +68,7 @@ describe("S3: event + after + while", () => {
     expect(t2.llmCalls).toBe(0);
     expect(t2.messages).toEqual([]);
     expect(t2.ended.map((r) => [r.flowId, r.reason])).toEqual([["interesse", "skipped"]]);
-    expect(t2.outcomes.map((o) => o.detail)).toEqual(["pulado: premissa mudou"]);
+    expect(t2.outcomes.map((o) => o.code)).toEqual(["premise-changed"]);
     expect(t2.session.runs).toEqual([]);
   });
 

@@ -48,6 +48,55 @@ export type StepOutcomeKind = "prompt" | "collect" | "say" | "do" | "wait" | "if
 export type StepOutcomeStatus = "ok" | "skipped" | "failed" | "waiting" | "deferred";
 
 /** One line per step for the host's execution log. */
+/**
+ * Why a line says what it says. Switch on this, never on `message`: the code
+ * is stable across versions, the sentence is not.
+ *
+ * `OUTCOME_MESSAGES` maps each one to its English sentence; a product that
+ * speaks another language maps the code to its own words instead.
+ */
+export type StepOutcomeCode =
+  // The turn refused the input
+  | "no-session"
+  | "duplicate-input"
+  | "stale-wake"
+  | "silence-broken"
+  // A trigger matched but started nothing
+  | "already-claimed"
+  | "cooldown"
+  | "hop-limit"
+  | "already-running"
+  | "flow-gone"
+  // A run ended early
+  | "step-loop"
+  | "step-gone"
+  | "customer-replied"
+  | "premise-changed"
+  | "silenced"
+  // A step
+  | "already-known"
+  | "another-reply"
+  | "already-sent"
+  | "branch"
+  | "max-asks"
+  | "inline-delay"
+  | "awaiting-trigger"
+  | "awaiting-event"
+  | "event-arrived"
+  | "no-event"
+  | "replied"
+  | "no-reply"
+  // A host action
+  | "action-skipped"
+  | "action-failed"
+  | "action-deferred"
+  // A value the model gave
+  | "unknown-field"
+  | "bad-value"
+  | "not-in-enum"
+  // The model
+  | "provider-unavailable";
+
 export interface StepOutcome {
   runId?: string;
   flowId?: string;
@@ -55,6 +104,11 @@ export interface StepOutcome {
   key?: string;
   kind: StepOutcomeKind;
   status: StepOutcomeStatus;
+  /** Why. Absent when the line needs no reason, such as a step that simply ran. */
+  code?: StepOutcomeCode;
+  /** The English sentence for `code`, filled by the framework. For logs; translate by `code` instead of showing this to someone who does not read English. */
+  message?: string;
+  /** Text this one occurrence carries: your `silenced` reason, an action's own words, the field a line is about. The framework never writes a sentence here. */
   detail?: string;
   next?: string;
   until?: string;
