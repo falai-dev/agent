@@ -185,7 +185,7 @@ Base URL `https://openrouter.ai/api`, chat completions with `json_schema`.
 
 Pass `providerOrder` to choose the hosts yourself. There is no way to say it inside `model`: OpenRouter answers `400 "z-ai/glm-5.3-flash@novita is not a valid model ID"`.
 
-One caveat worth measuring for your own model: through this gateway, `z-ai/glm-5.3-flash` put "somos umas 30 pessoas" in the wrong band of a four-value enum on most attempts, in every JSON mode and routing tried, while the same model on [ZaiProvider](#zaiprovider) and `deepseek-chat` got it right every time. Run `bun run eval:live --only openrouter` against the model you ship.
+**The route changes the answers, so measure your own model here.** Through this gateway, `z-ai/glm-5.3-flash` put "somos umas 30 pessoas" in the wrong band of a four-value enum on most attempts, in every JSON mode and routing tried, while the same model on [ZaiProvider](#zaiprovider) and `deepseek-chat` got it right every time. Over the 40-case understand eval on 2026-09-21 the same split holds: routing agreement 93% either way, but field agreement 86% (12/14) through OpenRouter against 100% (14/14) on `ZaiProvider`, and a median call three to five times slower. Prefer a model's own endpoint where you have one; run `bun run eval:understand` and `bun run eval:live --only openrouter` against the model you ship.
 
 ## DeepSeekProvider
 
