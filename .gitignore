@@ -42,3 +42,4 @@ coverage/
 # Temporary
 .tmp/
 .cache/
+.snippets/
