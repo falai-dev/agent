@@ -80,6 +80,8 @@ The speak call phrases the reply. If the provider fails here, or answers with an
 
 A failure that waits returns with an outcome `{ kind: "prompt" | "collect", status: "deferred", code, until }`, a `schedule[]` entry keyed `${runId}:${stepId}:${visit}:retry:${atMs}`, and `llmCalls` counting the call that failed. The backoff is 1 minute, then 5, 15, an hour, six hours (`RETRY_BACKOFF` in `src/core/Runner.ts`); the attempt number is the count of trailing `deferred` outcomes for that step on that run. A provider that stated a reset later than the next rung is woken at the reset instead. When the wake fires, the step runs again at the same visit, so its message carries the same key it would have carried the first time.
 
+**The provider's own answer wins.** The table reads the failure's kind, which is an inference. When the provider sends `x-should-retry` it is not one, so that is read first: a `503` saying don't ends the step instead of spending five wakes to be told again, and a rejected request saying do gets its wake instead of ending the run. It arrives on `ProviderError.shouldRetry`.
+
 **The ladder ends.** After the sixth failure on the same step there is no seventh wake: the outcome is `status: "failed"` and the run ends. The same happens at once for a failure no wait can fix — retrying a rejected key or an oversized prompt only spends two model calls to reach the same wall. Both land in `ended` with `reason: "failed"`, so your execution log shows a conversation that stopped and why.
 
 Actions that ran earlier in the same turn are not undone; they ran at-least-once and are idempotent on `ctx.key`. `say` steps that went out before the failure are in `messages[]` as usual.

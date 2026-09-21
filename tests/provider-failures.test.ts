@@ -87,6 +87,18 @@ describe("Speak names the failure", () => {
     });
   });
 
+  test("the provider's own answer beats the kind, both ways", async () => {
+    // `x-should-retry` is the one reading nobody has to infer, and core puts it
+    // above its own transience test. A 503 that says don't would otherwise cost
+    // five wakes and ten model calls; a wall that says do would end the run.
+    expect(
+      await deferralFor(new ProviderError("openai", "overload", "503", { shouldRetry: false })),
+    ).toEqual({ code: "provider-unavailable", retryable: false });
+    expect(
+      await deferralFor(new ProviderError("openai", "invalid", "try again", { shouldRetry: true })),
+    ).toEqual({ code: "provider-invalid", retryable: true });
+  });
+
   test("a bare 402 is classified as a wall, not as a mystery outage", async () => {
     // The kinds a wake can fix are 408, a transient 429, 5xx and no answer at
     // all — nothing else. A payment wall reaches here as a plain rejection with

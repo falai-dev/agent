@@ -78,8 +78,17 @@ function deferralOf(error: unknown): Deferral {
   // A usage window that says when it reopens is worth exactly one wake, then.
   // Without that number, waiting is guessing, and the ladder guesses in minutes
   // at a limit measured in hours.
-  const retryable = RETRY_KINDS.has(kind) || (kind === "quota" && reset !== undefined);
-  return { code: DEFER_CODE[kind], retryable, ...(reset !== undefined ? { resetAtMs: reset } : {}) };
+  const inferred = RETRY_KINDS.has(kind) || (kind === "quota" && reset !== undefined);
+  // Unless the provider said so outright. `x-should-retry` is the one answer
+  // nobody has to infer, and core already puts it above its own transience
+  // test — a 503 that says don't costs five wakes and ten model calls here if
+  // this reads the kind instead.
+  const stated = error instanceof ProviderError ? error.shouldRetry : undefined;
+  return {
+    code: DEFER_CODE[kind],
+    retryable: stated ?? inferred,
+    ...(reset !== undefined ? { resetAtMs: reset } : {}),
+  };
 }
 /** Gemini rejects any other envelope property name. */
 const WIRE_NAME = /^[a-zA-Z0-9_-]+$/;
