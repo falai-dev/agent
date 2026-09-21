@@ -4,13 +4,13 @@
  * speak call. Every test here spends zero real calls.
  */
 
-import type { SpeakOutcome, TalkRequest, Understanding } from "../src/core/contracts.js";
-import type { IdleSpeaker, Runner } from "../src/core/Runner.js";
+import type { IdleRequest, SpeakOutcome, TalkRequest, Understanding } from "../src/core/contracts.js";
+import type { Runner } from "../src/core/Runner.js";
 import type { Session, TurnInput, TurnResult } from "../src/index.js";
 
 export interface Driven<C, D> {
   result: TurnResult<D>;
-  talk: TalkRequest<C, D> | IdleSpeaker<C, D> | null;
+  talk: TalkRequest<C, D> | IdleRequest<C, D> | null;
   understood: boolean;
 }
 
@@ -19,7 +19,7 @@ export async function drive<C, D>(
   input: TurnInput<C, D>,
   feed: {
     understanding?: Omit<Understanding, "llmCalls">;
-    speak?: (talk: TalkRequest<C, D> | IdleSpeaker<C, D>) => SpeakOutcome | null;
+    speak?: (talk: TalkRequest<C, D> | IdleRequest<C, D>) => SpeakOutcome | null;
   } = {},
 ): Promise<Driven<C, D>> {
   const turn = runner.begin(input);
@@ -45,6 +45,6 @@ export function spoken(message: string, fields: Record<string, unknown> = {}): S
   return { spoken: { message, fields, data: {}, toolCalls: [], llmCalls: 0 } };
 }
 
-export function isTalk<C, D>(talk: TalkRequest<C, D> | IdleSpeaker<C, D> | null): talk is TalkRequest<C, D> {
+export function isTalk<C, D>(talk: TalkRequest<C, D> | IdleRequest<C, D> | null): talk is TalkRequest<C, D> {
   return talk !== null && "run" in talk;
 }

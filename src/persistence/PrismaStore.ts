@@ -20,7 +20,7 @@
  * and tolerated a model without `version`; neither survives.
  */
 
-import { isRecord } from "../core/Migrate.js";
+import { isRecord } from "../utils/json.js";
 import { SessionConflictError } from "../types/errors.js";
 import type { Session, Store } from "../types/session.js";
 import { readBlob, toBlob } from "./sessionRow.js";

@@ -11,6 +11,7 @@
 
 import type { History } from "../types/history.js";
 import type { Run, RunStatus, Session, StepOutcome } from "../types/session.js";
+import { isRecord } from "../utils/json.js";
 
 type Rec = Record<string, unknown>;
 
@@ -34,10 +35,6 @@ export interface MigrateOptions {
   flowIdOf: (signalKeyOrFlowId: string) => string;
   /** Stamps runs and claims that carry no date of their own. Default: now. */
   now?: Date;
-}
-
-export function isRecord(value: unknown): value is Rec {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const isWhole = (value: unknown): value is number =>
@@ -115,7 +112,7 @@ function checkRun(raw: unknown, index: number, bad: Bad): Run {
 
   const status = text("status");
   if (!RUN_STATUS.has(status)) throw bad(`${at}.status is "${status}"`);
-  const { stepId, hop, outcomes, input, waiting } = raw;
+  const { stepId, hop, outcomes, input, waiting, suspendedAt } = raw;
   if (stepId !== null && typeof stepId !== "string") throw bad(`${at}.stepId is ${describe(stepId)}, expected text or null`);
   if (!isWhole(hop)) throw bad(`${at}.hop is ${describe(hop)}, expected a whole number`);
   if (!Array.isArray(outcomes)) throw bad(`${at}.outcomes is ${describe(outcomes)}, expected a list`);
@@ -141,6 +138,7 @@ function checkRun(raw: unknown, index: number, bad: Bad): Run {
   };
   if (input !== undefined) run.input = input;
   if (waiting !== undefined) run.waiting = waiting as Run["waiting"];
+  if (typeof suspendedAt === "string") run.suspendedAt = suspendedAt;
   return run;
 }
 

@@ -26,6 +26,8 @@ export interface Run {
   /** Flow-to-flow chaining depth; capped at 5. */
   hop: number;
   startedAt: string;
+  /** Set while `suspended`; the most recently suspended run resumes first. */
+  suspendedAt?: string;
   waiting?: {
     kind: "timer" | "event";
     /** The wake key; only a `wake` equal to it is honoured. */

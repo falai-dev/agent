@@ -8,7 +8,7 @@
  *   begin ─▶ understandRequest ─(Understand)─▶ decide ─▶ advance ─(Speak)─▶ settle ─▶ finish
  */
 
-import type { AgentOptions, EndReason, Idle, TurnInput, TurnResult } from "../types/agent.js";
+import type { AgentOptions, EndReason, TurnInput, TurnResult } from "../types/agent.js";
 import type {
   ActionResult,
   Branch,
@@ -32,17 +32,8 @@ import { cloneDeep } from "../utils/clone.js";
 import { parseDuration } from "../utils/duration.js";
 import { coerceField, DEFAULT_MAX_ASKS, extractMode, isKnown, pendingFields } from "../utils/schema.js";
 import { render, renderDeep } from "../utils/template.js";
-import type { InputKind, SpeakOutcome, Spoken, TalkRequest, UnderstandRequest, Understanding } from "./contracts.js";
+import type { IdleRequest, InputKind, SpeakOutcome, Spoken, TalkRequest, UnderstandRequest, Understanding } from "./contracts.js";
 import { deepEqual, evaluate } from "./predicate.js";
-
-/**
- * No run holds the floor; the idle speaker answers. The same shape as
- * `contracts.IdleRequest`, generic so `Idle<C, D>` fits without a cast
- * (`keyof unknown` is `never`, so the non-generic one rejects every `D`).
- */
-export interface IdleSpeaker<C = unknown, D = unknown> {
-  idle: Exclude<Idle<C, D>, "silent">;
-}
 
 /** A `wait` this short rides as `afterMs` on the next message instead of a real wake. */
 const SHORT_WAIT_MS = 10_000;
@@ -630,6 +621,7 @@ export class Runner<C = unknown, D = unknown> {
       const suspended = turn.session.runs.find((r) => r.flowId === route.id && r.status === "suspended");
       if (suspended) {
         suspended.status = "running";
+        delete suspended.suspendedAt;
         turn.floorRunId = suspended.id;
       } else {
         const trigger = (route.on ?? []).find((t) => "message" in t);
@@ -677,7 +669,7 @@ export class Runner<C = unknown, D = unknown> {
 
   // ── Run: move everything that can move (design §4.5) ──────────────────
 
-  async advance(turn: Turn<C, D>): Promise<TalkRequest<C, D> | IdleSpeaker<C, D> | null> {
+  async advance(turn: Turn<C, D>): Promise<TalkRequest<C, D> | IdleRequest<C, D> | null> {
     if (turn.ignored) return null;
     this.resumeSuspended(turn);
     turn.queue = [...turn.session.runs];
@@ -685,7 +677,7 @@ export class Runner<C = unknown, D = unknown> {
     return this.speaker(turn);
   }
 
-  private speaker(turn: Turn<C, D>): TalkRequest<C, D> | IdleSpeaker<C, D> | null {
+  private speaker(turn: Turn<C, D>): TalkRequest<C, D> | IdleRequest<C, D> | null {
     if (turn.silenced !== undefined) return null;
     const { talk } = turn;
     if (talk) {
@@ -744,7 +736,8 @@ export class Runner<C = unknown, D = unknown> {
 
   /** `while` (default: the trigger's `if`) with fresh context; silence runs add "no lead message since the run started". */
   private premiseHolds(turn: Turn<C, D>, run: Run, flow: Flow<C, D>): boolean {
-    if (run.trigger.kind === "silence" && this.leadWroteSince(turn, run.startedAt, flow)) {
+    // A wake-driven move only: on a message turn the lead just wrote, and the flow's `wait ... else` says what to do about it.
+    if (run.trigger.kind === "silence" && turn.what.kind === "wake" && this.leadWroteSince(turn, run.startedAt, flow)) {
       this.endRun(turn, run, "skipped", "pulado: lead escreveu nesse meio-tempo");
       return false;
     }
@@ -783,7 +776,12 @@ export class Runner<C = unknown, D = unknown> {
         else this.endRun(turn, run, "skipped", `silenciado: ${turn.silenced}`, kind);
         return;
       }
-      for (const other of turn.session.runs) if (other !== run && other.status === "asking") other.status = "suspended";
+      for (const other of turn.session.runs) {
+        if (other !== run && other.status === "asking") {
+          other.status = "suspended";
+          other.suspendedAt = turn.nowIso;
+        }
+      }
       run.status = "asking";
       if (!turn.speakDone) turn.talk = { run, flow, step, pending };
       return;
@@ -1001,10 +999,14 @@ export class Runner<C = unknown, D = unknown> {
   /** When nobody asks, the most recently suspended run returns to asking. */
   private resumeSuspended(turn: Turn<C, D>): void {
     if (this.asker(turn)) return;
-    // ponytail: "most recently suspended" is read as latest `startedAt`, then position; two runs started in one turn tie. Upgrade: `suspendedAt` on Run.
-    const next = turn.session.runs.filter((r) => r.status === "suspended").reduce<Run | undefined>(
-      (top, cur) => (top && top.startedAt > cur.startedAt ? top : cur), undefined);
-    if (next) next.status = "asking";
+    const suspendedAt = (r: Run): string => r.suspendedAt ?? r.startedAt;
+    const next = turn.session.runs
+      .filter((r) => r.status === "suspended")
+      .reduce<Run | undefined>((top, cur) => (top && suspendedAt(top) > suspendedAt(cur) ? top : cur), undefined);
+    if (next) {
+      next.status = "asking";
+      delete next.suspendedAt;
+    }
   }
 
   // ── Settle: the one applier after Speak (design §4.7) ─────────────────

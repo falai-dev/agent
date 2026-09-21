@@ -62,12 +62,12 @@ export interface TalkRequest<C = unknown, D = unknown> {
 }
 
 /** No run holds the floor; the idle speaker answers. */
-export interface IdleRequest {
-  idle: Exclude<Idle, "silent">;
+export interface IdleRequest<C = unknown, D = unknown> {
+  idle: Exclude<Idle<C, D>, "silent">;
 }
 
 export interface SpeakRequest<C = unknown, D = unknown> {
-  talk: TalkRequest<C, D> | IdleRequest;
+  talk: TalkRequest<C, D> | IdleRequest<C, D>;
   /** What started this turn. A wake has no text: the assistant speaks first. */
   input: { kind: InputKind; text?: string };
   context: C;

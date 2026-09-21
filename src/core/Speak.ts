@@ -21,7 +21,7 @@ import type { History } from "../types/history.js";
 import type { StructuredSchema } from "../types/schema.js";
 import type { Tool, ToolCtx, ToolResult } from "../types/tool.js";
 import { assistantMessage, toolMessage } from "../utils/history.js";
-import { extractEmbeddedJSONObject, tryParseJSONResponse } from "../utils/json.js";
+import { extractEmbeddedJSONObject, isRecord, tryParseJSONResponse } from "../utils/json.js";
 import { logger } from "../utils/logger.js";
 import { isKnown, toWireSchema } from "../utils/schema.js";
 import { StreamingMessageDecoder } from "../utils/streamingMessage.js";
@@ -370,8 +370,4 @@ function serialize(value: unknown, max?: number): string {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

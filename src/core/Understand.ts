@@ -20,7 +20,7 @@
 import type { AgentOptions } from "../types/agent.js";
 import type { FieldDef, FieldDefs, Flow, ParamDef, ParamDefs } from "../types/flow.js";
 import type { StructuredSchema } from "../types/schema.js";
-import { extractEmbeddedJSONObject } from "../utils/json.js";
+import { extractEmbeddedJSONObject, isRecord } from "../utils/json.js";
 import { logger } from "../utils/logger.js";
 import { coerceField, isKnown, pendingFields, toWireSchema } from "../utils/schema.js";
 import { render, type TemplateScope } from "../utils/template.js";
@@ -357,10 +357,6 @@ function describeParam(name: string, def: ParamDef): string {
 
 function empty(llmCalls: number): Understanding {
   return { flows: {}, mentions: {}, extract: {}, branches: {}, fields: {}, llmCalls };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** A reply is usable when it is an object carrying at least one envelope section. */

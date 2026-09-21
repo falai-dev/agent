@@ -270,6 +270,44 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
   });
 });
 
+describe("the floor: suspended runs resume most recently suspended first", () => {
+  // `tarde` starts early but only reaches its talk step an hour later, so its `startedAt`
+  // is the oldest while its suspension is the newest: `suspendedAt` decides, not `startedAt`.
+  const tarde = f.flow({ id: "tarde", name: "Tarde", steps: [{ id: "w", wait: "1h" }, { id: "p", prompt: "Fale primeiro.", collect: ["confirmado"] }] });
+  const funil = f.flow({ id: "funil", name: "Funil", steps: [{ id: "q", collect: ["nome"] }] });
+  const outro = f.flow({ id: "outro", name: "Outro", steps: [{ id: "q", collect: ["modelo"] }] });
+  const start = (flow: string, key: string, session?: Session<Data>): TurnInput<Ctx, Data> => ({ sessionId: "s1", context: ai, session, start: { flow, key } });
+
+  test("a run that took the floor by wake is suspended after an older run and resumes before it", async () => {
+    const { runner, clock } = setup([tarde, funil, outro]);
+    const t1 = await drive(runner, start("tarde", "a"));
+    expect(t1.result.session.runs[0]).toMatchObject({ id: "tarde#a", status: "waiting" });
+
+    clock.advance("10m");
+    const t2 = await drive(runner, start("funil", "b", saved(t1.result)), { speak: () => spoken("Seu nome?") });
+    expect(t2.result.session.runs.map((r) => [r.id, r.status])).toEqual([["tarde#a", "waiting"], ["funil#b", "asking"]]);
+
+    clock.advance("50m");
+    const t3 = await drive(runner, { sessionId: "s1", context: ai, session: saved(t2.result), wake: t1.result.schedule[0].key }, { speak: () => spoken("Oi, sou eu.") });
+    expect(t3.result.session.runs.map((r) => [r.id, r.status])).toEqual([["tarde#a", "asking"], ["funil#b", "suspended"]]);
+    expect(t3.result.session.runs[1].suspendedAt).toBe(clock.now().toISOString());
+
+    clock.advance("10m");
+    const t4 = await drive(runner, start("outro", "c", saved(t3.result)), { speak: () => spoken("Qual modelo?") });
+    expect(t4.result.session.runs.map((r) => [r.id, r.status])).toEqual([["tarde#a", "suspended"], ["funil#b", "suspended"], ["outro#c", "asking"]]);
+
+    clock.advance("10m");
+    const t5 = await drive(runner, message("iPhone 17", "m1", { session: saved(t4.result) }), {
+      understanding: understood({ fields: { modelo: "iPhone 17" } }),
+      speak: () => spoken("Anotado."),
+    });
+    expect(t5.result.ended.map((r) => r.id)).toEqual(["outro#c"]);
+    // LIFO by suspension: tarde (suspended last) resumes, not funil (started later than tarde).
+    expect(t5.result.session.runs.map((r) => [r.id, r.status])).toEqual([["tarde#a", "asking"], ["funil#b", "suspended"]]);
+    expect(t5.result.session.runs[0]).not.toHaveProperty("suspendedAt");
+  });
+});
+
 describe("if, then { step, clear }, onEnd, while, replay and the step cap", () => {
   const gate = f.flow({
     id: "gate", name: "Gate",

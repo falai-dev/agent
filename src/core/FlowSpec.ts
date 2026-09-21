@@ -42,6 +42,7 @@ import type {
   WaitStep,
 } from "../types/flow.js";
 import type { StructuredSchema } from "../types/schema.js";
+import { isDuration } from "../utils/duration.js";
 import { toWireSchema } from "../utils/schema.js";
 
 // ── The JSON form ───────────────────────────────────────────────────────
@@ -262,8 +263,6 @@ interface LooseFlow {
 
 const BUILT_IN_CONDITIONS = ["equals", "known", "silenced"];
 
-// ponytail: a shape check only; src/utils/duration.ts (slice 3) owns parsing and the integrator swaps this for it.
-const DURATION = /^\d+(\.\d+)?[smhd]$/;
 const DURATION_HINT = 'Write a number and a unit: "30s", "5m", "24h" or "3d".';
 
 /**
@@ -345,7 +344,7 @@ export function validateFlow<C, D extends LooseData>(
   };
 
   const duration = (value: string | undefined, at: string, where: string): void => {
-    if (value !== undefined && !DURATION.test(value)) {
+    if (value !== undefined && !isDuration(value)) {
       throw problem(at, `${where} has duration "${value}", which does not parse`, DURATION_HINT);
     }
   };
