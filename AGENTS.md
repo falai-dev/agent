@@ -35,7 +35,7 @@
 | Typecheck examples | `bun run typecheck:examples` |
 | Lint | `bun run lint` |
 | Lint + fix | `bun run lint:fix` |
-| Test | `bun test tests/*.test.ts` |
+| Test | `bun test tests/*.test.ts tests/scenarios/*.test.ts` |
 | Clean | `bun run clean` |
 | Publish current version | `bun run release` |
 

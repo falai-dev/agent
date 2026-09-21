@@ -56,7 +56,7 @@
     "release:major": "bun pm version major && bun publish",
     "release:alpha": "bun publish --tag alpha",
     "release": "bun publish",
-    "test": "bun test tests/*.test.ts"
+    "test": "bun test tests/*.test.ts tests/scenarios/*.test.ts"
   },
   "keywords": [
     "ai",
