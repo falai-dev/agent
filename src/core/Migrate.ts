@@ -163,9 +163,8 @@ export function migrateSession<D>(blob: unknown, options: MigrateOptions): Sessi
 
 function fromLegacy<D>(blob: Rec, options: MigrateOptions, bad: Bad): Session<D> {
   const { sessionId, flowIdOf } = options;
-  const { data, version, metadata, history, flowHistory, signals } = blob;
+  const { data, metadata, history, flowHistory, signals } = blob;
   if (!isRecord(data)) throw bad(`data is ${describe(data)}, expected an object; not a 3.x session either`);
-  if (version !== undefined && !isWhole(version)) throw bad(`version is ${describe(version)}, expected a whole number`);
   if (metadata !== undefined && !isRecord(metadata)) throw bad(`metadata is ${describe(metadata)}, expected an object`);
   if (history !== undefined && !Array.isArray(history)) throw bad(`history is ${describe(history)}, expected a list`);
   if (flowHistory !== undefined && !Array.isArray(flowHistory)) throw bad(`flowHistory is ${describe(flowHistory)}, expected a list`);
@@ -217,7 +216,8 @@ function fromLegacy<D>(blob: Rec, options: MigrateOptions, bad: Bad): Session<D>
   const session: Session<D> = {
     id: sessionId,
     v: 4,
-    version: version ?? 0,
+    // A migrated session has no v4 row yet: 0 makes the host's first save an insert.
+    version: 0,
     data: data as Partial<D>,
     runs,
     claims,

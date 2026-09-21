@@ -30,7 +30,7 @@ describe("migrateSession: 3.x blobs", () => {
     expect(session).toEqual({
       id: sid,
       v: 4,
-      version: 12,
+      version: 0,
       data: blob.data as Session["data"],
       runs: [
         {
@@ -81,7 +81,8 @@ describe("migrateSession: 3.x blobs", () => {
       [`lembrete_carrinho:${sid}:`]: { at: "2026-09-03T15:24:00.000Z" },
       [`atendimento_pedido:${sid}:`]: { at: "2026-09-03T15:20:05.000Z" },
     });
-    expect(session.version).toBe(41);
+    // The legacy row version is not carried: the first save into a v4 store is an insert.
+    expect(session.version).toBe(0);
     expect(session.data).toEqual(blob.data as Session["data"]);
     expect(JSON.stringify(session)).not.toContain("pendingDirective");
     expect(JSON.stringify(session)).not.toContain("pagamento");
@@ -150,9 +151,9 @@ describe("migrateSession: 3.x blobs", () => {
     const sid = blob.id as string;
     const migrated = migrateSession(blob, { sessionId: sid, flowIdOf: identity, now: NOW });
     const store = new MemoryStore();
-    // A fresh v4 table has no row for this id yet, so the first save is an insert (expectedVersion 0)
-    // whatever version the legacy blob carried; the stored version restarts at 1.
-    const saved = await store.save(migrated, 0);
+    // A fresh v4 table has no row for this id yet: the migrated version is 0, so the host's
+    // usual `save(session, session.version)` is the insert, and the stored version starts at 1.
+    const saved = await store.save(migrated, migrated.version);
     expect(await store.load(sid)).toEqual({ ...migrated, version: 1 });
     expect(saved.runs[0].stepId).toBe("ask_budget");
   });
@@ -186,7 +187,6 @@ describe("migrateSession: malformed blobs throw InvalidSessionError", () => {
     ["an empty object", {}],
     ["data is text", { id: "s1", data: "nope" }],
     ["data is a list", { id: "s1", data: [] }],
-    ["legacy version is not whole", { id: "s1", data: {}, version: 1.5 }],
     ["legacy currentFlow is a number", { id: "s1", data: {}, currentFlow: 5 }],
     ["legacy currentFlow has no id", { id: "s1", data: {}, currentFlow: { title: "F" } }],
     ["legacy flowHistory entry without flowId", { id: "s1", data: {}, flowHistory: [{ completed: true }] }],

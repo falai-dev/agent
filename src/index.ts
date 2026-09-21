@@ -16,6 +16,27 @@ export {
 } from "./types/errors.js";
 export type { ErrorKind } from "./types/errors.js";
 
+// Stored flows as JSON
+export { flowSpecSchema, fromSpec, toSpec, validateFlow } from "./core/FlowSpec.js";
+export type { BranchSpec, FlowSpec, InstructionSpec, Registries, StepKind, StepSpec, TriggerSpec } from "./core/FlowSpec.js";
+
+// Sessions: reading stored blobs and the seven stores
+export { assertSession, InvalidSessionError, migrateSession } from "./core/Migrate.js";
+export type { MigrateOptions } from "./core/Migrate.js";
+export { MemoryStore } from "./persistence/MemoryStore.js";
+export { PostgresStore } from "./persistence/PostgresStore.js";
+export type { PgClient, PgQueryResult, PostgresStoreOptions } from "./persistence/PostgresStore.js";
+export { PrismaStore } from "./persistence/PrismaStore.js";
+export type { PrismaClient, PrismaSessionField, PrismaSessionModel, PrismaStoreOptions } from "./persistence/PrismaStore.js";
+export { RedisStore } from "./persistence/RedisStore.js";
+export type { RedisClient, RedisStoreOptions } from "./persistence/RedisStore.js";
+export { MongoStore } from "./persistence/MongoStore.js";
+export type { MongoClient, MongoCollection, MongoDatabase, MongoStoreOptions } from "./persistence/MongoStore.js";
+export { SQLiteStore } from "./persistence/SQLiteStore.js";
+export type { SqliteDatabase, SqliteStatement, SQLiteStoreOptions } from "./persistence/SQLiteStore.js";
+export { OpenSearchStore } from "./persistence/OpenSearchStore.js";
+export type { OpenSearchClient, OpenSearchStoreOptions } from "./persistence/OpenSearchStore.js";
+
 // Providers
 export { GeminiProvider } from "./providers/GeminiProvider.js";
 export type { GeminiProviderOptions } from "./providers/GeminiProvider.js";

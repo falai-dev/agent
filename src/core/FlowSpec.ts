@@ -58,7 +58,7 @@ export type InstructionSpec = Omit<Instruction, "if"> & { if?: ConditionSpec<Loo
 /** A trigger with its `if` in JSON form. Same shape as `Trigger` otherwise. */
 export type TriggerSpec = { repeat?: Repeat } & (
   | { message: string[]; if?: ConditionSpec<LooseData> }
-  | { mention: string[]; extract?: StructuredSchema; if?: ConditionSpec<LooseData> }
+  | { mention: string[]; extract?: ParamDefs; if?: ConditionSpec<LooseData> }
   | { silence: Duration; if?: ConditionSpec<LooseData>; businessHours?: boolean }
   | { event: string; if?: ConditionSpec<LooseData>; after?: Duration; businessHours?: boolean }
 );
