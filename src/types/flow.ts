@@ -1,608 +1,307 @@
 /**
- * Flow/Journey DSL type definitions
+ * The authoring surface: fields, flows, steps, triggers, actions, conditions.
+ *
+ * A Flow is a trigger plus an ordered list of steps. Everything here is a
+ * plain object literal, so the same shape round-trips through JSON (FlowSpec).
+ * Two generics thread through: `C` is the host's ambient context, passed on
+ * every turn; `D` is the data collected across all flows, inferred from the
+ * agent's fields with `InferData`.
  */
 
-import type { Tool } from "./tool.js";
 import type { StructuredSchema } from "./schema.js";
-import type { Instruction, HookContext, ExitReason } from "./agent.js";
-import type { Template } from "./template.js";
+import type { Run } from "./session.js";
 
-// ─── Condition types (v2 when/if split) ──────────────────────────────────────
+// ── Scalars ─────────────────────────────────────────────────────────────
 
-/**
- * Code-evaluated condition predicate. Returns `true` to pass, `false` to fail.
- * May be async. Used on `if` fields (free to evaluate, no LLM cost).
- */
-export type ConditionPredicate<TContext = unknown, TData = unknown> = (
-  ctx: { data: Partial<TData>; context: TContext; session: import("./session.js").SessionState<TData>; history: Event[] }
-) => boolean | Promise<boolean>;
+/** A time span: `'30s'`, `'5m'`, `'24h'`, `'3d'`. */
+export type Duration = `${number}${"s" | "m" | "h" | "d"}`;
+
+/** How often a trigger may start a run for one session or anchor. */
+export type Repeat = "once" | "always" | { cooldown: Duration };
 
 /**
- * The `if` field shape: a single predicate or an array of predicates (AND semantics).
+ * Prompt text. `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are filled in
+ * before the text is used.
  */
-export type ConditionIf<TContext = unknown, TData = unknown> =
-  | ConditionPredicate<TContext, TData>
-  | ConditionPredicate<TContext, TData>[];
+export type Template = string;
 
 /**
- * The `when` field shape: a single AI-evaluated string or array of strings.
- * Non-`!` entries use OR semantics. `!`-prefixed entries are OR exclusions:
- * any matching exclusion inhibits the condition. Functions are NOT allowed on
- * `when` — they belong on `if` only.
+ * Where a step sends the run next: a step id, `'end'` (reserved; ends the
+ * run), a step with fields to clear first, or another flow to start.
  */
-export type ConditionWhen = string | string[];
-import type { SessionState } from "./session.js";
-import type { Event } from "./history.js";
+export type Next<D = unknown> =
+  | string
+  | { step: string; clear?: (keyof D & string)[] }
+  | { flow: Template; input?: unknown };
 
-/**
- * Reason why execution stopped.
- * Used to indicate the stopping condition for step execution.
- *
- * v2 vocabulary — see Requirements 17.1–17.9.
- */
-export type StoppedReason =
-  | 'needs_input'        // Waiting for user input
-  | 'last_step'          // Flow ended because the last step had no successor
-  | 'completed'          // Flow ended because an explicit `complete` directive fired
-  | 'aborted'            // Conversation aborted via `abort` directive
-  | 'goto'              // Turn ended because a goTo/goToStep directive redirected
-  | 'reset'              // Turn ended because a `reset` directive fired
-  | 'halt'              // Pre-LLM halt directive — turn ends without LLM call
-  | 'reply'              // Turn ended because a verbatim reply was emitted (no LLM call)
-  | 'max_auto_steps'     // Auto-step chain exceeded maxAutoStepsPerTurn cap
-  | 'prepare_error'      // Error in prepare hook
-  | 'llm_error'          // Error during LLM call
-  | 'validation_error'   // Error validating collected data
-  | 'finalize_error';    // Error in finalize hook (non-fatal, logged)
+// ── Fields and parameters ───────────────────────────────────────────────
 
-/**
- * Result that a prepare/finalize hook may return to issue directives.
- * All fields are optional — returning void is also valid.
- */
-export interface PrepareResult<TContext = unknown, TData = unknown> {
-  /** Partial data to merge into session.data */
-  dataUpdate?: Partial<TData>;
-  /** Partial context to merge into the agent context */
-  contextUpdate?: Partial<TContext>;
-  /** If true, stop the auto-step chain and end the turn with `reply` */
-  halt?: boolean;
-  /** Verbatim reply to send when halting */
-  reply?: string;
-  /** Jump to a step within the current flow */
-  goToStep?: string | { step: string; flow?: string; data?: Partial<TData>; reason?: string; };
-  /** Jump to another flow */
-  goTo?: string | { flow?: string; step?: string; data?: Partial<TData>; reason?: string; carry?: 'preserve' | 'reset'; };
-  /** Mark the current flow as complete */
-  complete?: true | { next?: Directive<unknown, unknown>; reason?: string; };
-  /**
-   * Prompt lines appended to this turn's generation prompt. Pre-LLM
-   * augmentation: honored by auto steps' prepare; other step kinds drop it
-   * with a loud warning rather than silently ignoring it.
-   */
-  appendPrompt?: string[];
-  /**
-   * Extra tools made available for this turn only. Same auto-step-only
-   * honoring as {@link appendPrompt}.
-   */
-  injectTools?: Tool[];
+export type ScalarType = "string" | "number" | "integer" | "boolean";
+
+export interface ScalarDef<T extends ScalarType = ScalarType> {
+  type: T;
+  description?: string;
+  enum?: readonly (string | number)[];
 }
 
-
-
-// ─── Branch types ────────────────────────────────────────────────────────────
-
-/**
- * A programmatic transition directive. The single shape any tool, hook, branch,
- * or signal handler returns to write state, redirect the conversation, or speak
- * verbatim.
- *
- * At most one position field (`goTo`, `goToStep`, `complete`, `abort`, `reset`)
- * may be set per Directive. Non-position fields (`reply`, `contextUpdate`,
- * `dataUpdate`) may accompany any position field.
- *
- * Pre-LLM augmentation fields (`appendPrompt`, `injectTools`, `halt`) are
- * one-turn-lifetime: they only take effect in pre-LLM hooks (`onEnter`,
- * `prepare`). When emitted from post-LLM hooks (`finalize`, `onComplete`) or
- * persisted to `session.pendingDirective`, these fields are ignored and a WARN
- * log is emitted. They are never serialized across turns.
- */
-export interface Directive<TContext = unknown, TData = unknown> {
-  // ── Position fields (mutually exclusive: at most one) ────────────
-  /** Jump to a flow (string) or a flow with options (object). */
-  goTo?: string | { flow?: string; step?: string; data?: Partial<TData>; reason?: string; carry?: 'preserve' | 'reset'; };
-  /** Jump to a specific step, optionally in another flow. */
-  goToStep?: string | { step: string; flow?: string; data?: Partial<TData>; reason?: string; };
-  /** Mark the current flow as complete. */
-  complete?: true | { next?: Directive<unknown, unknown>; reason?: string; };
-  /** Abort the current flow. */
-  abort?: string | { reason: string; clearSession?: boolean; };
-  /** Reset the current flow (or jump to a step within it). */
-  reset?: true | { step?: string; clearData?: boolean; reason?: string; };
-
-  // ── Verbatim utterance ───────────────────────────────────────────
-  /** Verbatim reply text to send to the user. */
-  reply?: string;
-
-  // ── State writes ─────────────────────────────────────────────────
-  /** Partial context update applied before the next turn. */
-  contextUpdate?: Partial<TContext>;
-  /** Partial data update applied before the next turn. */
-  dataUpdate?: Partial<TData>;
-
-  // ── Pre-LLM augmentation (one-turn lifetime) ─────────────────────
+/** One collectable field, authored once on the agent. */
+export interface FieldDef<T extends ScalarType = ScalarType> extends ScalarDef<T> {
+  /** How the AI should ask for this field when a step collects it. */
+  ask?: string;
   /**
-   * Sentences to append to the system prompt for THIS turn only.
-   * Wired through PromptComposer's per-turn appendage slot.
-   *
-   * Only meaningful in pre-LLM hooks (`onEnter`, `prepare`). Ignored with
-   * a WARN log when emitted from post-LLM hooks or persisted.
+   * Where the value may be harvested from. `'anywhere'` (default for strings
+   * and numbers): any lead message. `'asked'` (default for booleans): only the
+   * reply to the step that lists the field, so a stray "sim" never opens a gate.
    */
-  appendPrompt?: string[];
-
-  /**
-   * Tools available for THIS turn only. Stacked on top of agent/flow/step
-   * tool scopes via ToolManager's transient layer.
-   *
-   * Only meaningful in pre-LLM hooks (`onEnter`, `prepare`). Ignored with
-   * a WARN log when emitted from post-LLM hooks or persisted.
-   */
-  injectTools?: Tool[];
-
-  /**
-   * If true, skip the LLM call entirely this turn.
-   *
-   * Co-validates with `reply`: when both are set, `reply` becomes the
-   * assistant output (`stoppedReason: 'reply'`). When `halt` is true
-   * without `reply`, the turn produces an empty assistant message
-   * (`stoppedReason: 'halt'`).
-   *
-   * Only meaningful in pre-LLM hooks (`onEnter`, `prepare`). Ignored with
-   * a WARN log when emitted from post-LLM hooks or persisted.
-   */
-  halt?: boolean;
+  extract?: "anywhere" | "asked";
 }
 
+export type FieldDefs = Record<string, FieldDef>;
 
+/** One parameter of a host action. All parameters are required unless `optional: true`. */
+export type ParamDef =
+  | (ScalarDef & { optional?: true })
+  | { type: "array"; items: ScalarDef; description?: string; optional?: true };
 
-/**
- * Context passed to a `BranchPredicate` function.
- *
- * **Typing note:** `data` is `Partial<TData>` — predicates must null-check
- * any field not declared in the source step's `requires`. Fields covered by
- * `requires` are guaranteed present by the engine when the predicate runs;
- * everything else is `T | undefined`.
- */
-export interface BranchPredicateContext<TContext = unknown, TData = unknown> {
-  /** Collected data (partial — null-check fields not in `requires`). */
-  data: Partial<TData>;
-  /** Agent-level context. */
-  context: TContext;
-  /** Full session state. */
-  session: SessionState<TData>;
-  /** Conversation history as events. */
-  history: Event[];
+export type ParamDefs = Record<string, ParamDef>;
+
+type Simplify<T> = { [K in keyof T]: T[K] };
+
+type TypeValue<T extends ScalarType> = T extends "string"
+  ? string
+  : T extends "boolean"
+    ? boolean
+    : number;
+
+type ScalarValue<Def extends ScalarDef> = Def extends { enum: readonly (infer E)[] }
+  ? E
+  : TypeValue<Def["type"]>;
+
+type ParamValue<Def extends ParamDef> = Def extends { type: "array"; items: infer I extends ScalarDef }
+  ? ScalarValue<I>[]
+  : Def extends ScalarDef
+    ? ScalarValue<Def>
+    : never;
+
+type OptionalKeys<P extends ParamDefs> = {
+  [K in keyof P]: P[K] extends { optional: true } ? K : never;
+}[keyof P];
+
+/** The collected-data type of a set of fields. Enums become literal unions. */
+export type InferData<F extends FieldDefs> = Simplify<{ [K in keyof F]: ScalarValue<F[K]> }>;
+
+/** The `with` shape of a host action, from its parameter definitions. */
+export type InferParams<P extends ParamDefs> = Simplify<
+  { [K in Exclude<keyof P, OptionalKeys<P>>]: ParamValue<P[K]> } & {
+    [K in OptionalKeys<P>]?: ParamValue<P[K]>;
+  }
+>;
+
+// ── Predicates ──────────────────────────────────────────────────────────
+
+/** What a code predicate sees. `run` is the run about to move or start. */
+export interface PredCtx<C = unknown, D = unknown, P = unknown> {
+  context: C;
+  data: Partial<D>;
+  input: P;
+  run: Run;
+  /** The host's reason the assistant cannot speak right now, when it cannot. */
+  silenced?: string;
+  now: Date;
 }
 
 /**
- * A code predicate for branch evaluation. Returns `true` to pass, `false`
- * to skip the entry. May be async.
- *
- * Predicates are evaluated **before** any AI condition (`when`) on the same
- * entry — code-first evaluation saves tokens when the predicate fails.
+ * A named host condition, used by name (with its argument) in JSON specs.
+ * Declared as a method so a condition typed for one argument fits the map;
+ * the argument arrives from JSON unvalidated, so the check should test it.
  */
-export type BranchPredicate<TContext = unknown, TData = unknown> = (
-  ctx: BranchPredicateContext<TContext, TData>,
-) => boolean | Promise<boolean>;
+export interface Condition<C = unknown, D = unknown, Arg = unknown> {
+  check(ctx: PredCtx<C, D>, arg: Arg): boolean;
+}
+
+export type ConditionMap<C = unknown, D = unknown> = Record<string, Condition<C, D>>;
 
 /**
- * A single entry in a `BranchMap`. Evaluated in declaration order; the first
- * entry whose conditions pass wins.
- *
- * **Resolution rules for `then`:**
- * 1. String matching a step id in the current flow → enter that step.
- * 2. String matching a flow id/title in the agent → treated as
- *    `applyDirective({ goTo: <string> })`.
- * 3. `Directive` object → applied via `applyDirective` directly.
- *
- * An entry with neither `when` nor `if` is an unconditional fallback and
- * is only legal as the **last** entry in the array.
+ * The JSON form of a predicate. Every listed entry must hold. Built-ins:
+ * `equals` (fields equal the given values), `known` (fields are known),
+ * `silenced` (the host gate is closed). Any other key names one of the
+ * agent's conditions and carries its argument.
  */
-export interface BranchEntry<TContext = unknown, TData = unknown> {
-  /**
-   * AI-evaluated condition. Non-`!` strings are OR alternatives; `!` strings
-   * are OR exclusions where any match inhibits the branch.
-   * Costs LLM tokens. Reuses the same machinery as `step.when`.
-   * Only evaluated if `if` passes (or is absent) — code-first short-circuit.
-   */
+export interface ConditionSpec<D = unknown> {
+  equals?: Partial<D>;
+  known?: (keyof D & string)[];
+  silenced?: boolean;
+  [condition: string]: unknown;
+}
+
+/** A code predicate (free) or its JSON form. */
+export type Pred<C = unknown, D = unknown, P = unknown> =
+  | ((ctx: PredCtx<C, D, P>) => boolean)
+  | ConditionSpec<D>;
+
+/** A fork judged while a step is asking: `when` by the AI, `if` by code. */
+export type Branch<C = unknown, D = unknown> = { then: Next<D> } & (
+  | { when: string }
+  | { if: Pred<C, D> }
+);
+
+// ── Triggers ────────────────────────────────────────────────────────────
+
+/**
+ * When a run starts. `repeat` defaults to `'once'` for message, mention and
+ * silence triggers and to `'always'` for events.
+ */
+export type Trigger<C = unknown, D = unknown> = { repeat?: Repeat } & (
+  /** The lead asks for this; the run takes the conversation. `[]` = catch-all. */
+  | { message: string[]; if?: Pred<C, D> }
+  /** The lead mentions this; the run reacts beside the conversation. `[]` + `if` = code-only. */
+  | { mention: string[]; extract?: StructuredSchema; if?: Pred<C, D> }
+  /** The lead has been quiet since the assistant last spoke. */
+  | { silence: Duration; if?: Pred<C, D>; businessHours?: boolean }
+  /** The host reported an event; its payload is the run's `input`. */
+  | { event: string; if?: Pred<C, D>; after?: Duration; businessHours?: boolean }
+);
+
+// ── Instructions ────────────────────────────────────────────────────────
+
+/** A behavioural statement rendered into the prompt while it applies. */
+export interface Instruction<C = unknown, D = unknown> {
+  id?: string;
+  /** `'must'` always, `'never'` a prohibition, `'should'` (default) a nudge. */
+  kind?: "must" | "never" | "should";
+  /** AI-judged activation, rendered into the prompt. */
   when?: string | string[];
+  /** Code-judged activation, free. */
+  if?: Pred<C, D>;
+  prompt: Template;
+}
 
-  /**
-   * Code predicate. Function or array of functions (AND semantics).
-   * Free to evaluate. When both `when` and `if` are set, `if` runs first;
-   * `when` is only evaluated if all `if` predicates pass (token-saving).
-   */
-  if?: BranchPredicate<TContext, TData> | BranchPredicate<TContext, TData>[];
+// ── Steps ───────────────────────────────────────────────────────────────
 
-  /**
-   * Where to go when this entry matches.
-   * - **String:** step id in the current flow, or flow id/title for cross-flow.
-   * - **Directive:** full programmatic transition (cross-flow with data,
-   *   complete, abort, reset, etc.).
-   */
-  then: string | Directive<TContext, TData>;
+/** The AI talks: a guideline, fields to collect, or both. */
+export type TalkStep<C = unknown, D = unknown> = (
+  | { prompt: Template; collect?: (keyof D & string)[] }
+  | { collect: (keyof D & string)[]; prompt?: Template }
+) & {
+  /** Per-flow wording for a field; the field's own `ask` is the default. */
+  ask?: Partial<Record<keyof D & string, string>>;
+  /** Times a field may be asked before it is skipped. Default 3. */
+  maxAsks?: number;
+  branches?: Branch<C, D>[];
+  tools?: string[];
+  instructions?: Instruction<C, D>[];
+};
 
-  /** Optional label for event traces and flow visualization. */
+/** A fixed message goes out, verbatim. */
+export interface SayStep {
+  say: Template;
+  media?: { slug: string };
+  /** Send at most once per session. */
+  once?: boolean;
+}
+
+/** The host does something. `with` is checked against the action's parameters. */
+export interface DoStep<D = unknown> {
+  do: string;
+  with?: Record<string, unknown>;
+  /** Where to go when the action reports `failed`. Default: continue. */
+  onFail?: Next<D>;
+}
+
+/** Park for a while. `then` = the time passed; `else` = the lead replied first. */
+export interface WaitStep<C = unknown, D = unknown> {
+  wait: Duration;
+  businessHours?: boolean;
+  else?: Next<D>;
+  branches?: Branch<C, D>[];
+}
+
+/** Park until an event. `then` = it came; `else` = `upTo` passed (default 30 days). */
+export interface WaitEventStep<D = unknown> {
+  wait: { event: string; upTo?: Duration };
+  else?: Next<D>;
+}
+
+/** The code forks. `then` = true; `else` = false (default `'end'`). */
+export interface IfStep<C = unknown, D = unknown> {
+  if: Pred<C, D>;
+  else?: Next<D>;
+}
+
+export interface StepBase<D = unknown> {
+  /** Required, unique inside the flow, never `'end'`. */
+  id: string;
   label?: string;
+  then?: Next<D>;
+  /** Editor-only data the framework carries but never reads. */
+  ui?: Record<string, unknown>;
 }
 
-/**
- * Array of branch entries evaluated in declaration order.
- * First entry whose conditions pass wins. This is the explicit, source-local
- * fork primitive — all possible paths from a step are visible in one list.
- */
-export type BranchMap<TContext = unknown, TData = unknown> = Array<BranchEntry<TContext, TData>>;
+export type Step<C = unknown, D = unknown> = StepBase<D> &
+  (TalkStep<C, D> | SayStep | DoStep<D> | WaitStep<C, D> | WaitEventStep<D> | IfStep<C, D>);
 
-// ─── End branch types ────────────────────────────────────────────────────────
+// ── Flow ────────────────────────────────────────────────────────────────
 
-/**
- * Reference to a flow
- */
-export interface FlowRef {
-  /** Flow identifier */
+export interface Flow<C = unknown, D = unknown> {
   id: string;
-}
-
-/**
- * Reference to a step within a flow
- */
-export interface StepRef {
-  /** Step identifier */
-  id: string;
-  /** Flow this step belongs to */
-  flowId: string;
-}
-
-
-
-/**
- * Flow lifecycle hooks for managing flow-specific data and behavior.
- *
- * Pre-LLM hooks (`onEnter`) return `void | Directive`.
- * Post-LLM hooks (`onComplete`) return `void | Directive`.
- * Informational hooks (`onExit`) return `void`.
- * Data hooks (`onDataUpdate`, `onContextUpdate`) retain their v1 signatures.
- */
-export interface FlowLifecycleHooks<TContext = unknown, TData = unknown> {
-  /**
-   * Called when the flow is first entered.
-   * May return a Directive to augment the prompt, inject tools, halt, or redirect.
-   * Pre-LLM fields (`appendPrompt`, `injectTools`, `halt`) are honored here.
-   */
-  onEnter?: (
-    ctx: HookContext<TContext, TData>
-  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
-
-  /**
-   * Called when the flow is exited. Informational only — cannot influence flow control.
-   * Receives the reason the flow was exited.
-   */
-  onExit?: (
-    ctx: HookContext<TContext, TData>,
-    reason: ExitReason
-  ) => void | Promise<void>;
-
-  /**
-   * Called when the flow's required fields are satisfied or when a `complete` directive fires.
-   * May return a Directive to chain into another flow or perform state writes.
-   */
-  onComplete?: (
-    ctx: HookContext<TContext, TData>
-  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
-
-  /**
-   * Called after collected data is updated for this flow (from AI response or tool execution)
-   * Useful for validation, enrichment, or persistence of flow-specific collected data
-   * Return modified collected data or the same data to keep it unchanged
-   *
-   * Unlike Agent-level onDataUpdate, this only triggers for data changes in this specific flow.
-   */
-  onDataUpdate?: (
-    data: Partial<TData>,
-    previousCollected: Partial<TData>
-  ) => Partial<TData> | Promise<Partial<TData>>;
-
-  /**
-   * Called after context is updated via updateContext() when this flow is active
-   * Useful for flow-specific context reactions, validation, or side effects
-   *
-   * Unlike Agent-level onContextUpdate, this only triggers when this specific flow is active.
-   */
-  onContextUpdate?: (
-    newContext: TContext,
-    previousContext: TContext
-  ) => void | Promise<void>;
-}
-
-
-
-/**
- * Options for creating a flow
- * @template TData - Type of data collected throughout the flow (inferred from schema)
- */
-export interface FlowOptions<TContext = unknown, TData = unknown> {
-  /** Custom ID for the flow (optional - will generate deterministic ID from title if not provided) */
-  id?: string;
-  /** Title of the flow */
-  title: string;
-  /** Description of what this flow accomplishes */
-  description?: string;
-
-  /**
-   * AI-evaluated activation condition(s). Non-`!` strings are OR alternatives;
-   * `!` strings are OR exclusions where any match inhibits activation.
-   * Costs LLM tokens. Functions are NOT allowed here — use `if` for code predicates.
-   */
-  when?: ConditionWhen;
-  /**
-   * Code-evaluated activation condition(s). Function or array of functions (AND semantics).
-   * Free to evaluate. When both `when` and `if` are set, `if` runs first;
-   * `when` is only evaluated when `if` passes.
-   */
-  if?: ConditionIf<TContext, TData>;
-  /**
-   * Instructions for this flow.
-   */
-  instructions?: Instruction<TContext, TData>[];
-  /** Tools available in this flow */
-  tools?: (string | Tool<TContext, TData>)[];
-
-  /** Optional: extractions the router may return (added to routing schema) */
-  routingExtrasSchema?: StructuredSchema;
-  /** Optional: structured response data for this flow's message generation */
-  responseOutputSchema?: StructuredSchema;
-  /**
-   * Required fields for flow completion - must be valid keys from agent's TData type
-   * Flow is considered complete when all required fields are present in agent data
-   */
-  requiredFields?: (keyof TData)[];
-  /**
-   * Optional fields that enhance the flow but aren't required for completion
-   * Must be valid keys from agent's TData type
-   */
-  optionalFields?: (keyof TData)[];
-  /**
-   * Initial data to pre-populate when entering this flow
-   * Useful for restoring sessions or pre-filling known information
-   * Steps with skip conditions will be automatically bypassed if data is present
-   * Now refers to agent-level data
-   */
-  initialData?: Partial<TData>;
-  /**
-   * Sequential steps for simple linear flows
-   * If provided, automatically chains the steps from initialStep
-   * The last step in the array is the implicit terminus of the flow
-   * For complex flows with branching, build the step machine manually instead
-   */
-  steps?: StepOptions<TContext, TData>[];
-
-  /**
-   * Optional transition when the flow completes (last step finishes).
-   *
-   * Accepts a flow ID or title string — sugar for
-   * `hooks.onComplete = () => ({ goTo: '<id>' })`.
-   *
-   * For dynamic completion logic, use `hooks.onComplete` instead.
-   * Setting both `onComplete` and `hooks.onComplete` on the same flow
-   * throws `FlowConfigurationError` at construction time.
-   *
-   * @example
-   * // Simple string — transitions to "Collect Feedback" on completion
-   * onComplete: "Collect Feedback"
-   */
-  onComplete?: string;
-  /**
-   * If true, this flow can be re-selected by the router after it has
-   * completed in the current session — useful for "do another?" patterns
-   * (re-book, re-search, repeat-task).
-   *
-   * Default: `false`. Once a flow completes (and `onComplete` is not set
-   * or returns `undefined`), the flow is excluded from routing candidates
-   * for the rest of the session unless `reentrant: true`.
-   *
-   * On re-entry, the engine clears every field declared in this flow's
-   * `requiredFields` and `optionalFields` (so the flow starts fresh from
-   * its initial step). Fields not declared as owned by this flow are
-   * preserved in `session.data`.
-   *
-   * `onComplete` always wins over `reentrant`. If `onComplete` returns a
-   * target flow, the session transitions there immediately on completion;
-   * `reentrant` is consulted only when `onComplete` is absent or returns
-   * `undefined`.
-   */
-  reentrant?: boolean;
-  /**
-   * Flow lifecycle hooks
-   */
-  hooks?: FlowLifecycleHooks<TContext, TData>;
-}
-
-/**
- * Step lifecycle hooks for managing step-specific behavior. Desugared onto the
- * equivalent top-level `prepare` / `finalize` fields by the Step constructor —
- * both spellings run through the same lifecycle machinery, and declaring both
- * runs them in sequence with their returns merged (Algorithm 4).
- *
- * `prepare` runs before the AI responds; `finalize` runs after the turn's
- * generation completes (before persistence). Both may return a Directive to
- * write state or redirect flow.
- */
-export interface StepLifecycleHooks<TContext = unknown, TData = unknown> {
-  /**
-   * Called pre-LLM (alongside any top-level `prepare`). May return a Directive
-   * to write state or redirect flow.
-   */
-  prepare?: (
-    context: TContext,
-    data?: Partial<TData>
-  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
-
-  /**
-   * Called after generation (alongside any top-level `finalize`, before
-   * persistence). May return a Directive to redirect flow or write state.
-   */
-  finalize?: (
-    context: TContext,
-    data?: Partial<TData>
-  ) => void | Directive<TContext, TData> | Promise<void | Directive<TContext, TData>>;
-}
-
-/**
- * Specification for a step transition
- */
-export interface StepOptions<TContext = unknown, TData = unknown> {
-  /** Custom ID for this step (optional - will generate deterministic ID if not provided) */
-  id?: string;
-  /** Description of the transition */
-  description?: string;
-  /** Transition to a chat state with this description */
-  prompt?: Template<TContext, TData>;
-  /** Tools available for AI to call in this step (by ID reference or inline definition) */
-  tools?: (string | Tool<TContext, TData>)[];
-  /** Programmatic function or tool to run before AI responds */
-  prepare?:
-  | string
-  | Tool<TContext, TData>
-  | ((context: TContext, data?: Partial<TData>) => void | PrepareResult<TContext, TData> | Promise<void | PrepareResult<TContext, TData>>);
-  /** Programmatic function or tool to run after AI responds */
-  finalize?:
-  | string
-  | Tool<TContext, TData>
-  | ((context: TContext, data?: Partial<TData>) => void | PrepareResult<TContext, TData> | Promise<void | PrepareResult<TContext, TData>>);
-
-  /**
-   * Fields to collect from the conversation in this step
-   * These should match keys in the agent's TData schema
-   */
-  collect?: (keyof TData)[];
-  /**
-   * Code-evaluated skip condition. If evaluates to true, the step will be bypassed.
-   * Function or array of functions (OR semantics) — if any returns true, step is skipped.
-   * Only code predicates are allowed here (no AI strings).
-   *
-   * Renamed from v1 `skipIf` to clarify the if-only shape.
-   */
-  skip?: ConditionIf<TContext, TData>;
-  /**
-   * Required data fields that must be present before entering this step
-   * If any required field is missing, step cannot be entered
-   * Must be valid keys from agent's TData type
-   */
-  requires?: (keyof TData)[];
-  /**
-   * AI-evaluated activation condition(s). Non-`!` strings are OR alternatives;
-   * `!` strings are OR exclusions where any match inhibits activation.
-   * Costs LLM tokens. Functions are NOT allowed here — use `if` for code predicates.
-   */
-  when?: ConditionWhen;
-  /**
-   * Code-evaluated activation condition(s). Function or array of functions (AND semantics).
-   * Free to evaluate. When both `when` and `if` are set, `if` runs first;
-   * `when` is only evaluated when `if` passes.
-   */
-  if?: ConditionIf<TContext, TData>;
-  /**
-   * Instructions for this step. Replaces v1's `guidelines`.
-   */
-  instructions?: Instruction<TContext, TData>[];
-
-  /**
-   * If true, this step runs without an LLM call. Pre-LLM hooks
-   * (`onEnter`, `prepare`) and branch resolution still execute.
-   *
-   * An auto-step **cannot** define `prompt`, `collect`, `tools`, or `finalize`.
-   * Defining any of these will throw `FlowConfigurationError` at construction time.
-   *
-   * Use auto-steps for:
-   * - Data enrichment between user-facing steps (CRM lookup, pricing calc).
-   * - Deterministic decision points (pair with `branches`).
-   * - Programmatic short-circuits (`prepare` returning `{ halt: true, reply }`).
-   *
-   * @default false
-   */
-  auto?: boolean;
-
-  /**
-   * Verbatim assistant output for this step. When set, the template is
-   * rendered via the same engine as `prompt` and emitted as the assistant
-   * message without invoking the LLM.
-   *
-   * A reply step **cannot** define `prompt`, `collect`, `tools`, `finalize`,
-   * or `auto: true`. Defining any of these will throw `FlowConfigurationError`
-   * at construction time.
-   *
-   * `onEnter` and `prepare` hooks fire normally before the reply is rendered.
-   * If `prepare` returns a Directive with its own `reply` field, the
-   * hook-emitted reply wins (last-emission-wins per Algorithm 4).
-   *
-   * After emission, `onExit` fires and `branches` are resolved for next step.
-   * `stoppedReason: 'reply'`.
-   *
-   * Use reply steps for: confirmations, hand-offs, farewells, acks — anything
-   * that doesn't need LLM reasoning.
-   */
-  reply?: Template<TContext, TData>;
-
-  /**
-   * Explicit source-local fork. An array of branch entries evaluated in
-   * declaration order — the first entry whose conditions pass wins; its
-   * `then` resolves to the next step or a Directive.
-   *
-   * Coexists with `nextStep`. If `branches` is absent or no entry matches,
-   * resolution falls through to linear nextStep / AI step selection.
-   *
-   * Runs **after** the step's post-LLM phase (tool execution, `finalize`)
-   * and **before** linear successor selection.
-   */
-  branches?: BranchMap<TContext, TData>;
-
-  /**
-   * Step lifecycle hooks — an alternative spelling of the top-level
-   * `prepare` / `finalize` fields. Both spellings run when declared together;
-   * returns are merged via Algorithm 4.
-   */
-  hooks?: StepLifecycleHooks<TContext, TData>;
-}
-
-/**
- * Specification for a branch in the conversation flow
- */
-export interface BranchSpec<TContext = unknown, TData = unknown> {
-  /** User-friendly identifier for this branch (used as object key) */
   name: string;
-  /** Optional ID for this branch (auto-generated if not provided) */
-  id?: string;
-  /** Step configuration for this branch */
-  step: StepOptions<TContext, TData>;
+  /** When this flow should be used; the AI reads it when routing. */
+  description?: string;
+  /** Absent or empty: the flow only starts when the host calls `start`. */
+  on?: Trigger<C, D>[];
+  /** `'session'` (default) or a host anchor name such as `'lead'`. */
+  anchor?: string;
+  /** Re-checked whenever the run moves. Default: the trigger's `if`. */
+  while?: Pred<C, D>;
+  clearOnStart?: (keyof D & string)[];
+  steps: Step<C, D>[];
+  /** What the run does after its last step. Default `'end'`. */
+  onEnd?: "end" | "stay" | "reset";
+  instructions?: Instruction<C, D>[];
+  tools?: string[];
 }
 
-/**
- * Result of a branch operation
- * Maps branch names to their respective step results for continued chaining
- */
-export interface BranchResult<TContext = unknown, TData = unknown> {
-  [branchName: string]: StepResult<TContext, TData>;
+// ── Actions and events ──────────────────────────────────────────────────
+
+export type ActionResult =
+  | { ok: true; detail?: string; spoke?: true }
+  | { skipped: string }
+  | { failed: string }
+  | { defer: Duration; detail: string };
+
+/** What a host action sees. Handlers run at-least-once; make them idempotent on `key`. */
+export interface ActionCtx<C = unknown, D = unknown> {
+  context: C;
+  data: Partial<D>;
+  input: unknown;
+  run: Run;
+  /** `${runId}:${stepId}:${visit}`; the same on a replay of the same input. */
+  key: string;
+  /** `${flowId}:${anchor}:${nonce}`; shared across a lead's sessions. */
+  dedupeKey: string;
+  silenced?: string;
+  now: Date;
+  /** Write collected data from inside the action. */
+  set(patch: Partial<D>): void;
 }
 
-/**
- * Result of a transition operation
- * Combines step reference with the ability to chain transitions and create branches
- */
-export interface StepResult<TContext = unknown, TData = unknown>
-  extends StepRef {
-  /** Allow chaining transitions */
-  nextStep: (spec: StepOptions<TContext, TData>) => StepResult<TContext, TData>;
-  /** Create multiple branches from this step */
-  branch: (
-    branches: BranchSpec<TContext, TData>[]
-  ) => BranchResult<TContext, TData>;
+export interface Action<C = unknown, D = unknown, P = Record<string, unknown>> {
+  description?: string;
+  parameters: ParamDefs;
+  run(params: P, ctx: ActionCtx<C, D>): ActionResult | Promise<ActionResult>;
 }
+
+export type ActionMap<C = unknown, D = unknown> = Record<string, Action<C, D>>;
+
+/** A host event the agent may react to. `P` is the payload type. */
+export interface EventDef<P = unknown> {
+  /**
+   * `'inbound'` counts as the lead speaking (resolves reply waits);
+   * `'outbound'` as the assistant speaking (re-arms silence).
+   */
+  direction?: "inbound" | "outbound";
+  /** Phantom: the payload type, for inference. Never set at runtime. */
+  readonly payload?: P;
+}
+
+export type EventMap = Record<string, EventDef>;

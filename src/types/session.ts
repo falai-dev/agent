@@ -1,86 +1,90 @@
 /**
- * Session step types for tracking conversation progress
+ * Runtime state: runs, step outcomes, the session blob and the Store seam.
+ *
+ * The session blob is the unit of consistency (invariant I1): the host loads
+ * it, calls `turn`, and saves it back with the version it loaded. A losing
+ * save throws `SessionConflictError` and the same input is replayed.
  */
 
 import type { History } from "./history.js";
-import type { Directive } from "./flow.js";
-import type { SignalsState } from "./signals.js";
 
-// Re-export for backward compatibility — canonical declarations live in ./signals.ts
-export type { SignalsState, SignalTriggerState } from "./signals.js";
+export type RunStatus = "running" | "asking" | "waiting" | "suspended";
+
+export type TriggerKind = "message" | "mention" | "silence" | "event" | "start" | "flow";
+
+/** One live execution of a flow inside a session. */
+export interface Run {
+  /** `${flowId}#${triggerKey}`: deterministic, so a replay mints the same keys. */
+  id: string;
+  flowId: string;
+  anchor: string;
+  dedupeKey: string;
+  stepId: string | null;
+  status: RunStatus;
+  trigger: { kind: TriggerKind; key: string; payload?: unknown };
+  input?: unknown;
+  /** Flow-to-flow chaining depth; capped at 5. */
+  hop: number;
+  startedAt: string;
+  waiting?: {
+    kind: "timer" | "event";
+    /** The wake key; only a `wake` equal to it is honoured. */
+    key?: string;
+    until?: string;
+    setAt: string;
+    event?: string;
+  };
+  /** Times each field was asked; a field at `maxAsks` is skipped. */
+  asked: Record<string, number>;
+  /** Times each step was entered; part of every action and message key. */
+  visits: Record<string, number>;
+  outcomes: StepOutcome[];
+}
+
+export type StepOutcomeKind = "prompt" | "collect" | "say" | "do" | "wait" | "if" | "idle";
+
+export type StepOutcomeStatus = "ok" | "skipped" | "failed" | "waiting" | "deferred";
+
+/** One line per step for the host's execution log. */
+export interface StepOutcome {
+  runId?: string;
+  flowId?: string;
+  stepId?: string;
+  key?: string;
+  kind: StepOutcomeKind;
+  status: StepOutcomeStatus;
+  detail?: string;
+  next?: string;
+  until?: string;
+  at: string;
+  llmCalls?: number;
+}
+
+/** One conversation's state. Holds many runs; at most one is asking. */
+export interface Session<D = unknown> {
+  id: string;
+  v: 4;
+  /** Optimistic-concurrency version; the host bumps it on save. */
+  version: number;
+  data: Partial<D>;
+  /** Live runs only. */
+  runs: Run[];
+  /** Once/cooldown claims: one key per flow. Always-flows keep the last 50. */
+  claims: Record<string, { at: string }>;
+  /** The last 50 keyed input ids, for replay detection. */
+  inputs: string[];
+  lastUserAt?: string;
+  lastAssistantAt?: string;
+  /** Kept only when the host does not manage history itself (playground). */
+  history?: History;
+  metadata: Record<string, unknown>;
+}
 
 /**
- * Session state tracks the current position in the conversation flow
- * and data collected at the agent level across all flows
+ * Where sessions live. `save` with `expectedVersion: 0` inserts if absent;
+ * a stale version throws `SessionConflictError`.
  */
-export interface SessionState<TData = unknown> {
-  /** Unique session identifier (useful for persistence) */
-  id: string;
-
-  /** Current flow the conversation is in */
-  currentFlow?: {
-    id: string;
-    title: string;
-    enteredAt?: Date;
-  };
-
-  /** Current step within the flow */
-  currentStep?: {
-    id: string;
-    description?: string;
-    enteredAt?: Date;
-  };
-
-  /**
-   * Agent-level data collected across all flows
-   * This is the single source of truth for all collected data
-   * Flows can access and contribute to this shared data structure
-   */
-  data: Partial<TData>;
-
-  /** History of flows visited in this session */
-  flowHistory?: Array<{
-    flowId: string;
-    enteredAt?: Date;
-    exitedAt?: Date;
-    completed: boolean;
-  }>;
-
-  /**
-   * Pending directive to apply at the start of the next turn.
-   * Replaces the v1 `pendingTransition` field. When set, the turn pipeline
-   * applies this directive and skips `FlowRouter.decideFlowAndStep`.
-   *
-   * Cleared after application unless `complete.next` chains another directive.
-   */
-  pendingDirective?: Directive<unknown, TData>;
-
-  /**
-   * Reserved for v2.x Signals feature. v2.0 does not read or mutate this
-   * field at runtime — persistence adapters preserve it bit-identical through
-   * save → load roundtrips. See Decision D-Q6 in design.md.
-   */
-  signals?: SignalsState;
-
-  /**
-   * Conversation history managed by the session
-   * Contains the full conversation between user and assistant
-   */
-  history?: History;
-
-  /** Session metadata */
-  metadata?: {
-    createdAt?: Date;
-    lastUpdatedAt?: Date;
-    [key: string]: unknown;
-  };
-
-  /**
-   * Optimistic-concurrency version, managed by the persistence layer.
-   * Incremented on every successful save; a save with a stale version
-   * throws SessionConflictError instead of silently overwriting state
-   * written by a concurrent turn. Undefined for sessions never persisted
-   * or persisted by a pre-2.4 version (no conflict check is performed then).
-   */
-  version?: number;
+export interface Store<D = unknown> {
+  load(id: string): Promise<Session<D> | null>;
+  save(session: Session<D>, expectedVersion: number): Promise<void>;
 }

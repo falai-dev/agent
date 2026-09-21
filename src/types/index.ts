@@ -1,164 +1,112 @@
 /**
- * Central type definitions export
+ * Every public type, in one place.
  */
 
-// Agent types
 export type {
-  AgentOptions,
   AgentCompactionConfig,
-  Term,
-  Instruction,
-  ScopedInstructions,
-  AppliedInstruction,
-  AgentResponseStreamChunk,
-  AgentResponse,
-  EndedFlow,
-  ContextLifecycleHooks,
-  ContextProvider,
-  ValidationError,
-  ValidationResult,
-  HookContext,
-  ExitReason,
+  AgentOptions,
+  BusinessHours,
+  Clock,
+  EndReason,
+  Idle,
+  OutboundMessage,
+  ScheduleEntry,
+  Silenced,
+  TurnBase,
+  TurnInput,
+  TurnKind,
+  TurnResult,
+  TurnStreamChunk,
 } from "./agent.js";
 
-// History types
 export type {
-  Event,
-  EmittedEvent,
-  MessageEventData,
-  ToolEventData,
-  StatusEventData,
-  Participant,
-  ToolResult as EventToolResult,
-  ToolCall,
-  HistoryMessage,
-  Role,
-  HistoryItem,
-  History,
-  UserHistoryItem,
-  AssistantHistoryItem,
-  SystemHistoryItem,
-  ToolHistoryItem,
-} from "./history.js";
-export { EventKind, MessageRole } from "./history.js";
-
-// Flow types
-export type {
-  FlowOptions,
-  FlowRef,
-  StepRef,
-  StepOptions,
-  FlowLifecycleHooks,
-  StepLifecycleHooks,
-  Directive,
-  BranchEntry,
-  BranchMap,
-  BranchPredicate,
-  BranchPredicateContext,
-  ConditionPredicate,
-  ConditionIf,
-  ConditionWhen,
-  StoppedReason,
-  PrepareResult,
+  Action,
+  ActionCtx,
+  ActionMap,
+  ActionResult,
+  Branch,
+  Condition,
+  ConditionMap,
+  ConditionSpec,
+  DoStep,
+  Duration,
+  EventDef,
+  EventMap,
+  FieldDef,
+  FieldDefs,
+  Flow,
+  IfStep,
+  InferData,
+  InferParams,
+  Instruction,
+  Next,
+  ParamDef,
+  ParamDefs,
+  Pred,
+  PredCtx,
+  Repeat,
+  SayStep,
+  ScalarDef,
+  ScalarType,
+  Step,
+  StepBase,
+  TalkStep,
+  Template,
+  Trigger,
+  WaitEventStep,
+  WaitStep,
 } from "./flow.js";
 
-// Session types
-export type { SessionState } from "./session.js";
-
-// Signals types (canonical source)
 export type {
-  Signal,
-  SignalContext,
-  SignalDirective,
-  ResolvedSignalDirective,
-  SignalPredicate,
-  SignalPredicateContext,
-  SignalFiring,
-  SignalSchema,
-  SignalsState,
-  SignalTriggerState,
-} from "./signals.js";
+  Run,
+  RunStatus,
+  Session,
+  StepOutcome,
+  StepOutcomeKind,
+  StepOutcomeStatus,
+  Store,
+  TriggerKind,
+} from "./session.js";
 
-// Tool types
-export type {
-  Tool,
-  ToolContext,
-  ToolResult,
-  ToolHandler,
-  ToolExecutionResult,
-  ToolValidationResult,
-  ToolPermissionResult,
-  ToolCallRequest,
-  ToolExecutionUpdate,
-  TrackedTool,
-  ToolStatus,
-  DataEnrichmentConfig,
-  ValidationConfig,
-  ApiCallConfig,
-  ComputationConfig
-} from "./tool.js";
-export { ToolScope } from "./tool.js";
+export type { Tool, ToolCtx, ToolPermissionResult, ToolResult, ToolValidationResult } from "./tool.js";
 
-// Compaction types
 export type {
-  CompactionOptions,
-  CompactionResult,
-} from "./compaction.js";
-
-// Prompt cache types
-export type {
-  PromptSectionType,
-  PromptCacheConfig,
-  SectionCompute,
-} from "./prompt-cache.js";
-
-// AI provider types
-export type {
+  AgentStructuredResponse,
   AiProvider,
   GenerateMessageInput,
   GenerateMessageOutput,
-  AgentStructuredResponse,
-  ReasoningConfig,
   GenerateMessageStreamChunk,
   ProviderCapabilities,
+  ReasoningConfig,
 } from "./ai.js";
 
-// Schema types
+export type {
+  AssistantHistoryItem,
+  EmittedEvent,
+  Event,
+  History,
+  HistoryItem,
+  MessageEventData,
+  Participant,
+  Role,
+  StatusEventData,
+  SystemHistoryItem,
+  ToolCall,
+  ToolEventData,
+  ToolHistoryItem,
+  ToolResult as EventToolResult,
+  UserHistoryItem,
+} from "./history.js";
+export { EventKind, MessageRole } from "./history.js";
+
 export type { StructuredSchema } from "./schema.js";
-
-// Persistence types
-export type {
-  SessionData,
-  MessageData,
-  SessionStatus,
-  SessionRepository,
-  MessageRepository,
-  PersistenceAdapter,
-  PersistenceConfig,
-  CreateSessionOptions,
-  CreateSessionData,
-  SaveMessageOptions,
-  CollectedStateData,
-  SessionUpdateOptions,
-} from "./persistence.js";
-
-// Template types
-export type {
-  Template,
-  TemplateContext,
-  ConditionEvaluationResult
-} from "./template.js";
-
-// Error types
-export { NotImplementedError, SessionConflictError, ProviderError } from "./errors.js";
-export type { ErrorKind } from "./errors.js";
-
-// Internal — ConditionTemplate is NOT exported from the public surface in v2.
-// It remains internally for the condition evaluator utility.
+export type { CompactionOptions, CompactionResult } from "./compaction.js";
+export type { PromptCacheConfig, PromptSectionType, SectionCompute } from "./prompt-cache.js";
 
 export {
-  ConditionEvaluator,
-  createConditionEvaluator,
-  extractAIContextStrings,
-  hasProgrammaticConditions
-} from "../utils/condition.js";
+  FlowConfigurationError,
+  NotImplementedError,
+  ProviderError,
+  SessionConflictError,
+} from "./errors.js";
+export type { ErrorKind } from "./errors.js";

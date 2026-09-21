@@ -55,3 +55,15 @@ export class SessionConflictError extends Error {
         this.name = 'SessionConflictError';
     }
 }
+
+/**
+ * Thrown when a flow cannot run as written: an unknown field, action, event,
+ * condition or step id, a duplicate or reserved step id, or a jump with no
+ * way out. Raised at agent construction and by `validateFlow`.
+ */
+export class FlowConfigurationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'FlowConfigurationError';
+    }
+}

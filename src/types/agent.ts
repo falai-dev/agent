@@ -1,429 +1,152 @@
 /**
- * Agent-related type definitions
+ * Agent options and the one entry point: `turn`.
  */
 
-import type { AgentStructuredResponse, AiProvider } from "./ai.js";
-import type { Tool } from "./tool.js";
-import type { Directive, FlowOptions, StepRef, StoppedReason } from "./flow.js";
-import type { PersistenceConfig } from "./persistence.js";
-import type { SessionState } from "./session.js";
-import type { Signal, SignalFiring } from "./signals.js";
-import type { StructuredSchema } from "./schema.js";
-import type { Event } from "./history.js";
-import type { Template } from "./template.js";
-import type { ConditionWhen, ConditionIf } from "./flow.js";
+import type { AiProvider } from "./ai.js";
+import type {
+  ActionMap,
+  ConditionMap,
+  EventMap,
+  FieldDefs,
+  Flow,
+  Instruction,
+  Template,
+} from "./flow.js";
+import type { History } from "./history.js";
 import type { PromptCacheConfig } from "./prompt-cache.js";
+import type { Run, Session, StepOutcome } from "./session.js";
+import type { Tool } from "./tool.js";
+
+/** Returns "now". Tests pass a fake clock. */
+export type Clock = () => Date;
+
+/** Moves a time forward to the next working moment. Snaps, never clamps. */
+export type BusinessHours<C = unknown> = (at: Date, ctx: { context: C }) => Date;
 
 /**
- * Context passed to every lifecycle hook (flow and step).
- * Carries the current state and a `dispatch` method for emitting directives
- * onto the per-turn directive bus.
+ * The one speaker that is not a step: answers when no run holds the floor.
+ * `'silent'` mutes it.
  */
-export interface HookContext<TContext = unknown, TData = unknown> {
-  /** Agent-level context. */
-  context: TContext;
-  /** Collected data (partial — fields may be undefined). */
-  data: Partial<TData>;
-  /** Full session state. */
-  session: SessionState<TData>;
-  /** Conversation history as events. */
-  history: Event[];
-  /**
-   * Emit a directive onto the per-turn directive bus.
-   * Multiple `dispatch()` calls are allowed; they merge via Algorithm 4
-   * along with any directive returned from the hook itself.
-   */
-  dispatch(directive: Directive<TContext, TData>): void;
-}
+export type Idle<C = unknown, D = unknown> =
+  | { prompt: Template; tools?: string[]; instructions?: Instruction<C, D>[] }
+  | "silent";
 
 /**
- * Reason why a flow was exited, passed to `hooks.onExit`.
- */
-export type ExitReason = 'completed' | 'goto_flow' | 'goto_step' | 'aborted';
-
-/**
- * Agent-level compaction configuration.
- * Unlike CompactionOptions, this does not require a `provider` since the agent already has one.
+ * Agent-level compaction configuration. `provider` comes from the agent.
  */
 export interface AgentCompactionConfig {
-  /** Maximum token budget for the conversation */
+  /** Maximum token budget for the conversation. */
   maxTokens: number;
-  /**
-   * Threshold ratio (0–1) at which to trigger compaction.
-   * Must be between 0.5 and 0.95.
-   * @default 0.8
-   */
+  /** Ratio (0.5–0.95) at which to compact. Default 0.8. */
   compactionThreshold?: number;
-  /**
-   * Number of recent messages to always preserve unchanged.
-   * Must be >= 2.
-   * @default 4
-   */
+  /** Recent messages always kept unchanged (>= 2). Default 4. */
   preserveRecentCount?: number;
-  /**
-   * Maximum characters per tool result before truncation.
-   * Must be > 0.
-   * @default 5000
-   */
+  /** Characters per tool result before truncation (> 0). Default 5000. */
   maxToolResultChars?: number;
-  /**
-   * Whether compaction is enabled.
-   * @default true when config is provided
-   */
+  /** Default true when the config is present. */
   enabled?: boolean;
 }
 
-/**
- * Context lifecycle hooks for managing step persistence
- */
-export interface ContextLifecycleHooks<TContext = unknown, TData = unknown> {
-  /**
-   * Called before respond() to get fresh context
-   * Useful for loading context from a database or cache
-   */
-  beforeRespond?: (currentContext: TContext) => Promise<TContext> | TContext;
-
-  /**
-   * Called after context is updated via updateContext() or tool execution
-   * Useful for persisting context to a database or cache
-   */
-  onContextUpdate?: (
-    newContext: TContext,
-    previousContext: TContext
-  ) => Promise<void> | void;
-
-  /**
-   * Called after collected data is updated (from AI response or tool execution)
-   * Useful for validation, enrichment, or persistence of collected data
-   * Return modified collected data or the same data to keep it unchanged
-   *
-   * Note: This hook now works with agent-level data collection (TData type)
-   */
-  onDataUpdate?: (
-    data: Partial<TData>,
-    previousCollected: Partial<TData>
-  ) => Partial<TData> | Promise<Partial<TData>>;
-}
-
-/**
- * Context provider function for always-fresh context
- * Alternative to static context, useful for loading from external sources
- */
-export type ContextProvider<TContext = unknown> = () =>
-  | Promise<TContext>
-  | TContext;
-
-/**
- * Options for creating an Agent
- */
-export interface AgentOptions<TContext = unknown, TData = unknown> {
-  /** Display name of the agent */
+export interface AgentOptions<C = unknown, D = unknown> {
   name: string;
-  /** The agent's primary goal or objective */
-  goal?: string;
-  /**
-   * Agent persona — covers role, tone, self-concept, and communication style.
-   * Rendered into the system prompt as "who you are and how you communicate."
-   */
-  persona?: Template<TContext>;
-  /**
-   * Hard bound on session.history length (default: 400). The oldest entries
-   * are trimmed — never splitting an assistant/tool pair — when the bound is
-   * exceeded and no compaction strategy shrank the history first. Set 0 to
-   * disable bounding entirely.
-   */
-  maxHistoryMessages?: number;
-  /** Enable debug logging */
-  debug?: boolean;
-  /** Default context data available to the agent */
-  context?: TContext;
-  /** Optional current session for convenience methods */
-  session?: SessionState;
-  /** Optional sessionId to load or create - managed by SessionManager */
-  sessionId?: string;
-  /** Context provider function for always-fresh context (alternative to static context) */
-  contextProvider?: ContextProvider<TContext>;
-  /** Lifecycle hooks for context management */
-  hooks?: ContextLifecycleHooks<TContext, TData>;
-  /** AI provider for generating responses */
+  /** What the agent is for. */
+  goal?: Template;
+  /** Who the agent is and how it talks. */
+  persona?: Template;
   provider: AiProvider;
-  /** Initial terms for domain glossary */
-  terms?: Term<TContext, TData>[];
-  /**
-   * Instructions for agent behavior — unified primitive.
-   * Each instruction has a `kind`: `'must'` (rule), `'never'` (prohibition), or `'should'` (default, nudge).
-   */
-  instructions?: Instruction<TContext, TData>[];
-  /** Global tools available to all flows */
-  tools?: Tool<TContext, TData, unknown>[];
-  /** Initial flows (will be instantiated as Flow objects) */
-  flows?: FlowOptions<TContext, TData>[];
-  /** Optional persistence configuration for auto-saving sessions and messages */
-  persistence?: PersistenceConfig<TData>;
-  /** Knowledge base containing any JSON structure the AI should know */
+  /** Every collectable field, authored once. */
+  fields: FieldDefs;
+  flows?: Flow<C, D>[];
+  /** Host actions `do` steps may name. */
+  actions?: ActionMap<C, D>;
+  /** Host events triggers and waits may name. */
+  events?: EventMap;
+  /** Host conditions JSON predicates may name. */
+  conditions?: ConditionMap<C, D>;
+  tools?: Tool<C, D>[];
+  instructions?: Instruction<C, D>[];
+  /** Any JSON the AI should know. */
   knowledgeBase?: Record<string, unknown>;
-  /** Agent-level data schema defining the complete data structure for collection */
-  schema?: StructuredSchema;
-  /** Initial data to pre-populate when creating the agent */
-  initialData?: Partial<TData>;
-  /**
-   * Margin (0-100) the best alternative flow must exceed the current flow's score
-   * by before the agent switches. Higher values make the agent "stickier" to the
-   * current flow. Set to 0 to switch whenever any flow scores higher.
-   * @default 15
-   */
-  flowSwitchMargin?: number;
-  /**
-  /**
-   * Maximum number of consecutive auto-steps (`auto: true`) that may execute
-   * within a single turn before the pipeline throws `FlowConfigurationError`.
-   * Guards against infinite loops in auto-step chains.
-   *
-   * The default (10) is applied at Agent construction time, not on this type.
-   *
-   * @default 10
-   */
-  maxAutoStepsPerTurn?: number;
-  /**
-   * Maximum number of chained directives allowed within a single turn before
-   * the pipeline throws `FlowConfigurationError`. Guards against infinite
-   * redirection loops (e.g., goTo → onEnter emits goTo → onComplete emits goTo → …).
-   *
-   * Chain breakers (`abort` mid-chain) stop counting and apply immediately.
-   *
-   * @default 10
-   */
-  maxDirectiveChain?: number;
-  /**
-   * Maximum number of tool loop iterations allowed within a single response
-   * generation before the pipeline stops executing further tool calls.
-   * Guards against runaway recursive tool calling. An explicit `0` is honored
-   * (no tool loops). Applies to both `respond()` and streaming paths.
-   *
-   * @default 5
-   */
+  idle?: Idle<C, D>;
+  clock?: Clock;
+  businessHours?: BusinessHours<C>;
+  /** Tool rounds per speak call. Default 5; 0 disables tools. */
   maxToolLoops?: number;
-  /**
-   * Optional compaction configuration for managing conversation history size.
-   * When provided, the agent will validate the options and make them available
-   * for use by the SessionManager/CompactionEngine.
-   */
   compaction?: AgentCompactionConfig;
-  /**
-   * Optional prompt cache configuration for controlling section memoization behavior.
-   * When provided, controls whether prompt sections are cached across turns.
-   * @default { enabled: true }
-   */
   promptCache?: PromptCacheConfig;
-  /**
-   * Reserved for future router strategies. v2.0: only `'ai'` is implemented.
-   * Future v2.x widens to `'embedding' | 'rules'` etc.
-   *
-   * Setting any non-`'ai'` value in v2.0 throws `NotImplementedError` at
-   * `Agent` construction time. This is intentional — it surfaces forward-compat
-   * misconfiguration loudly. Future v2.x widens the accepted union without
-   * breaking the throw site (the new value just stops throwing).
-   *
-   * @default 'ai'
-   */
-  routerMode?: 'ai';
-
-  /**
-   * Signals: typed event detectors that run around the LLM turn.
-   * Empty array or undefined → signal phases are no-ops, zero cost.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  signals?: Signal<TContext, TData, any>[];
-
-  /**
-   * Maximum signals per batched classifier call. Default 10.
-   * If more signals are eligible after gating, they are split into
-   * parallel batches of this size.
-   */
-  signalBatchSize?: number;
+  debug?: boolean;
 }
 
-/**
- * A term in the domain glossary
- */
-export interface Term<TContext = unknown, TData = unknown> {
-  /** Name of the term */
-  name: Template<TContext, TData>;
-  /** Description/definition of the term */
-  description: Template<TContext, TData>;
-  /** Alternative names or synonyms */
-  synonyms?: Template<TContext, TData>[];
+// ── turn() input ────────────────────────────────────────────────────────
+
+/** The host's reason the assistant cannot speak. Zero calls unless `understand: true`. */
+export type Silenced = string | { reason: string; understand?: boolean };
+
+type ContextField<C> = undefined extends C ? { context?: C } : { context: C };
+
+export type TurnBase<C = unknown, D = unknown> = ContextField<C> & {
+  sessionId: string;
+  /** Absent on a first turn. A wake never creates a session. */
+  session?: Session<D>;
+  /** Pass on every input kind, wakes included. */
+  history?: History;
+  silenced?: Silenced;
+  /** Host anchors this session belongs to, e.g. `{ lead: { key: 'lead:456', lastInboundAt } }`. */
+  anchors?: Record<string, { key: string; lastInboundAt?: string }>;
+  /** Claims held in the lead's other sessions: `dedupeKey → at`, and live `${flowId}:${anchor}` pairs. */
+  claims?: { held: Record<string, string>; active: string[] };
+};
+
+export type TurnKind =
+  /** The lead wrote. Hosts pass the channel id and receipt time. */
+  | { message: string; id?: string; at?: string }
+  /** A scheduled wake fired; the key came from `schedule[]`. */
+  | { wake: string }
+  /** Something happened in the host. */
+  | { event: string; payload?: unknown; key: string; hop?: number }
+  /** Start a flow by hand. */
+  | { start: { flow: string; input?: unknown; key: string; hop?: number } };
+
+export type TurnInput<C = unknown, D = unknown> = TurnBase<C, D> & TurnKind;
+
+// ── turn() result ───────────────────────────────────────────────────────
+
+export interface OutboundMessage {
+  text: string;
+  /** `'ai'` was phrased by the model; `'verbatim'` came from a `say` step. */
+  kind: "ai" | "verbatim";
+  media?: { slug: string };
+  /** Delay before sending, from a short `wait` that preceded it. */
+  afterMs: number;
+  /** `${runId}:${stepId}:${visit}`; the same on a replay. */
+  key: string;
+  runId?: string;
+  stepId?: string;
 }
 
-/**
- * Instruction — unified behavioral primitive.
- * Collapses v1's `Guideline` (scoped nudge), `Rule` (absolute must-do),
- * and `Prohibition` (absolute must-not) into a single type with a `kind` discriminator.
- *
- * @example
- * // A "should" (default) — same as a v1 Guideline
- * { prompt: "Prefer short answers", when: "User asks a simple question" }
- *
- * // A "must" — same as a v1 Rule
- * { kind: 'must', prompt: "Always validate email format before proceeding" }
- *
- * // A "never" — same as a v1 Prohibition
- * { kind: 'never', prompt: "Promise delivery dates you cannot guarantee" }
- */
-export interface Instruction<TContext = unknown, TData = unknown> {
-  /** Unique identifier (auto-generated if omitted). */
-  id?: string;
-  /**
-   * Instruction severity.
-   * - `'must'`  — absolute rule the agent must always follow.
-   * - `'never'` — absolute prohibition the agent must never do.
-   * - `'should'`— behavioral nudge, active when conditions match.
-   *
-   * @default 'should'
-   */
-  kind?: 'must' | 'never' | 'should';
-  /**
-   * AI-evaluated activation condition. Non-`!` strings are OR alternatives;
-   * `!` strings are OR exclusions where any match inhibits the instruction.
-   * Undefined = always active. Functions are NOT allowed here — use `if`.
-   */
-  when?: ConditionWhen;
-  /**
-   * Code-evaluated activation condition. Function or array of functions (AND semantics).
-   * Free to evaluate. When both `when` and `if` are set, `if` runs first;
-   * `when` is only evaluated when `if` passes.
-   */
-  if?: ConditionIf<TContext, TData>;
-  /** Behavioral instruction text rendered into the prompt. */
-  prompt: Template<TContext, TData>;
-  /** Whether this instruction is currently enabled. @default true */
-  enabled?: boolean;
-  /** Tags for organizing and filtering instructions. */
-  tags?: string[];
-  /** Additional metadata. */
-  metadata?: Record<string, unknown>;
+/** A wake to enqueue with `jobId = key`; at fire time call `turn({ wake: key })`. */
+export interface ScheduleEntry {
+  key: string;
+  at: Date;
+  /** An earlier wake this one supersedes; removing it is best effort. */
+  replaces?: string;
 }
 
-/**
- * Carries the three scope buckets through the prompt pipeline so the composer
- * can render scope captions correctly.
- */
-export interface ScopedInstructions<TContext = unknown, TData = unknown> {
-  /** Agent-level — rendered with caption `[Always]`. */
-  global: Instruction<TContext, TData>[];
-  /**
-   * Flow-level — rendered with caption `[In: <FlowTitle>]`.
-   * `flowTitle` is captured here so the composer doesn't need a Flow reference.
-   */
-  flow?: { flowTitle: string; items: Instruction<TContext, TData>[] };
-  /**
-   * Step-level — rendered with caption `[Step: <stepId>]`.
-   * `stepId` is captured here for the same reason.
-   */
-  step?: { stepId: string; items: Instruction<TContext, TData>[] };
+export type EndReason = "end" | "flow" | "reset" | "skipped" | "failed" | "replaced";
+
+export interface TurnResult<D = unknown> {
+  /** Version unchanged; the host bumps it on save. */
+  session: Session<D>;
+  /** False: save nothing, send nothing. */
+  changed: boolean;
+  messages: OutboundMessage[];
+  schedule: ScheduleEntry[];
+  outcomes: StepOutcome[];
+  started: Array<{ runId: string; flowId: string; anchor: string; dedupeKey: string }>;
+  ended: Array<Run & { reason: EndReason }>;
+  /** Triggers that matched but did not start a run, with the reason. */
+  skipped: Array<{ flowId: string; anchor: string; triggerKey: string; detail: string }>;
+  llmCalls: number;
 }
 
-/**
- * Observability record for an instruction that was rendered into a turn's prompt.
- * Textual `when` conditions are included in the prompt for the AI to evaluate.
- * Deterministic — derived from rendering, not from LLM self-report.
- */
-export interface AppliedInstruction {
-  /** The instruction's id */
-  id: string;
-  /** Which scope the instruction originated from */
-  scope: 'global' | 'flow' | 'step';
-  /** FlowTitle for `scope === 'flow'`, stepId for `scope === 'step'`, undefined for `scope === 'global'`. */
-  scopeRef?: string;
-}
-
-/** A flow that left its active position during a turn. */
-export interface EndedFlow {
-  flowId: string;
-  title?: string;
-  reason: StoppedReason;
-}
-
-export interface AgentResponse<TData = Record<string, unknown>> {
-  message: string;
-  session?: SessionState<TData>;
-  toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-  isFlowComplete?: boolean;
-  /** Steps executed in this response (for multi-step execution) */
-  executedSteps?: StepRef[];
-  /** Why execution stopped (for multi-step execution) */
-  stoppedReason?: StoppedReason;
-  /**
-   * Instructions rendered into this turn's prompt after code-evaluated gates passed.
-   * Textual `when` conditions remain in the prompt for the AI to evaluate.
-   * Deterministic — derived from rendering, not from LLM self-report.
-   */
-  appliedInstructions?: AppliedInstruction[];
-  /**
-   * Signals that fired during this turn (both pre- and post-phases), in fire order.
-   * Mirrors the observability framing of `executedSteps` and `appliedInstructions`.
-   */
-  triggeredSignals?: SignalFiring<unknown, TData>[];
-  /**
-   * Provider-reported usage for this turn's primary generation (routing and
-   * extraction sub-calls are not included).
-   */
-  metadata?: { tokensUsed?: number };
-  /**
-   * Flows that LEFT their active position this turn — completions, redirects,
-   * resets. planTurn knows these internally; surfaced so consumers stop
-   * re-deriving them from executedSteps + session cursor inspection.
-   */
-  endedFlows?: EndedFlow[];
-}
-
-export interface AgentResponseStreamChunk<TData = Record<string, unknown>> {
-  delta: string;
-  accumulated: string;
-  done: boolean;
-  session?: SessionState<TData>;
-  toolCalls?: Array<{ toolName: string; arguments: Record<string, unknown> }>;
-  isFlowComplete?: boolean;
-  /** Steps executed in this response (for multi-step execution) */
-  executedSteps?: StepRef[];
-  /** Why execution stopped (for multi-step execution) */
-  stoppedReason?: StoppedReason;
-  metadata?: {
-    model?: string;
-    tokensUsed?: number;
-    finishReason?: string;
-    [key: string]: unknown;
-  };
-  structured?: AgentStructuredResponse;
-  error?: Error;
-  /**
-   * Instructions whose conditions passed and were rendered into this turn's prompt.
-   * Populated on the final (`done: true`) chunk only.
-   */
-  appliedInstructions?: AppliedInstruction[];
-  /**
-   * Signals that fired during this turn (both pre- and post-phases), in fire order.
-   * Mirrors the observability framing of `executedSteps` and `appliedInstructions`.
-   * Populated on the final (`done: true`) chunk only.
-   */
-  triggeredSignals?: SignalFiring<unknown, TData>[];
-}
-
-/**
- * Validation error for data validation
- */
-export interface ValidationError {
-  field: string;
-  value: unknown;
-  message: string;
-  schemaPath: string;
-}
-
-/**
- * Result of data validation
- */
-export interface ValidationResult {
-  valid: boolean;
-  errors: ValidationError[];
-  warnings: ValidationError[];
-}
+export type TurnStreamChunk<D = unknown> = { delta: string } | { done: true; result: TurnResult<D> };

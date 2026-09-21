@@ -16,8 +16,6 @@ export enum MessageRole {
   SYSTEM = "system",
 }
 
-import type { SessionState } from "./session.js";
-
 /**
  * Types of events in the interaction history
  */
@@ -85,24 +83,6 @@ export type HistoryItem =
  * Simplified history array type
  */
 export type History = HistoryItem[];
-
-/**
- * Simple JSON format for history messages (developer-friendly)
- */
-export interface HistoryMessage<TData = unknown> {
-  /** Role of the message sender */
-  role: MessageRole;
-  /** Message content */
-  content: string;
-  /** Optional participant name */
-  name?: string;
-  /** Optional timestamp (ISO string) */
-  timestamp?: string;
-  /** Optional session state */
-  session?: SessionState<TData>;
-  /** Optional additional metadata */
-  metadata?: Record<string, unknown>;
-}
 
 /**
  * Data for a message event

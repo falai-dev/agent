@@ -1,20 +1,30 @@
-/** @intent Minimal agent: one flow, one step, one response.
- *  @teaches createAgent, GeminiProvider, Flow, Step, respond
- *  @readAfter docs/start/02-first-agent.md */
-import { createAgent, GeminiProvider } from "../src/index.js";
+/**
+ * Quickstart: one field, one flow, one turn.
+ *
+ * Run: GEMINI_API_KEY=... bun run examples/01-quickstart.ts
+ */
 
-if (!process.env.GEMINI_API_KEY) throw new Error("Set GEMINI_API_KEY");
+import { falai, GeminiProvider } from "@falai/agent";
 
-const agent = createAgent({
-    name: "Greeter",
-    provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY, model: "gemini-3.5-flash-lite" }),
-    schema: { type: "object", properties: { name: { type: "string" } } },
-    flows: [{
-        title: "Greet",
-        requiredFields: ["name"],
-        steps: [{ id: "ask_name", prompt: "What's your name?", collect: ["name"] }],
-    }],
+const f = falai().fields({
+  nome: { type: "string", ask: "Pergunte o nome da pessoa, sem tom de formulário." },
 });
 
-const response = await agent.respond({ history: [{ role: "user", content: "Hi, I'm Alice" }] });
-console.log(response.message);
+const agent = f.agent({
+  name: "Ana",
+  provider: new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY ?? "", model: "gemini-2.5-flash" }),
+  flows: [
+    f.flow({
+      id: "boas-vindas",
+      name: "Boas-vindas",
+      on: [{ message: [] }],
+      steps: [
+        { id: "nome", collect: ["nome"] },
+        { id: "ajuda", prompt: "Agradeça pelo nome e pergunte como pode ajudar." },
+      ],
+    }),
+  ],
+});
+
+const r = await agent.turn({ sessionId: "demo", message: "oi" });
+console.log(r.messages[0]?.text);
