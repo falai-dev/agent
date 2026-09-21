@@ -2,6 +2,32 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.0]
+
+One model for flows, automations and signals. The migration guide is [docs/migration/v3-to-v4.md](./docs/migration/v3-to-v4.md); this entry is its summary.
+
+### Changed (BREAKING)
+
+- **A Flow is now a trigger plus an ordered list of steps, and it is the only primitive that starts work.** Three products built the same three things around the framework because it had no notion of time or events: a follow-up scheduler, an automation engine with its own run ledger, and a second prompt composer for messages the framework could not phrase. All three are flows now. `on[]` says when a run starts: the customer asks for it (`message`), mentions it (`mention`, the old Signal), goes quiet (`silence`), something happens in the host (`event`, with `after` and `businessHours`), or nothing (the host calls `start`). A step is one of five things: the AI talks (`prompt` / `collect`), a fixed text goes out (`say`), the host does something (`do`), the run waits (`wait`), or the code forks (`if`). `title` → `id` + `name`, `when`/`if` on the flow → triggers, `reentrant` → `repeat` + `clearOnStart`, `endBehavior` → `onEnd: 'end' | 'stay' | 'reset'`, `reply` → `say`, `auto` → `do` / `if` / `wait`, every hook → a `do` step at that position.
+
+- **`agent.turn()` replaces `respond()`; it takes any input and returns everything the host must do.** `{ message }`, `{ wake }`, `{ event, payload, key }` or `{ start }` go in; `messages[]` (with `afterMs` and a deterministic `key`), `schedule[]` (wake keys and times), `outcomes[]` (one pt-BR line per step for the execution log), `started`, `ended`, `skipped` and `llmCalls` come out. The framework never sends, sleeps or saves. `context` and `history` arrive on every call; the instance holds no session, so one `Agent` serves every conversation and the per-turn rebuild consumers did is gone. `silenced: 'motivo'` is the one gate: `do` steps still run, nothing is phrased, zero model calls. `respondStream` is `turnStream`.
+
+- **Fields are declared once, with their own wording, and land in any order.** `falai<C>().fields(defs)` binds the data type for every `collect`, `ask`, `clearOnStart` and `ctx.set` downstream; `type Data = DataOf<typeof f>`. A field is `{ type, enum?, description?, ask?, extract?: 'anywhere' | 'asked' }`. A talk step's pending set is `collect − known − at maxAsks`, computed by code every turn, so a step whose fields are already known is skipped with no call and a step asks until they are known, a branch fires, or `maxAsks` (default 3) trips. `requires`, `skip`, `requiredFields` and `optionalFields` are gone: `requires` deadlocked whenever nothing collected the field, and the other three were never used by a consumer. Booleans default to `extract: 'asked'`, so a stray "sim" never opens an `if`.
+
+- **Movement is `then` / `else` on a step. Nothing else moves a run.** `goTo`, `goToStep`, `complete`, `abort`, `reset`, `dispatch()`, `pendingDirective`, `flow.merge()`, `flow.validate()` and the `Directive` type are gone; five appliers implemented the same five verbs five ways, and two of the verbs were no-ops. `Next` is a step id, `'end'`, `{ step, clear }` or `{ flow, input }`. Branches stay on talk and `wait` steps, judged while the step is asking. Tools return `{ value?, data? }` and take `(args, ctx)`.
+
+- **At most two model calls per text turn.** One `understand` call routes the message, detects mentions, judges branches and extracts fields in a single envelope; one `speak` call phrases the reply with the step's pending fields, plus one call per tool round. Today's pipeline spent two to four calls before the reply. A single eligible flow with no floor holder routes without a call; a `wake` to a `do` or `wait` step costs none. Every result carries `llmCalls`, so the budget is a test, not a promise.
+
+- **`Store { load, save(session, expectedVersion) }` replaces `PersistenceAdapter`.** The seven adapters survive as `MemoryStore`, `PostgresStore`, `PrismaStore`, `RedisStore`, `MongoStore`, `SQLiteStore` and `OpenSearchStore`, persisting the v4 blob and a version; message repositories, `SessionRepository`, `PersistenceManager`, `autoSave` and `restoreSession` are gone. The framework never calls a store: `load`, `turn`, `save`, and a stale version throws `SessionConflictError` so the same input is replayed. The session blob is `{ v: 4, version, data, runs, claims, inputs, lastUserAt, lastAssistantAt }`; `migrateSession(blob, { sessionId, flowIdOf })` turns a 3.x `SessionState` into it once, keeping `data` verbatim, the current step as one `asking` run, and once-fired signals as claims, and throws on a blob it does not recognise instead of yielding a fresh conversation.
+
+- **Stored flows are the framework's own JSON.** `FlowSpec` is a flow with flat `{ id, kind, ... }` steps and JSON predicates; `fromSpec` / `toSpec` convert, `validateFlow` names the unknown field, action, event, condition or step, and `flowSpecSchema` returns the closed schema to hand a model that writes flows. Host actions, events and conditions register once on the agent and are referenced by name, so a flow typed in a chat, drawn in an editor or written in TypeScript is the same object.
+
+- **Import surface.** The package exports `falai`, `Agent`, the seven stores, `migrateSession`, the `FlowSpec` helpers, the providers, the history helpers, the error classes and the types. Everything not on that list is gone, without aliases. The `rg` line in the guide finds every call site.
+
+### Unchanged
+
+- The providers (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, compaction, prompt caching and the history helpers.
+
 ## [3.4.1]
 
 ### Dependencies

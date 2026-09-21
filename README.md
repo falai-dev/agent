@@ -56,7 +56,7 @@ A typed function the AI can call. Receives a `ToolContext` with session data, ca
 - **Build your first agent** → [docs/start/01-install.md](./docs/start/01-install.md)
 - **Explore the docs** → [docs/](./docs/README.md)
 - **Examples** → [examples/](./examples/)
-- **Upgrading** → [docs/migration/](./docs/migration/README.md) (v2.3 → v2.4, v1 → v2)
+- **Upgrading** → [docs/migration/](./docs/migration/README.md) (v3 → v4, v2.6 → v2.7, v2.3 → v2.4, v1 → v2)
 
 ## Install
 
