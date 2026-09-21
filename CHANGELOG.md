@@ -26,13 +26,19 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **`promptCache` and `PromptSectionCache` are gone.** Every prompt is built per call from that turn's request, so there is nothing to memoize across turns. The providers' own prompt caching (Anthropic, OpenRouter sticky routing) is untouched. `compaction` stays and now runs once per turn, on the history the host passes, before either model call; a summarization counts as one `llmCalls`.
 
-- **Outcome lines carry a code, not a sentence.** Every `StepOutcome` and every `TurnResult.skipped` entry now has `code`, one of 32 stable values (`already-known`, `stale-wake`, `max-asks`, `provider-unavailable`, …), plus `message`, the English sentence the framework copies from `OUTCOME_MESSAGES`. Switch on `code`: it survives a rewording, and a product renders it in its own language. `detail` is now only ever text someone else wrote: your `silenced` reason, an action's own words, or the field a line is about. The Brazilian Portuguese strings that used to fill `detail` are gone from the package; a product that wants them maps the code to its own copy. Two lines also got more useful: `max-asks` and `unknown-field` now name the field in `detail`.
+- **Outcome lines carry a code, not a sentence.** Every `StepOutcome` and every `TurnResult.skipped` entry now has `code`, one of 37 stable values (`already-known`, `stale-wake`, `max-asks`, `provider-unavailable`, …), plus `message`, the English sentence the framework copies from `OUTCOME_MESSAGES`. Switch on `code`: it survives a rewording, and a product renders it in its own language. `detail` is now only ever text someone else wrote: your `silenced` reason, an action's own words, or the field a line is about. The Brazilian Portuguese strings that used to fill `detail` are gone from the package; a product that wants them maps the code to its own copy. Two lines also got more useful: `max-asks` and `unknown-field` now name the field in `detail`.
+
+### Added
+
+- **`TurnResult.usage` says what the turn's model calls cost.** `{ promptTokens, completionTokens, cachedInputTokens }`, the providers' own counts added up over the understand call, the speak call, every tool round and a compaction summary — the figure a host bills a conversation from. It sits beside `llmCalls` and is absent, never zero, when a turn spent no call or the provider reported no counts.
 
 ### Docs and tooling
 
 - **The docs are rewritten for v4**: a five-page tutorial, twelve task guides, four concept pages (the model, the turn, runs and waits, collection) and one reference page per public type, including the full outcome-code table a product team needs to build an execution log. The pages about directives, signals, `createAgent` and persistence adapters are gone with the things they described.
 
 - **`bun run check:docs`** typechecks every TypeScript fence in `README.md` and `docs/` as its own file against `src/index.ts`, so a snippet cannot drift from the API. A fence that shows a shape opens as ` ```ts fragment ` and is skipped. It runs in `prepublishOnly`.
+
+- **`bun run eval:live`** runs eight checks that only a real provider can answer — the envelope parses, fields land and an enum snaps, a tool round completes, deltas stream, the system half is read, a repeated prefix is billed as a cache read, a bad key classifies as `auth`, an oversized prompt as `context` — against every provider whose key is in the environment. `--only zai`, `--skip cache`.
 
 - **`bun run eval:understand`** replays 40 labelled Brazilian Portuguese messages through a real agent on every provider whose key is in the environment, with the speak call silenced so only the understand call runs. It reports how often the call agrees with the labels on routing, mentions and extraction, plus tokens and latency, and fails below `--min` (default 0.9). One call now does what 3.x spread over two to four.
 
@@ -42,11 +48,19 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **The reasoning behind a tool call rides back to the model.** Thinking providers reject an assistant turn that made a tool call and came back without its own chain of thought, which is the default path here: `ZaiProvider` fronts a GLM thinking endpoint. `AssistantHistoryItem` now carries `reasoning` and `reasoningDetails`, the framework fills them on its own tool rounds, and the OpenAI-shape adapters replay them. Anthropic-shape drops them on purpose — its thinking blocks are signed.
 
+- **A provider failure now says which wall it hit, and a wall that never moves ends the step.** Every throw from the speak call became one code and one ladder: `provider-unavailable`, re-parked at +1m, +5m, +15m, and then +15m forever — two model calls a wake, for as long as the session lived, against a wrong API key or a prompt past the context window. The failure is now classified (`provider-auth`, `provider-quota`, `provider-context`, `provider-invalid`, `provider-unavailable`), only the kinds a wait can fix are retried, the ladder is finite (1m, 5m, 15m, 1h, 6h) and then the run ends `failed`, and a provider that states when its limit reopens (`retry-after`, a plan window) is woken then instead.
+
+- **The stable half of the prompt is sent as a system message, so providers can cache it.** Identity and the knowledge base went in the same string as the turn's own text, which put a cache breakpoint on a prefix that changed every turn: on Anthropic and Z.ai the cache was written every call and never read. They now travel as `system`, and only text that interpolates `{{data}}` or `{{context}}` stays inline, where it belongs. Measured on Z.ai, a second turn on the same agent read 704 of 2,546 prompt tokens from cache; on OpenRouter, 6,656 of 14,845; on DeepSeek, 13,824 of 16,055.
+
+- **DeepSeek asks for JSON mode, not a schema.** `DeepSeekProvider` sent `response_format: { type: 'json_schema' }`, which DeepSeek answers with `400 "This response_format type is unavailable now"` — so every call failed and the provider had never worked. It now sends `{ type: 'json_object' }` with the schema in the prompt, which is the path the parser already tolerates, and reports `supportsNativeJsonSchema: false`.
+
+- **A tool whose `parameters` is not a JSON Schema object is rejected at build.** A function declaration needs `{ type: "object", properties, required }`; an action's shorthand map (`{ cidade: { type: "string" } }`) reads as valid TypeScript and is not one. DeepSeek answered it with a 400; every other provider accepted the declaration and simply never called the tool, with nothing logged. `f.agent()` now throws `FlowConfigurationError` naming the tool.
+
 - **An unregistered action names itself.** `detail` read `ação desconhecida`; it now reads `unknown action "notify"`, matching the wording `FlowConfigurationError` already uses for the same mistake at build time. `validateFlow` still rejects it long before a turn runs.
 
 ### Unchanged
 
-- The providers (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, the `compaction` option and the history helpers.
+- The provider classes (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, the `compaction` option and the history helpers. Their options are unchanged; what they send is not — see Fixed, and `GenerateMessageInput` gained an optional `system`.
 
 ## [3.4.1]
 

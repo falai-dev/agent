@@ -33,7 +33,8 @@ type StepOutcomeCode =
   // A value the model gave
   | "unknown-field" | "bad-value" | "not-in-enum"
   // The model
-  | "provider-unavailable";
+  | "provider-unavailable" | "provider-quota" | "provider-auth"
+  | "provider-context" | "provider-invalid";
 
 interface StepOutcome {
   runId?: string;
@@ -138,7 +139,9 @@ Grouped by what produced it. `kind` and `status` are given as `kind / status`. A
 | `prompt` or `collect / ok` | `branch` | A branch of the asking step fired: an `if` branch held, or the model answered `when` with true. | the branch's `then` |
 | `prompt` or `collect / skipped` | `another-reply` | On a message turn, another run's `say` or an action with `spoke: true` already answered. The talk waits; the run stays asking. | |
 | `prompt` or `collect / skipped` | `silenced`, `detail` = your reason | The step was reached fresh while `silenced`. The run ends (`reason: 'skipped'`). A step that was already asking stays asking silently and writes no line. | |
-| `prompt` or `collect / deferred` | `provider-unavailable` | The provider failed or returned an empty message. The step is re-parked under a retry wake `${runId}:${stepId}:${visit}:retry:${atMs}`, after 1 min, then 5 min, then 15 min for each following failure on the same step. `until` set. | |
+| `prompt` or `collect / deferred` | `provider-unavailable`, `provider-quota` | Waiting can still fix it: the provider was down, slow, rate-limited, or returned an empty message; or a usage window said when it reopens. The step is re-parked under `${runId}:${stepId}:${visit}:retry:${atMs}` at +1m, +5m, +15m, +1h, +6h, or at the stated reset when that is later. `until` set. | |
+| `prompt` or `collect / failed` | `provider-auth`, `provider-context`, `provider-invalid`, `provider-quota` | Waiting cannot fix it: a rejected key, a prompt past the context window, a request the provider refused, a spent balance with no stated reset. No wake; the run ends `failed`. | |
+| `prompt` or `collect / failed` | `provider-unavailable` | The retryable ladder ran out — six failures on the same step. The run ends `failed`. | |
 
 ### Say steps
 
@@ -185,7 +188,7 @@ No run.
 | `kind / status` | `code` | When |
 |---|---|---|
 | `idle / ok` | none; `llmCalls` and `key` (`idle:${triggerKey}`) set | No run held the floor on a message turn and `idle` is not `'silent'`; the model answered. |
-| `idle / deferred` | `provider-unavailable`; `llmCalls` set, no `key` | The idle speaker's call failed or came back empty. No retry wake: the next message tries again. |
+| `idle / deferred` | any `provider-*` code; `llmCalls` set, no `key` | The idle speaker's call failed or came back empty. No retry wake either way: it has no step to re-park, and the next message tries again. |
 
 ### A run ended early
 

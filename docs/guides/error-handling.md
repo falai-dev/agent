@@ -65,19 +65,26 @@ A turn makes at most one understand call and one speak call. A tool round inside
 
 The understand call judges the customer's message: which flow it fits, what it mentions, which fields it gives. If the provider fails here, `agent.turn()` throws the `ProviderError`. Nothing has run yet: no action was called, no message was produced, and the host has not saved anything. Retry the same input later; the same message id mints the same keys, so the retry is a replay, not a duplicate.
 
-### In the speak call: the turn returns, and the step is re-parked
+### In the speak call: the turn returns, and the step waits or ends
 
-The speak call phrases the reply. If the provider fails here, or answers with an empty message, the turn does not throw. The talk step is parked under a retry wake and the turn returns normally, with:
+The speak call phrases the reply. If the provider fails here, or answers with an empty message, the turn does not throw. What happens next depends on whether waiting could help.
 
-- an outcome on the run: `{ kind: "prompt" | "collect", status: "deferred", code: "provider-unavailable", until }`
-- a `schedule[]` entry whose key is `${runId}:${stepId}:${visit}:retry:${atMs}`
-- `llmCalls` counting the call that failed
+| The failure | Code | What the run does |
+|---|---|---|
+| The provider was down, slow, overloaded or rate-limited; the reply was empty | `provider-unavailable` | Waits, then tries again |
+| A usage window that says when it reopens | `provider-quota` | Waits until then |
+| A spent balance with no stated reset | `provider-quota` | Ends `failed` |
+| The key was rejected or has no access to the model | `provider-auth` | Ends `failed` |
+| The prompt is past the model's context window | `provider-context` | Ends `failed` |
+| The provider refused the request, or the model does not exist | `provider-invalid` | Ends `failed` |
 
-The retry backoff is 1 minute, then 5, then 15, and stays at 15 (`RETRY_BACKOFF` in `src/core/Runner.ts`). The attempt number is the count of trailing `deferred` outcomes for that step on that run. When the wake fires, the step runs again at the same visit, so its message carries the same key it would have carried the first time.
+A failure that waits returns with an outcome `{ kind: "prompt" | "collect", status: "deferred", code, until }`, a `schedule[]` entry keyed `${runId}:${stepId}:${visit}:retry:${atMs}`, and `llmCalls` counting the call that failed. The backoff is 1 minute, then 5, 15, an hour, six hours (`RETRY_BACKOFF` in `src/core/Runner.ts`); the attempt number is the count of trailing `deferred` outcomes for that step on that run. A provider that stated a reset later than the next rung is woken at the reset instead. When the wake fires, the step runs again at the same visit, so its message carries the same key it would have carried the first time.
+
+**The ladder ends.** After the sixth failure on the same step there is no seventh wake: the outcome is `status: "failed"` and the run ends. The same happens at once for a failure no wait can fix — retrying a rejected key or an oversized prompt only spends two model calls to reach the same wall. Both land in `ended` with `reason: "failed"`, so your execution log shows a conversation that stopped and why.
 
 Actions that ran earlier in the same turn are not undone; they ran at-least-once and are idempotent on `ctx.key`. `say` steps that went out before the failure are in `messages[]` as usual.
 
-The idle speaker has no step to re-park. Its failure leaves one outcome, `{ kind: "idle", status: "deferred", code: "provider-unavailable" }`, and no wake: the customer's next message asks it again.
+The idle speaker has no step to re-park. Its failure leaves one outcome, `{ kind: "idle", status: "deferred", code }`, and no wake: the customer's next message asks it again.
 
 ### What is in the error
 

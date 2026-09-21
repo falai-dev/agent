@@ -86,7 +86,7 @@ A `wait` step parks the run. There are two kinds.
 
 **Event**: `{ wait: { event: 'meeting_booked', upTo?: '7d' }, else? }`. The event arrives: `code: 'event-arrived'`, `then`. `upTo` passes (default 30 days): `code: 'no-event'`, `else`, or the run ends when there is no `else`.
 
-Two more things park a run: a `do` step that returns `{ defer: '24h', detail }`, whose wake re-runs the same step under the same key; and a speak call that failed, which gets a retry wake at 1, 5, then 15 minutes (see [the pipeline](./pipeline.md#7-settle)).
+Two more things park a run: a `do` step that returns `{ defer: '24h', detail }`, whose wake re-runs the same step under the same key; and a speak call that failed in a way a wait can fix, which gets a retry wake at 1, 5 and 15 minutes, then an hour, then six (see [the pipeline](./pipeline.md#7-settle)).
 
 ```ts
 import type { Agent } from "@falai/agent";

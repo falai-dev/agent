@@ -258,7 +258,8 @@ Keep the ids of talk steps stable when you edit a flow that has live runs.
 | `code: 'flow-gone'`, `code: 'step-gone'` | the flow or step no longer exists |
 | `code: 'step-loop'` | the 50-step cap |
 | `code: 'action-deferred'`, with `until` set | a `do` returned `{ defer }` |
-| `code: 'provider-unavailable'` | the speak call failed; the step is parked under a retry wake |
+| `code: 'provider-unavailable'`, `code: 'provider-quota'` | the speak call failed and a wait may help; the step is parked under a retry wake |
+| `code: 'provider-auth'`, `code: 'provider-context'`, `code: 'provider-invalid'` | the speak call failed and no wait can help; the run ends `failed` |
 | `code: 'no-session'`, `code: 'duplicate-input'`, `code: 'stale-wake'`, `code: 'silence-broken'` | the input was a no-op; the turn returns `changed: false` |
 | `code: 'unknown-field'`, `code: 'bad-value'`, `code: 'not-in-enum'` | an extracted value was dropped instead of written |
 

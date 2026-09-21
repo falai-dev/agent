@@ -162,7 +162,7 @@ All from `src/core/Runner.ts`.
 | `outcomes` per run | 50 | The oldest line is dropped. |
 | `hop` | 5 | The start is skipped: `code: 'hop-limit'`. |
 | Steps one run may take in one turn | 50 | The run ends `failed`: `code: 'step-loop'`. |
-| Retry wakes after a failed speak call | +1m, +5m, +15m | The fourth and later retries stay at +15m. |
+| Retry wakes after a failed speak call | +1m, +5m, +15m, +1h, +6h | Only for a failure a wait can fix, and only five of them: the sixth ends the run. A provider that stated when its limit reopens is woken then, when that is later. |
 
 ## Example
 

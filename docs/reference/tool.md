@@ -107,7 +107,7 @@ One speak call is a loop of provider rounds:
 3. When it calls no tools, the loop ends and its message is the reply.
 4. After `maxToolLoops` rounds with calls, one more round runs with no tools and a "wrap up" section, so a message always comes back.
 
-Every round is one model call and counts in `TurnResult.llmCalls`. A text turn therefore costs one understand call plus one call per speak round: up to `maxToolLoops` rounds with tools and one to wrap up, so six speak calls with the default, seven model calls in all. A round that fails at the provider, or a final message that is empty, defers the talk step: see [Outcomes](./outcomes.md), `code: 'provider-unavailable'`.
+Every round is one model call and counts in `TurnResult.llmCalls`. A text turn therefore costs one understand call plus one call per speak round: up to `maxToolLoops` rounds with tools and one to wrap up, so six speak calls with the default, seven model calls in all. A round that fails at the provider, or a final message that is empty, defers the talk step — or ends the run, when no wait can fix what failed: see [Outcomes](./outcomes.md), the `provider-*` codes. Rounds that already completed still count in `TurnResult.usage`.
 
 Within a round, consecutive calls that are safe (not destructive, and `isConcurrencySafe` true; when `isConcurrencySafe` is not defined, `isReadOnly` true) run together with `Promise.all`; any other call runs alone, in order. `data` patches merge in call order, not in the order the calls finished. Field values the model reports in its structured reply are checked and coerced; tool `data` is not.
 
