@@ -94,6 +94,24 @@ describe("extractMessageSoFar", () => {
   test("tolerates leading whitespace", () => {
     expect(extractMessageSoFar('  \n {"message":"Hi"}')).toBe("Hi");
   });
+
+  test("reads through a markdown fence", () => {
+    // A schema carried in the prompt comes back fenced from some models. The
+    // non-streaming parser strips the fence; so must this one, or the whole
+    // envelope reaches the customer.
+    expect(extractMessageSoFar('```json\n{"message":"Hi"}\n```')).toBe("Hi");
+    expect(extractMessageSoFar('```\n{"message":"Hi"')).toBe("Hi");
+  });
+
+  test("holds back while a fence may still be opening", () => {
+    for (const partial of ["`", "``", "```", "```js", "```json\n"]) {
+      expect(extractMessageSoFar(partial)).toBe("");
+    }
+  });
+
+  test("passes prose with inline code through verbatim", () => {
+    expect(extractMessageSoFar("`sim`, pode ser")).toBe("`sim`, pode ser");
+  });
 });
 
 describe("StreamingMessageDecoder", () => {

@@ -98,6 +98,7 @@ describe("Speak.stream", () => {
 
     expect(provider.calls).toHaveLength(2);
     expect(provider.calls[1].input.history).toEqual([
+      { role: "user", content: "quero saber como funciona" },
       { role: "assistant", content: null, tool_calls: [{ id: "call-0-0", name: "orcamento", arguments: { pessoas: 30 } }] },
       { role: "tool", tool_call_id: "call-0-0", name: "orcamento", content: '{"total":1500}' },
     ]);

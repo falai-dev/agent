@@ -56,6 +56,10 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **A tool whose `parameters` is not a JSON Schema object is rejected at build.** A function declaration needs `{ type: "object", properties, required }`; an action's shorthand map (`{ cidade: { type: "string" } }`) reads as valid TypeScript and is not one. DeepSeek answered it with a 400; every other provider accepted the declaration and simply never called the tool, with nothing logged. `f.agent()` now throws `FlowConfigurationError` naming the tool.
 
+- **A tool round no longer opens the conversation with the assistant.** The tool call and its result were appended to the host's history, and the composed prompt was sent after them — so on a first turn, where the host has no history yet, the model's own `functionCall` was the first thing in the request. Gemini refuses that outright (`400 "function call turn comes immediately after a user turn or after a function response turn"`), so every tool round on a new conversation ended with no answer; the OpenAI-shape providers accepted the same malformed order silently. The customer's message is now the turn the call answers, and a wake — where nobody spoke — uses the prompt.
+
+- **A fenced envelope no longer streams raw JSON to the customer.** A schema the model is merely asked for, which is how one rides on any call that also carries tools, comes back inside a ```` ```json ```` fence from some models. The non-streaming parser strips that fence; the streaming decoder did not, so it read the whole block as plain text and passed it through delta by delta. It now skips a leading fence, and holds text back while one may still be opening rather than guessing.
+
 - **An unregistered action names itself.** `detail` read `ação desconhecida`; it now reads `unknown action "notify"`, matching the wording `FlowConfigurationError` already uses for the same mistake at build time. `validateFlow` still rejects it long before a turn runs.
 
 ### Unchanged

@@ -23,7 +23,7 @@ import type { History } from "../types/history.js";
 import type { StructuredSchema } from "../types/schema.js";
 import type { StepOutcomeCode } from "../types/session.js";
 import type { Tool, ToolCtx, ToolResult } from "../types/tool.js";
-import { assistantMessage, toolMessage } from "../utils/history.js";
+import { assistantMessage, toolMessage, userMessage } from "../utils/history.js";
 import { extractEmbeddedJSONObject, isRecord, tryParseJSONResponse } from "../utils/json.js";
 import { logger } from "../utils/logger.js";
 import { isKnown, toWireSchema } from "../utils/schema.js";
@@ -199,6 +199,14 @@ export class Speak<C = unknown, D = unknown> {
         now: req.now,
       };
       const executed = await this.executeRound(read.toolCalls, tools, ctx, round, read.message, read.thought);
+      // A tool call answers a question, and Gemini enforces that literally:
+      // `400 "function call turn comes immediately after a user turn or after a
+      // function response turn"`. On a first turn the host has no history yet,
+      // so the call would open the conversation. The customer's own text is the
+      // turn it answers; on a wake, where nobody spoke, the prompt stands in.
+      if (round === 0 && history.at(-1)?.role !== "user") {
+        history = [...history, userMessage(req.input.text ?? prompt)];
+      }
       history = [...history, ...executed.items];
       Object.assign(data, executed.data);
       toolCalls.push(...read.toolCalls);

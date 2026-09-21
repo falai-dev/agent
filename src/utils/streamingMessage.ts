@@ -13,8 +13,9 @@
  * (tracking object depth and string context, so a nested decoy `"message"` key
  * or a `"message"` substring inside another value is never mistaken for it),
  * and is tolerant of truncation at any byte — a dangling escape sequence is
- * held back rather than emitted half-decoded. Input that is not a JSON object
- * (e.g. a provider streaming plain text) is passed through verbatim.
+ * held back rather than emitted half-decoded. A markdown fence around the
+ * object is skipped, and input that is not a JSON object (e.g. a provider
+ * streaming plain text) is passed through verbatim.
  */
 
 const WHITESPACE = " \t\n\r";
@@ -141,6 +142,28 @@ function skipJsonValue(s: string, i: number): ValueSkip {
 }
 
 /**
+ * Index just past a leading markdown fence, `i` when there is none, or -1 when
+ * the text starts with backticks whose opening line has not arrived yet.
+ *
+ * A schema the model was merely ASKED for — which is how one rides on any call
+ * that also carries tools — comes back fenced from some models:
+ * ```json\n{"message":"…"}\n```. The non-streaming parser strips that fence;
+ * without the same step here the whole envelope streams to the customer
+ * verbatim, which is the leak this module exists to prevent. While the opener
+ * is still arriving there is no telling a fence from prose, so the caller holds
+ * the text back rather than guess.
+ */
+function fenceEnd(s: string, i: number): number {
+  if (s[i] !== "`") return i;
+  let j = i;
+  while (j < s.length && s[j] === "`") j++;
+  if (j === s.length) return -1; // still arriving: "`", "``", "```"
+  if (j - i < 3) return i; // one or two backticks: inline code in prose
+  const newline = s.indexOf("\n", j);
+  return newline === -1 ? -1 : newline + 1;
+}
+
+/**
  * Extract the decoded value of the top-level `message` string field from a
  * (possibly partial) JSON object string, returning the text available so far.
  *
@@ -154,8 +177,15 @@ export function extractMessageSoFar(accumulated: string): string {
   let i = 0;
   while (i < n && WHITESPACE.includes(s[i])) i++;
 
-  // Not a JSON object — a plain-text stream; emit verbatim.
-  if (i >= n || s[i] !== "{") return accumulated;
+  const afterFence = fenceEnd(s, i);
+  if (afterFence === -1) return ""; // backticks arriving: a fence may be opening
+  const fenced = afterFence !== i;
+  i = afterFence;
+  while (i < n && WHITESPACE.includes(s[i])) i++;
+
+  // Not a JSON object — a plain-text stream; emit verbatim. Behind a fence it
+  // is an envelope whatever it holds, so nothing is emitted.
+  if (i >= n || s[i] !== "{") return fenced ? "" : accumulated;
   i++; // skip '{'
 
   while (i < n) {

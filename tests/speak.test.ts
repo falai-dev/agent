@@ -180,6 +180,9 @@ describe("Speak.run: tool rounds", () => {
     expect(provider.calls[0].prompt).toContain("## Tools");
     expect(provider.calls[1].input.tools).toEqual(provider.calls[0].input.tools);
     expect(provider.calls[1].input.history).toEqual([
+      // The call answers the customer's question, so that turn comes first:
+      // Gemini refuses a tool call that opens a conversation.
+      { role: "user", content: "quero saber como funciona" },
       {
         role: "assistant",
         content: "Deixa eu calcular.",
@@ -216,6 +219,7 @@ describe("Speak.run: tool rounds", () => {
     const out = await new Speak(agentOptions(provider)).run(talkRequest({ tools: [tool] }));
 
     expect(provider.calls[1].input.history).toEqual([
+      { role: "user", content: "quero saber como funciona" },
       { role: "assistant", content: null, tool_calls: [{ id: "call-0-0", name: "orcamento", arguments: { pessoas: 30 } }] },
       { role: "tool", tool_call_id: "call-0-0", name: "orcamento", content: '{"error":"planilha fora do ar"}' },
     ]);
@@ -274,7 +278,7 @@ describe("Speak.run: tool rounds", () => {
     const tool: Tool<Ctx, Data> = { id: "longa", maxResultSizeChars: 10, handler: () => ({ value: "x".repeat(30) }) };
     const provider = mockProvider({ speak: [{ toolCalls: [{ toolName: "longa", arguments: {} }] }, { message: "Pronto." }] });
     await new Speak(agentOptions(provider)).run(talkRequest({ tools: [tool] }));
-    expect(provider.calls[1].input.history[1]).toMatchObject({
+    expect(provider.calls[1].input.history[2]).toMatchObject({
       role: "tool",
       content: `${"x".repeat(10)}\n[truncated: 30 chars total, showing the first 10]`,
     });
@@ -321,7 +325,7 @@ describe("Speak.run: tool rounds", () => {
 
     expect(provider.calls.map((c) => c.input.tools === undefined)).toEqual([false, false, true]);
     expect(provider.calls[2].prompt).toContain("Do not call any tools.");
-    expect(provider.calls[2].input.history).toHaveLength(4);
+    expect(provider.calls[2].input.history).toHaveLength(5);
     expect(out).toMatchObject({
       spoken: {
         message: "Fechado em R$ 1.500.",
