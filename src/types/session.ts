@@ -82,9 +82,10 @@ export interface Session<D = unknown> {
 
 /**
  * Where sessions live. `save` with `expectedVersion: 0` inserts if absent;
- * a stale version throws `SessionConflictError`.
+ * a stale version throws `SessionConflictError`. On success the stored
+ * version is `expectedVersion + 1`, and the saved session comes back with it.
  */
 export interface Store<D = unknown> {
   load(id: string): Promise<Session<D> | null>;
-  save(session: Session<D>, expectedVersion: number): Promise<void>;
+  save(session: Session<D>, expectedVersion: number): Promise<Session<D>>;
 }

@@ -1,0 +1,136 @@
+import { describe, expect, test } from "bun:test";
+import fc from "fast-check";
+
+import { FlowConfigurationError } from "../src/types/errors.js";
+import type { FieldDefs } from "../src/types/flow.js";
+import type { StructuredSchema } from "../src/types/schema.js";
+import {
+  buildSchema,
+  coerceField,
+  extractMode,
+  isKnown,
+  pendingFields,
+  toWireSchema,
+} from "../src/utils/schema.js";
+
+const fields: FieldDefs = {
+  nome: { type: "string", ask: "Pergunte o nome." },
+  tamanho: { type: "string", enum: ["1-10", "11-50"], ask: "Pergunte o porte." },
+  orcamento: { type: "number", ask: "Pergunte a faixa.", description: "Faixa em reais" },
+  confirmado: { type: "boolean", ask: "Confirme." },
+};
+
+describe("isKnown / pendingFields", () => {
+  test("undefined, null and '' are unknown; 0 and false are known", () => {
+    expect([undefined, null, ""].map(isKnown)).toEqual([false, false, false]);
+    expect([0, false, "x"].map(isKnown)).toEqual([true, true, true]);
+  });
+
+  test("pending keeps order, drops known fields and fields at maxAsks", () => {
+    const step = { collect: ["nome", "tamanho", "orcamento"], maxAsks: 2 };
+    expect(pendingFields(step, { tamanho: "1-10" }, { orcamento: 2 })).toEqual(["nome"]);
+    expect(pendingFields({ collect: ["nome"] }, {}, { nome: 3 })).toEqual([]);
+    expect(pendingFields({ collect: ["nome"] }, {}, { nome: 2 })).toEqual(["nome"]);
+  });
+
+  test("booleans default to 'asked', the rest to 'anywhere'", () => {
+    expect(extractMode(fields.confirmado)).toBe("asked");
+    expect(extractMode(fields.nome)).toBe("anywhere");
+    expect(extractMode({ type: "boolean", extract: "anywhere" })).toBe("anywhere");
+  });
+});
+
+describe("coerceField", () => {
+  test("coerces strings to numbers and booleans, enforces enums", () => {
+    expect(coerceField(fields.orcamento, "1.500,50")).toEqual({ ok: false, detail: "campo descartado: valor inválido para number" });
+    expect(coerceField(fields.orcamento, "1500,50")).toEqual({ ok: true, value: 1500.5 });
+    expect(coerceField({ type: "integer" }, "7.9")).toEqual({ ok: true, value: 7 });
+    expect(coerceField(fields.confirmado, "sim")).toEqual({ ok: true, value: true });
+    expect(coerceField(fields.confirmado, "não")).toEqual({ ok: true, value: false });
+    expect(coerceField(fields.confirmado, "talvez").ok).toBe(false);
+    expect(coerceField(fields.tamanho, "11-50")).toEqual({ ok: true, value: "11-50" });
+    expect(coerceField(fields.tamanho, "200+")).toEqual({ ok: false, detail: "campo descartado: valor fora da lista" });
+    expect(coerceField(fields.nome, 42)).toEqual({ ok: true, value: "42" });
+    expect(coerceField(fields.nome, { a: 1 }).ok).toBe(false);
+  });
+});
+
+describe("toWireSchema", () => {
+  test("strips ask/extract and closes the object", () => {
+    expect(toWireSchema(fields)).toEqual({
+      type: "object",
+      properties: {
+        nome: { type: "string" },
+        tamanho: { type: "string", enum: ["1-10", "11-50"] },
+        orcamento: { type: "number", description: "Faixa em reais" },
+        confirmado: { type: "boolean" },
+      },
+      required: ["nome", "tamanho", "orcamento", "confirmado"],
+      additionalProperties: false,
+    });
+  });
+
+  test("nullable envelopes make every property required and null-accepting", () => {
+    const wire = toWireSchema({ nome: fields.nome }, { nullable: true });
+    expect(wire.properties?.nome).toEqual({ type: ["string", "null"] });
+    expect(wire.required).toEqual(["nome"]);
+  });
+
+  test("optional parameters leave the required list; arrays carry items", () => {
+    const wire = toWireSchema({
+      tags: { type: "array", items: { type: "string" } },
+      urgent: { type: "boolean", optional: true },
+    });
+    expect(wire.properties?.tags).toEqual({ type: "array", items: { type: "string" } });
+    expect(wire.required).toEqual(["tags"]);
+  });
+
+  test("property: the wire schema is strict for any field set", () => {
+    const fieldArb = fc.record({
+      type: fc.constantFrom("string", "number", "integer", "boolean") as fc.Arbitrary<"string" | "number" | "integer" | "boolean">,
+      ask: fc.string(),
+      description: fc.option(fc.string(), { nil: undefined }),
+      extract: fc.option(fc.constantFrom("anywhere", "asked") as fc.Arbitrary<"anywhere" | "asked">, { nil: undefined }),
+    });
+    fc.assert(
+      fc.property(fc.dictionary(fc.stringMatching(/^[a-z_]{1,12}$/), fieldArb), fc.boolean(), (defs, nullable) => {
+        const wire = toWireSchema(defs, { nullable });
+        expect(isStrictSchema(wire)).toBe(true);
+        for (const prop of Object.values(wire.properties ?? {})) {
+          expect("ask" in prop).toBe(false);
+          expect("extract" in prop).toBe(false);
+        }
+      }),
+    );
+  });
+});
+
+describe("buildSchema", () => {
+  test("merges rows by slug; first ask wins; type conflicts throw", () => {
+    const merged = buildSchema([
+      { id: "triagem", fields: { nome: { type: "string", ask: "A" } } },
+      { id: "agenda", fields: { nome: { type: "string", ask: "B", description: "d" }, dia: { type: "string" } } },
+    ]);
+    expect(merged.nome).toEqual({ type: "string", ask: "A", description: "d", enum: undefined, extract: undefined });
+    expect(Object.keys(merged)).toEqual(["nome", "dia"]);
+
+    expect(() =>
+      buildSchema([
+        { id: "triagem", fields: { tamanho: { type: "string" } } },
+        { id: "agenda", fields: { tamanho: { type: "number" } } },
+      ]),
+    ).toThrow(FlowConfigurationError);
+  });
+});
+
+/** Every object is closed and requires all of its properties. */
+function isStrictSchema(schema: StructuredSchema): boolean {
+  if (schema.type !== "object" && !(Array.isArray(schema.type) && schema.type.includes("object"))) return true;
+  const keys = Object.keys(schema.properties ?? {});
+  const required = new Set(schema.required ?? []);
+  return (
+    schema.additionalProperties === false &&
+    keys.every((k) => required.has(k)) &&
+    Object.values(schema.properties ?? {}).every(isStrictSchema)
+  );
+}
