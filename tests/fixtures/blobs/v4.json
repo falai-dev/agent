@@ -1,0 +1,65 @@
+{
+  "id": "conv_v4",
+  "v": 4,
+  "version": 3,
+  "data": {
+    "nome": "João",
+    "empresa": "Acme",
+    "tamanho": "11-50"
+  },
+  "runs": [
+    {
+      "id": "triagem#m1",
+      "flowId": "triagem",
+      "anchor": "conv_v4",
+      "dedupeKey": "triagem:conv_v4:",
+      "stepId": "porte",
+      "status": "asking",
+      "trigger": { "kind": "message", "key": "m1" },
+      "hop": 0,
+      "startedAt": "2026-09-20T10:00:00.000Z",
+      "asked": { "orcamento": 1 },
+      "visits": { "quem": 1, "porte": 1 },
+      "outcomes": [
+        {
+          "runId": "triagem#m1",
+          "flowId": "triagem",
+          "stepId": "quem",
+          "key": "triagem#m1:quem:1",
+          "kind": "collect",
+          "status": "ok",
+          "at": "2026-09-20T10:00:01.000Z",
+          "llmCalls": 1
+        }
+      ]
+    },
+    {
+      "id": "retomar#1758362400000",
+      "flowId": "retomar",
+      "anchor": "lead:456",
+      "dedupeKey": "retomar:lead:456:",
+      "stepId": "w1",
+      "status": "waiting",
+      "trigger": { "kind": "silence", "key": "1758362400000" },
+      "hop": 0,
+      "startedAt": "2026-09-20T11:00:00.000Z",
+      "waiting": {
+        "kind": "timer",
+        "key": "retomar#1758362400000:w1:1758448800000",
+        "until": "2026-09-21T11:00:00.000Z",
+        "setAt": "2026-09-20T11:00:00.000Z"
+      },
+      "asked": {},
+      "visits": { "p1": 1, "w1": 1 },
+      "outcomes": []
+    }
+  ],
+  "claims": {
+    "triagem:conv_v4:": { "at": "2026-09-20T10:00:00.000Z" },
+    "retomar:lead:456:": { "at": "2026-09-20T11:00:00.000Z" }
+  },
+  "inputs": ["m1", "m2", "m3"],
+  "lastUserAt": "2026-09-20T10:02:00.000Z",
+  "lastAssistantAt": "2026-09-20T10:02:05.000Z",
+  "metadata": { "workspaceId": "ws_demo" }
+}

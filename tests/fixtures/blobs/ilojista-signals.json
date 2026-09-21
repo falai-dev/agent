@@ -1,0 +1,68 @@
+{
+  "id": "session_1756900011000_p8q1zz",
+  "currentFlow": {
+    "id": "atendimento_pedido",
+    "title": "Atendimento de pedido",
+    "enteredAt": "2026-09-03T15:20:05.000Z"
+  },
+  "currentStep": {
+    "id": "confirmar_endereco",
+    "description": "Confirma o endereço de entrega",
+    "enteredAt": "2026-09-03T15:24:31.000Z"
+  },
+  "data": {
+    "nome": "Carlos",
+    "telefone": "+5581999990000",
+    "produto": "tenis-runner-42",
+    "quantidade": 1,
+    "endereco": null
+  },
+  "flowHistory": [
+    {
+      "flowId": "atendimento_pedido",
+      "enteredAt": "2026-09-03T15:20:05.000Z",
+      "completed": false
+    }
+  ],
+  "pendingDirective": {
+    "flow": "atendimento_pedido",
+    "step": "pagamento",
+    "reply": "Vamos para o pagamento."
+  },
+  "signals": {
+    "triggers": {
+      "not_interested_detection": {
+        "firstTriggeredAt": "2026-09-03T15:21:10.000Z",
+        "lastTriggeredAt": "2026-09-03T15:21:10.000Z",
+        "count": 1,
+        "lastReason": "Cliente disse que só estava olhando",
+        "lastPhase": "pre"
+      },
+      "pediu_preco": {
+        "firstTriggeredAt": "2026-09-03T15:22:02.000Z",
+        "lastTriggeredAt": "2026-09-03T15:22:02.000Z",
+        "count": 1,
+        "lastPhase": "post"
+      },
+      "bot_detected": {
+        "firstTriggeredAt": "2026-09-03T15:23:15.000Z",
+        "lastTriggeredAt": "2026-09-03T15:23:15.000Z",
+        "count": 1,
+        "lastPhase": "pre"
+      },
+      "lembrete_carrinho": {
+        "firstTriggeredAt": "2026-09-02T18:00:00.000Z",
+        "lastTriggeredAt": "2026-09-03T15:24:00.000Z",
+        "count": 3,
+        "lastPhase": "post"
+      }
+    }
+  },
+  "metadata": {
+    "createdAt": "2026-09-02T17:58:40.000Z",
+    "lastUpdatedAt": "2026-09-03T15:24:31.000Z",
+    "storeId": "loja_demo",
+    "tags": ["carrinho", "recompra"]
+  },
+  "version": 41
+}

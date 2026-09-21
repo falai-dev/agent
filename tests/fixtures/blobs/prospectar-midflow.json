@@ -1,0 +1,41 @@
+{
+  "id": "session_1756731890123_k3j9x2",
+  "currentFlow": {
+    "id": "qualificacao",
+    "title": "Qualificação",
+    "enteredAt": "2026-09-01T13:05:12.000Z"
+  },
+  "currentStep": {
+    "id": "ask_budget",
+    "description": "Pergunta a faixa de investimento",
+    "enteredAt": "2026-09-01T13:07:40.000Z"
+  },
+  "data": {
+    "nome": "Mariana",
+    "empresa": "Padaria Estrela",
+    "tamanho": "1-10",
+    "cidade": "Recife",
+    "interesses": ["cardapio digital", "delivery"],
+    "urgente": false
+  },
+  "flowHistory": [
+    {
+      "flowId": "boas_vindas",
+      "enteredAt": "2026-09-01T13:04:50.000Z",
+      "exitedAt": "2026-09-01T13:05:12.000Z",
+      "completed": true
+    },
+    {
+      "flowId": "qualificacao",
+      "enteredAt": "2026-09-01T13:05:12.000Z",
+      "completed": false
+    }
+  ],
+  "metadata": {
+    "createdAt": "2026-09-01T13:04:50.000Z",
+    "lastUpdatedAt": "2026-09-01T13:07:40.000Z",
+    "workspaceId": "ws_demo",
+    "channel": "whatsapp"
+  },
+  "version": 12
+}
