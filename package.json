@@ -47,6 +47,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "typecheck:examples": "tsc --noEmit --project examples/tsconfig.json",
     "check:docs": "bun run scripts/check-docs-snippets.ts",
+    "eval:understand": "bun run scripts/eval/understand.ts",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
