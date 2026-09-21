@@ -6,10 +6,12 @@
  * `@providerkit/core` (adapter + preset); this file is the constructor, the
  * family default for cheap high-volume work.
  *
- * Dialect notes (measured 2026-09-13, see the core preset for detail):
- * model ids are BARE (`glm-5.3-flash`, not `z-ai/glm-5.3-flash`), and
- * "no thinking" must be an explicit marker — silence means the model default,
- * which is thinking ON.
+ * Dialect notes (see the core preset for detail): model ids are BARE
+ * (`glm-5.3-flash`, not `z-ai/glm-5.3-flash`), and the endpoint reads an
+ * absent `thinking` field as thinking ON, so the preset says "no" out loud.
+ * That makes thinking OFF here by default (measured 2026-09-21: a call with no
+ * `config.effort` sends `thinking: { type: "disabled" }`); ask for it with
+ * `config: { effort: 'high' }`.
  */
 
 import { createZaiCodingProvider, type FallbackOptions, type Provider } from "@providerkit/core";

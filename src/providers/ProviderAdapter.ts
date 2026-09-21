@@ -101,11 +101,16 @@ export interface RequestConfig {
   maxTokens?: number;
   stopSequences?: string[];
   /**
-   * How hard the model thinks, bound as this provider's default. Absent means
-   * the model's own dynamic thinking, which is what every shape does when the
-   * field is never sent — so `"none"` is the only way to say *don't*, and it
-   * matters most under a small `maxTokens`, where thinking tokens come out of
-   * the same budget as the answer and can consume all of it.
+   * How hard the model thinks, bound as this provider's default. What absent
+   * means is the shape's own business, not one rule: on Gemini it is the
+   * model's dynamic thinking; on the OpenAI and OpenRouter dialects nothing is
+   * sent and not thinking is the default anyway; on the Anthropic shape — so
+   * `AnthropicProvider` and `ZaiProvider` — `@providerkit/core` resolves an
+   * absent effort to `"none"`, and Z.ai is sent an explicit disabled marker
+   * because its endpoint reads silence as thinking ON. Set a level to ask for
+   * thinking where it is off; it matters most under a small `maxTokens`, where
+   * thinking tokens come out of the same budget as the answer and can consume
+   * all of it.
    */
   effort?: Effort;
 }

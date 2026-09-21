@@ -236,7 +236,7 @@ import { ZaiProvider } from "@falai/agent";
 const zai = new ZaiProvider({ apiKey: process.env.ZAI_API_KEY ?? "" }); // model defaults to glm-5.3-flash
 ```
 
-The flat-rate Z.ai Coding Plan hosts GLM on an Anthropic-compatible endpoint. Model ids are bare, and "no thinking" has to be said with `config: { effort: "none" }`: leaving `effort` unset means the model's default, which is thinking on.
+The flat-rate Z.ai Coding Plan hosts GLM on an Anthropic-compatible endpoint. Model ids are bare, and thinking is off unless you ask for it: the endpoint reads an absent `thinking` field as thinking on, so `@providerkit/core` says "no" out loud for you. Measured 2026-09-21: a call with no `config.effort` sends `thinking: { type: "disabled" }`, the same body `effort: "none"` produces. Ask for thinking with `config: { effort: "high" }`.
 
 ## FallbackAiProvider
 
