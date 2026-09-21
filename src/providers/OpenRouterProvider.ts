@@ -71,10 +71,8 @@ export class OpenRouterProvider extends OpenAICompatibleProvider {
       // json_schema passthrough is what its models actually support.
       structuredOutput: "json_schema",
       ...(options.jsonWithTools ? { jsonWithTools: options.jsonWithTools } : {}),
-      headers: {
-        ...(options.siteUrl ? { "HTTP-Referer": options.siteUrl } : {}),
-        ...(options.siteName ? { "X-Title": options.siteName } : {}),
-      },
+      ...(options.siteUrl ? { siteUrl: options.siteUrl } : {}),
+      ...(options.siteName ? { siteName: options.siteName } : {}),
       ...(options.providerOrder ? { providerOrder: options.providerOrder } : {}),
       ...(options.backupModels ? { backupModels: options.backupModels } : {}),
       ...(options.fallbacks ? { fallbacks: options.fallbacks } : {}),

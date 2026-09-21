@@ -52,6 +52,10 @@ export interface OpenAICompatibleProviderInit
   /** Names the provider in errors, and picks core's effort dialect. */
   id: string;
   headers?: Record<string, string>;
+  /** App attribution for OpenRouter's rankings — sent as `HTTP-Referer`. */
+  siteUrl?: string;
+  /** App name for OpenRouter's rankings — sent as `X-Title`. */
+  siteName?: string;
   config?: RequestConfig;
   structuredOutput?: StructuredOutputMode;
   /** See {@link JsonWithTools}. Only affects calls that carry tools. */
@@ -101,6 +105,8 @@ function buildProvider(init: OpenAICompatibleProviderInit, mode: StructuredOutpu
     ...(init.jsonWithTools ? { jsonWithTools: init.jsonWithTools } : {}),
     ...(init.baseUrl ? { baseUrl: init.baseUrl } : {}),
     ...(init.headers ? { headers: init.headers } : {}),
+    ...(init.siteUrl ? { siteUrl: init.siteUrl } : {}),
+    ...(init.siteName ? { siteName: init.siteName } : {}),
     ...(init.config?.maxTokens ? { maxTokens: init.config.maxTokens } : {}),
     ...(init.config?.effort ? { effort: init.config.effort } : {}),
     ...(init.providerOrder ? { providerOrder: init.providerOrder } : {}),
