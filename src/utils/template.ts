@@ -5,6 +5,11 @@
  * per-turn context) and `input` (the run's trigger payload). A path that
  * resolves to nothing keeps its placeholder, so a typo stays visible instead
  * of vanishing into an empty string.
+ *
+ * A path that resolves to an EMPTY string is a different case: the host knows
+ * the field and knows it is blank. Then the placeholder goes and `tidy` closes
+ * the gap it left, so "Ola {{context.lead.name}}, tudo bem?" sends
+ * "Ola, tudo bem?" and never "Ola , tudo bem?".
  */
 
 export interface TemplateScope {
@@ -16,10 +21,30 @@ export interface TemplateScope {
 const PLACEHOLDER = /\{\{\s*([^}\s]+)\s*\}\}/g;
 
 export function render(template: string, scope: TemplateScope): string {
-  return template.replace(PLACEHOLDER, (match, path: string) => {
+  let emptied = false;
+  const out = template.replace(PLACEHOLDER, (match, path: string) => {
     const value = lookup(scope, path.split("."));
-    return value === undefined || value === null ? match : stringify(value);
+    if (value === undefined || value === null) return match;
+    const text = stringify(value);
+    if (text === "") emptied = true;
+    return text;
   });
+  return emptied ? tidy(out) : out;
+}
+
+/**
+ * Close the hole an empty value leaves: a doubled space, a space before
+ * punctuation, a space at the end of a line.
+ *
+ * Deliberately narrow. It only runs on a string where something substituted to
+ * "", and it only collapses a run of spaces that follows a visible character,
+ * so indentation in a markdown list survives.
+ */
+function tidy(text: string): string {
+  return text
+    .replace(/(?<=\S)[ \t]{2,}/g, " ")
+    .replace(/ +([,.;:!?\u2026])/g, "$1")
+    .replace(/[ \t]+$/gm, "");
 }
 
 /** `render` over every string inside a value, recursively. Non-strings pass through. */

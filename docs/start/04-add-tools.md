@@ -174,7 +174,7 @@ const agent = f.agent({
 
 `parameters` use the same `type`, `enum` and `description` as fields (plus `optional: true`), and `run` receives them already typed: `mensagem` is a `string` above, nothing to check.
 
-`with` fills the parameters. `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are replaced before the action runs. A placeholder whose value is unknown stays as written, so a skipped `tamanho` reaches the seller as `{{data.tamanho}}`. Word the message without it, or fork first with an `if` step on `{ known: ["tamanho"] }`. A `do` step never talks to the model: zero calls.
+`with` fills the parameters. `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are replaced before the action runs. A placeholder whose value is unknown stays as written, so a skipped `tamanho` reaches the seller as `{{data.tamanho}}`. One the host filled with an empty string drops out instead. Word the message without it, or fork first with an `if` step on `{ known: ["tamanho"] }`. A `do` step never talks to the model: zero calls.
 
 The name and the parameters are checked when the agent is built. An unknown action, or a `with` missing a required parameter, throws `FlowConfigurationError` at startup with the step id and the fix.
 

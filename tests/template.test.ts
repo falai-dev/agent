@@ -23,6 +23,25 @@ describe("render", () => {
     expect(render("{{ data.tags }} / {{data.confirmado}}", scope)).toBe("vip, novo / false");
   });
 
+  test("an empty value takes the gap with it", () => {
+    const blank = { context: { lead: { name: "", company: "" } } };
+    expect(render("Ola {{context.lead.name}}, tudo bem?", blank)).toBe("Ola, tudo bem?");
+    expect(render("Vi que a {{context.lead.company}} esta contratando.", blank)).toBe(
+      "Vi que a esta contratando.",
+    );
+    expect(render("Ate mais {{context.lead.name}}", blank)).toBe("Ate mais");
+  });
+
+  test("tidy only runs where something substituted to empty", () => {
+    // Two spaces the author typed stay put when no value came back blank.
+    expect(render("Oi  {{data.nome}} , beleza ?", scope)).toBe("Oi  Ana , beleza ?");
+  });
+
+  test("tidy leaves indentation alone", () => {
+    const blank = { data: { nota: "" } };
+    expect(render("Itens:\n  - um\n  - dois {{data.nota}}", blank)).toBe("Itens:\n  - um\n  - dois");
+  });
+
   test("renderDeep walks objects and arrays and leaves other values alone", () => {
     expect(
       renderDeep({ recipient: "owner", message: "Lead {{data.nome}}", tags: ["{{data.tamanho}}"], n: 3 }, scope),

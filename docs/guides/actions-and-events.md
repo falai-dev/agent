@@ -53,7 +53,7 @@ A `do` step fills the parameters with `with`. When the agent is built, `validate
 - a value has the wrong type; nothing is coerced, so `"3"` is not a number. A template such as `"{{data.cep}}"` is a string, so templates can only fill string parameters (and the items of a string array);
 - `with` names a parameter the action does not have.
 
-Templates in `with` are rendered right before `run` is called, against `data` (collected fields), `context` (this turn's host context) and `input` (the run's input). A path that resolves to nothing keeps its `{{...}}`, so a typo stays visible.
+Templates in `with` are rendered right before `run` is called, against `data` (collected fields), `context` (this turn's host context) and `input` (the run's input). An unknown path keeps its `{{...}}`, so a typo stays visible. A path that resolves to an empty string drops out, and the space or comma it left behind goes with it.
 
 ## What `run` sees
 
