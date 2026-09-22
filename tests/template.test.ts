@@ -37,6 +37,17 @@ describe("render", () => {
     expect(render("Oi  {{data.nome}} , beleza ?", scope)).toBe("Oi  Ana , beleza ?");
   });
 
+  test("a null container is absent, a null field is unknown", () => {
+    const noLead = { context: { lead: null }, data: { vazio: null } };
+
+    // There is no lead, so "the lead's name" is blank — not mistyped.
+    expect(render("Ola {{context.lead.name}}, tudo bem?", noLead)).toBe("Ola, tudo bem?");
+    // The field exists and collected nothing. That one stays visible.
+    expect(render("Oi {{data.vazio}}", noLead)).toBe("Oi {{data.vazio}}");
+    // And a container that is simply missing is still a typo.
+    expect(render("Oi {{context.leed.name}}", noLead)).toBe("Oi {{context.leed.name}}");
+  });
+
   test("tidy leaves indentation alone", () => {
     const blank = { data: { nota: "" } };
     expect(render("Itens:\n  - um\n  - dois {{data.nota}}", blank)).toBe("Itens:\n  - um\n  - dois");

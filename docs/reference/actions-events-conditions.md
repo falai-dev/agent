@@ -116,7 +116,7 @@ f.action<const P extends ParamDefs>(def: {
 
 ### Behaviour
 
-- `with` is rendered before `run` sees it. `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are replaced inside every string, at any depth. An unknown path keeps its placeholder, so a typo stays visible. A path that resolves to an empty string drops out instead, and the gap it left in the sentence closes.
+- `with` is rendered before `run` sees it. `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are replaced inside every string, at any depth. An unknown path keeps its placeholder, so a typo stays visible. A blank one drops out instead and the gap it left in the sentence closes — an empty string, or a path through a `null` (`{{context.lead.name}}` with no lead). A `null` at the end of a path is unknown, not blank.
 - `with` is checked when the agent is built, not on the turn that reaches the step. A missing required parameter, an unknown parameter, or a value outside `enum` throws `FlowConfigurationError`. So does a wrong type: `"3"` is not a number, because values are never coerced. A string that contains `{{` skips the `enum` check, because its value is only known at run time.
 - Actions run in the Run phase, by code, with zero model calls. They run while `silenced` too.
 - A `do` step whose action name is not registered throws at build. If the registry changed under a running agent, the step reports `code: 'action-failed'` with `detail: 'unknown action "notify"'`.

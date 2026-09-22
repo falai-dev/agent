@@ -6,10 +6,13 @@
  * resolves to nothing keeps its placeholder, so a typo stays visible instead
  * of vanishing into an empty string.
  *
- * A path that resolves to an EMPTY string is a different case: the host knows
- * the field and knows it is blank. Then the placeholder goes and `tidy` closes
- * the gap it left, so "Ola {{context.lead.name}}, tudo bem?" sends
- * "Ola, tudo bem?" and never "Ola , tudo bem?".
+ * A path the host answered with nothing is a different case: it knows the
+ * field and knows it is blank. Then the placeholder goes and `tidy` closes the
+ * gap it left, so "Ola {{context.lead.name}}, tudo bem?" sends "Ola, tudo bem?"
+ * and never "Ola , tudo bem?". Two things count as blank: an empty string, and
+ * a path that walks THROUGH a null — `context.lead` being `null` means there
+ * is no lead, so "the lead's name" is blank, not mistyped. A null at the end of
+ * a path is still unknown: a field that collected nothing keeps its braces.
  */
 
 export interface TemplateScope {
@@ -20,10 +23,17 @@ export interface TemplateScope {
 
 const PLACEHOLDER = /\{\{\s*([^}\s]+)\s*\}\}/g;
 
+/** The path ran into a `null` on its way down: the container the host named is absent. */
+const ABSENT = Symbol("absent");
+
 export function render(template: string, scope: TemplateScope): string {
   let emptied = false;
   const out = template.replace(PLACEHOLDER, (match, path: string) => {
     const value = lookup(scope, path.split("."));
+    if (value === ABSENT) {
+      emptied = true;
+      return "";
+    }
     if (value === undefined || value === null) return match;
     const text = stringify(value);
     if (text === "") emptied = true;
@@ -62,7 +72,8 @@ export function renderDeep<T>(value: T, scope: TemplateScope): T {
 function lookup(root: unknown, keys: string[]): unknown {
   let current = root;
   for (const key of keys) {
-    if (current === null || typeof current !== "object") return undefined;
+    if (current === null) return ABSENT;
+    if (typeof current !== "object") return undefined;
     current = (current as Record<string, unknown>)[key];
   }
   return current;
