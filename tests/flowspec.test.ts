@@ -38,7 +38,7 @@ const actions = {
     run: () => ({ ok: true }),
   }),
   add_tags: f.action({
-    parameters: { tags: { type: "array", items: { type: "string" } } },
+    parameters: { tags: { type: "array", items: { type: "string" } }, priority: { type: "integer", optional: true } },
     run: () => ({ ok: true }),
   }),
 };
@@ -333,10 +333,14 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
       'step "a": parameter "message" of action "notify" must be a string, got number',
     );
     expect(problem(spec([{ id: "a", kind: "do", do: "add_tags", with: { tags: "concorrente" } }]))).toContain(
-      'parameter "tags" of action "add_tags" must be a list of string, got string',
+      'parameter "tags" of action "add_tags" must be a list of strings, got string',
     );
     expect(problem(spec([{ id: "a", kind: "do", do: "add_tags", with: { tags: ["x"], urgent: true } }]))).toContain(
       'action "add_tags" has no parameter "urgent"',
+    );
+    // "an integer", not "a integer": the sentence is read by whoever wrote the flow.
+    expect(problem(spec([{ id: "a", kind: "do", do: "add_tags", with: { tags: ["x"], priority: "alta" } }]))).toContain(
+      'parameter "priority" of action "add_tags" must be an integer, got string',
     );
   });
 

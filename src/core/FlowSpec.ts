@@ -559,7 +559,12 @@ function describe(value: unknown): string {
 }
 
 function describeDef(def: ParamDef): string {
-  return def.type === "array" ? `a list of ${def.items.type}` : `a ${def.type}`;
+  return def.type === "array" ? `a list of ${def.items.type}s` : `${article(def.type)} ${def.type}`;
+}
+
+/** "an integer", "a string". A vowel test rather than one hard-coded type, so a new type reads right for free. */
+function article(type: string): string {
+  return /^[aeiou]/.test(type) ? "an" : "a";
 }
 
 // ── flowSpecSchema ──────────────────────────────────────────────────────

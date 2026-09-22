@@ -132,7 +132,7 @@ Every message has the form `[FlowConfigurationError] <where>: <what>. <fix>`, wh
 | Bad duration | `wait has duration "5 min", which does not parse` (also `silence`, `after`, `repeat.cooldown`, `wait.upTo`) | Write a number and a unit: "30s", "5m", "24h" or "3d". |
 | Dangling jump | `then points at step "x", which does not exist` (also `else`, `onFail`, `branches[n].then`) | Use an existing step id or "end". |
 | Missing parameter | `action "notify" needs parameter "message"` | Add it to `with`. |
-| Wrong parameter type | `parameter "tags" of action "add_tags" must be a list of string, got string` | Values are not coerced; write the right type. |
+| Wrong parameter type | `parameter "tags" of action "add_tags" must be a list of strings, got string` | Values are not coerced; write the right type. |
 | Extra parameter | `action "notify" has no parameter "to"` | Remove it or fix the name. |
 | Branch without a test | `branches[0] has neither when nor if` | Give the branch an AI condition (when) or a code one (if). |
 | Backward `if` with no `else` | `"if" jumps back to "quem" with no else` | Add else so the false branch has somewhere to go. |
