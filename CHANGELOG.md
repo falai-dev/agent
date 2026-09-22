@@ -38,6 +38,8 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **`validateFlow` rejects a trigger that names no kind, and a step that does nothing.** Both used to pass and then fail invisibly. An `on[]` entry is a trigger because it carries `message`, `mention`, `silence` or `event`; anything else — the v3 `{ kind: 'message', when: [...] }` shape, or a typo in that one key — survived `fromSpec` as written, never matched in the Runner, and left a flow that simply never fired with nothing anywhere saying why. The same for a step with no `prompt`, `collect`, `say`, `do`, `wait` or `if`: the run walked straight past it. Naming the unreachable thing is what `validateFlow` is for, so it now throws on both, saying which trigger or step and what a real one looks like.
 
+- **A wrong-type parameter error reads "an integer" and "a list of strings".** `describeDef` glued the article on by concatenation, so the one vowel-initial scalar type came out as "a integer" and an array as "a list of string" — in the very sentence that tells whoever wrote the flow what to type instead.
+
 - **`TurnResult.usage` says what the turn's model calls cost.** `{ promptTokens, completionTokens, cachedInputTokens }`, the providers' own counts added up over the understand call, the speak call, every tool round and a compaction summary — the figure a host bills a conversation from. It sits beside `llmCalls` and is absent, never zero, when a turn spent no call or the provider reported no counts.
 
 ### Docs and tooling
