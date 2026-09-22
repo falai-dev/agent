@@ -250,6 +250,29 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
     expect(problem(spec([{ id: "", kind: "say", say: "Oi" }]))).toContain("has no id");
   });
 
+  test("a trigger that names no kind", () => {
+    // The v3 shape. `fromSpec` keeps the object as written, the Runner finds
+    // no kind on it and the flow silently never fires — so it has to be caught
+    // here or nowhere.
+    const v3Shape = JSON.parse(
+      '{"id":"fx","name":"Fixture","on":[{"kind":"message","when":["o lead pede preço"]}],"steps":[{"id":"a","kind":"say","say":"Oi"}]}',
+    ) as FlowSpec;
+    const m = problem(v3Shape);
+    expect(m).toStartWith("[FlowConfigurationError]");
+    expect(m).toContain('flow "fx", trigger #1');
+    expect(m).toContain("names no trigger kind");
+    expect(m).toContain("`message`");
+    // A flow the host starts itself is the legal way to have no trigger.
+    expect(validateFlow(spec([say("a")]), registries)).toEqual({ warnings: [] });
+  });
+
+  test("a step that does none of the five things", () => {
+    const empty = JSON.parse('{"id":"fx","name":"Fixture","steps":[{"id":"a","then":"end"}]}') as FlowSpec;
+    const m = problem(empty);
+    expect(m).toContain('flow "fx", step "a"');
+    expect(m).toContain("does nothing");
+  });
+
   test("a duplicate step id", () => {
     const m = problem(spec([say("a"), say("a")]));
     expect(m).toContain('flow "fx", step "a"');

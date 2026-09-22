@@ -36,6 +36,8 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
   Two things count as blank. An empty string, and a path that walks **through** a `null`: `context.lead` being `null` says there is no lead, so "the lead's name" is blank rather than mistyped, and a host does not have to choose between a nullable object its conditions read and copy that renders. A `null` at the *end* of a path is still unknown — a field that collected nothing keeps its braces — and a container that is simply missing (`{{context.leed.name}}`) still keeps them too, which is the typo the rule exists for.
 
+- **`validateFlow` rejects a trigger that names no kind, and a step that does nothing.** Both used to pass and then fail invisibly. An `on[]` entry is a trigger because it carries `message`, `mention`, `silence` or `event`; anything else — the v3 `{ kind: 'message', when: [...] }` shape, or a typo in that one key — survived `fromSpec` as written, never matched in the Runner, and left a flow that simply never fired with nothing anywhere saying why. The same for a step with no `prompt`, `collect`, `say`, `do`, `wait` or `if`: the run walked straight past it. Naming the unreachable thing is what `validateFlow` is for, so it now throws on both, saying which trigger or step and what a real one looks like.
+
 - **`TurnResult.usage` says what the turn's model calls cost.** `{ promptTokens, completionTokens, cachedInputTokens }`, the providers' own counts added up over the understand call, the speak call, every tool round and a compaction summary — the figure a host bills a conversation from. It sits beside `llmCalls` and is absent, never zero, when a turn spent no call or the provider reported no counts.
 
 ### Docs and tooling

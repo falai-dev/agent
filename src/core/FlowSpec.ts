@@ -251,6 +251,7 @@ interface LooseStep {
   ask?: Partial<Record<string, string>>;
   branches?: LooseBranch[];
   instructions?: LooseInstruction[];
+  say?: Template;
   do?: string;
   with?: Record<string, unknown>;
   wait?: Duration | { event: string; upTo?: Duration };
@@ -270,6 +271,12 @@ interface LooseFlow {
 const BUILT_IN_CONDITIONS = ["equals", "known", "silenced"];
 
 const DURATION_HINT = 'Write a number and a unit: "30s", "5m", "24h" or "3d".';
+
+/** The four keys one of which makes an `on[]` entry a trigger. */
+const TRIGGER_KINDS = ["message", "mention", "silence", "event"] as const;
+
+/** The six keys one of which makes a step do something. */
+const STEP_DOES = ["prompt", "collect", "say", "do", "wait", "if"] as const;
 
 /**
  * Check a flow, typed or as a spec, against the agent's registries. Throws
@@ -424,6 +431,18 @@ export function validateFlow<C = unknown, D = LooseData>(
 
   flow.on?.forEach((trigger, i) => {
     const at = `${flowAt}, trigger #${i + 1}`;
+    // A trigger that names no kind can never fire, and nothing downstream says
+    // so: the Runner simply never finds it eligible and the flow looks broken
+    // for some other reason. `{ kind: 'message', when: [...] }` — the v3 shape —
+    // lands here, and so does a typo in the one key that matters.
+    if (!TRIGGER_KINDS.some((key) => trigger[key] !== undefined)) {
+      throw problem(
+        at,
+        "names no trigger kind",
+        `A trigger is one of ${TRIGGER_KINDS.map((key) => `\`${key}\``).join(", ")}. ` +
+          "A flow the host starts itself has no `on` at all.",
+      );
+    }
     if (trigger.event !== undefined && !own(events, trigger.event)) {
       throw problem(at, `unknown event "${trigger.event}"`, "Register it in events or fix the name.");
     }
@@ -450,6 +469,17 @@ export function validateFlow<C = unknown, D = LooseData>(
 
   flow.steps.forEach((step, i) => {
     const at = `${flowAt}, step "${step.id}"`;
+    // Same reasoning as the trigger above: a step that does none of the five
+    // things is a step the run walks straight past, silently. `kind` alone is
+    // not enough — the spec form drops it and keeps the body, so what counts
+    // is whether the body says what to do.
+    if (!STEP_DOES.some((key) => step[key] !== undefined)) {
+      throw problem(
+        at,
+        "does nothing",
+        "A step talks (`prompt` / `collect`), says (`say`), acts (`do`), waits (`wait`) or forks (`if`).",
+      );
+    }
     const thenTo = edge(i, step.then, at, "then");
     edge(i, step.else, at, "else");
 
