@@ -344,6 +344,33 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
     );
   });
 
+  test("with: a value of the right type that is not a listed one names the listed values", () => {
+    const reg = {
+      ...registries,
+      actions: {
+        ...actions,
+        send_webhook: f.action({
+          parameters: {
+            method: { type: "string", enum: ["GET", "POST"] },
+            retryOn: { type: "array", items: { type: "integer", enum: [429, 503] }, optional: true },
+          },
+          run: () => ({ ok: true }),
+        }),
+      },
+    };
+    // "must be a string, got string" told the author nothing: the type was right, the value was not.
+    expect(problem(spec([{ id: "a", kind: "do", do: "send_webhook", with: { method: "FETCH" } }]), reg)).toContain(
+      'parameter "method" of action "send_webhook" must be one of "GET", "POST", got "FETCH". Use one of the listed values.',
+    );
+    expect(
+      problem(spec([{ id: "a", kind: "do", do: "send_webhook", with: { method: "GET", retryOn: [429, 500] } }]), reg),
+    ).toContain('parameter "retryOn" of action "send_webhook" must be one of 429, 503, got 500');
+    // A wrong type still reads as a type.
+    expect(problem(spec([{ id: "a", kind: "do", do: "send_webhook", with: { method: 1 } }]), reg)).toContain(
+      'parameter "method" of action "send_webhook" must be a string, got number',
+    );
+  });
+
   test("event names not in events: triggers and waitEvent", () => {
     expect(problem(spec([say("a")], { on: [{ event: "tag_added" }] }))).toContain('flow "fx", trigger #1: unknown event "tag_added"');
     expect(problem(spec([{ id: "a", kind: "waitEvent", wait: { event: "tag_added" } }]))).toContain(

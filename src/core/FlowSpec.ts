@@ -410,11 +410,8 @@ export function validateFlow<C = unknown, D = LooseData>(
         continue;
       }
       if (!matchesParam(def, value)) {
-        throw problem(
-          at,
-          `parameter "${param}" of action "${name}" must be ${describeDef(def)}, got ${describe(value)}`,
-          "Values are not coerced; write the right type.",
-        );
+        const { expected, got, fix } = mismatch(def, value);
+        throw problem(at, `parameter "${param}" of action "${name}" must be ${expected}, got ${got}`, fix);
       }
     }
     for (const param of Object.keys(given)) {
@@ -552,6 +549,22 @@ function matches(def: ScalarDef, value: unknown): boolean {
   if (!typeOk) return false;
   if (!def.enum || (typeof value === "string" && value.includes("{{"))) return true;
   return typeof value !== "boolean" && def.enum.includes(value);
+}
+
+/**
+ * What a rejected value should have been and what it was. A value of the right type that is
+ * not a listed one names the listed values: "must be a string, got string" would say nothing.
+ */
+function mismatch(def: ParamDef, value: unknown): { expected: string; got: string; fix: string } {
+  const scalar = def.type === "array" ? def.items : def;
+  const { enum: allowed, ...typeOnly } = scalar;
+  const items = def.type === "array" && Array.isArray(value) ? value : [value];
+  const off = allowed ? items.findIndex((item) => matches(typeOnly, item) && !matches(scalar, item)) : -1;
+  if (!allowed || off === -1) {
+    return { expected: describeDef(def), got: describe(value), fix: "Values are not coerced; write the right type." };
+  }
+  const list = (v: unknown) => JSON.stringify(v);
+  return { expected: `one of ${allowed.map(list).join(", ")}`, got: list(items[off]), fix: "Use one of the listed values." };
 }
 
 function describe(value: unknown): string {
