@@ -67,7 +67,7 @@ Code first works out what there is to judge:
 Then the shortcuts, each worth zero calls:
 
 - Nothing to judge: no call. The catch-all or the idle speaker answers.
-- Exactly one eligible `message` flow, nobody on the floor, nothing else to judge: it starts without scoring.
+- Exactly one eligible `message` flow, nobody on the floor, no catch-all that passes, `idle: 'silent'`, nothing else to judge: it starts without scoring. With a catch-all or the idle speaker there, a low score has somewhere to go, so the lone flow is scored.
 - A floor holder, no other candidate, nothing else to judge: there is nothing to compare.
 
 Otherwise one call, `schemaName: 'understand'`, with one envelope: `{ flows: { id: 0–100 }, mentions: { id: boolean }, extract: { id: { … } }, branches: { q1: boolean }, fields: { field: value } }`. Only the sections with something to judge are present; inside a section every property is required and nullable, so the model must answer each one. Branch keys travel as short aliases (`q1`, `q2`) because a run id is not a legal property name; they are mapped back to `${runId}/${stepId}/${index}` when the reply is parsed. A reply with no usable JSON is logged and treated as an empty judgement; the call still counts. A provider failure here throws `ProviderError`: nothing ran, nothing was saved, and the host retries the input.
@@ -76,7 +76,7 @@ Otherwise one call, `schemaName: 'understand'`, with one envelope: `{ flows: { i
 
 Code applies the judgement in a fixed order.
 
-1. **Routing**, skipped when a run took the floor in Ingest. With an asking run, another flow takes over only when its score is at least 40 and beats the asker's by at least 15. With no asker: a single eligible flow starts as is; otherwise the best score at 40 or above starts, else the first `message: []` catch-all, else nobody, and the idle speaker answers in phase 6. A `suspended` run of the chosen flow resumes instead of a new one starting.
+1. **Routing**, skipped when a run took the floor in Ingest. With an asking run, another flow takes over only when its score is at least 40 and beats the asker's by at least 15. With no asker: the best score at 40 or above starts, else the first `message: []` catch-all, else nobody, and the idle speaker answers in phase 6. The one exception is a single eligible flow with no catch-all passing and `idle: 'silent'`: it starts as is. A `suspended` run of the chosen flow resumes instead of a new one starting.
 2. **Mention runs** start in flow order. A `mention: []` trigger is a code-only detector: it goes through the start checks on every message without the call, so a blocked `repeat` is logged as a skip. A trigger's `extract` values become the run's `input`.
 3. **The routed run** starts or resumes and holds the floor. A run that starts applies `clearOnStart` now, before extracted values land.
 4. **Fields** from the envelope are written one at a time, after validation. An unknown field name is dropped (`code: 'unknown-field'`), a value that does not fit the type is dropped (`code: 'bad-value'`), a value outside `enum` is dropped (`code: 'not-in-enum'`). Strings are coerced to numbers and booleans on the way in.
@@ -139,8 +139,8 @@ Every row but the last is asserted by a scenario in `tests/scenarios/`; the comp
 
 | Turn | Calls | Why | Scenario |
 |---|---|---|---|
-| A message with a floor holder or several candidate flows | 2 | understand, then speak | S1 |
-| A message when one flow is eligible and nothing else needs judging | 1 | speak only | S0, S1 |
+| A message with a floor holder, several candidate flows, or one candidate that a catch-all or the idle speaker could stand in for | 2 | understand, then speak | S1, S13 |
+| A message with nothing to judge: a catch-all alone, a floor holder alone, or one flow with `idle: 'silent'` and no catch-all | 1 | speak only | S0, S1, S8 |
 | A message with no flows, answered by the idle speaker | 1 | speak only | S9 |
 | A message where a mention flow's `say` answers | 1 | understand only; the floor's talk is skipped | S4 |
 | Each tool round | +1 | one more speak call | S8, S9 |

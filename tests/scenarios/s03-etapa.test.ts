@@ -31,7 +31,7 @@ describe("S3: event + after + while", () => {
   test("the event parks; the wake speaks first (1 call) and suspends triage; the reply finishes it and triage resumes", async () => {
     const { agent, clock, calls, provider } = build([triagem, interesse], {
       script: {
-        understand: [understood({ fields: { nome: "Ana" } }), understood({ fields: { urgencia: "agora" } })],
+        understand: [understood({ flows: { triagem: 90 }, fields: { nome: "Ana" } }), understood({ fields: { urgencia: "agora" } })],
         speak: [spoken("Oi Ana! De qual empresa você fala?"), spoken("Vi que avançamos. Para quando vocês precisam disso?"), spoken("Legal. E a empresa?")],
       },
     });

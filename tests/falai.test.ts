@@ -130,9 +130,9 @@ describe("falai()", () => {
     );
   });
 
-  test("agent().turn: the single message flow starts unscored; one understand call, one speak call", async () => {
+  test("agent().turn: one understand call scores the single message flow and extracts, one speak call asks", async () => {
     const provider = mockProvider({
-      understand: [{ flows: {}, fields: { nome: null } }],
+      understand: [{ flows: { triagem: 90 }, fields: { nome: null } }],
       speak: [{ message: "Oi! Como você se chama?", nome: null }],
     });
     const agent = f.agent({ name: "Ana", provider, actions: { notify }, conditions: { tagsAny }, flows: [triagem] });

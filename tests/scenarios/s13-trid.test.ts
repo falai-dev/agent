@@ -8,6 +8,9 @@ import { describe, expect, test } from "bun:test";
 
 import { build, f, message, saved, spoken, understood } from "./fixture.js";
 
+// The customer asked for exactly this; the idle speaker could answer otherwise, so the flow is scored.
+const routed = (partial: Record<string, unknown> = {}) => understood({ flows: { trid: 90 }, ...partial });
+
 const trid = f.flow({
   id: "trid",
   name: "TRID",
@@ -23,7 +26,7 @@ const trid = f.flow({
 describe("S13: say / wait 3s / say / prompt in one turn", () => {
   test("messages [A, B afterMs 3000, C]; two calls; the run asks for the model", async () => {
     const { agent, provider } = build([trid], {
-      script: { understand: [understood()], speak: [spoken("Qual modelo você quer: 17, 17 Pro ou 17 Pro Max?")] },
+      script: { understand: [routed()], speak: [spoken("Qual modelo você quer: 17, 17 Pro ou 17 Pro Max?")] },
     });
     const r = await agent.turn(message("quero um iphone", "m1"));
     expect(r.llmCalls).toBe(2);
@@ -44,7 +47,7 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
   });
 
   test("the model named in the first message skips the question; the run ends in one turn with zero speak calls", async () => {
-    const { agent, provider } = build([trid], { script: { understand: [understood({ fields: { modelo: "17 Pro" } })] } });
+    const { agent, provider } = build([trid], { script: { understand: [routed({ fields: { modelo: "17 Pro" } })] } });
     const r = await agent.turn(message("quero um iphone 17 pro", "m1"));
     expect(r.llmCalls).toBe(1);
     expect(provider.calls.map((c) => c.schemaName)).toEqual(["understand"]);
@@ -55,13 +58,13 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
   });
 
   test("a replay of the same input from the same session version mints the same keys", async () => {
-    const script = () => ({ understand: [understood()], speak: [spoken("Qual modelo?")] });
+    const script = () => ({ understand: [routed()], speak: [spoken("Qual modelo?")] });
     const a = await build([trid], { script: script() }).agent.turn(message("quero um iphone", "m1"));
     const b = await build([trid], { script: script() }).agent.turn(message("quero um iphone", "m1"));
     expect(b.messages).toEqual(a.messages);
     expect(b.session).toEqual(a.session);
     // And a second message re-entering the same step would mint a new visit, not the same key.
-    const { agent } = build([trid], { script: { understand: [understood(), understood()], speak: [spoken("Qual modelo?"), spoken("Ainda não entendi: qual modelo?")] } });
+    const { agent } = build([trid], { script: { understand: [routed(), understood()], speak: [spoken("Qual modelo?"), spoken("Ainda não entendi: qual modelo?")] } });
     const t1 = await agent.turn(message("quero um iphone", "m1"));
     const t2 = await agent.turn(message("hm", "m2", { session: saved(t1) }));
     expect(t2.messages.map((m) => m.key)).toEqual(["trid#m1:q:1"]);

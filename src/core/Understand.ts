@@ -44,12 +44,9 @@ export class Understand<C = unknown, D = unknown> {
     const candidates = candidateFlows(req);
     const onlyRouting =
       req.mentionFlows.length === 0 && req.branches.length === 0 && Object.keys(req.fields).length === 0;
-    if (onlyRouting && candidates.length <= 1) {
-      // One eligible flow and nobody on the floor: it starts, no scoring.
-      // Otherwise there is nothing to compare or extract.
-      const only = candidates[0];
-      return only && !req.floor ? { ...empty(0), flows: { [only.id]: 100 } } : empty(0);
-    }
+    // Nothing to compare or extract: no candidates, or only the floor's own flow. A lone
+    // candidate with nobody on the floor is here because the runner wants it scored.
+    if (onlyRouting && candidates.length <= (req.floor ? 1 : 0)) return empty(0);
 
     const aliases = new Aliases();
     const jsonSchema = buildEnvelope(req, candidates, aliases);

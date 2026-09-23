@@ -23,7 +23,7 @@ describe("S4: mention → say silences the floor → do → triage resumes", () 
   test("the mention turn spends one call; the say is the only message; triage keeps its floor for the next message", async () => {
     const { agent, calls, provider } = build([triagem, pediuHumano], {
       script: {
-        understand: [understood({ fields: { nome: "Ana" } }), understood({ mentions: { pediu_humano: true } }), understood()],
+        understand: [understood({ flows: { triagem: 90 }, fields: { nome: "Ana" } }), understood({ mentions: { pediu_humano: true } }), understood()],
         speak: [spoken("Oi Ana! De qual empresa você fala?"), spoken("Enquanto isso: de qual empresa você fala?")],
       },
     });

@@ -77,7 +77,7 @@ class Agent<C, D> {
 | `tools` | `Tool<C, D>[]` | `[]` | Functions the model may call while it speaks. See [Tool](tool.md). |
 | `instructions` | `Instruction<C, D>[]` | `[]` | Agent-level rules, rendered into every speak call. See [Instruction](instruction.md). |
 | `knowledgeBase` | `Record<string, unknown>` | none | Any JSON the model should know. Rendered as nested bullets. |
-| `idle` | `Idle<C, D>` | `{ prompt: "" }` | The one speaker that is not a step. Answers a message when no run holds the floor. `'silent'` mutes it. |
+| `idle` | `Idle<C, D>` | `{ prompt: "" }` | The one speaker that is not a step. Answers a message when no run holds the floor. `'silent'` mutes it; then a lone message flow with no catch-all starts without being scored. |
 | `clock` | `Clock` | `() => new Date()` | Returns "now". Tests pass `fakeClock(iso)`. |
 | `businessHours` | `BusinessHours<C>` | none | `(at, { context }) => Date`. Moves a timer forward to the next working moment when a trigger or wait says `businessHours: true`. |
 | `maxToolLoops` | `number` | `5` | Tool rounds per speak call. `0` disables tools. After the last round the model is asked once more without tools, so a message always comes back. |

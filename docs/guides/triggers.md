@@ -338,8 +338,8 @@ Every message turn decides who speaks, in this order:
 1. **Ingest first.** If the message ends a `wait` with `else` and the run goes on to another step, that run takes the floor and routing is skipped.
 2. **Eligible flows.** Message flows with a non-empty list whose `if` holds and whose `repeat` allows, in the order you passed them to the agent.
 3. **The run that is asking keeps priority.** When a run is asking, its flow is scored too. Another flow wins only when its score is at least 15 above the asking flow's and at least 40. Then a suspended run of that flow resumes, or a new run starts; the run that was asking is suspended and comes back when the winner ends.
-4. **One candidate, no floor.** It starts without scoring. If nothing else needs the model this turn (no mention flows, no pending fields to extract), the turn spends no understand call.
-5. **Several candidates, no floor.** The best score wins if it is at least 40. Otherwise the first `message: []` catch-all that passes `if` and `repeat` starts. Otherwise nobody takes the floor.
+4. **No floor.** The best score wins if it is at least 40. Otherwise the first `message: []` catch-all that passes `if` and `repeat` starts. Otherwise nobody takes the floor. A lone candidate is scored too, so "oi" does not start your scheduling flow just because it is the only one.
+5. **One candidate and nobody else to answer.** When no catch-all passes and `idle` is `'silent'`, a low score would leave the customer with no reply. So the one candidate starts without a score. If nothing else needs the model this turn (no mention flows, no pending fields to extract), the turn spends no understand call.
 6. **Nobody has the floor.** The idle speaker answers.
 
 Scores come from the understand call, 0 to 100 per candidate. The two thresholds, 40 and 15, are constants in `src/core/Runner.ts`.

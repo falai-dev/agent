@@ -154,11 +154,11 @@ const warn = spyOn(logger, "warn");
 afterEach(() => warn.mockClear());
 
 describe("Understand shortcuts", () => {
-  test("one eligible message flow and no floor starts at 100 with no call", async () => {
-    const provider = mockProvider();
+  test("a lone candidate with nobody on the floor is scored: the runner only sends one when a low score has somewhere to go", async () => {
+    const provider = mockProvider({ understand: [{ flows: { agendar: 20 } }] });
     const result = await understand(provider).run(request({ messageFlows: [agendar] }));
-    expect(result).toEqual({ ...EMPTY, flows: { agendar: 100 }, llmCalls: 0 });
-    expect(provider.calls).toHaveLength(0);
+    expect(result.flows).toEqual({ agendar: 20 });
+    expect(result.llmCalls).toBe(1);
   });
 
   test("nothing to judge costs no call: no candidates, or only the floor's own flow", async () => {

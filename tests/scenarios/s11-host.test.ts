@@ -14,7 +14,7 @@ describe("S11: store + scheduler host loop", () => {
   test("messages leave through the outbox after the save; wakes fire from the scheduler; a lost CAS replays", async () => {
     const { agent, clock } = build([triagem, retomar], {
       script: {
-        understand: [understood({ fields: { nome: "Ana" } }), understood({ fields: { empresa: "Zeta" } })],
+        understand: [understood({ flows: { triagem: 90 }, fields: { nome: "Ana" } }), understood({ fields: { empresa: "Zeta" } })],
         speak: [spoken("Oi Ana! De qual empresa?"), spoken("Oi Ana, ainda faz sentido?"), spoken("Ótimo! Quantas pessoas são?")],
       },
     });

@@ -31,7 +31,9 @@ const pos = f.flow({ id: "pos", name: "Pós-agendamento", steps: [{ id: "p", pro
 
 describe("S8: repeat always, tools in the speak step, then: { flow }", () => {
   test("a tool round costs one more call; confirmation hands the floor to `pos` with hop 1; the flow runs again with the field cleared", async () => {
+    // Silent idle: a message that is not a scheduling request has nobody else to go to.
     const { agent, provider } = build([agenda, pos], {
+      idle: "silent",
       tools: [checkAvailability],
       script: {
         // One routing question in the whole exchange: while `pos` holds the floor, could "ótimo" be a new agenda request?
@@ -47,7 +49,8 @@ describe("S8: repeat always, tools in the speak step, then: { flow }", () => {
       },
     });
 
-    // `confirmado` is a boolean (extract 'asked') and agenda is the only message flow: nothing for understand to do.
+    // `confirmado` is a boolean (extract 'asked') and agenda is the only message flow, with no catch-all and no idle
+    // speaker to take a low score: nothing for understand to do.
     const t1 = await agent.turn(message("quero marcar uma conversa", "m1"));
     expect(provider.calls.map((c) => c.schemaName)).toEqual(["speak", "speak"]);
     expect(t1.llmCalls).toBe(2);

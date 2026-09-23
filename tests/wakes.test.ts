@@ -68,7 +68,7 @@ describe("S10: wakes, versions and replays", () => {
 
     // v0 → v7: the lead opens triage, the assistant asks the name, a silence wake is armed.
     const t0 = await drive(runner, { sessionId: "s1", context: ai, message: "quer saber como funciona", id: "m1" }, {
-      understanding: understood(), speak: () => spoken("Qual é o seu nome?"),
+      understanding: understood({ flows: { triagem: 90 } }), speak: () => spoken("Qual é o seu nome?"),
     });
     expect(t0.result.session.runs.map((r) => [r.id, r.status])).toEqual([["triagem#m1", "asking"]]);
     const T0ms = Date.parse(T0);

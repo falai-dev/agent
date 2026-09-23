@@ -151,7 +151,7 @@ const suporte = f.flow({
 });
 ```
 
-What a `when` costs: the understand call happens at most once per turn, and every `when` branch rides in it. When that call would not happen otherwise (a single message flow, nothing to extract, no mention flows), a `when` branch alone makes the turn spend it. An instruction's `when` costs nothing extra: it is text inside the speak prompt.
+What a `when` costs: the understand call happens at most once per turn, and every `when` branch rides in it. When that call would not happen otherwise (no other flow to score, nothing to extract, no mention flows), a `when` branch alone makes the turn spend it. An instruction's `when` costs nothing extra: it is text inside the speak prompt.
 
 A `when` only makes sense where there is fresh customer text. Branches on a `wait` step are judged when the customer replies, by code only: an `if` branch there works, a `when` branch is listed by the type but never asked.
 

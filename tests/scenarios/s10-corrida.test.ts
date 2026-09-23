@@ -15,7 +15,7 @@ describe("S10: wake vs text, with versions", () => {
   test("the wake saves v1→v2; the text loaded at v1 conflicts, replays on v2 and ends the nudge run", async () => {
     const { agent, clock } = build([triagem, retomar], {
       script: {
-        understand: [understood({ fields: { nome: "Ana" } }), understood(), understood()],
+        understand: [understood({ flows: { triagem: 90 }, fields: { nome: "Ana" } }), understood(), understood()],
         // Four speak replies: the lost turn spends one too, exactly as a real host would.
         speak: [spoken("Oi Ana! De qual empresa?"), spoken("Oi Ana, ainda faz sentido?"), spoken("Ótimo! E a empresa?"), spoken("Ótimo! E a empresa?")],
       },

@@ -57,6 +57,8 @@ function setup(flows: Flow<Ctx, Data>[], options: { idle?: "silent"; reply?: (na
 const message = (text: string, id: string, extra: Partial<TurnInput<Ctx, Data>> = {}): TurnInput<Ctx, Data> => ({
   sessionId: "s1", context: ai, message: text, id, ...extra,
 });
+/** The model's verdict that this message is for `flowId`: with the idle speaker on, a lone flow is scored too. */
+const routedTo = (flowId: string) => understood({ flows: { [flowId]: 90 } });
 
 describe("duration, clock and predicates", () => {
   test("parseDuration reads s/m/h/d and rejects the rest", () => {
@@ -151,6 +153,34 @@ describe("S7: code-only mention flow runs beside the reply", () => {
   });
 });
 
+describe("a lone phrased flow starts unscored only when nobody else could answer", () => {
+  const agendar = f.flow({ id: "agendar", name: "Agendar", on: [{ message: ["quer agendar"] }], steps: [{ id: "a", prompt: "Ofereça horários." }] });
+  const geral = f.flow({ id: "geral", name: "Geral", on: [{ message: [] }], steps: [{ id: "g", prompt: "Responda." }] });
+  const low = understood({ flows: { agendar: 10 } });
+
+  test("idle 'silent' and no catch-all: it starts with no understand call", async () => {
+    const { result, understood: asked } = await drive(setup([agendar], { idle: "silent" }).runner, message("oi", "m1"), { speak: () => spoken("Temos horário amanhã.") });
+    expect(asked).toBe(false);
+    expect(result.started.map((s) => s.flowId)).toEqual(["agendar"]);
+  });
+
+  test("an eligible catch-all: the lone flow is scored, and a low score hands the message to the catch-all", async () => {
+    const t1 = await drive(setup([agendar, geral], { idle: "silent" }).runner, message("oi", "m1"), { understanding: low, speak: () => spoken("Oi!") });
+    expect(t1.understood).toBe(true);
+    expect(t1.result.started.map((s) => s.flowId)).toEqual(["geral"]);
+
+    const t2 = await drive(setup([agendar, geral], { idle: "silent" }).runner, message("quero agendar", "m1"), { understanding: routedTo("agendar"), speak: () => spoken("Temos horário amanhã.") });
+    expect(t2.result.started.map((s) => s.flowId)).toEqual(["agendar"]);
+  });
+
+  test("the idle speaker: the lone flow is scored, and a low score leaves the reply to idle", async () => {
+    const { result, talk, understood: asked } = await drive(setup([agendar]).runner, message("oi", "m1"), { understanding: low, speak: () => spoken("Oi!") });
+    expect(asked).toBe(true);
+    expect(result.started).toEqual([]);
+    expect(talk).toEqual({ idle: { prompt: "" } });
+  });
+});
+
 describe("S5: campaign start, deferred send, wake, reply into the funnel", () => {
   const campanha = f.flow({
     id: "campanha", name: "Campanha",
@@ -232,7 +262,7 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
 
   test("messages [A, B afterMs 3000] and the prompt speaks; own says never silence own talk", async () => {
     const { runner } = setup([trid]);
-    const { result, talk } = await drive(runner, message("oi", "m1"), { understanding: understood(), speak: () => spoken("Qual modelo?", { modelo: "17 Pro" }) });
+    const { result, talk } = await drive(runner, message("oi", "m1"), { understanding: routedTo("trid"), speak: () => spoken("Qual modelo?", { modelo: "17 Pro" }) });
     expect(result.llmCalls).toBe(0);
     expect(result.messages).toEqual([
       { text: "Oi! Aqui é da TRID.", kind: "verbatim", afterMs: 0, key: "trid#m1:a:1", runId: "trid#m1", stepId: "a" },
@@ -261,7 +291,7 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
       steps: [{ id: "s", say: "Já chamo alguém." }],
     });
     const { runner } = setup([trid, aviso]);
-    const t1 = await drive(runner, message("oi", "m1"), { understanding: understood(), speak: () => spoken("Qual modelo?") });
+    const t1 = await drive(runner, message("oi", "m1"), { understanding: routedTo("trid"), speak: () => spoken("Qual modelo?") });
     const humano: Ctx = { lead: { tags: ["vip", "pediu_humano"], owner: "ai" } };
     const t2 = await drive(runner, message("quero falar com alguém", "m2", { session: saved(t1.result), context: humano }), { understanding: understood() });
     expect(t2.talk).toBeNull();
@@ -343,7 +373,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
   test("onEnd 'stay' repeats the last step with a new key each time", async () => {
     const faq = f.flow({ id: "faq", name: "FAQ", on: [{ message: ["pergunta"] }], onEnd: "stay", steps: [{ id: "r", prompt: "Responda." }] });
     const { runner } = setup([faq]);
-    const t1 = await drive(runner, message("oi", "m1"), { speak: () => spoken("Oi!") });
+    const t1 = await drive(runner, message("oi", "m1"), { understanding: routedTo("faq"), speak: () => spoken("Oi!") });
     expect(t1.result.session.runs[0]).toMatchObject({ stepId: "r", status: "asking", visits: { r: 2 } });
     const t2 = await drive(runner, message("e aí", "m2", { session: saved(t1.result) }), { speak: () => spoken("Tudo bem!") });
     expect(t1.result.messages[0].key).toBe("faq#m1:r:1");
@@ -354,7 +384,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
   test("onEnd 'reset' closes the run and starts a fresh one at step one, data kept", async () => {
     const loop = f.flow({ id: "loop", name: "Loop", on: [{ message: ["oi"] }], onEnd: "reset", steps: [{ id: "p", prompt: "Oi." }, { id: "n", do: "notify", with: {} }] });
     const { runner } = setup([loop]);
-    const { result } = await drive(runner, message("oi", "m1"), { speak: () => spoken("Oi!", { nome: "Ana" }) });
+    const { result } = await drive(runner, message("oi", "m1"), { understanding: routedTo("loop"), speak: () => spoken("Oi!", { nome: "Ana" }) });
     expect(result.ended.map((r) => [r.id, r.reason])).toEqual([["loop#m1", "reset"]]);
     expect(result.started.map((s) => s.runId)).toEqual(["loop#m1", "loop#loop#m1:n:1"]);
     expect(result.session.runs[0]).toMatchObject({ id: "loop#loop#m1:n:1", stepId: "p", status: "asking", hop: 1 });
@@ -364,7 +394,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
   test("while (default: the trigger if) re-checked with fresh context ends the run", async () => {
     const vip = f.flow({ id: "vip", name: "VIP", on: [{ message: ["quero"], if: ({ context }) => context.lead.tags.includes("vip") }], steps: [{ id: "q", collect: ["nome"] }] });
     const { runner } = setup([vip]);
-    const t1 = await drive(runner, message("quero", "m1"), { speak: () => spoken("Nome?") });
+    const t1 = await drive(runner, message("quero", "m1"), { understanding: routedTo("vip"), speak: () => spoken("Nome?") });
     expect(t1.result.session.runs[0].status).toBe("asking");
     const t2 = await drive(runner, message("oi", "m2", { session: saved(t1.result), context: { lead: { tags: [], owner: "ai" } } }));
     expect(t2.result.ended.map((r) => r.reason)).toEqual(["skipped"]);
@@ -375,7 +405,7 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
   test("an explicit while wins over the trigger if", async () => {
     const flow = f.flow({ id: "w", name: "W", on: [{ message: ["x"] }], while: { known: ["nome"] }, steps: [{ id: "n", do: "notify", with: {} }] });
     const { runner, calls } = setup([flow]);
-    const { result } = await drive(runner, message("x", "m1"));
+    const { result } = await drive(runner, message("x", "m1"), { understanding: routedTo("w") });
     expect(calls).toEqual([]);
     expect(result.outcomes.map((o) => o.code)).toEqual(["premise-changed"]);
   });
@@ -420,7 +450,7 @@ describe("silenced: the host gate is one mouth", () => {
 
   test("an asking run stays asking; no request, no talk, zero calls", async () => {
     const { runner } = setup([triagem]);
-    const t1 = await drive(runner, message("quer", "m1"), { speak: () => spoken("Nome?") });
+    const t1 = await drive(runner, message("quer", "m1"), { understanding: routedTo("triagem"), speak: () => spoken("Nome?") });
     const t2 = await drive(runner, message("oi", "m2", { session: saved(t1.result), silenced: "humano no comando" }));
     expect(t2.understood).toBe(false);
     expect(t2.talk).toBeNull();
@@ -432,7 +462,7 @@ describe("silenced: the host gate is one mouth", () => {
 
   test("silenced: { understand: true } still produces an understand request", async () => {
     const { runner } = setup([triagem]);
-    const t1 = await drive(runner, message("quer", "m1"), { speak: () => spoken("Nome?") });
+    const t1 = await drive(runner, message("quer", "m1"), { understanding: routedTo("triagem"), speak: () => spoken("Nome?") });
     const t2 = await drive(runner, message("oi", "m2", { session: saved(t1.result), silenced: { reason: "humano", understand: true } }));
     expect(t2.understood).toBe(true);
     expect(t2.talk).toBeNull();

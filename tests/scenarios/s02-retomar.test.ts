@@ -12,7 +12,7 @@ describe("S2: retomar quem sumiu", () => {
   test("silence wake → nudge (1 call) → the lead replies → the wait's else ends the run", async () => {
     const { agent, clock, provider } = build([triagem, retomar], {
       script: {
-        understand: [understood({ fields: { nome: "Ana" } }), understood()],
+        understand: [understood({ flows: { triagem: 90 }, fields: { nome: "Ana" } }), understood()],
         speak: [spoken("Oi Ana! De qual empresa você fala?"), spoken("Oi Ana, ainda faz sentido conversarmos sobre a Zeta?"), spoken("Ótimo! E de qual empresa?")],
       },
     });
@@ -50,7 +50,7 @@ describe("S2: retomar quem sumiu", () => {
 
   test("silenced wake (a human owns the lead): the gate routes to the reminder, zero calls, nothing said", async () => {
     const { agent, clock, calls } = build([triagem, retomar], {
-      script: { understand: [understood({ fields: { nome: "Ana" } })], speak: [spoken("Oi Ana! De qual empresa?")] },
+      script: { understand: [understood({ flows: { triagem: 90 }, fields: { nome: "Ana" } })], speak: [spoken("Oi Ana! De qual empresa?")] },
     });
     const t1 = await agent.turn(message("oi, sou a Ana", "m1"));
     clock.advance("24h");
@@ -66,7 +66,7 @@ describe("S2: retomar quem sumiu", () => {
 
   test("silenced wake with the owner still 'ai' (a pause): the gate step takes `then`, the seller is notified", async () => {
     const { agent, clock, calls } = build([triagem, retomar], {
-      script: { understand: [understood({ fields: { nome: "Ana" } })], speak: [spoken("Oi Ana! De qual empresa?")] },
+      script: { understand: [understood({ flows: { triagem: 90 }, fields: { nome: "Ana" } })], speak: [spoken("Oi Ana! De qual empresa?")] },
     });
     const t1 = await agent.turn(message("oi, sou a Ana", "m1"));
     clock.advance("24h");

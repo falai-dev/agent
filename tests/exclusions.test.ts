@@ -106,11 +106,8 @@ describe("the understand prompt", () => {
   });
 
   test("a message flow's exclusions become a zero-score rule, not a reason to route", async () => {
-    // Two candidates: one eligible message flow with no floor routes without a
-    // call, so there would be no prompt to inspect.
-    const outro: Flow<undefined, Data> = { id: "outro", name: "Outro", on: [{ message: ["quer outra coisa"] }], steps: triagem.steps };
     const provider = mockProvider({ understand: [{ flows: {} }] });
-    await understand(provider).run(request({ messageFlows: [triagem, outro] }));
+    await understand(provider).run(request({ messageFlows: [triagem] }));
     const { prompt } = provider.calls[0];
 
     expect(prompt).toContain("The customer: quer um orçamento");

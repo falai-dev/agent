@@ -508,8 +508,7 @@ export class Runner<C = unknown, D = unknown> {
     const floorRun = this.floorRun(turn);
     const floorFlow = floorRun && this.flows.get(floorRun.flowId);
     const eligible = this.eligibleMessageFlows(turn);
-    // Exactly one eligible message flow and no floor: it starts without scoring (S9).
-    const messageFlows = !floorRun && eligible.length === 1 ? [] : eligible;
+    const messageFlows = !floorRun && this.startsUnscored(turn, eligible) ? [] : eligible;
     const mentionFlows = this.mentionFlows()
       .filter(({ flow, trigger }) => trigger.mention.length > 0 && this.repeatAllows(turn, flow, trigger, turn.triggerKey))
       .map(({ flow }) => flow);
@@ -562,6 +561,14 @@ export class Runner<C = unknown, D = unknown> {
     return this.messageFlows(turn, (list) => list.length > 0);
   }
 
+  /**
+   * The lone eligible flow starts without a score only when a low score would have nowhere
+   * else to send the message: no catch-all passes and the idle speaker is silent (S9).
+   */
+  private startsUnscored(turn: Turn<C, D>, eligible: Flow<C, D>[]): boolean {
+    return eligible.length === 1 && this.options.idle === "silent" && this.messageFlows(turn, (list) => list.length === 0).length === 0;
+  }
+
   private messageFlows(turn: Turn<C, D>, accept: (list: string[]) => boolean): Flow<C, D>[] {
     const out: Flow<C, D>[] = [];
     for (const flow of this.flows.values()) {
@@ -605,7 +612,7 @@ export class Runner<C = unknown, D = unknown> {
         const current = scores[asker.flowId] ?? 0;
         const top = best(eligible.filter((f) => f.id !== asker.flowId));
         if (top && top.score >= current + ROUTE_STICKY && top.score >= ROUTE_MIN) route = top.flow;
-      } else if (eligible.length === 1) {
+      } else if (this.startsUnscored(turn, eligible)) {
         route = eligible[0];
       } else {
         const top = best(eligible);

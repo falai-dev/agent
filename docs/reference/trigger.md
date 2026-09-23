@@ -123,8 +123,8 @@ Pass a real message `id` on every message turn. Only `id` is checked against the
 ## Behaviour
 
 **How message flows are chosen.** On a message turn, the eligible flows are those with a non-empty `message` list passing `if` and `repeat`, in agent order.
-- One eligible flow and no run asking: it starts without being scored. The understand call is skipped altogether when there is nothing else to judge: no mention flows, no `when` branches, no unknown `'anywhere'` field.
-- Several: the understand call scores each from 0 to 100. With no run asking, the top flow starts if it scores 40 or more; otherwise the first eligible `message: []` flow starts, if there is one.
+- No run asking: the understand call scores each eligible flow from 0 to 100, a lone one included. The top flow starts if it scores 40 or more; otherwise the first eligible `message: []` flow starts, if there is one.
+- One exception: a single eligible flow, with no `message: []` flow passing and `idle: 'silent'`, starts without being scored, because a low score would leave the customer with no reply. The understand call is then skipped altogether when there is nothing else to judge: no mention flows, no `when` branches, no unknown `'anywhere'` field.
 - A run is asking: it keeps the floor unless another flow scores at least 15 above it and at least 40. Then that flow starts, or its suspended run resumes, and the asker is suspended.
 - The catch-all `message: []` is never scored. It obeys `if` and `repeat` like any trigger, so with the default `'once'` it fires once per session. When nothing starts and no run is asking, the idle speaker answers.
 
