@@ -40,6 +40,8 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **A wrong-type parameter error reads "an integer" and "a list of strings".** `describeDef` glued the article on by concatenation, so the one vowel-initial scalar type came out as "a integer" and an array as "a list of string" — in the very sentence that tells whoever wrote the flow what to type instead.
 
+- **`history` is the conversation BEFORE this input, and the docs now say so.** Both calls quote the customer's message on its own ("Customer's latest message"), so a host that stores the message first and then passes the stored history makes the model read it twice. The type and both docs said only "the conversation so far", and three ports split on it: the worker left the message out, while every playground and site chat put it in. The contract is now written where a host reads it: leave the message this turn carries out of `history`, and store it after the turn.
+
 - **`TurnResult.usage` says what the turn's model calls cost.** `{ promptTokens, completionTokens, cachedInputTokens }`, the providers' own counts added up over the understand call, the speak call, every tool round and a compaction summary — the figure a host bills a conversation from. It sits beside `llmCalls` and is absent, never zero, when a turn spent no call or the provider reported no counts.
 
 ### Docs and tooling

@@ -87,7 +87,11 @@ export type TurnBase<C = unknown, D = unknown> = ContextField<C> & {
   sessionId: string;
   /** Absent on a first turn. A wake never creates a session. */
   session?: Session<D>;
-  /** Pass on every input kind, wakes included. */
+  /**
+   * The conversation BEFORE this input. Pass it on every input kind, wakes included.
+   * Leave out the message this turn carries: both calls quote it on their own, so a
+   * history that ends with it makes the model read it twice.
+   */
   history?: History;
   silenced?: Silenced;
   /** Host anchors this session belongs to, e.g. `{ lead: { key: 'lead:456', lastInboundAt } }`. */

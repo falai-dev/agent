@@ -122,7 +122,7 @@ Per turn, the host passes what only it knows:
 |---|---|
 | `sessionId`, `session?` | The session the host loaded, or nothing on a first turn. A wake never creates a session. |
 | `context` | Your own data for this turn: the customer, the tenant, whatever your flows read. Typed by `falai<C>()`. Templates read it as `{{context.x}}`; predicates, actions and tools as `ctx.context`. |
-| `history` | The conversation so far. Pass it on every input kind, wakes included; both calls read it. |
+| `history` | The conversation before this input. Pass it on every input kind, wakes included; both calls read it. Leave out the message this turn carries: both calls quote it on their own, so a history that ends with it is read twice. |
 | `silenced?` | Why the assistant cannot speak right now. `do` steps still run, nothing is phrased, zero calls — unless you pass `{ reason, understand: true }`, which still spends the understand call. |
 | `anchors?`, `claims?` | Host keys and claims from the customer's other sessions, for flows that run once per customer instead of once per session (see [Anchors](./runs-and-waits.md#anchors)). |
 

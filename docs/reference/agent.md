@@ -105,7 +105,7 @@ Every input carries the common fields, plus exactly one of the four kinds.
 | `sessionId` | `string` | The conversation's id. A first turn creates the session under this id. |
 | `session` | `Session<D>` | The stored session, as the store returned it. Absent on a first turn. A `wake` without a session is ignored. |
 | `context` | `C` | Your ambient data for this turn. Required unless `C` allows `undefined` (`falai()` with no generic). |
-| `history` | `History` | The conversation so far. Pass it on every input kind, wakes included; both calls read it. Without it the framework falls back to `session.history`, then to an empty list. |
+| `history` | `History` | The conversation before this input. Pass it on every input kind, wakes included; both calls read it. Leave out the message this turn carries: both calls quote it on their own, so a history that ends with it is read twice. Store the message after the turn, not before. Without `history` the framework falls back to `session.history`, then to an empty list. |
 | `silenced` | `Silenced` | Your reason the assistant cannot speak right now. See below. |
 | `anchors` | `Record<string, { key: string; lastInboundAt?: string }>` | The host anchors this session belongs to, by name, e.g. `{ lead: { key: 'lead:456', lastInboundAt } }`. A flow with `anchor: 'lead'` keys its runs and claims by `anchors.lead.key`. |
 | `claims` | `{ held: Record<string, string>; active: string[] }` | Claims from the customer's other sessions: `held` maps a dedupe key to the ISO time it was taken; `active` lists live `${flowId}:${anchor}` pairs. A flow already active elsewhere is skipped with `code: 'already-running'`. |
