@@ -1,6 +1,6 @@
 {
   "name": "@falai/agent",
-  "version": "4.0.0-alpha.8",
+  "version": "4.0.0-alpha.9",
   "description": "Conversational state engine for TypeScript where the AI understands, but the code is in control",
   "type": "module",
   "main": "./dist/cjs/index.js",
