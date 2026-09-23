@@ -229,7 +229,7 @@ console.log(r.outcomes[0]?.code); // "awaiting-trigger"
 
 - `turn({ event, payload, key })` publishes it. The payload becomes the run's `input`: `{{input.stageId}}` in templates, `ctx.input` in actions, `input` in the trigger's `if`. `input` is typed `unknown` there; narrow it before you read it.
 - `after: '1h'` parks the new run before its first step. The wake key is `<runId>:start:<atMs>`; the outcome line reads `code: 'awaiting-trigger'`. If the same event arrives again for the same flow and anchor while the run is still parked there, the parked run is replaced (`ended[].reason: 'replaced'`). Any other live run makes the new one skip with `code: 'already-running'`.
-- `businessHours: true` moves `after` forward to the next working hour.
+- `businessHours: true` moves `after` forward to the next working hour. With no `after`, it holds an event that arrives after hours until the next working hour, and starts at once inside them.
 - Default `repeat: 'always'`: every event with a new `key` starts a run. The same `key` twice is skipped with `code: 'already-claimed'`, so publishing an event again is safe.
 - Zero model calls, unless the run reaches a talk step: then the assistant speaks first, one call.
 - An event may carry a `direction`, which stamps the session as the customer or the assistant speaking. See [Actions and events](actions-and-events.md).
@@ -298,7 +298,7 @@ Inside a session, a flow has at most one live run per anchor. A trigger that fir
 
 ## `businessHours`
 
-Timers can wait for working hours. Give the agent a `businessHours` function and set `businessHours: true` where it should apply: a silence trigger, an event's `after`, a `wait` step.
+Timers can wait for working hours. Give the agent a `businessHours` function and set `businessHours: true` where it should apply: a silence trigger, an event trigger (its `after`, or the start itself when it has none), a `wait` step.
 
 ```ts
 import { falai, GeminiProvider } from "@falai/agent";

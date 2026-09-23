@@ -425,9 +425,11 @@ export class Runner<C = unknown, D = unknown> {
     }
     session.runs.push(run);
     turn.started.push({ runId: run.id, flowId: flow.id, anchor, dedupeKey });
-    const after = opts.trigger && "event" in opts.trigger ? opts.trigger.after : undefined;
-    if (after) {
-      const at = this.snap(turn, new Date(turn.now.getTime() + parseDuration(after)), opts.trigger && "event" in opts.trigger ? opts.trigger.businessHours : undefined);
+    const eventTrigger = opts.trigger && "event" in opts.trigger ? opts.trigger : undefined;
+    const after = eventTrigger?.after;
+    const at = this.snap(turn, new Date(turn.now.getTime() + (after ? parseDuration(after) : 0)), eventTrigger?.businessHours);
+    // With no `after`, only a closed hour parks the start: inside working hours the snap returns now.
+    if (after || at.getTime() > turn.now.getTime()) {
       this.park(turn, run, { kind: "timer", key: `${run.id}:start:${at.getTime()}` }, at);
       this.outcome(turn, run, { kind: "wait", status: "waiting", code: "awaiting-trigger", until: at.toISOString() });
     }

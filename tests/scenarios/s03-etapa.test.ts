@@ -80,3 +80,32 @@ describe("S3: event + after + while", () => {
     expect(t1.schedule).toEqual([]);
   });
 });
+
+describe("S3: an event with businessHours and no `after`", () => {
+  const boasVindas = f.flow({
+    id: "boas-vindas",
+    name: "Entrou em negociação, em horário",
+    on: [{ event: "stage_entered", businessHours: true }],
+    steps: [{ id: "s", say: "Vi que avançamos! Já te chamo." }],
+  });
+  const noon = Date.parse(T0) + 2 * 3_600_000;
+
+  test("outside working hours the start parks until the snapped time, then says its step", async () => {
+    const { agent, clock } = build([boasVindas], { businessHours: (at) => (at.getTime() < noon ? new Date(noon) : at) });
+    const t1 = await agent.turn(entered({}));
+    expect(t1.messages).toEqual([]);
+    expect(t1.schedule).toEqual([{ key: `boas-vindas#stage:7:start:${noon}`, at: new Date(noon) }]);
+    expect(t1.outcomes.map((o) => [o.code, o.until])).toEqual([["awaiting-trigger", new Date(noon).toISOString()]]);
+
+    clock.advance("2h");
+    const t2 = await agent.turn({ sessionId: "s1", context: negociando, session: saved(t1), wake: t1.schedule[0].key });
+    expect(t2.messages.map((m) => m.text)).toEqual(["Vi que avançamos! Já te chamo."]);
+  });
+
+  test("inside working hours it starts at once, as it did before", async () => {
+    const { agent } = build([boasVindas], { businessHours: (at) => at });
+    const t1 = await agent.turn(entered({}));
+    expect(t1.schedule).toEqual([]);
+    expect(t1.messages.map((m) => m.text)).toEqual(["Vi que avançamos! Já te chamo."]);
+  });
+});

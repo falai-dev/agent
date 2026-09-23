@@ -85,7 +85,7 @@ A trigger whose phrases are *all* exclusions can never fire, so `validateFlow` r
 | `event` | `string` | required | The event's name in the agent's `events`. |
 | `after` | `Duration` | none | Park the run this long before its first step. |
 | `if` | `Pred<C, D>` | none | Judged when the event arrives, with the payload as `input`. |
-| `businessHours` | `boolean` | `false` | Snap the `after` wake forward. |
+| `businessHours` | `boolean` | `false` | Start only in working hours: snap the start (now, or now + `after`) forward with the agent's `businessHours`. |
 | `repeat` | `Repeat` | `'always'` | |
 
 The event's `payload` is the run's `input`.
@@ -116,7 +116,7 @@ Pass a real message `id` on every message turn. Only `id` is checked against the
 
 **Dedupe key.** `${flowId}:${anchor}:${nonce}`. The nonce is the trigger key when `repeat` is `'always'` and empty otherwise. It is written to `session.claims` when the run starts, given to actions as `ctx.dedupeKey`, and returned in `started[]`. The last 50 `'always'` claims per flow and anchor are kept; `'once'` and cooldown claims are never pruned. The host may pass claims from the customer's other sessions in `turn({ claims })`; they count the same.
 
-**Wake for `after`.** `${runId}:start:${atMs}`, where `atMs` is the fire time in milliseconds after `businessHours` snapping. The run is returned in `started[]` at once with the outcome `code: 'awaiting-trigger'`. At the wake it enters its first step. A second event for the same flow and anchor while it is parked replaces it: the parked run ends with reason `'replaced'`.
+**Wake for `after`.** `${runId}:start:${atMs}`, where `atMs` is the fire time in milliseconds after `businessHours` snapping. With `businessHours: true` and no `after`, the same wake parks a run whose event arrives outside working hours; inside them it starts at once. The run is returned in `started[]` at once with the outcome `code: 'awaiting-trigger'`. At the wake it enters its first step. A second event for the same flow and anchor while it is parked replaces it: the parked run ends with reason `'replaced'`.
 
 **Wake for silence.** `silence:${flowId}:${sessionId}:${lastAssistantAtMs}`. Armed at the end of every turn in which the assistant spoke and the customer has not written since, for every silence flow passing `if` and `repeat`; the entry's `replaces` names the previous silence wake. At fire time it is honoured only while `session.lastAssistantAt` still equals that timestamp and the customer has not written since (`code: 'silence-broken'` otherwise).
 
