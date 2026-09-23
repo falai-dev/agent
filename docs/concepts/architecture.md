@@ -137,7 +137,7 @@ Then one of four input kinds: `{ message, id?, at? }`, `{ wake }`, `{ event, pay
 | `changed: false` | Nothing. Save nothing, send nothing. |
 | `session` | Save it with the version you loaded: `store.save(session, loadedVersion)`. A stale version throws `SessionConflictError`; discard everything and replay the same input. |
 | `messages[]` | Send each one, honouring `afterMs`, keyed by `key` so a retry never sends twice. |
-| `schedule[]` | Enqueue each wake with `jobId = key`. When it fires, call `turn({ wake: key })`. |
+| `schedule[]` | Enqueue each wake with the key in the payload and `encodeURIComponent(key)` as the job id: BullMQ refuses a `:` in a custom id. When it fires, call `turn({ wake: key })`. |
 | `outcomes`, `started`, `ended`, `skipped` | Your execution log. |
 
 The order matters: save first, then send and schedule. A message that leaves before the save is sent twice when the save loses a race; a message that leaves after it is not. The one exception is `do` handlers and tool handlers: they run inside the turn, before the save, so they run at least once and must be idempotent on `ctx.key`. [Runs and waits](./runs-and-waits.md#five-rules-that-always-hold) lists the five rules it rests on.

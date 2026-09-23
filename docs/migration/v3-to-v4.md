@@ -65,7 +65,7 @@ async function onMessage(sessionId: string, context: unknown, history: History, 
   if (r.changed) {
     await store.save(r.session, session?.version ?? 0);   // throws SessionConflictError when another turn saved first: drop this result and run the turn again
     for (const m of r.messages) await send(m.text, { after: m.afterMs, key: m.key });
-    for (const s of r.schedule) await queue.add({ jobId: s.key, at: s.at });
+    for (const s of r.schedule) await queue.add({ jobId: encodeURIComponent(s.key), at: s.at });   // BullMQ refuses a ':' in a custom id
   }
 }
 ```
@@ -303,7 +303,7 @@ const retomar = f.flow({
 });
 ```
 
-- `wait: '3s'` (10 s or less, and the next step is a `say` or a talk step) becomes `afterMs` on that message in the same turn; every other wait parks the run (stops it until a wake) and puts `{ key, at }` in `schedule[]`. Enqueue the wake with `jobId = key` and call `turn({ wake: key })` when it fires. The framework never cancels a wake itself: a stale one is ignored (`changed: false`). A re-armed silence wake names the one it supersedes in `replaces`; removing that job is optional.
+- `wait: '3s'` (10 s or less, and the next step is a `say` or a talk step) becomes `afterMs` on that message in the same turn; every other wait parks the run (stops it until a wake) and puts `{ key, at }` in `schedule[]`. Enqueue the wake with `encodeURIComponent(key)` as the job id (BullMQ refuses a `:` in a custom id) and call `turn({ wake: key })` when it fires. The framework never cancels a wake itself: a stale one is ignored (`changed: false`). A re-armed silence wake names the one it supersedes in `replaces`; removing that job is optional.
 - `on: [{ event: 'stage_entered', after: '1h' }]` starts a run when your code calls `turn({ event, payload, key })`. Declare events with `f.event<Payload>({ direction? })`: `inbound` counts as the customer speaking, `outbound` as the assistant.
 - `wait: { event: 'meeting_booked', upTo: '7d' }` parks until the event arrives.
 - Runs inside a session are concurrent; at most one is asking a question. A timer-started talk step suspends the current asker and hands the floor back when it is done.
@@ -386,6 +386,7 @@ const session = migrateSession(rowBlob, {
 - `version` is 0: the session has no row in the v4 table yet, so your usual `store.save(session, session.version)` is the insert.
 - `pendingDirective` is dropped.
 - A blob that is neither v4 nor a recognisable 3.x state throws `InvalidSessionError`; a corrupt row can no longer become a fresh conversation silently.
+- 3.x did not record when the assistant last spoke, so a lifted session has no `lastAssistantAt` and arms no silence follow-up until the assistant speaks again. At cutover, set `session.lastAssistantAt` and `session.lastUserAt` from your messages table, save, and enqueue `agent.pendingWakes({ session, context })`: a conversation that was quiet at cutover then gets its follow-up on time.
 
 Add a test that loads one real (anonymised) row per product and asserts the run's `stepId` and the carried claims.
 
@@ -441,7 +442,7 @@ Then, in this order:
 1. Convert stored flows and signal rules to `FlowSpec` rows. Keep talk-step ids; give each migrated signal flow `id = signal key`.
 2. Register your actions, events and conditions on the agent.
 3. Replace the `respond` call site with load → `turn` → save + messages + schedules in one transaction.
-4. Wire wakes (`jobId = key`, `turn({ wake })` at fire time) and host events.
+4. Wire wakes (job id `encodeURIComponent(key)`, `turn({ wake })` at fire time) and host events. At cutover, enqueue `agent.pendingWakes()` for every lifted session that was quiet.
 5. Put `migrateSession` in your deserializer and let it throw on garbage.
 6. Delete the automation engine, the follow-up sweep and the second composer.
 

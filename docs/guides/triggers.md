@@ -181,7 +181,7 @@ How it works, in order:
 
 1. The assistant speaks: a talk step, a `say`, or an action that returns `spoke: true`. The turn stamps `session.lastAssistantAt`.
 2. For every silence flow whose `if` holds and whose `repeat` allows, the turn puts a wake in `schedule[]`: key `silence:<flowId>:<sessionId>:<lastAssistantAtMs>`, `at` = that time plus the duration. `replaces` names the previous silence key of the same flow so the host can drop the old job. Dropping it is best effort; a stale wake is harmless.
-3. The host enqueues the wake with `jobId = key` and calls `turn({ wake: key })` when it fires.
+3. The host enqueues the wake with the key in the payload and `encodeURIComponent(key)` as the job id, because BullMQ refuses a `:` in a custom id, and calls `turn({ wake: key })` when it fires.
 4. The wake is honoured only while the session still shows that silence: the assistant's last message is still the same one and the customer has not written since. Otherwise the turn ends with `code: 'silence-broken'` and `changed: false`.
 5. The run starts, takes the floor and speaks first. A talk step costs one model call; the prompt tells the model there is no new message from the customer.
 

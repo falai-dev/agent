@@ -8,7 +8,7 @@
  *   begin ─▶ understandRequest ─(Understand)─▶ decide ─▶ advance ─(Speak)─▶ settle ─▶ finish
  */
 
-import type { AgentOptions, EndReason, TurnInput, TurnResult } from "../types/agent.js";
+import type { AgentOptions, EndReason, PendingWakesInput, ScheduleEntry, TurnBase, TurnInput, TurnResult } from "../types/agent.js";
 import type { TokenUsage } from "../types/ai.js";
 import type { ActionResult, Branch, DoStep, Duration, Flow, IfStep, Next, Pred, PredCtx, Repeat, SayStep, Step, StepBase, TalkStep, Trigger, WaitEventStep, WaitStep } from "../types/flow.js";
 import type { History } from "../types/history.js";
@@ -49,7 +49,7 @@ export type What =
 
 /** The mutable per-turn state. `session` is a deep copy; the input is never touched. */
 export interface Turn<C = unknown, D = unknown> {
-  readonly input: TurnInput<C, D>;
+  readonly input: TurnBase<C, D>;
   readonly what: What;
   readonly kind: InputKind;
   /** Message id, wake key, event key or start key: the trigger key of runs started this turn. */
@@ -171,11 +171,26 @@ export class Runner<C = unknown, D = unknown> {
   // ── Load + Ingest ─────────────────────────────────────────────────────
 
   begin(input: TurnInput<C, D>): Turn<C, D> {
-    const now = (this.options.clock ?? (() => new Date()))();
+    const now = this.now();
+    const turn = this.open(input, describe(input, now.toISOString()), now);
+    if (turn.what.kind === "wake" && !input.session) {
+      this.ignore(turn, "no-session", turn.what.key);
+      return turn;
+    }
+    turn.ingesting = true;
+    this.ingest(turn);
+    turn.ingesting = false;
+    return turn;
+  }
+
+  private now(): Date {
+    return (this.options.clock ?? (() => new Date()))();
+  }
+
+  private open(input: TurnBase<C, D>, what: What, now: Date): Turn<C, D> {
     const nowIso = now.toISOString();
-    const what = describe(input, nowIso);
     const silenced = typeof input.silenced === "string" ? input.silenced : input.silenced?.reason;
-    const turn: Turn<C, D> = {
+    return {
       input,
       what,
       kind: what.kind,
@@ -204,14 +219,17 @@ export class Runner<C = unknown, D = unknown> {
       speakDone: false,
       queue: [],
     };
-    if (what.kind === "wake" && !input.session) {
-      this.ignore(turn, "no-session", what.key);
-      return turn;
-    }
-    turn.ingesting = true;
-    this.ingest(turn);
-    turn.ingesting = false;
-    return turn;
+  }
+
+  /** Every wake the session waits on: each parked run's own, then each silence flow's since the assistant last spoke. */
+  pendingWakes(input: PendingWakesInput<C, D>): ScheduleEntry[] {
+    // No input arrives, so nothing reads `what`: the inert wake shape only fills the field.
+    const turn = this.open({ ...input, sessionId: input.session.id }, { kind: "wake", key: "" }, this.now());
+    // `park` always sets both; the type leaves them optional, so a hand-built blob without them has no wake to give.
+    const parked = turn.session.runs.flatMap(({ status, waiting }) =>
+      status === "waiting" && waiting?.key && waiting.until ? [{ key: waiting.key, at: new Date(waiting.until) }] : [],
+    );
+    return [...parked, ...this.silenceWakes(turn)];
   }
 
   private ingest(turn: Turn<C, D>): void {
@@ -1146,14 +1164,21 @@ export class Runner<C = unknown, D = unknown> {
     return new Date(reset !== undefined && reset > ladder ? reset : ladder);
   }
 
-  /** The assistant spoke last: every silence flow passing `if` and `repeat` gets a wake. */
+  /** The assistant spoke this turn: its silence wakes replace the ones its last words set. */
   private armSilence(turn: Turn<C, D>): void {
+    const previous = turn.original?.lastAssistantAt;
+    if (turn.session.lastAssistantAt === previous) return;
+    turn.schedule.push(...this.silenceWakes(turn, previous));
+  }
+
+  /** The assistant spoke last: every silence flow passing `if` and `repeat` gets a wake. */
+  private silenceWakes(turn: Turn<C, D>, previous?: string): ScheduleEntry[] {
     const { session } = turn;
     const { lastAssistantAt, lastUserAt } = session;
-    if (!lastAssistantAt || lastAssistantAt === turn.original?.lastAssistantAt) return;
-    if (lastUserAt && Date.parse(lastUserAt) > Date.parse(lastAssistantAt)) return;
+    if (!lastAssistantAt) return [];
+    if (lastUserAt && Date.parse(lastUserAt) > Date.parse(lastAssistantAt)) return [];
     const ms = Date.parse(lastAssistantAt);
-    const previous = turn.original?.lastAssistantAt;
+    const wakes: ScheduleEntry[] = [];
     for (const flow of this.flows.values()) {
       const trigger = (flow.on ?? []).find((t): t is SilenceTrigger<C, D> => "silence" in t);
       if (!trigger) continue;
@@ -1161,12 +1186,13 @@ export class Runner<C = unknown, D = unknown> {
       if (trigger.if && !this.holds(trigger.if, turn, this.draftRun(turn, flow, "silence", key))) continue;
       if (!this.repeatAllows(turn, flow, trigger, key)) continue;
       const at = this.snap(turn, new Date(ms + parseDuration(trigger.silence)), trigger.businessHours);
-      turn.schedule.push({
+      wakes.push({
         key: `silence:${flow.id}:${session.id}:${ms}`,
         at,
         ...(previous ? { replaces: `silence:${flow.id}:${session.id}:${Date.parse(previous)}` } : {}),
       });
     }
+    return wakes;
   }
 
   // ── Return (design §4.8) ──────────────────────────────────────────────

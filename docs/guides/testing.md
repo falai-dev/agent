@@ -218,7 +218,7 @@ What each assertion pins down:
 
 - `llmCalls` is the budget. A turn that spends more than you scripted throws inside the provider, so an unexpected third call cannot pass silently. `usage` is absent in tests unless your scripted provider reports token counts — real providers do, and the turn adds them up.
 - `messages[].key` is `${runId}:${stepId}:${visit}`, and `runId` is `${flowId}#${triggerKey}`. The trigger key of a message turn is the message `id` you passed; of a silence wake, the `lastAssistantAt` timestamp in milliseconds.
-- `schedule[].key` is what your queue stores as `jobId` and what you pass back as `wake`. The silence key is `silence:${flowId}:${sessionId}:${ms}`; a timer wait's key is `${runId}:${stepId}:${atMs}`.
+- `schedule[].key` is what your queue job carries (its id is the key encoded, since BullMQ refuses a `:` in one) and what you pass back as `wake`. The silence key is `silence:${flowId}:${sessionId}:${ms}`; a timer wait's key is `${runId}:${stepId}:${atMs}`.
 - `outcomes[]` is the execution log, one line per step. Assert on `code`, which is stable across versions, not on `message`, the English sentence beside it; see [outcomes](../reference/outcomes.md).
 
 ## Replaying the same input

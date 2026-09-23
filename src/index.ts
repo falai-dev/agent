@@ -137,6 +137,7 @@ export type {
   ParamDef,
   ParamDefs,
   Participant,
+  PendingWakesInput,
   Pred,
   PredCtx,
   ProviderCapabilities,

@@ -94,6 +94,10 @@ class Agent<C, D> {
 
 `turnStream(input)` runs the same turn and yields `{ delta: string }` chunks while the model phrases the reply, then one `{ done: true, result: TurnResult }`. When nobody speaks, only the last chunk comes. See [Streaming](../guides/streaming.md).
 
+## pendingWakes()
+
+`pendingWakes({ session, context, anchors?, claims? })` returns the `ScheduleEntry[]` a saved session is waiting on: each parked run's wake, and each silence flow's counted from `session.lastAssistantAt`, none once the customer wrote after it. The trigger's `if` and `repeat` are judged on the `context`, `anchors` and `claims` you pass, as in a turn. It changes nothing and spends no model call; the entries carry no `replaces`. Use it when a queue lost its jobs, and after `migrateSession`, since a 3.x blob has no `lastAssistantAt` and so no silence wake until the assistant speaks again.
+
 ## TurnInput
 
 Every input carries the common fields, plus exactly one of the four kinds.
@@ -134,7 +138,7 @@ A string closes the gate: `do` steps still run, nothing is phrased, zero model c
 | `session` | `Session<D>` | The session after this turn. `version` is unchanged; the host saves it with the version it loaded and the store bumps it. |
 | `changed` | `boolean` | `false` means save nothing and send nothing: the input was ignored or nothing moved. |
 | `messages` | `OutboundMessage[]` | What to send, in order. |
-| `schedule` | `ScheduleEntry[]` | Wakes to enqueue with `jobId = key`. At fire time call `turn({ wake: key })`. |
+| `schedule` | `ScheduleEntry[]` | Wakes to enqueue, with `encodeURIComponent(key)` as the job id. At fire time call `turn({ wake: key })`. |
 | `outcomes` | `StepOutcome[]` | One line per step this turn, for your execution log. See [Outcomes](outcomes.md). |
 | `started` | `Array<{ runId; flowId; anchor; dedupeKey }>` | Runs that started this turn. |
 | `ended` | `Array<Run & { reason: EndReason }>` | Runs that ended, with the run's last state and why: `'end'`, `'flow'`, `'reset'`, `'skipped'`, `'failed'` or `'replaced'`. |
@@ -183,7 +187,7 @@ if (r.usage) {
 
 | Field | Type | Meaning |
 |---|---|---|
-| `key` | `string` | The wake key. Use it as the job id and pass it back as `turn({ wake: key })`. |
+| `key` | `string` | The wake key. Pass it back as `turn({ wake: key })`. As a queue job id, encode it: BullMQ refuses a custom id with a `:` in it, and every key has one. |
 | `at` | `Date` | When to fire. |
 | `replaces` | `string` | An earlier wake this one supersedes. Removing it is best effort; a stale wake is ignored anyway. |
 

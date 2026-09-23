@@ -7,7 +7,7 @@
  * provider call apiece, and Runner settles what they returned.
  */
 
-import type { AgentOptions, TurnInput, TurnResult, TurnStreamChunk } from "../types/agent.js";
+import type { AgentOptions, PendingWakesInput, ScheduleEntry, TurnInput, TurnResult, TurnStreamChunk } from "../types/agent.js";
 import type { TokenUsage } from "../types/ai.js";
 import type { CompactionOptions } from "../types/compaction.js";
 import { FlowConfigurationError } from "../types/errors.js";
@@ -54,6 +54,16 @@ export class Agent<C = unknown, D = unknown> {
     }
     await this.runner.settle(turn, outcome);
     yield { done: true, result: this.runner.finish(turn) };
+  }
+
+  /**
+   * Every wake a saved session is waiting on, as its turns scheduled them: each parked run's,
+   * and each silence flow's since the assistant last spoke. For a queue that lost its jobs, and
+   * for sessions no turn has armed yet, such as blobs lifted by `migrateSession`. It changes
+   * nothing and spends no call: enqueue the entries as you would a turn's `schedule[]`.
+   */
+  pendingWakes(input: PendingWakesInput<C, D>): ScheduleEntry[] {
+    return this.runner.pendingWakes(input);
   }
 
   /** Load, Ingest, Understand, Decide and Run: everything before the one speaker is known. */

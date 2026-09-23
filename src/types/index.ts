@@ -10,6 +10,7 @@ export type {
   EndReason,
   Idle,
   OutboundMessage,
+  PendingWakesInput,
   ScheduleEntry,
   Silenced,
   TurnBase,

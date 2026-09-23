@@ -94,7 +94,7 @@ console.log(outbox[0]?.text, (await store.load("s1"))?.version); // "…", 1
 
 Three attempts is enough: a fourth conflict means two workers are firing on the same session, which is a queue problem, not a race.
 
-Three things happen after the save and never before it: messages go out (honouring `afterMs`, keyed by `key`), `schedule[]` entries go into your queue with `jobId = key`, and at fire time you call `turn({ wake: key })` through this same loop. `changed: false` means the input changed nothing (a stale wake, a repeated message id): skip the save and the send.
+Three things happen after the save and never before it: messages go out (honouring `afterMs`, keyed by `key`), `schedule[]` entries go into your queue with the key in the payload and `encodeURIComponent(key)` as the job id (BullMQ refuses a `:` in a custom id, and every key has one), and at fire time you call `turn({ wake: key })` through this same loop. `changed: false` means the input changed nothing (a stale wake, a repeated message id): skip the save and the send.
 
 ## What a row holds
 

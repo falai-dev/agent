@@ -182,3 +182,32 @@ describe("S10: wakes, versions and replays", () => {
     expect(b.result.schedule).toEqual([{ key: `silence:cutuca:s1:${clock.now().getTime()}`, at: at(clock.now().toISOString(), "1h"), replaces: first.key }]);
   });
 });
+
+describe("pendingWakes: what a saved session waits on", () => {
+  const strip = (entries: { key: string; at: Date; replaces?: string }[]) => entries.map(({ key, at: when }) => ({ key, at: when }));
+
+  test("after each turn it is that turn's schedule, less what the turn replaced", async () => {
+    const { runner, clock } = setup();
+    const t0 = await drive(runner, { sessionId: "s1", context: ai, message: "quer saber como funciona", id: "m1" }, { understanding: understood(), speak: () => spoken("Nome?") });
+    expect(runner.pendingWakes({ session: saved(t0.result), context: ai })).toEqual(strip(t0.result.schedule));
+
+    // The silence wake fired: retomar spoke and parked on w1. Its claim holds, so the new silence arms nothing.
+    clock.advance("24h");
+    const tw = await drive(runner, { sessionId: "s1", context: ai, session: saved(t0.result), wake: t0.result.schedule[0].key }, { speak: () => spoken("Ainda aí?") });
+    expect(runner.pendingWakes({ session: saved(tw.result), context: ai })).toEqual(strip(tw.result.schedule));
+    expect(tw.result.schedule).toHaveLength(1);
+  });
+
+  test("a lifted session no turn has armed: silence counts from lastAssistantAt, and only while the lead has not written since", () => {
+    const { runner } = setup();
+    const quiet: Session<Data> = { id: "s1", v: 4, version: 3, data: {}, runs: [], claims: {}, inputs: [], metadata: {}, lastAssistantAt: T0 };
+    expect(runner.pendingWakes({ session: quiet, context: ai })).toEqual([{ key: `silence:retomar:s1:${Date.parse(T0)}`, at: at(T0, "24h") }]);
+
+    const answered = { ...quiet, lastUserAt: at(T0, "1m").toISOString() };
+    expect(runner.pendingWakes({ session: answered, context: ai })).toEqual([]);
+    // The trigger's `if` still decides: a human owns this lead.
+    expect(runner.pendingWakes({ session: quiet, context: { lead: { owner: "human" } } })).toEqual([]);
+    // A `once` flow whose claim is held, here by another session of the lead, arms nothing.
+    expect(runner.pendingWakes({ session: quiet, context: ai, claims: { held: { "retomar:s1:": T0 }, active: [] } })).toEqual([]);
+  });
+});

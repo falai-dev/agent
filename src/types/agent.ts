@@ -112,6 +112,13 @@ export type TurnKind =
 
 export type TurnInput<C = unknown, D = unknown> = TurnBase<C, D> & TurnKind;
 
+/** A saved session and the host inputs a turn on it would carry: what `pendingWakes` reads. */
+export type PendingWakesInput<C = unknown, D = unknown> = ContextField<C> & {
+  session: Session<D>;
+  anchors?: TurnBase<C, D>["anchors"];
+  claims?: TurnBase<C, D>["claims"];
+};
+
 // ── turn() result ───────────────────────────────────────────────────────
 
 export interface OutboundMessage {
@@ -127,7 +134,7 @@ export interface OutboundMessage {
   stepId?: string;
 }
 
-/** A wake to enqueue with `jobId = key`; at fire time call `turn({ wake: key })`. */
+/** A wake to enqueue, keyed by `key` (encode it as a queue job id: BullMQ refuses a `:`); at fire time call `turn({ wake: key })`. */
 export interface ScheduleEntry {
   key: string;
   at: Date;

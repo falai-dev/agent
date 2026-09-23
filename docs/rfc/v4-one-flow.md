@@ -239,7 +239,7 @@ type TurnInput<C, D, E> = {
 interface TurnResult<D> {
   session: Session<D>; changed: boolean;             // changed: false → save nothing
   messages: Array<{ text: string; kind: 'ai' | 'verbatim'; media?: { slug: string }; afterMs: number; key: string; runId?: string; stepId?: string }>;
-  schedule: Array<{ key: string; at: Date; replaces?: string }>;   // jobId = key; at fire: turn({ wake: key })
+  schedule: Array<{ key: string; at: Date; replaces?: string }>;   // job id = the key, encoded (BullMQ refuses ':'); at fire: turn({ wake: key })
   outcomes: StepOutcome[];
   started: Array<{ runId: string; flowId: string; anchor: string; dedupeKey: string }>;
   ended: Array<Run & { reason: 'end' | 'flow' | 'reset' | 'skipped' | 'failed' | 'replaced' }>;
@@ -304,7 +304,7 @@ interface Store<D> { load(id: string): Promise<Session<D> | null>; save(session:
 
 **Keys.** Trigger key: `message`/`mention` → the input `id` (playground: `at`, replays not idempotent); `silence` → `lastAssistantAtMs`; `event`/`start` → the host key; `flow` → `${parentRunId}:${stepId}:${visit}`. Wake key: `${runId}:${stepId}:${atMs}`. Dedupe key `${flowId}:${anchor}:${nonce}`, nonce `''` for `once` and cooldown (blocked while `now - claims[key].at < cooldown`, else overwritten), the trigger key for `always` (last 50 kept).
 
-**Host contract:** (a) one `turn` per session at a time; a wake queues behind a debounced inbound not yet turned. (b) On every input: fresh `context`, `history`, `anchors` (with the lead's `lastInboundAt`), `claims` for non-`always` flows, `silenced` for every "cannot speak now" reason (ownership, Pausa, closed 24h window, quota, `sem conversa`); inbound messages carry the channel `id` and `at`. (c) `changed: false` → nothing. Else one transaction: `store.save`, `started[].dedupeKey` into a unique index, `started`/`ended` into a partial unique index `(flowId, anchor) WHERE live`, `outcomes`/`ended`/`skipped` into the `flowRuns` mirror, `messages[]` and `schedule[]` into the outbox. Conflict or unique violation → discard, replay. (d) Drain the outbox: send honoring `afterMs`, record a refused send against `key` in the mirror (`enviada`/`recusada` beside the framework's `gerada`); enqueue wakes with `jobId = key`, `queue.remove(replaces)` best-effort. (e) At fire: `turn({ wake, silenced })`. (f) Call `turn` for every inbound even while a human owns the lead. (g) `businessHours(at)` snaps, never clamps. (h) Lead-level events go to the lead's latest open conversation; none → session `lead:<id>` with `silenced: 'sem conversa'`. (i) `ProviderError` → retry the input with backoff.
+**Host contract:** (a) one `turn` per session at a time; a wake queues behind a debounced inbound not yet turned. (b) On every input: fresh `context`, `history`, `anchors` (with the lead's `lastInboundAt`), `claims` for non-`always` flows, `silenced` for every "cannot speak now" reason (ownership, Pausa, closed 24h window, quota, `sem conversa`); inbound messages carry the channel `id` and `at`. (c) `changed: false` → nothing. Else one transaction: `store.save`, `started[].dedupeKey` into a unique index, `started`/`ended` into a partial unique index `(flowId, anchor) WHERE live`, `outcomes`/`ended`/`skipped` into the `flowRuns` mirror, `messages[]` and `schedule[]` into the outbox. Conflict or unique violation → discard, replay. (d) Drain the outbox: send honoring `afterMs`, record a refused send against `key` in the mirror (`enviada`/`recusada` beside the framework's `gerada`); enqueue wakes under a job id made from the key (encoded: BullMQ refuses a `:` in a custom id), remove `replaces` the same way, best-effort. (e) At fire: `turn({ wake, silenced })`. (f) Call `turn` for every inbound even while a human owns the lead. (g) `businessHours(at)` snaps, never clamps. (h) Lead-level events go to the lead's latest open conversation; none → session `lead:<id>` with `silenced: 'sem conversa'`. (i) `ProviderError` → retry the input with backoff.
 
 ```ts
 const clock = fakeClock('2026-09-20T10:00Z');
@@ -458,7 +458,7 @@ async function runTurn(sessionId: string, input: TurnInputBody) {
         await outbox.put(tx, r.messages, r.schedule);                              // wakes ride in the same transaction
       });
     } catch (e) { if (e instanceof SessionConflictError || isUniqueViolation(e)) continue; throw e; }
-    await outbox.drain(sessionId);                                                 // send honoring afterMs, enqueue wakes jobId = key
+    await outbox.drain(sessionId);                                                 // send honoring afterMs, enqueue wakes under the encoded key
     return;
   }
 }

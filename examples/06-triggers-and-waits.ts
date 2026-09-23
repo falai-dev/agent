@@ -117,9 +117,10 @@ const agent = f.agent({
 });
 
 // ─── The host loop ─────────────────────────────────────────────────────────
-// Real hosts persist `session`, enqueue each `schedule[]` entry with
-// `jobId = key`, and call `turn({ wake: key })` when it fires. Here we keep
-// them in memory and jump the clock.
+// Real hosts persist `session`, enqueue each `schedule[]` entry under the job
+// id `encodeURIComponent(key)` (BullMQ refuses a `:` in a custom id), and call
+// `turn({ wake: key })` when it fires. Here we keep them in memory and jump
+// the clock.
 
 const context: Ctx = { lead: { id: "456", nome: "Ana", etapa: "proposta", dono: "ia", tags: [] } };
 const timers: ScheduleEntry[] = [];

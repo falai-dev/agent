@@ -170,13 +170,28 @@ A `wait` longer than 10 seconds, a `silence` trigger or an `event` trigger with 
 { key: "triagem#wamid.HBgL:w1:1790244000000", at: new Date("2026-09-24T10:00:00.000Z") }
 ```
 
-A `silence` trigger's wake also carries `replaces`: the earlier silence wake it supersedes. Put the entry in your queue with `jobId = key` and the session id in the payload. When `replaces` is set, remove that job; it is best effort, a stale wake is harmless. When the job fires:
+A `silence` trigger's wake also carries `replaces`: the earlier silence wake it supersedes. Put the entry in your queue with the key and the session id in the payload, under a job id made from the key: every key contains `:`, and BullMQ refuses a custom job id with a `:` in it unless it splits into exactly three parts, so encode it as `encodeURIComponent(key)`. When `replaces` is set, remove the job whose id is `encodeURIComponent(replaces)`; it is best effort, a stale wake is harmless. When the job fires:
 
 ```ts fragment
 await handle({ sessionId: job.data.sessionId, wake: job.data.key });
 ```
 
 Only the run still waiting on that exact key honours the wake. Anything else returns `changed: false` with one line in `r.outcomes`: `code: 'stale-wake'` for a wait that a reply already resolved, `code: 'silence-broken'` when the customer wrote after the silence wake was set, `code: 'no-session'` when there is no session. So you do not have to cancel jobs: fire every one and the framework drops the stale ones.
+
+### When the queue loses its jobs
+
+A flushed Redis, or sessions lifted from 3.x by `migrateSession`, leave conversations waiting on wakes nobody will fire. `agent.pendingWakes({ session, context })` returns every wake a saved session waits on: each parked run's, and each silence flow's counted from `lastAssistantAt`, with the trigger's `if` and `repeat` judged on the `context` and `claims` you pass, as a turn would. It changes nothing and spends no model call. Enqueue what it returns as you would a turn's `schedule[]`:
+
+```ts fragment
+for (const wake of agent.pendingWakes({ session, context })) {
+  await queue.add("wake", { sessionId: session.id, key: wake.key }, {
+    jobId: encodeURIComponent(wake.key),
+    delay: Math.max(0, wake.at.getTime() - Date.now()),
+  });
+}
+```
+
+Running it twice is safe: BullMQ ignores a job whose id is already queued, and a wake that fires twice is dropped the second time as stale.
 
 `fakeClock` and `MemoryScheduler` are the test doubles for this: [Testing](../guides/testing.md) plays a two-day follow-up in one test.
 
