@@ -337,6 +337,45 @@ describe("the floor: suspended runs resume most recently suspended first", () =>
     expect(t5.result.session.runs.map((r) => [r.id, r.status])).toEqual([["tarde#a", "asking"], ["funil#b", "suspended"]]);
     expect(t5.result.session.runs[0]).not.toHaveProperty("suspendedAt");
   });
+  test("a run resumed on a message has its if branches judged before its step moves on", async () => {
+    const compra = f.flow({
+      id: "compra", name: "Compra",
+      steps: [
+        { id: "q", collect: ["modelo"], branches: [{ if: ({ context }) => context.lead.tags.includes("comprou"), then: "pos" }], then: "avisa" },
+        { id: "avisa", do: "notify", with: {}, then: "end" },
+        { id: "pos", say: "Vi que você já comprou! Posso ajudar no pós-venda?" },
+      ],
+    });
+    const comprou: Ctx = { lead: { tags: ["vip", "comprou"], owner: "ai" } };
+    const { runner, clock, calls } = setup([compra, outro]);
+    const t1 = await drive(runner, start("compra", "a"), { speak: () => spoken("Qual modelo?") });
+    clock.advance("1m");
+    const t2 = await drive(runner, start("outro", "b", saved(t1.result)), { speak: () => spoken("Qual modelo você quer?") });
+    expect(t2.result.session.runs.map((r) => [r.id, r.status])).toEqual([["compra#a", "suspended"], ["outro#b", "asking"]]);
+    clock.advance("1m");
+    const t3 = await drive(runner, message("um Corolla", "m3", { session: saved(t2.result), context: comprou }), {
+      understanding: understood({ fields: { modelo: "Corolla" } }),
+    });
+    expect(calls).toEqual([]);
+    expect(t3.result.messages.map((m) => m.text)).toEqual(["Vi que você já comprou! Posso ajudar no pós-venda?"]);
+  });
+
+  test("a message nobody answered goes down the suspended stack until a run answers it", async () => {
+    const campanha = f.flow({ id: "campanha", name: "Campanha", steps: [{ id: "m", collect: ["modelo"] }] });
+    const { runner, clock } = setup([funil, campanha, outro]);
+    const t1 = await drive(runner, start("funil", "a"), { speak: () => spoken("Seu nome?") });
+    clock.advance("1m");
+    const t2 = await drive(runner, start("campanha", "b", saved(t1.result)), { speak: () => spoken("Qual modelo te interessa?") });
+    clock.advance("1m");
+    const t3 = await drive(runner, start("outro", "c", saved(t2.result)), { speak: () => spoken("Qual modelo?") });
+    expect(t3.result.session.runs.map((r) => [r.id, r.status])).toEqual([["funil#a", "suspended"], ["campanha#b", "suspended"], ["outro#c", "asking"]]);
+    clock.advance("1m");
+    const t4 = await drive(runner, message("um Corolla", "m4", { session: saved(t3.result) }), {
+      understanding: understood({ fields: { modelo: "Corolla" } }),
+      speak: () => spoken("Anotado! E seu nome?"),
+    });
+    expect(t4.result.messages.map((m) => m.key)).toEqual(["funil#a:q:1"]);
+  });
 });
 
 describe("if, then { step, clear }, onEnd, while, replay and the step cap", () => {
@@ -700,6 +739,90 @@ describe("onEnd 'stay' answers every message from the last talk step, even one t
     expect(t2.talk).toBeNull();
     expect(t2.result.messages.map((m) => m.text)).toEqual(["Olá! Como posso ajudar?"]);
     expect(t2.result.session.runs.map((r) => [r.id, r.status, r.stepId])).toEqual([["modelo#m1", "suspended", "m"], ["boas#m2", "asking", "p"]]);
+  });
+
+  test("chained into by a mention beside the asker, it waits suspended: the message stays the asker's", async () => {
+    const modelo = f.flow({ id: "modelo", name: "Modelo", on: [{ message: ["carro"] }], steps: [{ id: "m", collect: ["modelo"] }, { id: "n", do: "notify", with: {} }] });
+    const alerta = f.flow({ id: "alerta", name: "Alerta", on: [{ mention: ["urgente"] }], steps: [{ id: "t", do: "add_tags", with: {}, then: { flow: "lead" } }] });
+    const { runner } = setup([modelo, alerta, lead]);
+    const known: Session<Data> = { id: "s1", v: 4, version: 1, data: { nome: "Ana" }, runs: [], claims: {}, inputs: [], metadata: {} };
+    const t1 = await drive(runner, message("carro", "m1", { session: known }), { understanding: routedTo("modelo"), speak: () => spoken("Qual modelo?") });
+    const t2 = await drive(runner, message("ainda não sei, é urgente", "m2", { session: saved(t1.result) }), {
+      understanding: understood({ mentions: { alerta: true } }),
+      speak: () => spoken("Sem pressa. Qual modelo?"),
+    });
+    expect(isTalk(t2.talk) && t2.talk.run.id).toBe("modelo#m1");
+    expect(t2.result.session.runs.map((r) => [r.flowId, r.status])).toEqual([["modelo", "asking"], ["lead", "suspended"]]);
+  });
+
+  test("a reply that brings the run back to its stay has that step's when branches judged", async () => {
+    const seguro = f.flow({
+      id: "seguro", name: "Seguro", on: [{ message: ["seguro"] }], onEnd: "stay",
+      steps: [
+        { id: "s", prompt: "Fale do seguro.", branches: [{ when: "quer falar com um humano", then: "humano" }] },
+        { id: "w", wait: "1d", else: "end", then: "lembra" },
+        { id: "lembra", say: "Ainda por aí?", then: "end" },
+        { id: "humano", do: "notify", with: {}, then: "end" },
+      ],
+    });
+    const { runner, calls } = setup([seguro]);
+    const t1 = await drive(runner, message("seguro", "m1"), { understanding: routedTo("seguro"), speak: () => spoken("Temos três planos.") });
+    expect(t1.result.session.runs.map((r) => [r.status, r.stepId])).toEqual([["waiting", "w"]]);
+    const t2 = await drive(runner, message("quero falar com um humano", "m2", { session: saved(t1.result) }), {
+      understanding: understood({ branches: { "seguro#m1/s/0": true } }),
+      speak: () => spoken("Já chamo alguém."),
+    });
+    expect(calls.map((c) => c.key)).toEqual(["seguro#m1:humano:1"]);
+    expect(t2.result.messages.map((m) => m.text)).toEqual(["Já chamo alguém."]);
+  });
+
+  test("routed to when the asker's own say already answered, it takes the conversation and the asker does not ask again", async () => {
+    const pedido = f.flow({
+      id: "pedido", name: "Pedido", on: [{ message: ["pedido"] }],
+      steps: [{ id: "m", collect: ["modelo"] }, { id: "ok", say: "Anotado!" }, { id: "c", collect: ["confirmado"] }],
+    });
+    const { runner } = setup([pedido, lead]);
+    const known: Session<Data> = { id: "s1", v: 4, version: 1, data: { nome: "Ana" }, runs: [], claims: {}, inputs: [], metadata: {} };
+    const t1 = await drive(runner, message("pedido", "m1", { session: known }), { understanding: routedTo("pedido"), speak: () => spoken("Qual modelo?") });
+    const t2 = await drive(runner, message("um Corolla. quero falar de seguro", "m2", { session: saved(t1.result) }), {
+      understanding: understood({ flows: { lead: 90 }, fields: { modelo: "Corolla" } }),
+      speak: () => spoken("Confirma o pedido?"),
+    });
+    expect(t2.talk).toBeNull();
+    expect(t2.result.messages.map((m) => m.text)).toEqual(["Anotado!"]);
+    expect(t2.result.session.runs.map((r) => [r.id, r.status])).toEqual([["pedido#m1", "suspended"], ["lead#m2", "asking"]]);
+  });
+
+  test("edited from 'stay' to 'end', a staying run ends on the next message", async () => {
+    const steps: Flow<Ctx, Data>["steps"] = [{ id: "c", prompt: "Converse." }];
+    const v1 = f.flow({ id: "chat", name: "Chat", on: [{ message: ["oi"] }], onEnd: "stay", steps });
+    const v2 = f.flow({ id: "chat", name: "Chat", on: [{ message: ["oi"] }], onEnd: "end", steps });
+    const t1 = await drive(setup([v1]).runner, message("oi", "m1"), { understanding: routedTo("chat"), speak: () => spoken("Olá!") });
+    expect(t1.result.session.runs[0]).toMatchObject({ status: "asking", staying: true });
+    const t2 = await drive(setup([v2]).runner, message("e aí", "m2", { session: saved(t1.result) }), { speak: () => spoken("Tudo certo.") });
+    expect(t2.result.ended.map((r) => r.reason)).toEqual(["end"]);
+    expect(t2.result.session.runs).toEqual([]);
+  });
+
+  test("staying with a field still pending, each answer has its own key and max-asks is reported once", async () => {
+    const recusa = f.flow({
+      id: "lead", name: "Lead", on: [{ message: ["quero"] }], onEnd: "stay",
+      steps: [
+        { id: "q", collect: ["nome"], maxAsks: 3, branches: [{ when: "não quer dizer o nome", then: "avisa" }] },
+        { id: "avisa", do: "notify", with: {}, then: "end" },
+      ],
+    });
+    const { runner } = setup([recusa]);
+    const t1 = await drive(runner, message("quero", "m1"), { understanding: routedTo("lead"), speak: () => spoken("Qual seu nome?") });
+    const t2 = await drive(runner, message("prefiro não dizer", "m2", { session: saved(t1.result) }), {
+      understanding: understood({ branches: { "lead#m1/q/0": true } }),
+      speak: () => spoken("Tudo bem! Em que posso ajudar?"),
+    });
+    const t3 = await drive(runner, message("qual o preço?", "m3", { session: saved(t2.result) }), { speak: () => spoken("R$ 99.") });
+    const t4 = await drive(runner, message("e o prazo?", "m4", { session: saved(t3.result) }), { speak: () => spoken("Dois dias.") });
+    expect([t2, t3, t4].flatMap((t) => t.result.messages.map((m) => m.key))).toEqual(["lead#m1:q:2", "lead#m1:q:3", "lead#m1:q:4"]);
+    expect([t2, t3, t4].map((t) => t.result.outcomes.filter((o) => o.code === "max-asks").length)).toEqual([0, 1, 0]);
+    expect(t4.result.session.runs[0]).toMatchObject({ stepId: "q", staying: true, asked: { nome: 3 } });
   });
 
   test("a stay flow with no talk step ends like 'end'", async () => {

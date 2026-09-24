@@ -79,6 +79,8 @@ console.log(t2.messages.map((m) => m.text)); // ["Claro, vou chamar alguém da e
 
 If no branch holds, the step carries on: it speaks again with what is still pending, or completes when its fields are known.
 
+A suspended run that gets the conversation back in the middle of a turn, because the run that was asking finished without a word, is checked the same way before it speaks, but only its `if` branches: the model was not asked about its `when` branches this turn.
+
 **On a `wait` step**, the branches are judged only when the customer replies while the run is parked, which is also when `else` applies. The first `if` branch that holds wins over `else`. A `wait` with no `else` ignores the reply, branches included. When the timer fires, branches are not consulted: the run takes `then`, or `else` if the customer wrote after the wait was set. The outcome line reads `code: 'replied'` or `code: 'no-reply'`.
 
 ```ts

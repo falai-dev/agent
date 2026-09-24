@@ -661,6 +661,9 @@ export class Runner<C = unknown, D = unknown> {
       }
     }
 
+    // Unless routing or Ingest moved it, the message is the asker's: written down, so a chain beside it cannot take it.
+    if (asker && !route && !turn.floorFromIngest) turn.floorRunId = asker.id;
+
     for (const [field, raw] of Object.entries(understanding?.fields ?? {})) this.writeField(turn, field, raw);
 
     if (asker && turn.session.runs.includes(asker) && asker.status === "asking") {
@@ -709,16 +712,17 @@ export class Runner<C = unknown, D = unknown> {
 
   async advance(turn: Turn<C, D>): Promise<TalkRequest<C, D> | IdleRequest<C, D> | null> {
     if (turn.ignored) return null;
-    this.resumeSuspended(turn);
+    this.resume(turn);
     turn.queue = [...turn.session.runs];
     await this.drain(turn);
-    // The asker moved on without a word: the run it suspended answers the message instead.
-    if (turn.what.kind === "message" && turn.silenced === undefined && !turn.talk && turn.spokeBy.size === 0) {
-      const resumed = this.resumeSuspended(turn);
-      if (resumed) {
-        turn.queue.push(resumed);
-        await this.drain(turn);
-      }
+    // An asker that moved on without a word hands the message to the run it suspended, and that one to the next.
+    // Each pass takes a run off the suspended stack, so the stack's size bounds the loop.
+    for (let left = turn.session.runs.length; left > 0; left--) {
+      if (turn.what.kind !== "message" || turn.silenced !== undefined || turn.talk || turn.spokeBy.size > 0) break;
+      const resumed = this.resume(turn);
+      if (!resumed) break;
+      turn.queue.push(resumed);
+      await this.drain(turn);
     }
     return this.speaker(turn);
   }
@@ -790,6 +794,11 @@ export class Runner<C = unknown, D = unknown> {
       return;
     }
     if (!this.premiseHolds(turn, run, flow)) return;
+    // The flow was edited off 'stay' after this run finished its steps: its new `onEnd` decides now.
+    if (run.staying && flow.onEnd !== "stay") {
+      this.finishFlow(turn, run, flow);
+      return;
+    }
     const resuming = run.status === "asking";
     run.status = "running";
     if (run.stepId === null) {
@@ -1052,7 +1061,11 @@ export class Runner<C = unknown, D = unknown> {
     run.status = "asking";
   }
 
-  /** Where `stay` answers from: the talk step this run last took, so a branched flow stays on its own path. The flow's last talk step when the log names none. */
+  /**
+   * Where `stay` answers from: the talk step this run last took, so a branched flow stays on its own path. The flow's last talk step when the log names none.
+   * ponytail: read back from `run.outcomes`, which keeps 50 lines; a tail of 50+ lines after the talk step (a long polling loop) loses it and the run
+   * stays on the flow's last talk step. Upgrade: record the talk step on the run when it talks.
+   */
   private stayStep(run: Run, flow: Flow<C, D>): TalkOf<C, D> | undefined {
     for (let i = run.outcomes.length - 1; i >= 0; i--) {
       const { kind, stepId } = run.outcomes[i];
@@ -1080,9 +1093,13 @@ export class Runner<C = unknown, D = unknown> {
       for (const other of others) {
         other.status = "suspended";
         other.suspendedAt = turn.nowIso;
+        if (turn.talk?.run === other) turn.talk = undefined;
       }
-      // A message nothing has answered yet gets its answer now.
-      if (turn.what.kind === "message" && turn.silenced === undefined && !turn.speakDone && turn.spokeBy.size === 0) run.status = "running";
+      // A message nothing has answered yet gets its answer now. Reached in Ingest, the run stays asking: Decide judges its
+      // branches as the asker's, and it answers when it moves.
+      if (!turn.ingesting && turn.what.kind === "message" && turn.silenced === undefined && !turn.speakDone && turn.spokeBy.size === 0) {
+        run.status = "running";
+      }
       return;
     }
     if (onEnd === "reset" && last) {
@@ -1111,6 +1128,17 @@ export class Runner<C = unknown, D = unknown> {
     run.status = "waiting";
     run.waiting = { ...waiting, until: at.toISOString(), setAt: turn.nowIso };
     turn.schedule.push({ key: waiting.key, at });
+  }
+
+  /** `resumeSuspended`, and on a message the resumed run's `if` branches are judged before it speaks, as the asker's are in Decide. */
+  private resume(turn: Turn<C, D>): Run | undefined {
+    const run = this.resumeSuspended(turn);
+    if (run && turn.what.kind === "message") {
+      const flow = this.flows.get(run.flowId);
+      const step = flow && this.stepOf(flow, run.stepId);
+      if (flow && step && isTalk(step)) this.fireBranch(turn, run, flow, step, null);
+    }
+    return run;
   }
 
   /** When nobody asks, the most recently suspended run returns to asking. */
@@ -1174,19 +1202,22 @@ export class Runner<C = unknown, D = unknown> {
     Object.assign(turn.session.data, spoken.data);
     this.outcome(turn, run, { kind: talkKind(step), status: "ok", key, llmCalls: spoken.llmCalls, stepId: step.id });
     if (!turn.session.runs.includes(run)) return;
-    if (step.collect?.length) {
-      const pending = pendingFields(step, turn.session.data, run.asked);
-      if (pending.length) {
-        for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
-        run.status = "asking";
-        return;
-      }
-      if (!run.staying) this.reportMaxAsks(turn, run, step);
-    }
+    const pending = step.collect?.length ? pendingFields(step, turn.session.data, run.asked) : [];
+    for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
     if (run.staying) {
+      // Each answer is a new visit, so a new key, even while a field is still pending; that field's max-asks is reported once, when it gets there.
+      const maxAsks = step.maxAsks ?? DEFAULT_MAX_ASKS;
+      for (const field of pending) {
+        if (run.asked[field] === maxAsks) this.outcome(turn, run, { kind: "collect", status: "skipped", key, code: "max-asks", detail: field });
+      }
       this.stayAt(run, step);
       return;
     }
+    if (pending.length) {
+      run.status = "asking";
+      return;
+    }
+    this.reportMaxAsks(turn, run, step);
     run.status = "running";
     this.follow(turn, run, flow, step, step.then);
     if (turn.session.runs.includes(run) && run.status === "running") turn.queue.push(run);

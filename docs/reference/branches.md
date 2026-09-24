@@ -34,7 +34,7 @@ type Branch<C = unknown, D = unknown> = { then: Next<D> } & (
 3. The run leaves the step with the outcome `code: 'branch'` (kind `prompt` or `collect`, status `ok`, `next` naming the target) and follows `then` in the same turn. Fields the understand call extracted from the same message are written first, so `then` may land on a step that is already satisfied.
 4. When no branch holds, the step continues as usual: pending fields are harvested and the step speaks again.
 
-A `when` branch costs the understand call; when it is the only thing to judge, that is one model call the turn would not otherwise spend. An `if` branch is judged on every message turn even when no understand call happens.
+A `when` branch costs the understand call; when it is the only thing to judge, that is one model call the turn would not otherwise spend. An `if` branch is judged on every message turn even when no understand call happens. A suspended run that returns to asking during the turn, because the asker ended or moved on without a word, has its `if` branches judged before its step speaks; its `when` branches were not in the understand call, so they wait for the next message.
 
 **On a wait step.** Only `if` branches are judged, and only when the customer writes before the time passes and the step has `else`. The first `if` branch that holds replaces `else` as the target (outcome `code: 'replied'`). A `when` branch on a wait step is never asked, because a reply to a wait step does not reach the understand call. When the wake fires, branches are not consulted: the run follows `then`, or `else` when the customer wrote after the wait was set.
 
