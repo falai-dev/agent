@@ -28,6 +28,8 @@ export interface Run {
   startedAt: string;
   /** Set while `suspended`; the most recently suspended run resumes first. */
   suspendedAt?: string;
+  /** Set once an `onEnd: 'stay'` run has finished its steps: it sits on its last talk step and answers every message from there. Any other move clears it. */
+  staying?: true;
   waiting?: {
     kind: "timer" | "event";
     /** The wake key; only a `wake` equal to it is honoured. */

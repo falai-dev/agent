@@ -153,7 +153,7 @@ The code forks. No model call.
 | Form | Meaning |
 |---|---|
 | `'passo'` | Jump to that step id. |
-| `'end'` | Finish the run here, exactly as running past the last step does — `onEnd` still decides: `'end'` ends it, `'stay'` re-enters the last step and keeps asking, `'reset'` starts a fresh run. `'end'` is reserved: no step may use it as an id. |
+| `'end'` | Finish the run here, exactly as running past the last step does — `onEnd` still decides: `'end'` ends it, `'stay'` goes back to the last talk step and answers every message from there, `'reset'` starts a fresh run. `'end'` is reserved: no step may use it as an id. |
 | `{ step: 'passo', clear: ['campo'] }` | Delete the listed fields from `session.data`, then jump. The way to ask something again. |
 | `{ flow: 'outro', input? }` | End this run (reason `'flow'`) and start `outro` in the same turn, one hop deeper. The child gets `input`, or this run's `input` when absent, and holds the floor. `flow` is a template. |
 

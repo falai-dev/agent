@@ -112,7 +112,7 @@ function checkRun(raw: unknown, index: number, bad: Bad): Run {
 
   const status = text("status");
   if (!RUN_STATUS.has(status)) throw bad(`${at}.status is "${status}"`);
-  const { stepId, hop, outcomes, input, waiting, suspendedAt } = raw;
+  const { stepId, hop, outcomes, input, waiting, suspendedAt, staying } = raw;
   if (stepId !== null && typeof stepId !== "string") throw bad(`${at}.stepId is ${describe(stepId)}, expected text or null`);
   if (!isWhole(hop)) throw bad(`${at}.hop is ${describe(hop)}, expected a whole number`);
   if (!Array.isArray(outcomes)) throw bad(`${at}.outcomes is ${describe(outcomes)}, expected a list`);
@@ -139,6 +139,7 @@ function checkRun(raw: unknown, index: number, bad: Bad): Run {
   if (input !== undefined) run.input = input;
   if (waiting !== undefined) run.waiting = waiting as Run["waiting"];
   if (typeof suspendedAt === "string") run.suspendedAt = suspendedAt;
+  if (staying === true) run.staying = true;
   return run;
 }
 

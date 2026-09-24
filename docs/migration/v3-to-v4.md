@@ -147,7 +147,7 @@ const triagem = f.flow({
     { id: 'aviso', do: 'notify', with: { recipient: 'owner', message: 'Lead: {{data.nome}} ({{data.empresa}})' } },
     { id: 'tchau', say: 'Um vendedor continua daqui.' },
   ],
-  onEnd: 'end',   // or 'stay' (repeat the last step) or 'reset' (first step, data kept)
+  onEnd: 'end',   // or 'stay' (the last talk step answers every later message) or 'reset' (first step, data kept)
 });
 ```
 

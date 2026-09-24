@@ -166,6 +166,15 @@ describe("migrateSession: v4 blobs", () => {
     expect(session).toEqual(blob as unknown as Session); // fixture is the exact v4 shape; the cast only types the comparison
   });
 
+  test("a run's staying mark survives the round trip; anything but true is dropped", () => {
+    const blob = fixture("v4");
+    const [run] = blob.runs as Blob[];
+    const read = (staying: unknown) =>
+      migrateSession({ ...blob, runs: [{ ...run, staying }] }, { sessionId: "conv_v4", flowIdOf: identity }).runs[0];
+    expect(read(true).staying).toBe(true);
+    expect(read("yes")).not.toHaveProperty("staying");
+  });
+
   test("a v4 blob drops a store's own bookkeeping keys and nothing else", () => {
     const blob = { ...fixture("v4"), createdAt: "x", updatedAt: "y" };
     const session = migrateSession(blob, { sessionId: "conv_v4", flowIdOf: identity });

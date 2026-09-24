@@ -443,6 +443,122 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
   });
 });
 
+describe("onEnd 'stay' answers every message from the last talk step, even one that only collects", () => {
+  const lead = f.flow({
+    id: "lead", name: "Lead", on: [{ message: ["quero"] }], onEnd: "stay",
+    steps: [{ id: "q", collect: ["nome"], maxAsks: 2 }, { id: "avisa", do: "notify", with: {} }],
+  });
+  const asked = async () => {
+    const { runner, calls } = setup([lead]);
+    const t1 = await drive(runner, message("quero", "m1"), { understanding: routedTo("lead"), speak: () => spoken("Qual seu nome?") });
+    return { runner, calls, t1 };
+  };
+
+  test("the reply that fills the field is answered, the tail runs once, then every message gets its own key", async () => {
+    const { runner, calls, t1 } = await asked();
+    const t2 = await drive(runner, message("Ana", "m2", { session: saved(t1.result) }), { speak: () => spoken("Prazer, Ana!", { nome: "Ana" }) });
+    expect(t2.result.messages.map((m) => m.key)).toEqual(["lead#m1:q:1"]);
+    expect(calls.map((c) => c.key)).toEqual(["lead#m1:avisa:1"]);
+    expect(t2.result.session.runs[0]).toMatchObject({ stepId: "q", status: "asking", staying: true, visits: { q: 2, avisa: 1 } });
+
+    const t3 = await drive(runner, message("e o preço?", "m3", { session: saved(t2.result) }), { speak: () => spoken("R$ 99.") });
+    const t4 = await drive(runner, message("e o prazo?", "m4", { session: saved(t3.result) }), { speak: () => spoken("Dois dias.") });
+    expect([t3, t4].map((t) => t.result.messages.map((m) => m.key))).toEqual([["lead#m1:q:2"], ["lead#m1:q:3"]]);
+    expect(isTalk(t3.talk) && t3.talk.pending).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(t4.result.ended).toEqual([]);
+    expect(t4.result.session.runs[0]).toMatchObject({ status: "asking", staying: true, visits: { q: 4, avisa: 1 } });
+  });
+
+  test("a field the understand call filled finishes the flow and the step answers that same message", async () => {
+    const { runner, calls, t1 } = await asked();
+    const t2 = await drive(runner, message("sou a Ana", "m2", { session: saved(t1.result) }), {
+      understanding: understood({ fields: { nome: "Ana" } }),
+      speak: () => spoken("Prazer, Ana!"),
+    });
+    expect(t2.result.outcomes.map((o) => [o.stepId, o.status, o.key])).toEqual([
+      ["q", "ok", "lead#m1:q:1"],
+      ["avisa", "ok", "lead#m1:avisa:1"],
+      ["q", "ok", "lead#m1:q:2"],
+    ]);
+    expect(t2.result.messages.map((m) => [m.key, m.text])).toEqual([["lead#m1:q:2", "Prazer, Ana!"]]);
+    expect(calls).toHaveLength(1);
+    expect(t2.result.session.runs[0]).toMatchObject({ status: "asking", staying: true, visits: { q: 3 } });
+  });
+
+  test("the message that hits maxAsks is still answered, and max-asks is reported once", async () => {
+    const { runner, t1 } = await asked();
+    const t2 = await drive(runner, message("hm", "m2", { session: saved(t1.result) }), { speak: () => spoken("Sem problema.") });
+    expect(t2.result.messages.map((m) => m.key)).toEqual(["lead#m1:q:1"]);
+    const t3 = await drive(runner, message("oi?", "m3", { session: saved(t2.result) }), { speak: () => spoken("Oi! Em que ajudo?") });
+    expect(t3.result.messages.map((m) => m.key)).toEqual(["lead#m1:q:2"]);
+    const t4 = await drive(runner, message("preço?", "m4", { session: saved(t3.result) }), { speak: () => spoken("R$ 99.") });
+    expect(t4.result.messages.map((m) => m.key)).toEqual(["lead#m1:q:3"]);
+    const maxAsks = [t2, t3, t4].flatMap((t) => t.result.outcomes.filter((o) => o.code === "max-asks"));
+    expect(maxAsks).toEqual([expect.objectContaining({ detail: "nome", stepId: "q" })]);
+  });
+
+  test("a silenced message leaves the run staying, asking, with zero calls", async () => {
+    const { runner, t1 } = await asked();
+    const t2 = await drive(runner, message("Ana", "m2", { session: saved(t1.result) }), { speak: () => spoken("Prazer!", { nome: "Ana" }) });
+    const t3 = await drive(runner, message("oi", "m3", { session: saved(t2.result), silenced: "pausa" }));
+    expect(t3.talk).toBeNull();
+    expect(t3.result.llmCalls).toBe(0);
+    expect(t3.result.ended).toEqual([]);
+    expect(t3.result.session.runs[0]).toMatchObject({ status: "asking", staying: true, visits: { q: 2 } });
+  });
+
+  test("a silenced message that finishes the flow leaves it staying without a word", async () => {
+    const { runner, calls, t1 } = await asked();
+    const t2 = await drive(runner, message("sou a Ana", "m2", { session: saved(t1.result), silenced: { reason: "pausa", understand: true } }), {
+      understanding: understood({ fields: { nome: "Ana" } }),
+    });
+    expect(t2.talk).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(t2.result.session.runs[0]).toMatchObject({ status: "asking", staying: true, visits: { q: 2 } });
+  });
+
+  test("a start turn for another flow leaves the staying run where it is", async () => {
+    const tarefa = f.flow({ id: "tarefa", name: "Tarefa", steps: [{ id: "n", do: "notify", with: {} }] });
+    const { runner, calls } = setup([lead, tarefa]);
+    const t1 = await drive(runner, message("quero", "m1"), { understanding: routedTo("lead"), speak: () => spoken("Nome?") });
+    const t2 = await drive(runner, message("Ana", "m2", { session: saved(t1.result) }), { speak: () => spoken("Prazer!", { nome: "Ana" }) });
+    const t3 = await drive(runner, { sessionId: "s1", context: ai, session: saved(t2.result), start: { flow: "tarefa", key: "k" } });
+    expect(t3.talk).toBeNull();
+    expect(calls.map((c) => c.key)).toEqual(["lead#m1:avisa:1", "tarefa#k:n:1"]);
+    expect(t3.result.session.runs).toEqual([t2.result.session.runs[0]]);
+  });
+
+  test("a branch taken from the staying step moves the run and it stops staying", async () => {
+    const menu = f.flow({
+      id: "menu", name: "Menu", on: [{ message: ["oi"] }], onEnd: "stay",
+      steps: [
+        { id: "h", collect: ["nome"] },
+        { id: "r", prompt: "Responda.", branches: [{ when: "é outra pessoa", then: { step: "h", clear: ["nome"] } }] },
+      ],
+    });
+    const { runner } = setup([menu]);
+    const known: Session<Data> = { id: "s1", v: 4, version: 1, data: { nome: "Ana" }, runs: [], claims: {}, inputs: [], metadata: {} };
+    const t1 = await drive(runner, message("oi", "m1", { session: known }), { understanding: routedTo("menu"), speak: () => spoken("Oi, Ana!") });
+    expect(t1.result.session.runs[0]).toMatchObject({ stepId: "r", status: "asking", staying: true });
+    const t2 = await drive(runner, message("não sou a Ana", "m2", { session: saved(t1.result) }), {
+      understanding: understood({ branches: { "menu#m1/r/0": true } }),
+    });
+    expect(isTalk(t2.talk) && [t2.talk.step.id, t2.talk.pending]).toEqual(["h", ["nome"]]);
+    expect(t2.result.session.data).toEqual({});
+    expect(t2.result.session.runs[0].stepId).toBe("h");
+    expect(t2.result.session.runs[0]).not.toHaveProperty("staying");
+  });
+
+  test("a stay flow with no talk step ends like 'end'", async () => {
+    const tags = f.flow({ id: "tags", name: "Tags", onEnd: "stay", steps: [{ id: "t", do: "add_tags", with: { tags: ["x"] } }] });
+    const { runner } = setup([tags]);
+    const { result } = await drive(runner, { sessionId: "s1", context: ai, start: { flow: "tags", key: "k" } });
+    expect(result.ended.map((r) => r.reason)).toEqual(["end"]);
+    expect(result.session.runs).toEqual([]);
+  });
+});
+
 describe("silenced: the host gate is one mouth", () => {
   const triagem = f.flow({ id: "triagem", name: "Triagem", on: [{ message: ["quer"] }], steps: [{ id: "quem", collect: ["nome"] }, { id: "avisa", do: "notify", with: {} }] });
   const nudge = f.flow({ id: "nudge", name: "Nudge", steps: [{ id: "w", wait: "1h" }, { id: "p", prompt: "Cutuque." }] });

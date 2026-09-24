@@ -63,7 +63,7 @@ It enters `steps[0]` in the same turn unless the trigger has `after`. Keys and s
 
 **`onEnd`.**
 - `'end'`: the run ends with reason `'end'`.
-- `'stay'`: the run re-enters the last step (a new visit, so new keys) and stays asking. It speaks that step again on the next message. Meant for a last talk step that answers follow-up questions.
+- `'stay'`: the run goes back to the flow's last talk step and stays there, asking. From then on that step answers every message, even when it has nothing left to collect, and each answer is a new visit, so a new key. The steps after it ran once, on the way to the end, and do not run again. If the run finishes on a message nobody has answered yet, the step answers it in that same turn. A branch on the step still moves the run. A flow with no talk step ends, as with `'end'`.
 - `'reset'`: the run ends with reason `'reset'` and a fresh run of the same flow starts at `steps[0]`, data kept, one hop deeper. A flow that resets forever without asking anything stops at hop 5, with `code: 'hop-limit'`.
 
 **Instructions and tools while speaking.** The speak call sees the agent's instructions, then this flow's, then the step's, each already filtered by its `if`. Tools are the step's `tools`; without one, the flow's `tools`; without that, every agent tool.

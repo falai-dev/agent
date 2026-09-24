@@ -255,7 +255,7 @@ export interface Flow<C = unknown, D = unknown> {
   while?: Pred<C, D>;
   clearOnStart?: (keyof D & string)[];
   steps: Step<C, D>[];
-  /** What the run does after its last step. Default `'end'`. */
+  /** What the run does after its last step. Default `'end'`. `'stay'`: the last talk step answers every later message. */
   onEnd?: "end" | "stay" | "reset";
   instructions?: Instruction<C, D>[];
   tools?: string[];

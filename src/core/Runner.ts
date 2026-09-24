@@ -824,7 +824,9 @@ export class Runner<C = unknown, D = unknown> {
       let pending: string[] = [];
       if (step.collect?.length) {
         pending = pendingFields(step, data, run.asked);
-        if (!pending.length) {
+        // A `stay` run answers even with nothing left to collect: answering is what it stays for. It only runs on a message
+        // (asking runs sit out wakes and events), and on a silenced one the check below keeps it asking.
+        if (!pending.length && !run.staying) {
           this.reportMaxAsks(turn, run, step);
           this.outcome(turn, run, resuming
             ? { kind, status: "ok", key, next: nextLabel(step.then) }
@@ -1021,15 +1023,25 @@ export class Runner<C = unknown, D = unknown> {
     run.visits[stepId] = (run.visits[stepId] ?? 0) + 1;
     run.status = "running";
     delete run.waiting;
+    delete run.staying;
+  }
+
+  /** `onEnd: 'stay'`: the run sits on its last talk step and answers every message from there, each answer a new visit and so a new key. */
+  private stayAt(run: Run, step: Step<C, D>): void {
+    this.enter(run, step.id);
+    run.staying = true;
+    run.status = "asking";
   }
 
   private finishFlow(turn: Turn<C, D>, run: Run, flow: Flow<C, D>): void {
     const onEnd = flow.onEnd ?? "end";
     const last = flow.steps[flow.steps.length - 1];
-    if (onEnd === "stay" && last) {
-      // "repete o último passo": the run stays live at its last step, re-entered so the repetition mints a new key, and runs it on the next message.
-      this.enter(run, last.id);
-      run.status = "asking";
+    const stay = onEnd === "stay" ? [...flow.steps].reverse().find(isTalk) : undefined;
+    if (stay) {
+      // The steps after it ran once, on the way here; staying, it only answers. A lead's message nobody has answered yet
+      // gets its answer now, so the step runs in this turn instead of waiting for the next message.
+      this.stayAt(run, stay);
+      if (turn.what.kind === "message" && turn.silenced === undefined && !turn.speakDone && !turn.talk) run.status = "running";
       return;
     }
     if (onEnd === "reset" && last) {
@@ -1127,7 +1139,11 @@ export class Runner<C = unknown, D = unknown> {
         run.status = "asking";
         return;
       }
-      this.reportMaxAsks(turn, run, step);
+      if (!run.staying) this.reportMaxAsks(turn, run, step);
+    }
+    if (run.staying) {
+      this.stayAt(run, step);
+      return;
     }
     run.status = "running";
     this.follow(turn, run, flow, step, step.then);

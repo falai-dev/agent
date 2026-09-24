@@ -151,7 +151,7 @@ Ends this run with `reason: 'flow'` and starts the other flow in the same turn. 
 | `onEnd` | What happens | `ended[].reason` |
 |---|---|---|
 | `'end'` (default) | the run ends; the session is idle | `'end'` |
-| `'stay'` | the run stays at its last step and runs it again on the next message; each repetition mints a new key | none: the run does not end |
+| `'stay'` | the run goes back to its last talk step and answers every later message from there, with a new key each time; the steps after that talk step do not run again | none: the run does not end |
 | `'reset'` | the run ends and a fresh run of the same flow starts at the first step, data kept, one hop deeper | `'reset'` |
 
 ```ts
@@ -168,6 +168,8 @@ const faq = f.flow({
   steps: [{ id: "r", prompt: "Responda a dúvida com base no que sabe e pergunte se ficou claro." }],
 });
 ```
+
+The talk step does not have to be the last step, and it does not need anything left to collect. A flow that asks for the name, tells the team, and then keeps talking is `steps: [{ id: "quem", collect: ["nome"] }, { id: "avisa", do: "notify" }]` with `onEnd: "stay"`: `avisa` runs once, then `quem` answers every message, even though the name is known. A flow with no talk step ends, as with `'end'`.
 
 `'reset'` is a chain into the same flow, so it costs a hop: a flow with no talk step that resets forever stops at the hop cap instead of spinning.
 
