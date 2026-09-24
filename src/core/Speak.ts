@@ -96,6 +96,8 @@ const WIRE_NAME = /^[a-zA-Z0-9_-]+$/;
 const GUIDELINE_HEADING = "## Guideline for your reply (adapt to the conversation)";
 const DEFAULT_GUIDELINE =
   "Collect what is still missing below, in the flow of the conversation, one or two things per message.";
+/** A step with no prompt and nothing left to collect: the step an `onEnd: 'stay'` run answers from. */
+const ANSWER_GUIDELINE = "Answer the customer's message, in the flow of the conversation.";
 const TOOLS_SECTION =
   "## Tools\nCall the tools provided when you need to look something up or act before answering. Once you have what you need, answer the customer.";
 const FINAL_SECTION =
@@ -330,7 +332,7 @@ function buildPrompt<C, D>(
       ? [guideline(talk.idle.prompt)]
       : [
           `## Flow\n${talk.flow.name}${talk.flow.description ? `: ${talk.flow.description}` : ""}`,
-          guideline(talk.step.prompt ?? DEFAULT_GUIDELINE),
+          guideline(talk.step.prompt ?? (talk.pending.length ? DEFAULT_GUIDELINE : ANSWER_GUIDELINE)),
           pendingSection(talk.pending, options.fields, talk.step.ask ?? {}, scope),
           // `Partial<D>` is a mapped type; the guard is how it reaches an index-signature parameter without a cast.
           factsSection(options.fields, isRecord(req.data) ? req.data : {}),

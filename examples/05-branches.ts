@@ -54,7 +54,7 @@ const agent = f.agent({
           then: "dados",
         },
       ],
-      // After the last step the run stays on it, so follow-up questions land here.
+      // After the last step the run goes back to the last talk step it took, so follow-up questions land there.
       onEnd: "stay",
     }),
     f.flow({

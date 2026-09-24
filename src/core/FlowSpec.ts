@@ -702,7 +702,7 @@ export function flowSpecSchema(registries: Registries): StructuredSchema {
     while: orNull({ ...condition, description: "The run ends when this stops holding" }),
     clearOnStart: slugList && orNull({ ...slugList, description: "Fields to forget when a run starts" }),
     steps: list(step, "In order; a run moves to the next step unless `then` says otherwise"),
-    onEnd: orNull(enumOf(["end", "stay", "reset"], "After the last step: end the run, stay on the last talk step answering every message, or reset to the first")),
+    onEnd: orNull(enumOf(["end", "stay", "reset"], "After the last step: end the run, stay on the last talk step it took answering every message, or reset to the first")),
     instructions: orNull(list(instruction, "Rules that apply only inside this flow")),
   });
 }

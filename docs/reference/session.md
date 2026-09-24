@@ -38,6 +38,7 @@ interface Run {
   hop: number;
   startedAt: string;
   suspendedAt?: string;
+  staying?: true;
   waiting?: { kind: "timer" | "event"; key?: string; until?: string; setAt: string; event?: string };
   asked: Record<string, number>;
   visits: Record<string, number>;
@@ -86,6 +87,7 @@ From `src/types/session.ts`. Every date is ISO 8601 text, never a `Date`: the bl
 | `hop` | `number` | Chaining depth. `0` for a run a trigger started; `+1` per `{ flow }` move and per `onEnd: 'reset'`. A start at hop 5 is skipped: `code: 'hop-limit'` on `TurnResult.skipped`. |
 | `startedAt` | `string` | The clock's now when the run started. |
 | `suspendedAt` | `string?` | Set while `suspended`. The most recently suspended run is the one that resumes. |
+| `staying` | `true?` | Set once an `onEnd: 'stay'` run has finished its steps and sits on its last talk step, answering every message. Any other move clears it. |
 | `waiting` | object? | Set while `waiting`. See below. |
 | `asked` | `Record<string, number>` | Per field, how many times a talk step spoke with that field still pending. A field at the step's `maxAsks` (default 3, `src/utils/schema.ts`) leaves the pending set: `code: 'max-asks'`, with the field's slug in `detail`. |
 | `visits` | `Record<string, number>` | Per step, how many times this run entered it. Part of every message and action key, so a revisit mints new keys. |

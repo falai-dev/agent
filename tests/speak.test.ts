@@ -10,7 +10,7 @@ import type { AiProvider, GenerateMessageOutput, GenerateMessageStreamChunk } fr
 import type { Tool } from "../src/types/tool.js";
 import { assistantMessage, userMessage } from "../src/utils/history.js";
 import { mockProvider } from "./mock-provider.js";
-import { type Ctx, type Data, agentOptions, idleRequest, run, talkRequest } from "./speak-fixtures.js";
+import { type Ctx, type Data, agentOptions, idleRequest, quem, run, talkRequest, triagem } from "./speak-fixtures.js";
 
 const nullable = (type: string) => [type, "null"];
 
@@ -88,6 +88,15 @@ describe("Speak.run: talk step", () => {
     expect(call.input.history).toEqual(history);
     expect(call.seen).not.toContain("mensagem antiga do cliente");
     expect(call.seen).not.toContain("resposta antiga da Ana");
+  });
+
+  test("a step with no prompt and nothing left to collect is told to answer, not to collect", async () => {
+    const provider = mockProvider({ speak: [{ message: "Claro, funciona assim." }] });
+    const step = { id: "quem", collect: ["nome" as const], ask: quem.ask };
+    await new Speak(agentOptions(provider)).run(talkRequest({ talk: { run, flow: triagem, step, pending: [] } }));
+    const [call] = provider.calls;
+    expect(call.prompt).toContain("## Guideline for your reply (adapt to the conversation)\nAnswer the customer's message, in the flow of the conversation.");
+    expect(call.prompt).not.toContain("Collect what is still missing");
   });
 
   test("a wake adds the you-speak-first line; a message quotes the text", async () => {

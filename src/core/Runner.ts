@@ -669,8 +669,9 @@ export class Runner<C = unknown, D = unknown> {
   }
 
   private fireBranch(turn: Turn<C, D>, run: Run, flow: Flow<C, D>, step: TalkOf<C, D>, understanding: Understanding | null): void {
+    // A staying run already took its `if` branches on the way to the end; judged again they would hold on every message.
     const hit = (branch: Branch<C, D>, index: number): boolean =>
-      "if" in branch ? this.holds(branch.if, turn, run) : understanding?.branches[`${run.id}/${step.id}/${index}`] === true;
+      "if" in branch ? !run.staying && this.holds(branch.if, turn, run) : understanding?.branches[`${run.id}/${step.id}/${index}`] === true;
     const index = (step.branches ?? []).findIndex(hit);
     if (index < 0) return;
     const branch = (step.branches ?? [])[index];
@@ -1033,15 +1034,34 @@ export class Runner<C = unknown, D = unknown> {
     run.status = "asking";
   }
 
+  /** Where `stay` answers from: the talk step this run last took, so a branched flow stays on its own path. The flow's last talk step when the log names none. */
+  private stayStep(run: Run, flow: Flow<C, D>): TalkOf<C, D> | undefined {
+    for (let i = run.outcomes.length - 1; i >= 0; i--) {
+      const { kind, stepId } = run.outcomes[i];
+      const step = kind === "prompt" || kind === "collect" ? this.stepOf(flow, stepId ?? null) : undefined;
+      if (step && isTalk(step)) return step;
+    }
+    return [...flow.steps].reverse().find(isTalk);
+  }
+
   private finishFlow(turn: Turn<C, D>, run: Run, flow: Flow<C, D>): void {
     const onEnd = flow.onEnd ?? "end";
     const last = flow.steps[flow.steps.length - 1];
-    const stay = onEnd === "stay" ? [...flow.steps].reverse().find(isTalk) : undefined;
+    const stay = onEnd === "stay" ? this.stayStep(run, flow) : undefined;
     if (stay) {
-      // The steps after it ran once, on the way here; staying, it only answers. A lead's message nobody has answered yet
-      // gets its answer now, so the step runs in this turn instead of waiting for the next message.
+      // The steps after it ran once, on the way here; staying, it only answers.
+      const other = turn.session.runs.find((r) => r !== run && r.status === "asking");
       this.stayAt(run, stay);
-      if (turn.what.kind === "message" && turn.silenced === undefined && !turn.speakDone && !turn.talk) run.status = "running";
+      // A message nothing has answered yet gets its answer now, from this run when nobody else is asking or the lead's
+      // message was routed here; the talk step then suspends the other asker, as any talk step does.
+      const unanswered = turn.what.kind === "message" && turn.silenced === undefined && !turn.speakDone && turn.spokeBy.size === 0;
+      if (unanswered && (!other || turn.floorRunId === run.id)) {
+        run.status = "running";
+      } else if (other) {
+        // One asker at a time: this run waits behind the one holding the conversation and resumes when it is done.
+        run.status = "suspended";
+        run.suspendedAt = turn.nowIso;
+      }
       return;
     }
     if (onEnd === "reset" && last) {

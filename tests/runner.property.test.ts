@@ -35,6 +35,7 @@ const stepArb = (id: string): fc.Arbitrary<Step<undefined, Data>> =>
 interface Spec {
   flowId: string;
   steps: Step<undefined, Data>[];
+  onEnd: "end" | "stay" | "reset";
   whileFalse: boolean;
   run?: { status: RunStatus; stepIndex: number | null };
 }
@@ -43,6 +44,7 @@ const specArb = (flowId: string): fc.Arbitrary<Spec> =>
   fc.record({
     flowId: fc.constant(flowId),
     steps: fc.integer({ min: 1, max: ids.length }).chain((n) => fc.tuple(...ids.slice(0, n).map(stepArb))),
+    onEnd: fc.constantFrom("end" as const, "stay" as const, "reset" as const),
     whileFalse: fc.boolean(),
     run: fc.option(
       fc.record({ status: fc.constantFrom<RunStatus>("running", "asking", "suspended"), stepIndex: fc.option(fc.integer({ min: 0, max: ids.length - 1 }), { nil: null }) }),
@@ -51,10 +53,12 @@ const specArb = (flowId: string): fc.Arbitrary<Spec> =>
   });
 
 const worldArb = fc.tuple(specArb("fa"), specArb("fb"), specArb("fc"));
+/** A message, or a start of one of the flows: a turn with no fresh text, where no asker speaks. */
+const inputArb = fc.option(fc.constantFrom("fa", "fb", "fc"), { nil: undefined });
 
 function build(specs: Spec[]) {
   const flows: Flow<undefined, Data>[] = specs.map((s) => ({
-    id: s.flowId, name: s.flowId, steps: s.steps, ...(s.whileFalse ? { while: () => false } : {}),
+    id: s.flowId, name: s.flowId, steps: s.steps, onEnd: s.onEnd, ...(s.whileFalse ? { while: () => false } : {}),
   }));
   const runs: Run[] = [];
   let askers = 0;
@@ -78,9 +82,11 @@ function build(specs: Spec[]) {
 describe("advance() invariants", () => {
   test("at most one asker, and a run whose while is false never moves", async () => {
     await fc.assert(
-      fc.asyncProperty(worldArb, async (specs) => {
+      fc.asyncProperty(worldArb, inputArb, async (specs, start) => {
         const { runner, session, moved } = build(specs);
-        const { result, talk } = await drive(runner, { sessionId: "s1", session, message: "oi", id: "m1" });
+        const { result, talk } = await drive(runner, start
+          ? { sessionId: "s1", session, start: { flow: start, key: "k2" } }
+          : { sessionId: "s1", session, message: "oi", id: "m1" });
 
         const asking = result.session.runs.filter((r) => r.status === "asking");
         expect(asking.length).toBeLessThanOrEqual(1);
@@ -108,7 +114,7 @@ describe("advance() invariants", () => {
         }
         expect(result.llmCalls).toBe(0);
       }),
-      { numRuns: 150 },
+      { numRuns: 400 },
     );
   });
 });
