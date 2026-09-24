@@ -23,6 +23,7 @@ interface FlowSpec {
   on?: TriggerSpec[];
   anchor?: string;
   while?: ConditionSpec;
+  collect?: string[];
   clearOnStart?: string[];
   steps: StepSpec[];
   onEnd?: "end" | "stay" | "reset";
@@ -33,7 +34,7 @@ interface FlowSpec {
 type StepSpec = StepBase &
   (
     | { kind: "prompt"; prompt: Template; ask?; maxAsks?; branches?: BranchSpec[]; tools?; instructions?: InstructionSpec[] }
-    | { kind: "collect"; collect: string[]; prompt?: Template; ask?; maxAsks?; branches?: BranchSpec[]; tools?; instructions?: InstructionSpec[] }
+    | { kind: "collect"; collect: string[]; prompt?: Template; question?: Template; ask?; maxAsks?; branches?: BranchSpec[]; tools?; instructions?: InstructionSpec[] }
     | { kind: "say"; say: Template; media?: { slug: string }; once?: boolean }
     | { kind: "do"; do: string; with?: Record<string, unknown>; onFail?: Next }
     | { kind: "wait"; wait: Duration; businessHours?: boolean; else?: Next; branches?: BranchSpec[] }
@@ -120,7 +121,7 @@ Every message has the form `[FlowConfigurationError] <where>: <what>. <fix>`, wh
 | Reserved step id | `uses the reserved id "end"` | "end" ends the run; pick another id. |
 | Duplicate step id | `duplicates an earlier step id` | Give each step its own id. |
 | Triggers, no steps | `has triggers but no steps` | Add at least one step or remove `on`. |
-| Unknown field | `unknown field "x" in collect` (also `ask`, `clearOnStart`, `then.clear`, `while.equals`, `if.known`, …) | Add it to the agent's fields or fix the slug. |
+| Unknown field | `unknown field "x" in collect` (the flow's or a step's; also `ask`, `clearOnStart`, `then.clear`, `while.equals`, `if.known`, …) | Add it to the agent's fields or fix the slug. |
 | Unknown tool | `unknown tool "x"` (flow or step `tools`) | Register it in the agent's tools or fix the name. |
 | Unknown action | `unknown action "x"` | Register it in actions or fix the name. |
 | Unknown event | `unknown event "x"` (trigger) or `unknown event "x" in wait` | Register it in events or fix the name. |
@@ -136,6 +137,7 @@ Every message has the form `[FlowConfigurationError] <where>: <what>. <fix>`, wh
 | Extra parameter | `action "notify" has no parameter "to"` | Remove it or fix the name. |
 | Branch without a test | `branches[0] has neither when nor if` | Give the branch an AI condition (when) or a code one (if). |
 | Backward `if` with no `else` | `"if" jumps back to "quem" with no else` | Add else so the false branch has somewhere to go. |
+| Fixed question, nothing to ask | `has a question but collects nothing` | A fixed question asks for fields: add collect, or send the text with a say step. |
 
 Parameter values are checked strictly: `"3"` is not a number, `3.5` is not an integer, and an `enum` must contain the value unless the string holds `{{`, because a template's value is only known at run time.
 
@@ -146,7 +148,8 @@ Two checks live in the agent constructor rather than in `validateFlow`: `flow "x
 | Warning | Why |
 |---|---|
 | `flow "f", step "s": then jumps back to "quem" without clear; the fields collected since stay known and those steps skip. Add clear: [...] to re-ask them.` | A `then`, `else`, `onFail` or branch target points at the same or an earlier step and clears nothing, so a collect step it lands on is skipped with `code: 'already-known'`. |
-| `flow "f", step "s": collects "nome", "empresa" with no prompt and no ask; the model has nothing to go on. Add a prompt or an ask per field.` | A collect step with no `prompt`, where no listed field has an `ask` on the step or on the agent. |
+| `flow "f", step "s": collects "nome", "empresa" with no prompt and no ask; the model has nothing to go on. Add a prompt or an ask per field.` | A collect step with no `prompt` and no `question`, where no listed field has an `ask` on the step or on the agent. |
+| `flow "f": collect lists "confirmado", which is only taken from the answer to a step that asks it, and no step does. Add it to a step's collect, or set extract: 'anywhere' on the field.` | A field in the flow's `collect` with `extract: 'asked'` (every boolean, by default) that no step's `collect` lists, so nothing can ever fill it. |
 
 ## flowSpecSchema
 

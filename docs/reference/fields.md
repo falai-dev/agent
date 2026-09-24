@@ -21,6 +21,7 @@ interface ScalarDef<T extends ScalarType = ScalarType> {
 }
 
 interface FieldDef<T extends ScalarType = ScalarType> extends ScalarDef<T> {
+  label?: string;
   ask?: string;
   extract?: "anywhere" | "asked";
 }
@@ -37,6 +38,7 @@ type DataOf<T extends { fields: FieldDefs }> = InferData<T["fields"]>;
 |---|---|---|---|
 | `type` | `ScalarType` | required | `'string'`, `'number'`, `'integer'` or `'boolean'`. |
 | `enum` | `readonly (string \| number)[]` | none | The allowed values. A value outside the list is dropped (`code: 'not-in-enum'`). In the data type the field becomes the literal union. |
+| `label` | `string` | none | The name a person reads, in an editor or next to a collected value. Never sent to the model. |
 | `description` | `string` | none | What the field is. Sent to the model with the field's type and options. |
 | `ask` | `string` | none | How the model should ask for it. Sent to the speak call as "How to ask" while the field is pending. A talk step's own `ask` overrides it. A template: `{{data.x}}` and `{{context.x}}` are filled in. |
 | `extract` | `'anywhere' \| 'asked'` | `'anywhere'` for string, number and integer; `'asked'` for boolean | Where a value may be taken from. `'anywhere'`: any message from the customer, whether or not the field was asked. `'asked'`: only the reply to the step that lists the field, so a stray "sim" never confirms anything. |
@@ -55,7 +57,7 @@ Properties are readonly — `fields()` takes the definitions as a `const` type, 
 
 **Known.** A field is known when its value is not `undefined`, `null` or `''`. Known fields are never asked again and never re-extracted; both calls list them under "Already known".
 
-**Which call extracts what.** The understand call, on a message turn, extracts every unknown `'anywhere'` field named in a `collect` of the flow holding the floor and of every eligible message flow, in one envelope. The speak call extracts the pending fields of the step that speaks, `'asked'` ones included, in the same call that phrases the reply. Tools write `data` and actions call `ctx.set()`; those values are written as given, with no check.
+**Which call extracts what.** The understand call, on a message turn, extracts every unknown `'anywhere'` field that the flow holding the floor or an eligible message flow lists, in the flow's own `collect` or a talk step's, in one envelope. With nobody on the floor, the catch-all's fields are read too. The speak call extracts the pending fields of the step that speaks, `'asked'` ones included, in the same call that phrases the reply. Tools write `data` and actions call `ctx.set()`; those values are written as given, with no check.
 
 **Coercion.** A raw value from the model goes through `coerceField(def, raw)` before it is written:
 
@@ -68,9 +70,9 @@ Properties are readonly — `fields()` takes the definitions as a `const` type, 
 
 Anything else is dropped with the outcome line `code: 'bad-value'`. A value outside `enum` is dropped with `code: 'not-in-enum'`. A value for a slug that is not a field is dropped with `code: 'unknown-field'`. Dropped values leave a `collect` outcome with status `skipped` and no run id; the field stays pending and is asked again.
 
-**What reaches the provider.** `toWireSchema(defs)` turns definitions into the JSON schema the model must fill: a closed object (`additionalProperties: false`) with one property per field carrying `type`, `description` and `enum`, and nothing else. `ask` and `extract` are stripped; they steer the framework, not the schema. In the envelope style used by both calls every property is required and nullable (`type: [type, 'null']`), so the model answers `null` for what the customer did not give. The prompt describes each field once more in words (`nome (string) [a | b]: description`) and, in the speak call, adds the pending field's "How to ask".
+**What reaches the provider.** `toWireSchema(defs)` turns definitions into the JSON schema the model must fill: a closed object (`additionalProperties: false`) with one property per field carrying `type`, `description` and `enum`, and nothing else. `label`, `ask` and `extract` are stripped; they are for people and the framework, not the schema. In the envelope style used by both calls every property is required and nullable (`type: [type, 'null']`), so the model answers `null` for what the customer did not give. The prompt describes each field once more in words (`nome (string) [a | b]: description`) and, in the speak call, adds the pending field's "How to ask".
 
-**Clearing.** `{ step, clear: ['x'] }` on a `then`/`else`/branch and `clearOnStart` on a flow delete the field from `session.data`, so the next step that collects it asks again. `maxAsks` on a talk step (default 3) is the other way a field stops being pending: it is skipped for that run with `code: 'max-asks'`, the field in `detail`.
+**Clearing.** `{ step, clear: ['x'] }` on a `then`/`else`/branch and `clearOnStart` on a flow delete the field from `session.data`, so the next step that collects it asks again. `{ step, clear }` also resets how many times the run asked it. `maxAsks` on a talk step (default 3) is the other way a field stops being pending: it is skipped for that run with `code: 'max-asks'`, the field in `detail`.
 
 **Action parameters** use the sibling type `ParamDef`: a `ScalarDef` plus `optional?: true`, or `{ type: 'array', items: ScalarDef }`. `InferParams<P>` gives the `with` shape. They share `toWireSchema` and the same strictness at construction. See [Actions, events and conditions](actions-events-conditions.md).
 

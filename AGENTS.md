@@ -44,9 +44,9 @@
 One model: a **Flow** is a trigger plus an ordered list of steps, and `agent.turn()` is the one entry point. Flows, automations and signals are the same thing here; there is no separate rule or automation primitive.
 
 1. **Agent** — Immutable config: fields, provider, flows, host actions/events/conditions, tools, instructions. One instance serves every session; `context`, `history` and `session` arrive on each `turn()`.
-2. **Flow** — `on[]` triggers + `steps[]`. Triggers: `message` (the AI routes here; takes the conversation), `mention` (the AI detects it; reacts beside the conversation, may `extract`), `silence`, `event` (with `after`), or none (the host calls `start`). `repeat`, `anchor`, `while`, `clearOnStart`, `onEnd: 'end' | 'stay' | 'reset'`.
-3. **Step** — Five kinds: talk (`prompt` / `collect`), `say` (verbatim, `media`, `once`), `do` (a host action with `with`), `wait` (a duration with `else` = the customer replied, or `{ event, upTo }`), `if` (code fork). Movement is only `then` / `else`: a step id, `'end'`, `{ step, clear }` or `{ flow, input }`.
-4. **Field** — Authored once on the agent: `{ type, enum?, description?, ask?, extract?: 'anywhere' | 'asked' }`. A talk step's pending set is `collect − known − at maxAsks`; a step whose fields are known is skipped with no call, except the step an `onEnd: 'stay'` run stays on, which answers every message.
+2. **Flow** — `on[]` triggers + `steps[]`. Triggers: `message` (the AI routes here; takes the conversation), `mention` (the AI detects it; reacts beside the conversation, may `extract`), `silence`, `event` (with `after`), or none (the host calls `start`). `collect` (the data it needs, as slugs), `repeat`, `anchor`, `while`, `clearOnStart`, `onEnd: 'end' | 'stay' | 'reset'`.
+3. **Step** — Five kinds: talk (`prompt` / `collect`, optional fixed first `question`), `say` (verbatim, `media`, `once`), `do` (a host action with `with`), `wait` (a duration with `else` = the customer replied, or `{ event, upTo }`), `if` (code fork). Movement is only `then` / `else`: a step id, `'end'`, `{ step, clear }` or `{ flow, input }`.
+4. **Field** — Authored once on the agent: `{ type, enum?, label?, description?, ask?, extract?: 'anywhere' | 'asked' }`. `label` is for people; the model never sees it. A talk step's pending set is `collect − known − at maxAsks`; a step whose fields are known is skipped with no call, except the step an `onEnd: 'stay'` run stays on, which answers every message.
 5. **Action / Event / Condition** — Host registries referenced by name from flows and from JSON `FlowSpec` rows. Actions run at-least-once and must be idempotent on `ctx.key`; they return `{ ok } | { skipped } | { failed } | { defer }`.
 6. **Tool** — A typed function the AI may call while speaking. Returns `{ value?, data? }`, never movement.
 7. **Instruction** — `{ kind: 'must' | 'never' | 'should', when? (AI), if? (code), prompt }` at agent, flow or step level.
@@ -95,7 +95,7 @@ src/
 - Two generics thread everywhere: `C` (ambient host context, passed on every turn) and `D` (the data collected across all flows).
 - `falai<C>()` is the only explicit generic an app writes. `.fields(defs)` binds `D`; `type Data = DataOf<typeof f>`. Action, event and condition names inside flows are strings, checked at agent construction (the same path a JSON `FlowSpec` takes).
 - `Condition.check` and `Action.run` are method signatures on purpose: method bivariance lets a heterogeneous registry type without `any`.
-- `StructuredSchema` is the JSON-schema-like wire type; `toWireSchema(defs, { nullable })` is the only way field or parameter definitions reach a provider (it strips `ask`, `extract`, `optional`).
+- `StructuredSchema` is the JSON-schema-like wire type; `toWireSchema(defs, { nullable })` is the only way field or parameter definitions reach a provider (it strips `label`, `ask`, `extract`, `optional`).
 - All public types are re-exported from `src/types/index.ts` → `src/index.ts`.
 
 ## Providers
@@ -146,7 +146,7 @@ All providers implement the `AiProvider` interface:
 
 ## What NOT to Do
 
-- Don't add per-flow schemas — fields live on the agent.
+- Don't add per-flow schemas. Field definitions live on the agent; `flow.collect` only lists which of them a flow needs, by slug.
 - Don't introduce implicit messaging — the framework never speaks unless a talk step, a `say` or the `idle` speaker does.
 - Don't bring back a Directive, `dispatch`, signals or a router primitive — movement is `then` / `else`, signals are `mention` flows, routing is the understand phase.
 - Don't rebuild the Agent per turn — one instance, per-turn inputs.

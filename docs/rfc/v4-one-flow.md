@@ -104,6 +104,7 @@ type Trigger<C, D, Cond, E> = { repeat?: Repeat } & (      // default: message/m
 
 type Talk<C, D, Cond> = ({ prompt: Template; collect?: (keyof D)[] } | { collect: (keyof D)[]; prompt?: Template }) & {
   ask?: Partial<Record<keyof D, string>>;                   // per-flow wording; schema `ask` is the default
+  question?: Template;                                      // fixed first ask, verbatim, no call; needs collect
   maxAsks?: number; branches?: Branch<C, D, Cond>[]; tools?: string[]; instructions?: Instruction<C, D>[];
 };
 
@@ -121,6 +122,7 @@ interface Flow<C, D, Cond, A extends ActionMap, E> {
   on?: Trigger<C, D, Cond, E>[];        // absent or [] = Início manual
   anchor?: string;                      // 'session' (default) or a host anchor name — "vale por conversa / por lead"
   while?: Pred<C, D, Cond>;             // re-checked whenever the run moves; default = trigger `if`
+  collect?: (keyof D)[];                // the data this flow needs; steps' collect orders the asks
   clearOnStart?: (keyof D)[];
   steps: Step<C, D, Cond, A, E>[];      // ids required, unique, never 'end'
   onEnd?: 'end' | 'stay' | 'reset';     // default 'end'

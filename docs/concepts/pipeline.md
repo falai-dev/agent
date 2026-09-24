@@ -62,7 +62,7 @@ Code first works out what there is to judge:
 - **Candidates**: the flow holding the floor, whatever its trigger, plus every `message` flow with a non-empty phrase list whose `if` holds and whose `repeat` allows a start, in flow order. `message: []` catch-alls are never scored.
 - **Mentions**: every `mention` flow with a non-empty list whose `repeat` allows a start.
 - **Branches**: the `when` branches of the asking step.
-- **Fields**: every unknown field with `extract: 'anywhere'` listed by any talk step of the floor's flow or of a candidate flow.
+- **Fields**: every unknown field with `extract: 'anywhere'` that the floor's flow or a candidate flow lists, in its own `collect` or a talk step's. With nobody on the floor, the catch-all that would take the message adds its fields too, because an opening message often says the most. The fields its first step asks are read by that step's own speak call, so on their own they are not worth a call. A first step with a fixed `question` has no speak call, so its fields do count.
 
 Then the shortcuts, each worth zero calls:
 
@@ -140,11 +140,12 @@ Every row but the last is asserted by a scenario in `tests/scenarios/`; the comp
 | Turn | Calls | Why | Scenario |
 |---|---|---|---|
 | A message with a floor holder, several candidate flows, or one candidate that a catch-all or the idle speaker could stand in for | 2 | understand, then speak | S1, S13 |
-| A message with nothing to judge: a catch-all alone, a floor holder alone, or one flow with `idle: 'silent'` and no catch-all | 1 | speak only | S0, S1, S8 |
+| A message with nothing to judge: a catch-all alone with nothing to learn beyond what its first step asks, a floor holder alone, or one flow with `idle: 'silent'` and no catch-all | 1 | speak only | S0, S1, S8, S14 |
 | A message with no flows, answered by the idle speaker | 1 | speak only | S9 |
 | A message where a mention flow's `say` answers | 1 | understand only; the floor's talk is skipped | S4 |
 | Each tool round | +1 | one more speak call | S8, S9 |
 | A wake or start that reaches a talk step | 1 | speak only; there is no message to understand | S2, S5, S12 |
+| A step's first ask with a fixed `question` | 0 | the text goes out as written | S14 |
 | A wake or start that runs only `do`, `wait` and `if` steps | 0 | code only | S5 (the start; its defer test covers the wake) |
 | Any input under `silenced` (a plain reason) | 0 | `do` steps run, nobody speaks; `{ reason, understand: true }` still spends the understand call | S2, S12 |
 | A message with `idle: 'silent'` and no eligible flow | 0 | nothing to judge, nobody speaks | S9 |

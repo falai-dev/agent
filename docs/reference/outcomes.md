@@ -25,7 +25,7 @@ type StepOutcomeCode =
   // A run ended early
   | "step-loop" | "step-gone" | "customer-replied" | "premise-changed" | "silenced"
   // A step
-  | "already-known" | "another-reply" | "already-sent" | "branch" | "max-asks"
+  | "already-known" | "asked-fixed" | "another-reply" | "already-sent" | "branch" | "max-asks"
   | "inline-delay" | "awaiting-trigger" | "awaiting-event" | "event-arrived"
   | "no-event" | "replied" | "no-reply"
   // A host action
@@ -134,6 +134,7 @@ Grouped by what produced it. `kind` and `status` are given as `kind / status`. A
 |---|---|---|---|
 | `prompt` or `collect / ok` | none; `llmCalls` set | The speak call answered. The run is asking if fields are still pending, else it moved. | none. This line never carries `next`, even when the run moves on; the lines that follow show where it went |
 | `collect / skipped` | `already-known` | The step was entered and every field it collects was already known (or at `maxAsks`). No call. | `then` |
+| `collect / ok` | `asked-fixed` | The step's `question` went out word for word as its first ask. No call; the run is asking. | |
 | `collect / ok` | none, no `llmCalls` | An asking step whose remaining fields were all known when the customer's next message resumed it: the understand call filled them in from the message, or an action's `ctx.set()` or a tool's `data` had written them since the step last asked. It moved without speaking. | `then` |
 | `collect / skipped` | `max-asks`, `detail` = the field slug | One line per field still unknown when the step moves on because that field reached `maxAsks` (default 3). | |
 | `prompt` or `collect / ok` | `branch` | A branch of the asking step fired: an `if` branch held, or the model answered `when` with true. | the branch's `then` |

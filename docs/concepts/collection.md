@@ -7,7 +7,7 @@ order: 4
 
 # Field collection
 
-A field is one piece of data the conversation collects: a name, a company, a budget, a yes or no. You declare each field once, on the agent, with how to ask for it. Steps say which fields they collect. The model asks and extracts. Code decides what is still missing.
+A field is one piece of data the conversation collects: a name, a company, a budget, a yes or no. You declare each field once, on the agent, with how to ask for it. A flow lists the fields it needs, and its steps say which to ask and when. The model asks and extracts. Code decides what is still missing.
 
 ## Declared once
 
@@ -41,11 +41,44 @@ type Data = DataOf<typeof f>;
 |---|---|
 | `type` | `'string'`, `'number'`, `'integer'` or `'boolean'`. Values are coerced to it on the way in. |
 | `enum` | The allowed values. A value outside the list is dropped. It becomes a literal union in `Data`. |
+| `label` | The name a person reads, in an editor or next to a collected value. The model never sees it. |
 | `description` | What the field means, for the model. |
 | `ask` | How the model should ask for it. A step may override it. |
 | `extract` | Where a value may come from: `'anywhere'` or `'asked'`. The default depends on `type`, below. |
 
 `f.fields()` binds the data type, so `collect`, `ask`, `clearOnStart`, `{ step, clear }`, `if: { equals }` and an action's `ctx.set()` are all checked against these field names at compile time. The collected values live in `session.data` as a `Partial<Data>`.
+
+## A flow's data, a step's questions
+
+A scheduling flow needs one set of fields and a triage flow another. The flow's `collect` lists the fields it needs. Each talk step's `collect` says which of them to ask now, in what order: one field, or several when the step's prompt asks them together.
+
+```ts
+import { falai } from "@falai/agent";
+
+const f = falai().fields({
+  nome: { type: "string", label: "Nome", ask: "Pergunte o nome." },
+  dia: { type: "string", label: "Dia", ask: "Pergunte qual dia fica melhor." },
+  orcamento: { type: "number", label: "Orçamento" },
+});
+
+const agenda = f.flow({
+  id: "agenda",
+  name: "Agendamento",
+  on: [{ message: ["quer agendar uma visita"] }],
+  collect: ["nome", "dia", "orcamento"],
+  steps: [
+    { id: "quem", collect: ["nome"], question: "Claro! Qual é o seu nome?" },
+    { id: "quando", prompt: "Ofereça terça ou quinta.", collect: ["dia"] },
+    { id: "fim", say: "Combinado, {{data.nome}}. Até {{data.dia}}." },
+  ],
+});
+
+export { agenda };
+```
+
+No step asks for `orcamento`. It is still on the flow's list, so when the customer mentions a budget while this flow holds the conversation, the value is noted. A field on the list that only an answer can fill (`extract: 'asked'`, every boolean by default) and that no step asks can never be filled; `validateFlow` warns about it.
+
+Step one asks with fixed text: `question`. Its first ask goes out word for word, with no model call. It goes out only when every field the step collects is still missing. If the customer's first message already gave the name, the step is skipped. A later ask is the model's own wording, so a customer who replies with a question gets an answer.
 
 ## Known and pending
 
@@ -69,7 +102,7 @@ Four writers reach `session.data`. Two are the model, two are your code.
 
 | Writer | Which fields | When |
 |---|---|---|
-| The understand call | Unknown fields with `extract: 'anywhere'` listed by any talk step of the floor's flow or of a candidate `message` flow | On a message, before runs move |
+| The understand call | Unknown fields with `extract: 'anywhere'` that the floor's flow or a candidate `message` flow lists, in its own `collect` or a talk step's. With nobody on the floor, also the catch-all's (`message: []`) | On a message, before runs move |
 | The speak call | The speaking step's pending fields, whatever their `extract`, in the envelope `{ message, ...fields }` | When the step speaks |
 | A tool's `data` | Whatever the tool returns | During a speak round, written as given |
 | An action's `ctx.set(patch)` | Whatever the action writes | During a `do` step, written as given |
@@ -110,7 +143,7 @@ This split also decides which call spends tokens on what. On a message, the unde
 { kind: 'collect', status: 'skipped', code: 'max-asks', detail: 'orcamento' }
 ```
 
-One line per field that ran out of asks, with the field's slug in `detail`. `maxAsks: 1` means "ask once, do not insist". The field stays unknown: a later step may still collect it, and a later run of the flow starts the count again, because `asked` lives on the run.
+One line per field that ran out of asks, with the field's slug in `detail`. `maxAsks: 1` means "ask once, do not insist". The field stays unknown: a later step may still collect it, and a later run of the flow starts the count again, because `asked` lives on the run. A step's fixed `question` counts as one ask. `{ step, clear }` resets the count of the fields it clears, so a confirmation loop asks from scratch each round.
 
 ## Known fields are never re-extracted
 
@@ -157,11 +190,13 @@ Three layers of text shape the question, from general to specific.
 2. The step's `ask: { orcamento: '…' }`: wins over the field's, for that step only.
 3. The step's `prompt`: the guideline for the whole reply. Without one, the default is "Collect what is still missing below, in the flow of the conversation, one or two things per message."
 
-All three are templates: `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are filled in before the model reads them. The model sees every pending field of the step with its wording, in collect order, and is told to ask at the pace the prompt sets and to take any value the customer's message already answers.
+A step's `question` skips all three for the first ask: it is the exact text the customer reads. Every later ask goes back to the three layers.
+
+All four are templates: `{{data.x}}`, `{{context.x}}` and `{{input.x}}` are filled in before the model reads them. The model sees every pending field of the step with its wording, in collect order, and is told to ask at the pace the prompt sets and to take any value the customer's message already answers.
 
 ## What the provider sees
 
-`toWireSchema` in `src/utils/schema.ts` is the only way a field definition reaches a provider. It keeps `type`, `description` and `enum` and strips `ask`, `extract` and `optional`: those are for the framework, not the model. The result is a closed JSON schema (`additionalProperties: false`). In both envelopes every property is required and nullable, so the model must answer each field with a value or `null`. A field name that is not a legal property name for the provider, or is spelled `message`, travels under an alias and is mapped back on the way out.
+`toWireSchema` in `src/utils/schema.ts` is the only way a field definition reaches a provider. It keeps `type`, `description` and `enum` and strips `label`, `ask`, `extract` and `optional`: those are for the framework, not the model. The result is a closed JSON schema (`additionalProperties: false`). In both envelopes every property is required and nullable, so the model must answer each field with a value or `null`. A field name that is not a legal property name for the provider, or is spelled `message`, travels under an alias and is mapped back on the way out.
 
 ## Where next
 

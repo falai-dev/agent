@@ -44,6 +44,7 @@ The model speaks. A guideline, fields to collect, or both.
 ```ts fragment
 type TalkStep<C, D> = ({ prompt: Template; collect?: (keyof D & string)[] } | { collect: (keyof D & string)[]; prompt?: Template }) & {
   ask?: Partial<Record<keyof D & string, string>>;
+  question?: Template;
   maxAsks?: number;
   branches?: Branch<C, D>[];
   tools?: string[];
@@ -54,8 +55,9 @@ type TalkStep<C, D> = ({ prompt: Template; collect?: (keyof D & string)[] } | { 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `prompt` | `Template` | "Collect what is still missing below, in the flow of the conversation, one or two things per message." | The guideline for the reply. Required when there is no `collect`. |
-| `collect` | `(keyof D & string)[]` | none | Fields to collect. The step is done when they are known. |
+| `collect` | `(keyof D & string)[]` | none | Fields to ask for now, in this order. The step is done when they are known. The flow's own `collect` lists everything it needs; see [Flow](flow.md). |
 | `ask` | `Partial<Record<slug, string>>` | the field's own `ask` | Per-flow wording for a field. |
+| `question` | `Template` | none | A fixed first question, sent word for word with no model call. Needs `collect`. |
 | `maxAsks` | `number` | `3` | Times a field may be asked before it is skipped (`code: 'max-asks'`, the field in `detail`). |
 | `branches` | `Branch<C, D>[]` | none | Exits judged while the step asks. See [Branches](branches.md). |
 | `tools` | `string[]` | the flow's `tools`, else all | Tools the model may call from this step. |
@@ -64,6 +66,7 @@ type TalkStep<C, D> = ({ prompt: Template; collect?: (keyof D & string)[] } | { 
 - Pending fields are `collect` minus the known ones minus those at `maxAsks`, in `collect` order. A step the run enters whose pending list is empty is skipped with no model call (`code: 'already-known'`) and the run follows `then`. When the asking run resumes and the message filled the last field, the same move is logged `ok` with no detail.
 - Reaching a talk step suspends any other run that was asking; this run becomes the asker and holds the floor. It speaks in this turn if the speak call has not happened yet; otherwise it speaks on the next message.
 - The speak call returns the message plus one value per pending field. Values are validated and written; each field still pending is counted as asked once more. With pending fields left the run stays asking. With none left, or with no `collect` at all, the run follows `then` in the same turn.
+- With `question`, the step's first ask is that text, as a `kind: 'verbatim'` message with no speak call (`code: 'asked-fixed'`). It goes out only when every field in `collect` is still pending and none was asked yet, and never on a run that stays (`onEnd: 'stay'`). Reached after this turn's speak call, it goes out in the same turn, the way a `say` does. It counts as one ask of each field. Every later ask is the model's own wording, so a customer who asks something back gets an answer; `maxAsks` still applies. A `{ step, clear }` that clears the step's fields also clears their ask count, so the question goes out again.
 - With `silenced` set, a talk step ends the run with `code: 'silenced'` (`detail` = your reason); a run that was already asking stays asking instead.
 - Outcome kind: `collect` when `collect` is non-empty, else `prompt`.
 
@@ -154,7 +157,7 @@ The code forks. No model call.
 |---|---|
 | `'passo'` | Jump to that step id. |
 | `'end'` | Finish the run here, exactly as running past the last step does — `onEnd` still decides: `'end'` ends it, `'stay'` goes back to the last talk step and answers every message from there, `'reset'` starts a fresh run. `'end'` is reserved: no step may use it as an id. |
-| `{ step: 'passo', clear: ['campo'] }` | Delete the listed fields from `session.data`, then jump. The way to ask something again. |
+| `{ step: 'passo', clear: ['campo'] }` | Delete the listed fields from `session.data` and forget how many times the run asked them, then jump. The way to ask something again. |
 | `{ flow: 'outro', input? }` | End this run (reason `'flow'`) and start `outro` in the same turn, one hop deeper. The child gets `input`, or this run's `input` when absent. It holds the floor when this run did, or when no run did: a `mention` flow that chains does not take the message from the run it was routed to. `flow` is a template. |
 
 Entering a step counts a visit; the visit is part of every key minted there, so a step visited twice sends twice. A `{ step }` jump to an id that no longer exists ends the run with `code: 'step-gone'`; a `{ flow }` to an unknown flow is skipped with `code: 'flow-gone'`.

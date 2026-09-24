@@ -19,6 +19,7 @@ interface Flow<C = unknown, D = unknown> {
   on?: Trigger<C, D>[];
   anchor?: string;
   while?: Pred<C, D>;
+  collect?: (keyof D & string)[];
   clearOnStart?: (keyof D & string)[];
   steps: Step<C, D>[];
   onEnd?: "end" | "stay" | "reset";
@@ -37,6 +38,7 @@ interface Flow<C = unknown, D = unknown> {
 | `on` | `Trigger<C, D>[]` | none | What starts a run. Absent or empty: only `turn({ start })` or another flow's `then: { flow }` starts it. See [Trigger](trigger.md). |
 | `anchor` | `string` | `'session'` | What a run is keyed to. `'session'` uses the session id. Any other name reads `input.anchors[name].key`, and falls back to the session id when the host did not pass that anchor. |
 | `while` | `Pred<C, D>` | the trigger's `if` | Re-checked before the run moves. When it stops holding, the run ends with `code: 'premise-changed'`. |
+| `collect` | `(keyof D & string)[]` | none | The data this flow needs, as agent field slugs. Talk steps' `collect` says which of it to ask, and in what order. |
 | `clearOnStart` | `(keyof D & string)[]` | none | Fields forgotten when a run of this flow starts, so a second run asks for them again. |
 | `steps` | `Step<C, D>[]` | required | In order. A run enters `steps[0]` and moves to the next step unless `then` says otherwise. See [Step](step.md). |
 | `onEnd` | `'end' \| 'stay' \| 'reset'` | `'end'` | What the run does after its last step. |
@@ -59,6 +61,8 @@ It enters `steps[0]` in the same turn unless the trigger has `after`. Keys and s
 
 **`while`.** Checked every time the run is about to move: at the start of each turn's run phase for a running run, and when an asking run resumes on a message. A parked run (`waiting`) or a suspended one is not checked until it moves again. Without `while`, the check is the trigger's `if`: the run holds while any trigger of the same kind as the one that started it would still fire. A run started by `start` or by another flow has no such trigger, so without `while` it always holds. A silence run also ends, with `code: 'customer-replied'`, when a wake finds that the customer wrote after the run started.
 
+**`collect`.** The flow's data is its `collect` plus every field its talk steps collect. While the flow holds the conversation, or could take it on this message, the understand call notes any of it the customer gives that is still unknown and has `extract: 'anywhere'`. A field no step asks is still noted that way; it is just never asked for. When nobody holds the conversation, the catch-all (`message: []`) that would take the message counts as a flow that could take it. See [Field collection](../concepts/collection.md).
+
 **`clearOnStart`.** Applied at start for every trigger kind, `start` and `{ flow }` chains included. Not applied when `onEnd: 'reset'` restarts the flow: reset keeps the data.
 
 **`onEnd`.**
@@ -77,7 +81,8 @@ It enters `steps[0]` in the same turn unless the trigger has `after`. Keys and s
 - no `id`, or `steps` is not a list
 - a step with no `id`, the id `'end'`, or an id used twice
 - triggers with zero steps
-- an unknown field slug in `clearOnStart`, `collect`, `ask`, `equals`, `known` or a `clear` list
+- an unknown field slug in the flow's `collect`, `clearOnStart`, a step's `collect`, `ask`, `equals`, `known` or a `clear` list
+- a `question` on a talk step that collects nothing
 - an unknown action in `do`; a `with` that misses a required parameter, names one the action does not have, or gives a value of the wrong type (`with` values are not coerced; a `{{template}}` string is accepted for any enum)
 - an unknown event in a trigger or in `wait: { event }`
 - an unknown condition name, or a malformed built-in (`equals` not an object, `known` not a list, `silenced` not a boolean); an `equals` value whose type does not match the field
@@ -87,7 +92,7 @@ It enters `steps[0]` in the same turn unless the trigger has `after`. Keys and s
 - a branch with neither `when` nor `if`
 - an `if` step whose `then` jumps backward with no `else`
 
-It returns warnings, logged by the agent, for two things that run but probably not as intended: a jump backward without `clear` (the fields collected since stay known, so those steps skip), and a `collect` step with no `prompt` and no `ask` on any of its fields.
+It returns warnings, logged by the agent, for three things that run but probably not as intended: a jump backward without `clear` (the fields collected since stay known, so those steps skip), a `collect` step with no `prompt`, no `question` and no `ask` on any of its fields, and a field in the flow's `collect` that only an answer can fill (`extract: 'asked'`) when no step asks it.
 
 `toSpec(flow)` throws `FlowConfigurationError` when a predicate is a function, because a function cannot be stored as JSON.
 
