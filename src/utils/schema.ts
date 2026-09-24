@@ -76,7 +76,7 @@ export interface WireOptions {
 
 /**
  * The JSON schema a provider sees: an allow-list of JSON-schema keys, with
- * `ask`, `extract` and `optional` stripped. Closed (`additionalProperties:
+ * `label`, `ask`, `extract` and `optional` stripped. Closed (`additionalProperties:
  * false`); every property required unless a parameter says `optional`.
  */
 export function toWireSchema(defs: FieldDefs | ParamDefs, options: WireOptions = {}): StructuredSchema {
@@ -102,8 +102,8 @@ function wireProperty(def: FieldDef | ParamDef, nullable: boolean): StructuredSc
 
 /**
  * Merge field rows authored per flow into the agent's one field set. Two
- * rows for one slug must agree on type and enum; the first non-empty `ask`
- * and `description` win.
+ * rows for one slug must agree on type and enum; the first non-empty `label`,
+ * `ask` and `description` win.
  */
 export function buildSchema(groups: Array<{ id: string; fields: FieldDefs }>): FieldDefs {
   const merged: FieldDefs = {};
@@ -131,6 +131,7 @@ export function buildSchema(groups: Array<{ id: string; fields: FieldDefs }>): F
       merged[slug] = {
         ...seen,
         enum: seen.enum ?? def.enum,
+        label: seen.label ?? def.label,
         ask: seen.ask ?? def.ask,
         description: seen.description ?? def.description,
         extract: seen.extract ?? def.extract,

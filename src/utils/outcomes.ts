@@ -28,6 +28,7 @@ export const OUTCOME_MESSAGES = {
   silenced: "the host cannot speak right now",
 
   "already-known": "every field this step collects is known",
+  "asked-fixed": "the step's fixed question went out word for word",
   "another-reply": "another run already answered this turn",
   "already-sent": "this message was already sent once",
   branch: "a branch of this step fired",

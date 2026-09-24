@@ -77,6 +77,7 @@ export type StepOutcomeCode =
   | "silenced"
   // A step
   | "already-known"
+  | "asked-fixed"
   | "another-reply"
   | "already-sent"
   | "branch"

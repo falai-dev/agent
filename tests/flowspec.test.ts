@@ -306,6 +306,7 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
       'step "a": unknown field "telefone" in ask',
     );
     expect(problem(spec([say("a")], { clearOnStart: ["telefone"] }))).toContain('flow "fx": unknown field "telefone" in clearOnStart');
+    expect(problem(spec([say("a")], { collect: ["telefone"] }))).toContain('flow "fx": unknown field "telefone" in collect');
     expect(problem(spec([say("a", { step: "a", clear: ["telefone"] })]))).toContain('step "a": unknown field "telefone" in then.clear');
     expect(problem(spec([{ id: "a", kind: "if", if: { equals: { telefone: "x" } }, else: "end" }]))).toContain(
       'step "a": unknown field "telefone" in if.equals',
@@ -419,6 +420,15 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
     expect(ok.warnings).toHaveLength(1);
   });
 
+  test("a fixed question on a step that collects nothing", () => {
+    expect(problem(spec([{ id: "a", kind: "collect", collect: [], question: "Tudo bem?" }]))).toContain(
+      'step "a": has a question but collects nothing',
+    );
+    const typed = f.flow({ id: "q", name: "Q", steps: [{ id: "a", prompt: "Cumprimente.", question: "Oi!" }] });
+    expect(() => validateFlow(typed, registries)).toThrow('flow "q", step "a": has a question but collects nothing');
+    expect(() => toSpec(typed)).toThrow('step "a": has a question but collects nothing');
+  });
+
   test("triggers but no steps", () => {
     const m = problem(spec([], { on: [{ message: ["oi"] }] }));
     expect(m).toContain('flow "fx": has triggers but no steps');
@@ -445,6 +455,15 @@ describe("validateFlow warns", () => {
     expect(validateFlow(spec([{ id: "a", kind: "collect", collect: ["cargo"], ask: { cargo: "Pergunte o cargo." } }]), registries).warnings).toEqual([]);
     expect(validateFlow(spec([{ id: "a", kind: "collect", collect: ["cargo", "nome"] }]), registries).warnings).toEqual([]);
     expect(validateFlow(spec([{ id: "a", kind: "collect", collect: ["cargo"], prompt: "Descubra o cargo." }]), registries).warnings).toEqual([]);
+    expect(validateFlow(spec([{ id: "a", kind: "collect", collect: ["cargo"], question: "Qual é o seu cargo?" }]), registries).warnings).toEqual([]);
+  });
+
+  test("a flow field only an answer fills, which no step asks", () => {
+    const { warnings } = validateFlow(spec([{ id: "a", kind: "collect", collect: ["nome"] }], { collect: ["nome", "cargo", "confirmado"] }), registries);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('flow "fx": collect lists "confirmado", which is only taken from the answer to a step that asks it');
+    const asked = spec([{ id: "a", kind: "collect", collect: ["confirmado"] }], { collect: ["confirmado"] });
+    expect(validateFlow(asked, registries).warnings).toEqual([]);
   });
 });
 
@@ -505,6 +524,8 @@ describe("flowSpecSchema", () => {
 
     expect(prop(steps.collect[0], "collect").items?.enum).toEqual(slugs);
     expect(prop(schema, "clearOnStart").items?.enum).toEqual(slugs);
+    expect(prop(schema, "collect").items?.enum).toEqual(slugs);
+    expect(prop(steps.collect[0], "question").type).toEqual(["string", "null"]);
     expect(prop(prop(steps.waitEvent[0], "wait"), "event").enum).toEqual(["stage_entered", "meeting_booked"]);
 
     const triggers = variants(prop(schema, "on").items ?? {});
@@ -570,7 +591,15 @@ describe("property", () => {
     return fc.oneof(
       fc.record({ kind: fc.constant("prompt" as const), prompt: text, branches: branches(ids), ...base }, { requiredKeys: ["kind", "prompt"] }),
       fc.record(
-        { kind: fc.constant("collect" as const), collect: fc.subarray(slugs), prompt: text, maxAsks: fc.integer({ min: 1, max: 5 }), branches: branches(ids), ...base },
+        {
+          kind: fc.constant("collect" as const),
+          collect: fc.subarray(slugs),
+          prompt: text,
+          question: text,
+          maxAsks: fc.integer({ min: 1, max: 5 }),
+          branches: branches(ids),
+          ...base,
+        },
         { requiredKeys: ["kind", "collect"] },
       ),
       fc.record(
@@ -616,6 +645,7 @@ describe("property", () => {
       on: fc.array(trigger, { maxLength: 3 }),
       anchor: fc.constantFrom("session", "lead"),
       while: condition,
+      collect: fc.subarray(slugs),
       clearOnStart: fc.subarray(slugs),
       steps,
       onEnd: fc.constantFrom("end" as const, "stay" as const, "reset" as const),

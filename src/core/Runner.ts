@@ -137,6 +137,13 @@ function talkKind(step: { collect?: readonly string[] }): StepOutcomeKind {
   return step.collect?.length ? "collect" : "prompt";
 }
 
+/** Everything a flow collects: its own `collect`, then each talk step's, once each. */
+function flowFields<C, D>(flow: Flow<C, D>): string[] {
+  const fields = new Set<string>(flow.collect);
+  for (const step of flow.steps) if (isTalk(step)) for (const field of step.collect ?? []) fields.add(field);
+  return [...fields];
+}
+
 function kindOf<C, D>(step: Step<C, D> | undefined): StepOutcomeKind {
   if (!step) return "if";
   if (isTalk(step)) return talkKind(step);
@@ -543,16 +550,25 @@ export class Runner<C = unknown, D = unknown> {
     }
     const fields: UnderstandRequest<C, D>["fields"] = {};
     const data: Record<string, unknown> = turn.session.data;
+    const harvestable = (field: string): boolean => {
+      const def = this.options.fields[field];
+      return def !== undefined && !isKnown(data[field]) && extractMode(def) === "anywhere";
+    };
     for (const flow of [...(floorFlow ? [floorFlow] : []), ...eligible]) {
-      for (const step of flow.steps) {
-        if (!isTalk(step)) continue;
-        for (const field of step.collect ?? []) {
-          const def = this.options.fields[field];
-          if (def && !isKnown(data[field]) && extractMode(def) === "anywhere") fields[field] = def;
-        }
-      }
+      for (const field of flowFields(flow).filter(harvestable)) fields[field] = this.options.fields[field];
     }
-    if (!messageFlows.length && !mentionFlows.length && !branches.length && !Object.keys(fields).length) return null;
+    const judging = messageFlows.length > 0 || mentionFlows.length > 0 || branches.length > 0 || Object.keys(fields).length > 0;
+    // With nobody on the floor the catch-all may take this message, and an opening message often says the most. The
+    // fields its first step asks ride on that step's speak call, so alone they spend no call; a fixed question has no speak call.
+    // ponytail: "first step" is steps[0]; a catch-all that opens with a say or an if pays the call for that step's fields too.
+    const fallback = floorRun ? undefined : this.messageFlows(turn, (list) => list.length === 0)[0];
+    if (fallback) {
+      const first = fallback.steps[0];
+      const free = new Set<string>(first && isTalk(first) && first.question === undefined ? first.collect : []);
+      const own = flowFields(fallback).filter(harvestable);
+      if (judging || own.some((field) => !free.has(field))) for (const field of own) fields[field] = this.options.fields[field];
+    }
+    if (!judging && !Object.keys(fields).length) return null;
     return {
       text: turn.what.text,
       history: this.historyOf(turn),
@@ -724,7 +740,31 @@ export class Runner<C = unknown, D = unknown> {
       turn.queue.push(resumed);
       await this.drain(turn);
     }
-    return this.speaker(turn);
+    const speaker = this.speaker(turn);
+    if (speaker && !("idle" in speaker) && this.askFixed(turn, speaker)) {
+      turn.talk = undefined;
+      return null;
+    }
+    return speaker;
+  }
+
+  /**
+   * Send the step's fixed question when this is its first ask: every field it collects still unknown, none asked yet,
+   * and the run not staying (a staying run answers the lead). The question counts as one ask of each field. False when
+   * the AI should phrase the ask instead.
+   */
+  private askFixed(turn: Turn<C, D>, { run, step, pending }: TalkRequest<C, D>): boolean {
+    const { question, collect = [] } = step;
+    if (question === undefined || run.staying) return false;
+    if (pending.length !== collect.length || pending.some((field) => (run.asked[field] ?? 0) > 0)) return false;
+    const key = this.stepKey(run, step);
+    turn.messages.push({ text: render(question, this.scope(turn, run)), kind: "verbatim", afterMs: turn.afterMs, key, runId: run.id, stepId: step.id });
+    turn.afterMs = 0;
+    turn.spokeBy.add(run.id);
+    turn.spoke = true;
+    for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
+    this.outcome(turn, run, { kind: "collect", status: "ok", key, code: "asked-fixed", stepId: step.id });
+    return true;
   }
 
   /**
@@ -873,7 +913,9 @@ export class Runner<C = unknown, D = unknown> {
         }
       }
       run.status = "asking";
+      // Reached after Speak (settle's drain), a talk step waits for the next message; a fixed question costs no call, so it goes out now, as a say would.
       if (!turn.speakDone) turn.talk = { run, flow, step, pending };
+      else this.askFixed(turn, { run, flow, step, pending });
       return;
     }
 
@@ -1014,7 +1056,11 @@ export class Runner<C = unknown, D = unknown> {
     }
     if ("step" in target) {
       const data: Record<string, unknown> = turn.session.data;
-      for (const field of target.clear ?? []) delete data[field];
+      // Forgetting a field means asking for it from scratch: its ask count goes too, so a fixed question goes out again.
+      for (const field of target.clear ?? []) {
+        delete data[field];
+        delete run.asked[field];
+      }
       this.jump(turn, run, flow, target.step);
       return;
     }

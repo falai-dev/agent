@@ -45,6 +45,8 @@ export interface ScalarDef<T extends ScalarType = ScalarType> {
 
 /** One collectable field, authored once on the agent. */
 export interface FieldDef<T extends ScalarType = ScalarType> extends ScalarDef<T> {
+  /** The name a person reads, in an editor or next to a collected value. The model never sees it. */
+  label?: string;
   /** How the AI should ask for this field when a step collects it. */
   ask?: string;
   /**
@@ -185,6 +187,12 @@ export type TalkStep<C = unknown, D = unknown> = (
 ) & {
   /** Per-flow wording for a field; the field's own `ask` is the default. */
   ask?: Partial<Record<keyof D & string, string>>;
+  /**
+   * A fixed first question, sent word for word with no model call when the step
+   * first asks: every field it collects is still unknown and none was asked yet.
+   * Any later ask is the AI's own wording. Needs `collect`.
+   */
+  question?: Template;
   /** Times a field may be asked before it is skipped. Default 3. */
   maxAsks?: number;
   branches?: Branch<C, D>[];
@@ -253,6 +261,12 @@ export interface Flow<C = unknown, D = unknown> {
   anchor?: string;
   /** Re-checked whenever the run moves. Default: the trigger's `if`. */
   while?: Pred<C, D>;
+  /**
+   * The data this flow needs, as agent field slugs. Its talk steps' `collect`
+   * says which of it to ask, and in what order; a field no step asks is still
+   * noted whenever the lead gives it while the flow holds the conversation.
+   */
+  collect?: (keyof D & string)[];
   clearOnStart?: (keyof D & string)[];
   steps: Step<C, D>[];
   /** What the run does after its last step. Default `'end'`. `'stay'`: the last talk step the run took answers every later message. */

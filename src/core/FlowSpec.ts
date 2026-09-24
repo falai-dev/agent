@@ -44,7 +44,7 @@ import type {
 import type { StructuredSchema } from "../types/schema.js";
 import { isDuration } from "../utils/duration.js";
 import { splitPhrases } from "../utils/phrases.js";
-import { toWireSchema } from "../utils/schema.js";
+import { extractMode, toWireSchema } from "../utils/schema.js";
 
 // ── The JSON form ───────────────────────────────────────────────────────
 
@@ -77,7 +77,7 @@ interface TalkSpecExtras {
 export type StepSpec = StepBase<LooseData> &
   (
     | ({ kind: "prompt"; prompt: Template; collect?: undefined } & TalkSpecExtras)
-    | ({ kind: "collect"; collect: string[]; prompt?: Template } & TalkSpecExtras)
+    | ({ kind: "collect"; collect: string[]; prompt?: Template; question?: Template } & TalkSpecExtras)
     | ({ kind: "say" } & SayStep)
     | ({ kind: "do" } & DoStep<LooseData>)
     | { kind: "wait"; wait: Duration; businessHours?: boolean; else?: Next<LooseData>; branches?: BranchSpec[] }
@@ -92,6 +92,7 @@ export interface FlowSpec {
   on?: TriggerSpec[];
   anchor?: string;
   while?: ConditionSpec<LooseData>;
+  collect?: string[];
   clearOnStart?: string[];
   steps: StepSpec[];
   onEnd?: "end" | "stay" | "reset";
@@ -136,6 +137,7 @@ export function toSpec<C, D extends LooseData>(flow: Flow<C, D>): FlowSpec {
     on: flow.on?.map((trigger, i) => triggerToSpec(trigger, at(`trigger #${i + 1}`))),
     anchor: flow.anchor,
     while: jsonPred(flow.while, at("while")),
+    collect: flow.collect,
     clearOnStart: flow.clearOnStart,
     steps: flow.steps.map((step) => stepToSpec(step, at(`step "${step.id}"`))),
     onEnd: flow.onEnd,
@@ -189,11 +191,12 @@ function stepToSpec<C, D extends LooseData>(step: Step<C, D>, at: string): StepS
     instructions: step.instructions?.map((ins, i) => instructionToSpec(ins, `${at} instructions[${i}]`)),
   };
   if (step.collect !== undefined) {
-    return compact<StepSpec>({ ...base, kind: "collect", collect: step.collect, prompt: step.prompt, ...talk });
+    return compact<StepSpec>({ ...base, kind: "collect", collect: step.collect, prompt: step.prompt, question: step.question, ...talk });
   }
   if (step.prompt === undefined) {
     throw problem(at, "has neither prompt nor collect", "A talk step needs a guideline, fields to collect, or both.");
   }
+  if (step.question !== undefined) throw questionWithoutCollect(at);
   return compact<StepSpec>({ ...base, kind: "prompt", prompt: step.prompt, ...talk });
 }
 
@@ -248,6 +251,7 @@ interface LooseStep {
   onFail?: Next<LooseData>;
   prompt?: Template;
   collect?: string[];
+  question?: Template;
   ask?: Partial<Record<string, string>>;
   branches?: LooseBranch[];
   instructions?: LooseInstruction[];
@@ -262,6 +266,7 @@ interface LooseFlow {
   id: string;
   on?: LooseTrigger[];
   while?: LoosePred;
+  collect?: string[];
   clearOnStart?: string[];
   steps: LooseStep[];
   instructions?: LooseInstruction[];
@@ -421,7 +426,18 @@ export function validateFlow<C = unknown, D = LooseData>(
     }
   };
 
+  for (const field of flow.collect ?? []) slug(field, flowAt, "collect");
   for (const field of flow.clearOnStart ?? []) slug(field, flowAt, "clearOnStart");
+  // A field taken only from the answer to a step that asks it can never be filled when no step asks it.
+  const asked = new Set(flow.steps.flatMap((step) => step.collect ?? []));
+  for (const field of flow.collect ?? []) {
+    if (!asked.has(field) && extractMode(fields[field]) === "asked") {
+      warnings.push(
+        `${flowAt}: collect lists "${field}", which is only taken from the answer to a step that asks it, and no ` +
+          "step does. Add it to a step's collect, or set extract: 'anywhere' on the field.",
+      );
+    }
+  }
   pred(flow.while, flowAt, "while");
   toolNames(flow.tools, flowAt);
   flow.instructions?.forEach((ins, i) => pred(ins.if, flowAt, `instructions[${i}].if`));
@@ -483,8 +499,14 @@ export function validateFlow<C = unknown, D = LooseData>(
     if (step.collect !== undefined || step.prompt !== undefined) {
       for (const field of step.collect ?? []) slug(field, at, "collect");
       for (const field of Object.keys(step.ask ?? {})) slug(field, at, "ask");
+      if (step.question !== undefined && !step.collect?.length) throw questionWithoutCollect(at);
       const fields_ = step.collect ?? [];
-      if (step.prompt === undefined && fields_.length > 0 && fields_.every((f) => !step.ask?.[f] && !fields[f].ask)) {
+      if (
+        step.prompt === undefined &&
+        step.question === undefined &&
+        fields_.length > 0 &&
+        fields_.every((f) => !step.ask?.[f] && !fields[f].ask)
+      ) {
         warnings.push(
           `${at}: collects ${fields_.map((f) => `"${f}"`).join(", ")} with no prompt and no ask; the AI has nothing ` +
             "to go on. Add a prompt or an ask per field.",
@@ -655,6 +677,7 @@ export function flowSpecSchema(registries: Registries): StructuredSchema {
         kind: enumOf(["collect"]),
         collect: { ...slugList, description: "Fields the AI asks for until they are known" },
         prompt: orNull(STRING),
+        question: orNull({ type: "string", description: "A fixed first question, sent word for word; later asks are the AI's" }),
         maxAsks: orNull({ ...INTEGER, description: "Times a field may be asked before it is skipped; default 3" }),
         branches,
       }),
@@ -700,6 +723,7 @@ export function flowSpecSchema(registries: Registries): StructuredSchema {
     on: orNull(list(trigger, "What starts a run; null = started by hand")),
     anchor: orNull({ type: "string", description: "'session' (default) or a host anchor such as 'lead'" }),
     while: orNull({ ...condition, description: "The run ends when this stops holding" }),
+    collect: slugList && orNull({ ...slugList, description: "The data this flow needs; its steps ask for it in order, and any of it the lead gives is noted" }),
     clearOnStart: slugList && orNull({ ...slugList, description: "Fields to forget when a run starts" }),
     steps: list(step, "In order; a run moves to the next step unless `then` says otherwise"),
     onEnd: orNull(enumOf(["end", "stay", "reset"], "After the last step: end the run, stay on the last talk step it took answering every message, or reset to the first")),
@@ -750,6 +774,10 @@ function orNull(schema: StructuredSchema): StructuredSchema {
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────
+
+function questionWithoutCollect(at: string): FlowConfigurationError {
+  return problem(at, "has a question but collects nothing", "A fixed question asks for fields: add collect, or send the text with a say step.");
+}
 
 function problem(at: string, what: string, fix: string): FlowConfigurationError {
   return new FlowConfigurationError(`[FlowConfigurationError] ${at}: ${what}. ${fix}`);

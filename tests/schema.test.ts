@@ -14,7 +14,7 @@ import {
 import { isStrictSchema } from "./helpers.js";
 
 const fields: FieldDefs = {
-  nome: { type: "string", ask: "Pergunte o nome." },
+  nome: { type: "string", label: "Nome", ask: "Pergunte o nome." },
   tamanho: { type: "string", enum: ["1-10", "11-50"], ask: "Pergunte o porte." },
   orcamento: { type: "number", ask: "Pergunte a faixa.", description: "Faixa em reais" },
   confirmado: { type: "boolean", ask: "Confirme." },
@@ -56,7 +56,7 @@ describe("coerceField", () => {
 });
 
 describe("toWireSchema", () => {
-  test("strips ask/extract and closes the object", () => {
+  test("strips label/ask/extract and closes the object", () => {
     expect(toWireSchema(fields)).toEqual({
       type: "object",
       properties: {
@@ -106,12 +106,12 @@ describe("toWireSchema", () => {
 });
 
 describe("buildSchema", () => {
-  test("merges rows by slug; first ask wins; type conflicts throw", () => {
+  test("merges rows by slug; first label and ask win; type conflicts throw", () => {
     const merged = buildSchema([
       { id: "triagem", fields: { nome: { type: "string", ask: "A" } } },
-      { id: "agenda", fields: { nome: { type: "string", ask: "B", description: "d" }, dia: { type: "string" } } },
+      { id: "agenda", fields: { nome: { type: "string", label: "Nome", ask: "B", description: "d" }, dia: { type: "string" } } },
     ]);
-    expect(merged.nome).toEqual({ type: "string", ask: "A", description: "d", enum: undefined, extract: undefined });
+    expect(merged.nome).toEqual({ type: "string", label: "Nome", ask: "A", description: "d", enum: undefined, extract: undefined });
     expect(Object.keys(merged)).toEqual(["nome", "dia"]);
 
     expect(() =>
