@@ -64,7 +64,7 @@ console.log(t2.messages.map((m) => m.text)); // ["Claro, vou chamar alguém da e
 
 `branches` is allowed on two step kinds:
 
-- A talk step that collects (`collect`, with or without a `prompt`). Both `when` and `if` branches work while it asks. A `prompt` step with no `collect` speaks once and moves on in the same turn, so its branches are only judged in the rare turn where it is still asking: the talk step an `onEnd: 'stay'` flow stays on (only its `when` branches; its `if` branches were settled on the way to the end), or a turn where another run answered the customer first.
+- A talk step that collects (`collect`, with or without a `prompt`). Both `when` and `if` branches work while it asks. A `prompt` step with no `collect` speaks once and moves on in the same turn, so its branches are only judged in the rare turn where it is still asking: the talk step an `onEnd: 'stay'` flow stays on, or a turn where another run answered the customer first. On the step a run stays on, an `if` branch that leads to `'end'` or to a step the run has already been through is not taken: that path already ran, and the fact would still hold on every message. Write a restart there as a `when`.
 - A timer `wait` step (`wait: '2d'`). Only `if` branches are judged there.
 
 `say`, `do`, `if` and `wait: { event }` steps have no branches. A code fork between them is an `if` step.

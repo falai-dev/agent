@@ -303,6 +303,8 @@ export class Runner<C = unknown, D = unknown> {
       const branch = step.branches?.find((b) => "if" in b && this.holds(b.if, turn, run));
       const target = branch ? branch.then : step.else;
       this.outcome(turn, run, { kind: "wait", status: "ok", code: "replied", next: nextLabel(target) });
+      // The reply is this run's while it moves, so a stay it reaches answers it.
+      if (!turn.floorFromIngest) turn.floorRunId = run.id;
       this.follow(turn, run, flow, step, target);
       this.takeFloor(turn, run);
     }
@@ -669,9 +671,15 @@ export class Runner<C = unknown, D = unknown> {
   }
 
   private fireBranch(turn: Turn<C, D>, run: Run, flow: Flow<C, D>, step: TalkOf<C, D>, understanding: Understanding | null): void {
-    // A staying run already took its `if` branches on the way to the end; judged again they would hold on every message.
+    // Staying, a run does not take an `if` branch back onto a path it has already run: the fact it tests is still true,
+    // so it would re-run that path on every message. A `when` branch is judged on each new message and always counts.
+    // ponytail: "already run" is the target's visit count, so an `if` restart (`{ step, clear }` to a visited step) never fires while staying; write it as a `when`.
+    const ran = (then: Next<D>): boolean =>
+      typeof then === "string" ? then === "end" || (run.visits[then] ?? 0) > 0 : "step" in then && (run.visits[then.step] ?? 0) > 0;
     const hit = (branch: Branch<C, D>, index: number): boolean =>
-      "if" in branch ? !run.staying && this.holds(branch.if, turn, run) : understanding?.branches[`${run.id}/${step.id}/${index}`] === true;
+      "if" in branch
+        ? !(run.staying && ran(branch.then)) && this.holds(branch.if, turn, run)
+        : understanding?.branches[`${run.id}/${step.id}/${index}`] === true;
     const index = (step.branches ?? []).findIndex(hit);
     if (index < 0) return;
     const branch = (step.branches ?? [])[index];
@@ -704,6 +712,14 @@ export class Runner<C = unknown, D = unknown> {
     this.resumeSuspended(turn);
     turn.queue = [...turn.session.runs];
     await this.drain(turn);
+    // The asker moved on without a word: the run it suspended answers the message instead.
+    if (turn.what.kind === "message" && turn.silenced === undefined && !turn.talk && turn.spokeBy.size === 0) {
+      const resumed = this.resumeSuspended(turn);
+      if (resumed) {
+        turn.queue.push(resumed);
+        await this.drain(turn);
+      }
+    }
     return this.speaker(turn);
   }
 
@@ -996,11 +1012,11 @@ export class Runner<C = unknown, D = unknown> {
     const childId = render(target.flow, this.scope(turn, run));
     const key = this.stepKey(run, step);
     this.endRun(turn, run, "flow");
-    this.chain(turn, childId, key, target.input ?? run.input, run.hop + 1);
+    this.chain(turn, run, childId, key, target.input ?? run.input, run.hop + 1);
   }
 
-  /** Start a child flow that holds the floor and moves in this same phase. */
-  private chain(turn: Turn<C, D>, flowId: string, key: string, input: unknown, hop: number, keepData = false): void {
+  /** Start a child flow that moves in this same phase. It inherits the floor when its parent held it, or when nobody did. */
+  private chain(turn: Turn<C, D>, parent: Run, flowId: string, key: string, input: unknown, hop: number, keepData = false): void {
     const child = this.flows.get(flowId);
     if (!child) {
       turn.skipped.push({ flowId, anchor: turn.session.id, triggerKey: key, code: "flow-gone", message: OUTCOME_MESSAGES["flow-gone"] });
@@ -1008,8 +1024,10 @@ export class Runner<C = unknown, D = unknown> {
     }
     const run = this.startRun(turn, child, "flow", key, { payload: input, hop, keepData });
     if (!run) return;
-    turn.floorRunId = run.id;
-    if (turn.ingesting) turn.floorFromIngest = true;
+    if (turn.floorRunId === undefined || turn.floorRunId === parent.id) {
+      turn.floorRunId = run.id;
+      if (turn.ingesting) turn.floorFromIngest = true;
+    }
     turn.queue.push(run);
   }
 
@@ -1050,18 +1068,21 @@ export class Runner<C = unknown, D = unknown> {
     const stay = onEnd === "stay" ? this.stayStep(run, flow) : undefined;
     if (stay) {
       // The steps after it ran once, on the way here; staying, it only answers.
-      const other = turn.session.runs.find((r) => r !== run && r.status === "asking");
       this.stayAt(run, stay);
-      // A message nothing has answered yet gets its answer now, from this run when nobody else is asking or the lead's
-      // message was routed here; the talk step then suspends the other asker, as any talk step does.
-      const unanswered = turn.what.kind === "message" && turn.silenced === undefined && !turn.speakDone && turn.spokeBy.size === 0;
-      if (unanswered && (!other || turn.floorRunId === run.id)) {
-        run.status = "running";
-      } else if (other) {
-        // One asker at a time: this run waits behind the one holding the conversation and resumes when it is done.
+      // One asker at a time. A run the lead's message went to holds the conversation and suspends the other asker;
+      // any other run waits behind that asker and resumes when it is done.
+      const others = turn.session.runs.filter((r) => r !== run && r.status === "asking");
+      if (others.length && !(turn.what.kind === "message" && turn.floorRunId === run.id)) {
         run.status = "suspended";
         run.suspendedAt = turn.nowIso;
+        return;
       }
+      for (const other of others) {
+        other.status = "suspended";
+        other.suspendedAt = turn.nowIso;
+      }
+      // A message nothing has answered yet gets its answer now.
+      if (turn.what.kind === "message" && turn.silenced === undefined && !turn.speakDone && turn.spokeBy.size === 0) run.status = "running";
       return;
     }
     if (onEnd === "reset" && last) {
@@ -1069,7 +1090,7 @@ export class Runner<C = unknown, D = unknown> {
       // It is a chain into itself, so it costs a hop: a code-only flow that resets forever stops at the hop cap instead of spinning.
       const key = this.stepKey(run, last);
       this.endRun(turn, run, "reset");
-      this.chain(turn, flow.id, key, run.input, run.hop + 1, true);
+      this.chain(turn, run, flow.id, key, run.input, run.hop + 1, true);
       return;
     }
     this.endRun(turn, run, "end");
@@ -1093,8 +1114,8 @@ export class Runner<C = unknown, D = unknown> {
   }
 
   /** When nobody asks, the most recently suspended run returns to asking. */
-  private resumeSuspended(turn: Turn<C, D>): void {
-    if (this.asker(turn)) return;
+  private resumeSuspended(turn: Turn<C, D>): Run | undefined {
+    if (this.asker(turn)) return undefined;
     const suspendedAt = (r: Run): string => r.suspendedAt ?? r.startedAt;
     const next = turn.session.runs
       .filter((r) => r.status === "suspended")
@@ -1103,6 +1124,7 @@ export class Runner<C = unknown, D = unknown> {
       next.status = "asking";
       delete next.suspendedAt;
     }
+    return next;
   }
 
   // ── Settle: the one applier after Speak (design §4.7) ─────────────────

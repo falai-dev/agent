@@ -84,7 +84,7 @@ Code applies the judgement in a fixed order.
 
 ## 5. Run
 
-If no run is asking, the most recently suspended one returns to asking. Then every live run is moved in turn; a child started by `then: { flow }` joins the queue. A run moves only if it can: `waiting` and `suspended` runs stay put, and an asking run re-speaks only on a message, never on a wake or an event.
+If no run is asking, the most recently suspended one returns to asking. Then every live run is moved in turn; a child started by `then: { flow }` joins the queue. On a message that nothing has answered once the queue is empty, with nobody asking and no `silenced`, the most recently suspended run returns to asking and moves too: an asker that moved on without a word hands the message back to the run it suspended. A run moves only if it can: `waiting` and `suspended` runs stay put, and an asking run re-speaks only on a message, never on a wake or an event.
 
 Before a run moves, its premise is re-checked with this turn's context: `while` when the flow has one, otherwise the trigger's `if`. A false premise ends the run: `code: 'premise-changed'`. A silence-started run moved by a wake also ends when the customer has written since it started: `code: 'customer-replied'`. A flow the agent no longer has ends the run with `code: 'flow-gone'`; a missing step, `code: 'step-gone'`.
 

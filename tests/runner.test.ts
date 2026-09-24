@@ -629,6 +629,79 @@ describe("onEnd 'stay' answers every message from the last talk step, even one t
     expect(t2.result.session.runs.map((r) => [r.id, r.status])).toEqual([["modelo#m1", "suspended"], ["lead#m2", "asking"]]);
   });
 
+  test("an if branch on a prompt-only stay step hands off once its fact is true", async () => {
+    const chat = f.flow({
+      id: "chat", name: "Chat", on: [{ message: ["oi"] }], onEnd: "stay",
+      steps: [{ id: "c", prompt: "Converse.", branches: [{ if: { equals: { confirmado: true } }, then: { flow: "posvenda" } }] }],
+    });
+    const posvenda = f.flow({ id: "posvenda", name: "Pós-venda", steps: [{ id: "pv", prompt: "Cuide do pós-venda." }] });
+    const { runner } = setup([chat, posvenda]);
+    const pago: Session<Data> = { id: "s1", v: 4, version: 1, data: { confirmado: true }, runs: [], claims: {}, inputs: [], metadata: {} };
+    const t1 = await drive(runner, message("oi", "m1", { session: pago }), { understanding: routedTo("chat"), speak: () => spoken("Olá!") });
+    expect(t1.result.session.runs[0]).toMatchObject({ stepId: "c", staying: true });
+    const t2 = await drive(runner, message("e agora?", "m2", { session: saved(t1.result) }), { speak: () => spoken("Seu pedido já saiu.") });
+    expect(isTalk(t2.talk) && t2.talk.run.flowId).toBe("posvenda");
+  });
+
+  test("a reply that resolves its wait into the stay is answered by that run, not the one that was asking", async () => {
+    const seguro = f.flow({
+      id: "seguro", name: "Seguro", on: [{ message: ["seguro"] }], onEnd: "stay",
+      steps: [{ id: "s", prompt: "Fale do seguro." }, { id: "w", wait: "1d", else: "end" }, { id: "lembra", say: "Ainda por aí?" }],
+    });
+    const modelo = f.flow({ id: "modelo", name: "Modelo", steps: [{ id: "m", collect: ["modelo"] }] });
+    const { runner } = setup([seguro, modelo]);
+    const t1 = await drive(runner, message("seguro", "m1"), { understanding: routedTo("seguro"), speak: () => spoken("Temos três planos.") });
+    const t2 = await drive(runner, { sessionId: "s1", context: ai, session: saved(t1.result), start: { flow: "modelo", key: "k" } }, { speak: () => spoken("Qual modelo?") });
+    expect(t2.result.session.runs.map((r) => [r.id, r.status])).toEqual([["seguro#m1", "waiting"], ["modelo#k", "asking"]]);
+    const t3 = await drive(runner, message("e o preço?", "m3", { session: saved(t2.result) }), { speak: () => spoken("R$ 50 por mês.") });
+    expect(isTalk(t3.talk) && t3.talk.run.id).toBe("seguro#m1");
+    expect(t3.result.session.runs.map((r) => [r.id, r.status])).toEqual([["seguro#m1", "asking"], ["modelo#k", "suspended"]]);
+  });
+
+  test("suspended on a start, it answers the message its asker moves on from without a word", async () => {
+    const modelo = f.flow({ id: "modelo", name: "Modelo", on: [{ message: ["carro"] }], steps: [{ id: "m", collect: ["modelo"] }] });
+    const { runner } = setup([lead, modelo], { idle: "silent" });
+    const known: Session<Data> = { id: "s1", v: 4, version: 1, data: { nome: "Ana" }, runs: [], claims: {}, inputs: [], metadata: {} };
+    const t1 = await drive(runner, message("carro", "m1", { session: known }), { understanding: routedTo("modelo"), speak: () => spoken("Qual modelo?") });
+    const t2 = await drive(runner, { sessionId: "s1", context: ai, session: saved(t1.result), start: { flow: "lead", key: "k" } });
+    expect(t2.result.session.runs.map((r) => [r.id, r.status])).toEqual([["modelo#m1", "asking"], ["lead#k", "suspended"]]);
+    const t3 = await drive(runner, message("um Corolla", "m3", { session: saved(t2.result) }), {
+      understanding: understood({ fields: { modelo: "Corolla" } }),
+      speak: () => spoken("Anotado, Ana!"),
+    });
+    expect(isTalk(t3.talk) && t3.talk.run.id).toBe("lead#k");
+    expect(t3.result.messages.map((m) => m.key)).toEqual(["lead#k:q:2"]);
+  });
+
+  test("a mention flow chaining on the side does not take the routed message from it", async () => {
+    const modelo = f.flow({ id: "modelo", name: "Modelo", on: [{ message: ["carro"] }], steps: [{ id: "m", collect: ["modelo"] }] });
+    const alerta = f.flow({ id: "alerta", name: "Alerta", on: [{ mention: ["urgente"] }], steps: [{ id: "n", do: "notify", with: {}, then: { flow: "marca" } }] });
+    const marca = f.flow({ id: "marca", name: "Marca", steps: [{ id: "t", do: "add_tags", with: { tags: ["urgente"] } }] });
+    const { runner, calls } = setup([modelo, lead, alerta, marca]);
+    const t1 = await drive(runner, message("carro", "m1"), { understanding: routedTo("modelo"), speak: () => spoken("Qual modelo?") });
+    const t2 = await drive(runner, message("quero, é urgente, sou a Ana", "m2", { session: saved(t1.result) }), {
+      understanding: understood({ flows: { lead: 90 }, mentions: { alerta: true }, fields: { nome: "Ana" } }),
+      speak: () => spoken("Prazer, Ana!"),
+    });
+    expect(calls.map((c) => c.action)).toEqual(["notify", "notify", "add_tags"]);
+    expect(isTalk(t2.talk) && t2.talk.run.id).toBe("lead#m2");
+    expect(t2.result.session.runs.map((r) => [r.id, r.status])).toEqual([["modelo#m1", "suspended"], ["lead#m2", "asking"]]);
+  });
+
+  test("routed to, it holds the conversation even when its own say was the answer", async () => {
+    const modelo = f.flow({ id: "modelo", name: "Modelo", on: [{ message: ["carro"] }], steps: [{ id: "m", collect: ["modelo"] }] });
+    const boas = f.flow({
+      id: "boas", name: "Boas-vindas", on: [{ message: ["oi"] }], onEnd: "stay",
+      steps: [{ id: "b", say: "Olá! Como posso ajudar?", then: "end" }, { id: "p", prompt: "Converse." }],
+    });
+    const { runner } = setup([modelo, boas]);
+    const t1 = await drive(runner, message("carro", "m1"), { understanding: routedTo("modelo"), speak: () => spoken("Qual modelo?") });
+    const t2 = await drive(runner, message("oi", "m2", { session: saved(t1.result) }), { understanding: routedTo("boas") });
+    expect(t2.talk).toBeNull();
+    expect(t2.result.messages.map((m) => m.text)).toEqual(["Olá! Como posso ajudar?"]);
+    expect(t2.result.session.runs.map((r) => [r.id, r.status, r.stepId])).toEqual([["modelo#m1", "suspended", "m"], ["boas#m2", "asking", "p"]]);
+  });
+
   test("a stay flow with no talk step ends like 'end'", async () => {
     const tags = f.flow({ id: "tags", name: "Tags", onEnd: "stay", steps: [{ id: "t", do: "add_tags", with: { tags: ["x"] } }] });
     const { runner } = setup([tags]);
