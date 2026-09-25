@@ -32,6 +32,24 @@ describe("render", () => {
     expect(render("Ate mais {{context.lead.name}}", blank)).toBe("Ate mais");
   });
 
+  test("a comma left before the end of a sentence goes with the value", () => {
+    const blank = { context: { lead: { name: "", greeting: "Bom dia" } } };
+    expect(render("Oi, {{context.lead.name}}!", blank)).toBe("Oi!");
+    expect(render("{{context.lead.greeting}}, {{context.lead.name}}! Tudo bem?", blank)).toBe(
+      "Bom dia! Tudo bem?",
+    );
+    // No lead: the greeting is blank too, so the line starts at "Tudo bem?".
+    const noLead = { context: { lead: null } };
+    expect(render("{{context.lead.greeting}}, {{context.lead.name}}! Tudo bem?", noLead)).toBe("Tudo bem?");
+    expect(render("Oi!\n{{context.lead.greeting}}, {{context.lead.name}}! Tudo bem?", noLead)).toBe(
+      "Oi!\nTudo bem?",
+    );
+    // A line that is only punctuation keeps it: a message never renders to nothing.
+    expect(render("{{context.lead.greeting}}, {{context.lead.name}}!", noLead)).toBe("!");
+    // A colon that ends a line is the author's, not a hole.
+    expect(render("Seus dados{{context.lead.name}}:\n- um", noLead)).toBe("Seus dados:\n- um");
+  });
+
   test("tidy only runs where something substituted to empty", () => {
     // Two spaces the author typed stay put when no value came back blank.
     expect(render("Oi  {{data.nome}} , beleza ?", scope)).toBe("Oi  Ana , beleza ?");

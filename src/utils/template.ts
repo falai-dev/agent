@@ -44,16 +44,22 @@ export function render(template: string, scope: TemplateScope): string {
 
 /**
  * Close the hole an empty value leaves: a doubled space, a space before
- * punctuation, a space at the end of a line.
+ * punctuation, a comma left before the end of a sentence ("Oi, {{name}}!"
+ * gives "Oi!", not "Oi,!"), punctuation stranded at the start of a line
+ * ("{{greeting}}, {{name}}! Tudo bem?" gives "Tudo bem?"), a space at the end
+ * of a line.
  *
  * Deliberately narrow. It only runs on a string where something substituted to
  * "", and it only collapses a run of spaces that follows a visible character,
- * so indentation in a markdown list survives.
+ * so indentation in a markdown list survives. A line that is only punctuation
+ * keeps it, so a message never renders to nothing.
  */
 function tidy(text: string): string {
   return text
     .replace(/(?<=\S)[ \t]{2,}/g, " ")
     .replace(/ +([,.;:!?\u2026])/g, "$1")
+    .replace(/[,;]+(?=[.!?\u2026])/g, "")
+    .replace(/^([ \t]*)[,;:!?]+[ \t]+(?=\S)/gm, "$1")
     .replace(/[ \t]+$/gm, "");
 }
 
