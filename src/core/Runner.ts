@@ -13,7 +13,6 @@ import type { TokenUsage } from "../types/ai.js";
 import type { ActionResult, Branch, DoStep, Duration, Flow, IfStep, Next, Pred, PredCtx, Repeat, SayStep, Step, StepBase, TalkStep, Trigger, WaitEventStep, WaitStep } from "../types/flow.js";
 import type { History } from "../types/history.js";
 import type { Run, Session, StepOutcome, StepOutcomeCode, StepOutcomeKind, TriggerKind } from "../types/session.js";
-import { cloneDeep } from "../utils/clone.js";
 import { isDuration, parseDuration } from "../utils/duration.js";
 import { OUTCOME_MESSAGES } from "../utils/outcomes.js";
 import { coerceField, DEFAULT_MAX_ASKS, extractMode, isKnown, pendingFields } from "../utils/schema.js";
@@ -202,7 +201,7 @@ export class Runner<C = unknown, D = unknown> {
       what,
       kind: what.kind,
       triggerKey: what.kind === "message" ? (what.id ?? what.at) : what.key,
-      session: input.session ? cloneDeep(input.session) : freshSession<D>(input.sessionId),
+      session: input.session ? structuredClone(input.session) : freshSession<D>(input.sessionId),
       original: input.session,
       now,
       nowIso,
@@ -415,11 +414,8 @@ export class Runner<C = unknown, D = unknown> {
       return null;
     };
     if (opts.trigger?.if && !this.holds(opts.trigger.if, turn, run)) return null;
-    const heldAt = this.claimAt(turn, dedupeKey);
-    if (heldAt !== undefined) {
-      if (typeof repeat === "string") return skip("already-claimed");
-      if (turn.now.getTime() - Date.parse(heldAt) < parseDuration(repeat.cooldown)) return skip("cooldown");
-    }
+    const blocked = this.repeatBlocks(turn, dedupeKey, repeat);
+    if (blocked) return skip(blocked);
     if (hop >= MAX_HOP) return skip("hop-limit");
     const live = session.runs.find((r) => r.flowId === flow.id && r.anchor === anchor);
     if (live) {
@@ -464,10 +460,15 @@ export class Runner<C = unknown, D = unknown> {
 
   private repeatAllows(turn: Turn<C, D>, flow: Flow<C, D>, trigger: Trigger<C, D>, key: string): boolean {
     const repeat = trigger.repeat ?? defaultRepeat(triggerKind(trigger));
-    const heldAt = this.claimAt(turn, `${flow.id}:${this.anchorOf(turn, flow)}:${repeat === "always" ? key : ""}`);
-    if (heldAt === undefined) return true;
-    if (typeof repeat === "string") return false;
-    return turn.now.getTime() - Date.parse(heldAt) >= parseDuration(repeat.cooldown);
+    return !this.repeatBlocks(turn, `${flow.id}:${this.anchorOf(turn, flow)}:${repeat === "always" ? key : ""}`, repeat);
+  }
+
+  /** Why the claim already on `dedupeKey` stops another start, or nothing when there is none or its cooldown has run out. */
+  private repeatBlocks(turn: Turn<C, D>, dedupeKey: string, repeat: Repeat): "already-claimed" | "cooldown" | undefined {
+    const heldAt = this.claimAt(turn, dedupeKey);
+    if (heldAt === undefined) return undefined;
+    if (typeof repeat === "string") return "already-claimed";
+    return turn.now.getTime() - Date.parse(heldAt) < parseDuration(repeat.cooldown) ? "cooldown" : undefined;
   }
 
   /** A run as it would be if started now, for trigger-level predicates. */

@@ -115,6 +115,8 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **A flow id with a `:` gets its silence wake.** The wake key is `silence:<flowId>:<sessionId>:<ms>`, and the flow id was read up to the first `:`, so `follow:up` was looked up as `follow` and every wake was skipped as `flow-gone`. The key is now cut at the session id.
 
+- **A field alias in the speak call can no longer take another field's name.** A pending slug that Gemini rejects (`nome completo`) went out as `field_<position>`, so a real field named `field_1` in the same step shared its property and one value landed on the wrong field. The speak call now names aliases the way the understand call does: `field_1`, `field_2`, …, skipping any name a real field or the `message` key already has.
+
 ### Unchanged
 
 - The provider classes (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, the `compaction` option and the history helpers. Their options are unchanged; what they send is not — see Fixed, and `GenerateMessageInput` gained an optional `system`.

@@ -67,7 +67,7 @@ describe("Speak.stream", () => {
     }
     expect(deltas.join("")).toBe(reply.message);
     expect(outcome).toEqual({
-      spoken: { message: reply.message, fields: { nome: "João" }, data: {}, toolCalls: [], llmCalls: 1 },
+      spoken: { message: reply.message, fields: { nome: "João" }, data: {}, llmCalls: 1 },
     });
   });
 
@@ -108,7 +108,6 @@ describe("Speak.stream", () => {
         message: "Fica em R$ 1.500.",
         fields: { tamanho: "11-50" },
         data: { orcamento: 1500 },
-        toolCalls: [{ toolName: "orcamento", arguments: { pessoas: 30 } }],
         llmCalls: 2,
       },
     });

@@ -50,7 +50,7 @@ describe("Speak.run: talk step", () => {
       }),
     );
 
-    expect(out).toEqual({ spoken: { message: "Oi! Como você se chama?", fields: {}, data: {}, toolCalls: [], llmCalls: 1 } });
+    expect(out).toEqual({ spoken: { message: "Oi! Como você se chama?", fields: {}, data: {}, llmCalls: 1 } });
     const [call] = provider.calls;
     expect(call.schemaName).toBe("speak");
     expect(call.input.parameters?.jsonSchema).toEqual({
@@ -134,22 +134,34 @@ describe("Speak.run: talk step", () => {
   });
 
   test("a slug Gemini rejects rides under an alias and maps back; a slug without a definition is a string", async () => {
-    const provider = mockProvider({ speak: [{ message: "Anotado!", field_0: "João da Silva", nome: null }] });
+    const provider = mockProvider({ speak: [{ message: "Anotado!", field_1: "João da Silva", nome: null }] });
     const out = await new Speak(agentOptions(provider)).run(talkRequest({ pending: ["nome completo", "nome"] }));
 
     expect(provider.calls[0].input.parameters?.jsonSchema).toMatchObject({
-      properties: { field_0: { type: nullable("string") } },
-      required: ["message", "field_0", "nome"],
+      properties: { field_1: { type: nullable("string") } },
+      required: ["message", "field_1", "nome"],
     });
-    expect(provider.calls[0].prompt).toContain('- "field_0": nome completo (string).');
+    expect(provider.calls[0].prompt).toContain('- "field_1": nome completo (string).');
     expect(out).toMatchObject({ spoken: { fields: { "nome completo": "João da Silva" } } });
+  });
+
+  test("an alias never takes a real slug's name, and a slug called message never takes the reply's", async () => {
+    const provider = mockProvider({ speak: [{ message: "Oi!", field_1: "a", field_2: "b", field_3: "c" }] });
+    const out = await new Speak(agentOptions(provider)).run(talkRequest({ pending: ["nome completo", "field_1", "message"] }));
+
+    expect(provider.calls[0].input.parameters?.jsonSchema).toMatchObject({
+      required: ["message", "field_1", "field_2", "field_3"],
+    });
+    expect(out).toMatchObject({
+      spoken: { message: "Oi!", fields: { "nome completo": "a", field_1: "b", message: "c" } },
+    });
   });
 
   test("values come back raw with nulls dropped; stray text around the envelope is tolerated", async () => {
     const provider = looseProvider('Claro!\n{"message":"Prazer, João!","nome":"João","tamanho":"30"}');
     const out = await new Speak(agentOptions(provider)).run(talkRequest());
     expect(out).toEqual({
-      spoken: { message: "Prazer, João!", fields: { nome: "João", tamanho: "30" }, data: {}, toolCalls: [], llmCalls: 1 },
+      spoken: { message: "Prazer, João!", fields: { nome: "João", tamanho: "30" }, data: {}, llmCalls: 1 },
     });
   });
 });
@@ -160,7 +172,7 @@ describe("Speak.run: idle", () => {
     const out = await new Speak(agentOptions(provider)).run(idleRequest({ instructions: [{ prompt: "Seja breve." }] }));
 
     expect(out).toEqual({
-      spoken: { message: "De nada! Qualquer coisa, é só chamar.", fields: {}, data: {}, toolCalls: [], llmCalls: 1 },
+      spoken: { message: "De nada! Qualquer coisa, é só chamar.", fields: {}, data: {}, llmCalls: 1 },
     });
     const [call] = provider.calls;
     expect(call.input.parameters?.jsonSchema).toEqual({
@@ -226,7 +238,6 @@ describe("Speak.run: tool rounds", () => {
         message: "Fica em R$ 1.500. Fechado?",
         fields: { nome: "João", tamanho: "11-50" },
         data: { orcamento: 2500 },
-        toolCalls: [{ toolName: "orcamento", arguments: { pessoas: 30 } }],
         llmCalls: 2,
       },
     });
@@ -291,16 +302,16 @@ describe("Speak.run: tool rounds", () => {
       "ok",
       '{"error":"Tool \\"sumida\\" is not available."}',
     ]);
-    expect(out).toMatchObject({
-      spoken: {
-        toolCalls: [
-          { toolName: "gated", arguments: { pessoas: "trinta" } },
-          { toolName: "gated", arguments: { pessoas: 13 } },
-          { toolName: "gated", arguments: { pessoas: 30 } },
-          { toolName: "sumida", arguments: {} },
-        ],
-      },
+    // The string arguments reach the history parsed.
+    expect(provider.calls[1].input.history.find((h) => h.role === "assistant")).toMatchObject({
+      tool_calls: [
+        { name: "gated", arguments: { pessoas: "trinta" } },
+        { name: "gated", arguments: { pessoas: 13 } },
+        { name: "gated", arguments: { pessoas: 30 } },
+        { name: "sumida", arguments: {} },
+      ],
     });
+    expect(out).toMatchObject({ spoken: { message: "Pronto." } });
   });
 
   test("a long result is cut at maxResultSizeChars with a notice", async () => {
@@ -355,16 +366,11 @@ describe("Speak.run: tool rounds", () => {
     expect(provider.calls.map((c) => c.input.tools === undefined)).toEqual([false, false, true]);
     expect(provider.calls[2].prompt).toContain("Do not call any tools.");
     expect(provider.calls[2].input.history).toHaveLength(5);
-    expect(out).toMatchObject({
-      spoken: {
-        message: "Fechado em R$ 1.500.",
-        llmCalls: 3,
-        toolCalls: [
-          { toolName: "orcamento", arguments: { pessoas: 10 } },
-          { toolName: "orcamento", arguments: { pessoas: 20 } },
-        ],
-      },
-    });
+    expect(provider.calls[2].input.history.filter((h) => h.role === "assistant")).toMatchObject([
+      { tool_calls: [{ name: "orcamento", arguments: { pessoas: 10 } }] },
+      { tool_calls: [{ name: "orcamento", arguments: { pessoas: 20 } }] },
+    ]);
+    expect(out).toMatchObject({ spoken: { message: "Fechado em R$ 1.500.", llmCalls: 3 } });
   });
 });
 

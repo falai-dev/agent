@@ -42,7 +42,7 @@ export function understood(partial: Partial<Omit<Understanding, "llmCalls">> = {
 
 /** A hand-made speak result with the fields the model would have filled. */
 export function spoken(message: string, fields: Record<string, unknown> = {}): SpeakOutcome {
-  return { spoken: { message, fields, data: {}, toolCalls: [], llmCalls: 0 } };
+  return { spoken: { message, fields, data: {}, llmCalls: 0 } };
 }
 
 export function isTalk<C, D>(talk: TalkRequest<C, D> | IdleRequest<C, D> | null): talk is TalkRequest<C, D> {

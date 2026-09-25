@@ -87,7 +87,6 @@ export interface Spoken {
   fields: Record<string, unknown>;
   /** Data patches returned by tools, merged in call order. */
   data: Record<string, unknown>;
-  toolCalls: Array<{ toolName: string; arguments: Record<string, unknown> }>;
   llmCalls: number;
   usage?: TokenUsage;
 }

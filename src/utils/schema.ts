@@ -3,7 +3,6 @@
  * how a raw extracted value becomes a typed one.
  */
 
-import { FlowConfigurationError } from "../types/errors.js";
 import type { FieldDef, FieldDefs, ParamDef, ParamDefs, ScalarDef } from "../types/flow.js";
 import type { StructuredSchema } from "../types/schema.js";
 
@@ -34,8 +33,8 @@ export type Coerced = { ok: true; value: string | number | boolean } | { ok: fal
 
 /**
  * Turn a raw value from the model into the field's type. Strings are coerced
- * to numbers and booleans; enum membership is enforced. The `detail` is the
- * outcome line the host shows when a value is dropped.
+ * to numbers and booleans; enum membership is enforced. Returns the coerced
+ * value, or the code saying why it was rejected (`bad-value`, `not-in-enum`).
  */
 export function coerceField(def: ScalarDef, raw: unknown): Coerced {
   const value = coerceScalar(def, raw);
@@ -98,49 +97,4 @@ function wireProperty(def: FieldDef | ParamDef, nullable: boolean): StructuredSc
   if (def.type !== "array" && def.enum) out.enum = [...def.enum];
   if (nullable) out.type = [def.type, "null"];
   return out;
-}
-
-/**
- * Merge field rows authored per flow into the agent's one field set. Two
- * rows for one slug must agree on type and enum; the first non-empty `label`,
- * `ask` and `description` win.
- */
-export function buildSchema(groups: Array<{ id: string; fields: FieldDefs }>): FieldDefs {
-  const merged: FieldDefs = {};
-  const owner: Record<string, string> = {};
-  for (const group of groups) {
-    for (const [slug, def] of Object.entries(group.fields)) {
-      const seen = merged[slug];
-      if (!seen) {
-        merged[slug] = { ...def };
-        owner[slug] = group.id;
-        continue;
-      }
-      if (seen.type !== def.type) {
-        throw new FlowConfigurationError(
-          `[FlowConfigurationError] field "${slug}" has two types: "${seen.type}" in "${owner[slug]}", ` +
-            `"${def.type}" in "${group.id}". Give one slug one type.`,
-        );
-      }
-      if (seen.enum && def.enum && !sameList(seen.enum, def.enum)) {
-        throw new FlowConfigurationError(
-          `[FlowConfigurationError] field "${slug}" has two option lists: in "${owner[slug]}" and "${group.id}". ` +
-            `Give one slug one list.`,
-        );
-      }
-      merged[slug] = {
-        ...seen,
-        enum: seen.enum ?? def.enum,
-        label: seen.label ?? def.label,
-        ask: seen.ask ?? def.ask,
-        description: seen.description ?? def.description,
-        extract: seen.extract ?? def.extract,
-      };
-    }
-  }
-  return merged;
-}
-
-function sameList(a: readonly (string | number)[], b: readonly (string | number)[]): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
 }

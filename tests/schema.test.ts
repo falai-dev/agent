@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 
-import { FlowConfigurationError } from "../src/types/errors.js";
 import type { FieldDefs } from "../src/types/flow.js";
 import {
-  buildSchema,
   coerceField,
   extractMode,
   isKnown,
@@ -102,24 +100,6 @@ describe("toWireSchema", () => {
         }
       }),
     );
-  });
-});
-
-describe("buildSchema", () => {
-  test("merges rows by slug; first label and ask win; type conflicts throw", () => {
-    const merged = buildSchema([
-      { id: "triagem", fields: { nome: { type: "string", ask: "A" } } },
-      { id: "agenda", fields: { nome: { type: "string", label: "Nome", ask: "B", description: "d" }, dia: { type: "string" } } },
-    ]);
-    expect(merged.nome).toEqual({ type: "string", label: "Nome", ask: "A", description: "d", enum: undefined, extract: undefined });
-    expect(Object.keys(merged)).toEqual(["nome", "dia"]);
-
-    expect(() =>
-      buildSchema([
-        { id: "triagem", fields: { tamanho: { type: "string" } } },
-        { id: "agenda", fields: { tamanho: { type: "number" } } },
-      ]),
-    ).toThrow(FlowConfigurationError);
   });
 });
 

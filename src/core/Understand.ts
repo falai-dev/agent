@@ -29,14 +29,11 @@ import { coerceField, isKnown, pendingFields, toWireSchema } from "../utils/sche
 import { render, type TemplateScope } from "../utils/template.js";
 import { readUsage } from "../utils/usage.js";
 import type { UnderstandRequest, Understanding } from "./contracts.js";
-import { describeField, factsSection, joinSections, stablePrefix } from "./Prompt.js";
+import { Aliases, describeField, factsSection, joinSections, stablePrefix } from "./Prompt.js";
 
 export const UNDERSTAND_SCHEMA_NAME = "understand";
 
 const SECTIONS = ["flows", "mentions", "extract", "branches", "fields"] as const;
-
-/** Gemini rejects any other character in a property name. */
-const SAFE_KEY = /^[a-zA-Z0-9_-]+$/;
 
 export class Understand<C = unknown, D = unknown> {
   constructor(private readonly options: AgentOptions<C, D>) {}
@@ -110,38 +107,6 @@ function candidateFlows<C, D>(req: UnderstandRequest<C, D>): Flow<C, D>[] {
     if (!seen.has(flow.id)) seen.set(flow.id, flow);
   }
   return [...seen.values()];
-}
-
-/**
- * Envelope property names for ids the schema cannot carry. A safe id keeps
- * its own name; anything else (run ids carry `#`, `:` and `/`) gets a short
- * alias, mapped back when the reply is parsed.
- */
-class Aliases {
-  private readonly byReal = new Map<string, string>();
-  private readonly byAlias = new Map<string, string>();
-  private n = 0;
-
-  of(real: string, prefix = "k"): string {
-    const seen = this.byReal.get(real);
-    if (seen) return seen;
-    const alias = SAFE_KEY.test(real) && !this.byAlias.has(real) ? real : this.fresh(prefix);
-    this.byAlias.set(alias, real);
-    this.byReal.set(real, alias);
-    return alias;
-  }
-
-  /** Unknown aliases come back as they are; Runner drops keys it does not know. */
-  real(alias: string): string {
-    return this.byAlias.get(alias) ?? alias;
-  }
-
-  private fresh(prefix: string): string {
-    let alias: string;
-    do alias = `${prefix}${++this.n}`;
-    while (this.byAlias.has(alias));
-    return alias;
-  }
 }
 
 function branchKey(branch: { runId: string; stepId: string; index: number }): string {

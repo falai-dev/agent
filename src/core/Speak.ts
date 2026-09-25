@@ -32,6 +32,7 @@ import { render, type TemplateScope } from "../utils/template.js";
 import { addUsage, readUsage } from "../utils/usage.js";
 import type { Deferral, SpeakOutcome, SpeakRequest, SpeakStreamChunk } from "./contracts.js";
 import {
+  Aliases,
   describeField,
   factsSection,
   instructionsSection,
@@ -90,8 +91,6 @@ function deferralOf(error: unknown): Deferral {
     ...(reset !== undefined ? { resetAtMs: reset } : {}),
   };
 }
-/** Gemini rejects any other envelope property name. */
-const WIRE_NAME = /^[a-zA-Z0-9_-]+$/;
 
 const GUIDELINE_HEADING = "## Guideline for your reply (adapt to the conversation)";
 const DEFAULT_GUIDELINE =
@@ -168,7 +167,6 @@ export class Speak<C = unknown, D = unknown> {
     let history: History = req.history;
     const fields: Record<string, unknown> = {};
     const data: Record<string, unknown> = {};
-    const toolCalls: ToolCall[] = [];
     let llmCalls = 0;
     let usage: TokenUsage | undefined;
     let message = "";
@@ -223,14 +221,13 @@ export class Speak<C = unknown, D = unknown> {
       }
       history = [...history, ...executed.items];
       Object.assign(data, executed.data);
-      toolCalls.push(...read.toolCalls);
     }
 
     if (!message.trim()) {
       logger.warn(`[Speak] the model returned no message after ${llmCalls} call(s); deferring.`);
       return { deferred: UNAVAILABLE, llmCalls, ...(usage ? { usage } : {}) };
     }
-    return { spoken: { message, fields, data, toolCalls, llmCalls, ...(usage ? { usage } : {}) } };
+    return { spoken: { message, fields, data, llmCalls, ...(usage ? { usage } : {}) } };
   }
 
   /** One provider call. Streaming yields clean message deltas; both paths return the same shape. */
@@ -394,16 +391,14 @@ function formatSection(envelope: Envelope, fields: FieldDefs): string {
 // ── Envelope ────────────────────────────────────────────────────────────
 
 function buildEnvelope(fields: FieldDefs, pending: string[]): Envelope {
+  const aliases = new Aliases(["message"]);
   const wire = new Map<string, string>();
   const defs: FieldDefs = { message: { type: "string" } };
-  pending.forEach((slug, i) => {
-    // ponytail: a slug spelled like the reply key or with characters Gemini rejects
-    // rides under an alias; the table maps it back. Ceiling: a real slug named
-    // `field_N` could collide with an alias. Upgrade: bump the alias until free.
-    const name = WIRE_NAME.test(slug) && slug !== "message" ? slug : `field_${i}`;
+  for (const slug of pending) {
+    const name = aliases.of(slug, "field_");
     wire.set(slug, name);
     defs[name] = fields[slug] ?? { type: "string" };
-  });
+  }
   return { schema: toWireSchema(defs, { nullable: true }), wire };
 }
 
