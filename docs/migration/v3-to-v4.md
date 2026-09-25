@@ -206,7 +206,7 @@ Per-field wording lives on the field (`ask`); a step may override it (`ask: { no
 type Next = string /* step id or 'end' */ | { step: string; clear?: string[] } | { flow: string; input?: unknown };
 ```
 
-Branches stay on talk steps, judged while the step is asking: `{ when: '...', then }` for the model, `{ if: pred, then }` for code. A `wait` step takes `if` branches only, judged when the customer replies, and only when the step also has an `else`; a `when` branch on a wait never fires. There is no standalone AI-judged step: the model forks only where fresh customer text exists.
+Branches stay on talk steps, judged while the step is asking: `{ when: '...', then }` for the model, `{ if: pred, then }` for code. A `wait` step takes `if` branches only, judged when the customer replies, and only when the step also has an `else`; `validateFlow` rejects a `when` branch on a wait, since nothing would ever judge it. There is no standalone AI-judged step: the model forks only where fresh customer text exists.
 
 ```ts fragment
 // ─── v3 ───

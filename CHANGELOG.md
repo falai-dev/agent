@@ -97,6 +97,16 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **An unregistered action names itself.** `detail` read `ação desconhecida`; it now reads `unknown action "notify"`, matching the wording `FlowConfigurationError` already uses for the same mistake at build time. `validateFlow` still rejects it long before a turn runs.
 
+- **The retry wake answers the customer's question.** After a provider failure, the retry wake spoke with the "you speak first" situation: no new message, do not answer a question nobody asked. But the customer's message was still unanswered, so the model was told to ignore the one thing it had to answer. On a wake where the host's history still ends with a customer message, the speak call is now told that message has no answer yet.
+
+- **`validateFlow` and `fromSpec` check the JSON's shape before its names.** A stored row or a generated spec with a string where a list belongs crashed with a raw `TypeError` that named no flow (`steps: [null]`, `on: {}`, `then: 5`), or passed and misbehaved: `collect: "nome"` asked for the fields "n", "o", "m", "e", `message: "quer agendar"` reached the model one letter per phrase, `onEnd: "restart"` just ended the run. Each is now a `FlowConfigurationError` that names the flow, the step and the key, with the fix. A step that does two things (`say` and `do`) ran only the first and dropped the other without a word; it is now rejected, and so is a spec step whose `kind` disagrees with its body. A `when` branch on a wait step, which no call ever judges, is rejected too, and `flowSpecSchema` no longer offers one.
+
+- **The agent build catches three more mistakes that used to fail on live turns.** An unknown condition in an agent or idle instruction's `if` made every `turn()` throw; a host condition named `equals`, `known` or `silenced` was never called, because the built-in answered first; a literal `then: { flow: "humnao" }` naming no flow was only skipped at run time with `flow-gone`. All three now throw `FlowConfigurationError` when the agent is built. `Registries` takes an optional `flows` list for the last check; a templated `{ flow }` is still resolved per run.
+
+- **An action that defers by something that is not a duration fails its step instead of throwing the turn.** `{ defer: "2 minutos" }` threw outside the guard around the handler, so the turn failed after the side effect had happened, and every replay did it again. The step now fails with `code: 'action-failed'` and a `detail` that quotes the value, and `onFail` applies.
+
+- **A flow id with a `:` gets its silence wake.** The wake key is `silence:<flowId>:<sessionId>:<ms>`, and the flow id was read up to the first `:`, so `follow:up` was looked up as `follow` and every wake was skipped as `flow-gone`. The key is now cut at the session id.
+
 ### Unchanged
 
 - The provider classes (`GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`, `OpenRouterProvider`, `DeepSeekProvider`, `ZaiProvider`, `FallbackAiProvider`, `OpenAICompatibleProvider`, `ProviderAdapter`), the `AiProvider` seam, the `compaction` option and the history helpers. Their options are unchanged; what they send is not — see Fixed, and `GenerateMessageInput` gained an optional `system`.

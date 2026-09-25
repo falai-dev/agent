@@ -227,7 +227,7 @@ The run leaves `session.runs`, appears in `TurnResult.ended`, and writes one lin
 | `cooldown` | `repeat: { cooldown }` and the last run is younger than the cooldown. |
 | `already-running` | A live run of this flow exists for this anchor, in this session or (through `turn({ claims })`) in another of the customer's sessions. |
 | `hop-limit` | The start would be at hop 5. `{ flow }` jumps and `onEnd: 'reset'` each add a hop. |
-| `flow-gone` | `turn({ start })`, a silence wake, or a `{ flow }` jump named a flow the agent does not have. |
+| `flow-gone` | `turn({ start })`, a silence wake, or a templated `{ flow }` jump named a flow the agent does not have. A literal `{ flow }` id the agent does not have fails the agent build instead. |
 
 A trigger whose `if` is false starts nothing and writes nothing.
 

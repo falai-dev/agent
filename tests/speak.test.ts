@@ -113,6 +113,19 @@ describe("Speak.run: talk step", () => {
     expect(provider.calls[1].seen).not.toContain("You speak first");
   });
 
+  test("a wake after an unanswered customer message answers it instead of speaking first", async () => {
+    // The retry wake after a provider failure: the customer's question is the
+    // last thing in the history and nobody answered it yet.
+    const provider = mockProvider({ speak: [{ message: "Custa R$ 99 por mês." }] });
+    await new Speak(agentOptions(provider)).run(
+      talkRequest({ input: { kind: "wake" }, history: [assistantMessage("Oi!"), userMessage("quanto custa?")] }),
+    );
+    expect(provider.calls[0].prompt).toContain(
+      "## Situation\nThe customer's last message, in the conversation above, has no answer yet. Answer it now.",
+    );
+    expect(provider.calls[0].seen).not.toContain("You speak first");
+  });
+
   test("a slug Gemini rejects rides under an alias and maps back; a slug without a definition is a string", async () => {
     const provider = mockProvider({ speak: [{ message: "Anotado!", field_0: "João da Silva", nome: null }] });
     const out = await new Speak(agentOptions(provider)).run(talkRequest({ pending: ["nome completo", "nome"] }));

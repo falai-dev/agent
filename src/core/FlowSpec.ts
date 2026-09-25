@@ -100,8 +100,14 @@ export interface FlowSpec {
   tools?: string[];
 }
 
-/** What a flow's names resolve against: the agent's fields, actions, events, conditions and tools. */
-export type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "conditions" | "tools">;
+/**
+ * What a flow's names resolve against: the agent's fields, actions, events,
+ * conditions and tools. With `flows`, a literal `{ flow }` target must name
+ * one of them; the agent passes its own.
+ */
+export type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "conditions" | "tools"> & {
+  flows?: ReadonlyArray<{ id: string }>;
+};
 
 // ── fromSpec / toSpec ───────────────────────────────────────────────────
 
@@ -113,9 +119,7 @@ export type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "c
  */
 export function fromSpec<C = unknown, D = LooseData>(spec: FlowSpec): Flow<C, D> {
   const clean = stripNulls(spec);
-  if (!Array.isArray(clean.steps)) {
-    throw problem(`flow "${clean.id}"`, "has no steps list", "Write steps as a list, even an empty one.");
-  }
+  checkShape(clean);
   const { steps, ...rest } = clean;
   const flow: Flow<unknown, LooseData> = { ...rest, steps: steps.map(fromStepSpec) };
   return flow as Flow<C, D>;
@@ -273,15 +277,16 @@ interface LooseFlow {
   tools?: string[];
 }
 
-const BUILT_IN_CONDITIONS = ["equals", "known", "silenced"];
+export const BUILT_IN_CONDITIONS = ["equals", "known", "silenced"];
 
 const DURATION_HINT = 'Write a number and a unit: "30s", "5m", "24h" or "3d".';
 
 /** The four keys one of which makes an `on[]` entry a trigger. */
 const TRIGGER_KINDS = ["message", "mention", "silence", "event"] as const;
 
-/** The six keys one of which makes a step do something. */
-const STEP_DOES = ["prompt", "collect", "say", "do", "wait", "if"] as const;
+const ON_END = ["end", "stay", "reset"];
+
+const INSTRUCTION_KINDS = ["must", "never", "should"];
 
 /**
  * Check a flow, typed or as a spec, against the agent's registries. Throws
@@ -294,7 +299,8 @@ export function validateFlow<C = unknown, D = LooseData>(
 ): { warnings: string[] } {
   // Nulls mean "not set" in a spec; a typed flow has none, so one pass serves both forms.
   const flow: LooseFlow = stripNulls(input);
-  const { fields, actions = {}, events = {}, conditions = {}, tools = [] } = registries;
+  checkShape(flow);
+  const { fields, actions = {}, events = {}, tools = [] } = registries;
   const toolIds = new Set(tools.map((tool) => tool.id));
   const warnings: string[] = [];
 
@@ -302,9 +308,6 @@ export function validateFlow<C = unknown, D = LooseData>(
     throw problem("flow", "has no id", "Give the flow a short unique id.");
   }
   const flowAt = `flow "${flow.id}"`;
-  if (!Array.isArray(flow.steps)) {
-    throw problem(flowAt, "has no steps list", "Write steps as a list, even an empty one.");
-  }
 
   const index = new Map<string, number>();
   flow.steps.forEach((step, i) => {
@@ -323,11 +326,7 @@ export function validateFlow<C = unknown, D = LooseData>(
     throw problem(flowAt, "has triggers but no steps", "Add at least one step or remove `on`.");
   }
 
-  const slug = (name: string, at: string, where: string): void => {
-    if (!own(fields, name)) {
-      throw problem(at, `unknown field "${name}" in ${where}`, "Add it to the agent's fields or fix the slug.");
-    }
-  };
+  const slug = (name: string, at: string, where: string): void => checkSlug(fields, name, at, where);
 
   const toolNames = (names: string[] | undefined, at: string): void => {
     for (const name of names ?? []) {
@@ -335,38 +334,7 @@ export function validateFlow<C = unknown, D = LooseData>(
     }
   };
 
-  const pred = (value: LoosePred | undefined, at: string, where: string): void => {
-    if (value === undefined || typeof value === "function") return;
-    for (const [name, arg] of Object.entries(value)) {
-      if (name === "equals") {
-        if (arg === null || typeof arg !== "object" || Array.isArray(arg)) {
-          throw problem(at, `${where}.equals is not an object`, "Write equals as { field: value }.");
-        }
-        for (const [field, given] of Object.entries(arg)) {
-          slug(field, at, `${where}.equals`);
-          const def = fields[field];
-          if (!matches(def, given)) {
-            throw problem(
-              at,
-              `${where}.equals gives "${field}" a ${describe(given)}, but the field is a ${def.type}`,
-              `Write a ${def.type}; values are not coerced.`,
-            );
-          }
-        }
-      } else if (name === "known") {
-        if (!Array.isArray(arg)) throw problem(at, `${where}.known is not a list`, "Write known as [field, ...].");
-        for (const field of arg) slug(String(field), at, `${where}.known`);
-      } else if (name === "silenced") {
-        if (typeof arg !== "boolean") throw problem(at, `${where}.silenced is not a boolean`, "Write true or false.");
-      } else if (!own(conditions, name)) {
-        throw problem(
-          at,
-          `unknown condition "${name}" in ${where}`,
-          `Register it in conditions or use ${BUILT_IN_CONDITIONS.join(", ")}.`,
-        );
-      }
-    }
-  };
+  const pred = (value: LoosePred | undefined, at: string, where: string): void => checkPred(value, at, where, registries);
 
   const duration = (value: string | undefined, at: string, where: string): void => {
     if (value !== undefined && !isDuration(value)) {
@@ -384,7 +352,18 @@ export function validateFlow<C = unknown, D = LooseData>(
       }
       return to;
     }
-    if ("flow" in next) return undefined;
+    if ("flow" in next) {
+      // A templated id resolves per run; only a literal one can be checked now.
+      const known = registries.flows?.map((f) => f.id);
+      if (known && !next.flow.includes("{{") && !known.includes(next.flow)) {
+        throw problem(
+          at,
+          `${where} names flow "${next.flow}", which this agent does not have`,
+          known.length ? `Use one of ${known.map((id) => `"${id}"`).join(", ")}, or add the flow.` : "Add the flow to the agent.",
+        );
+      }
+      return undefined;
+    }
     const to = index.get(next.step);
     if (to === undefined) {
       throw problem(at, `${where} points at step "${next.step}", which does not exist`, 'Use an existing step id or "end".');
@@ -482,17 +461,6 @@ export function validateFlow<C = unknown, D = LooseData>(
 
   flow.steps.forEach((step, i) => {
     const at = `${flowAt}, step "${step.id}"`;
-    // Same reasoning as the trigger above: a step that does none of the five
-    // things is a step the run walks straight past, silently. `kind` alone is
-    // not enough — the spec form drops it and keeps the body, so what counts
-    // is whether the body says what to do.
-    if (!STEP_DOES.some((key) => step[key] !== undefined)) {
-      throw problem(
-        at,
-        "does nothing",
-        "A step talks (`prompt` / `collect`), says (`say`), acts (`do`), waits (`wait`) or forks (`if`).",
-      );
-    }
     const thenTo = edge(i, step.then, at, "then");
     edge(i, step.else, at, "else");
 
@@ -517,6 +485,10 @@ export function validateFlow<C = unknown, D = LooseData>(
       const where = `branches[${j}]`;
       if (branch.when === undefined && branch.if === undefined) {
         throw problem(at, `${where} has neither when nor if`, "Give the branch an AI condition (when) or a code one (if).");
+      }
+      // No understand call judges a wait, so an AI condition there could never fire.
+      if (branch.when !== undefined && step.wait !== undefined) {
+        throw problem(at, `${where} is a "when" branch, but a wait step is judged by code only`, 'Use "if", or move the branch to a talk step.');
       }
       pred(branch.if, at, `${where}.if`);
       edge(i, branch.then, at, `${where}.then`);
@@ -552,6 +524,229 @@ export function validateFlow<C = unknown, D = LooseData>(
   });
 
   return { warnings };
+}
+
+function checkSlug(fields: FieldDefs, name: string, at: string, where: string): void {
+  if (!own(fields, name)) {
+    throw problem(at, `unknown field "${name}" in ${where}`, "Add it to the agent's fields or fix the slug.");
+  }
+}
+
+/**
+ * A predicate's names against the registries: the fields `equals` and `known`
+ * read, and every other key as one of the agent's conditions. A function is
+ * code and passes as is. The agent runs this on its own instructions too.
+ */
+export function checkPred(value: LoosePred | undefined, at: string, where: string, registries: Registries): void {
+  if (value === undefined || typeof value === "function") return;
+  const { fields, conditions = {} } = registries;
+  for (const [name, arg] of Object.entries(value)) {
+    if (name === "equals") {
+      if (!isObject(arg)) {
+        throw problem(at, `${where}.equals is not an object`, "Write equals as { field: value }.");
+      }
+      for (const [field, given] of Object.entries(arg)) {
+        checkSlug(fields, field, at, `${where}.equals`);
+        const def = fields[field];
+        if (!matches(def, given)) {
+          throw problem(
+            at,
+            `${where}.equals gives "${field}" a ${describe(given)}, but the field is a ${def.type}`,
+            `Write a ${def.type}; values are not coerced.`,
+          );
+        }
+      }
+    } else if (name === "known") {
+      if (!Array.isArray(arg)) throw problem(at, `${where}.known is not a list`, "Write known as [field, ...].");
+      for (const field of arg) checkSlug(fields, String(field), at, `${where}.known`);
+    } else if (name === "silenced") {
+      if (typeof arg !== "boolean") throw problem(at, `${where}.silenced is not a boolean`, "Write true or false.");
+    } else if (!own(conditions, name)) {
+      throw problem(
+        at,
+        `unknown condition "${name}" in ${where}`,
+        `Register it in conditions or use ${BUILT_IN_CONDITIONS.join(", ")}.`,
+      );
+    }
+  }
+}
+
+// ── Shape ───────────────────────────────────────────────────────────────
+
+/**
+ * The JSON shape, checked before any name is. Stored rows and generated specs
+ * are untrusted: a string where a list belongs used to crash with a raw
+ * TypeError naming no flow, or pass and misbehave at run time (`collect:
+ * "nome"` read as the fields "n", "o", "m", "e").
+ */
+function checkShape(value: unknown): void {
+  if (!isObject(value)) throw problem("flow", `is ${show(value)}, not an object`, "Pass the flow itself: { id, name, steps }.");
+  const flowAt = typeof value.id === "string" ? `flow "${value.id}"` : "flow";
+  if (!Array.isArray(value.steps)) {
+    throw problem(flowAt, "has no steps list", "Write steps as a list, even an empty one.");
+  }
+  text(value, ["description", "anchor"], flowAt);
+  for (const key of ["collect", "clearOnStart", "tools"]) listOf(value[key], key, flowAt, "string");
+  oneOf(value.onEnd, "onEnd", ON_END, flowAt);
+  predShape(value.while, "while", flowAt);
+  instructionsShape(value.instructions, flowAt);
+
+  listOf(value.on, "on", flowAt, "object").forEach((trigger, i) => {
+    const at = `${flowAt}, trigger #${i + 1}`;
+    if (!isObject(trigger)) return;
+    listOf(trigger.message, "message", at, "string");
+    listOf(trigger.mention, "mention", at, "string");
+    predShape(trigger.if, "if", at);
+    const { repeat } = trigger;
+    if (repeat !== undefined && repeat !== "once" && repeat !== "always" && !(isObject(repeat) && typeof repeat.cooldown === "string")) {
+      throw problem(at, `repeat is ${show(repeat)}`, 'Use "once", "always" or { cooldown: "24h" }.');
+    }
+  });
+
+  listOf(value.steps, "steps", flowAt, "object").forEach((step, i) => {
+    if (!isObject(step)) return;
+    const at = typeof step.id === "string" ? `${flowAt}, step "${step.id}"` : `${flowAt}, step #${i + 1}`;
+    stepShape(step, at);
+  });
+}
+
+/** One step: what it does, and every value the right kind of thing. */
+function stepShape(step: Record<string, unknown>, at: string): void {
+  // A step that does none of the five things is one the run walks straight
+  // past; one that does two runs only the first, and the other never happens.
+  const kinds = bodyKinds(step);
+  if (kinds.length === 0) {
+    throw problem(
+      at,
+      "does nothing",
+      "A step talks (`prompt` / `collect`), says (`say`), acts (`do`), waits (`wait`) or forks (`if`).",
+    );
+  }
+  if (kinds.length > 1) {
+    throw problem(at, `mixes ${and(kinds.map((k) => `"${k}"`))}`, "A step does one thing. Split it into one step per kind.");
+  }
+  // The spec's `kind` must say what the body does; the Runner reads the body.
+  if (step.kind !== undefined && step.kind !== kinds[0]) {
+    throw problem(at, `has kind ${show(step.kind)}, but its body is a "${kinds[0]}" step`, `Set kind to "${kinds[0]}", or change the body to match.`);
+  }
+  text(step, ["say", "prompt", "question"], at);
+  listOf(step.collect, "collect", at, "string");
+  listOf(step.tools, "tools", at, "string");
+  if (step.ask !== undefined && !isObject(step.ask)) {
+    throw problem(at, `ask is ${show(step.ask)}, not an object`, 'Write ask as { field: "how to ask" }.');
+  }
+  if (step.with !== undefined && !isObject(step.with)) {
+    throw problem(at, `with is ${show(step.with)}, not an object`, "Write with as { parameter: value }.");
+  }
+  const { maxAsks } = step;
+  if (maxAsks !== undefined && !(typeof maxAsks === "number" && Number.isInteger(maxAsks) && maxAsks >= 1)) {
+    throw problem(at, `maxAsks is ${show(maxAsks)}, not a whole number of 1 or more`, "Write a number like 3.");
+  }
+  if (isObject(step.wait) && typeof step.wait.event !== "string") {
+    throw problem(at, "wait has no event", 'Write wait: { event: "name" } to wait for an event, or a duration like "1h".');
+  }
+  predShape(step.if, "if", at);
+  for (const key of ["then", "else", "onFail"]) nextShape(step[key], key, at);
+  instructionsShape(step.instructions, at);
+  listOf(step.branches, "branches", at, "object").forEach((branch, j) => {
+    if (!isObject(branch)) return;
+    const where = `branches[${j}]`;
+    if (branch.when !== undefined && typeof branch.when !== "string") {
+      throw problem(at, `${where}.when is ${show(branch.when)}, not text`, "Write the condition as one sentence.");
+    }
+    predShape(branch.if, `${where}.if`, at);
+    nextShape(branch.then, `${where}.then`, at);
+  });
+}
+
+/** The kinds a step's body carries, by its keys. A talk step is `collect` with a list, `prompt` with a guideline alone. */
+function bodyKinds(step: Record<string, unknown>): StepKind[] {
+  const kinds: StepKind[] = [];
+  if (step.collect !== undefined) kinds.push("collect");
+  else if (step.prompt !== undefined) kinds.push("prompt");
+  if (step.say !== undefined) kinds.push("say");
+  if (step.do !== undefined) kinds.push("do");
+  if (step.wait !== undefined) kinds.push(typeof step.wait === "string" ? "wait" : "waitEvent");
+  if (step.if !== undefined) kinds.push("if");
+  return kinds;
+}
+
+function instructionsShape(value: unknown, at: string): void {
+  listOf(value, "instructions", at, "object").forEach((ins, i) => {
+    if (!isObject(ins)) return;
+    const where = `instructions[${i}]`;
+    oneOf(ins.kind, `${where}.kind`, INSTRUCTION_KINDS, at);
+    if (typeof ins.prompt !== "string") {
+      throw problem(at, `${where}.prompt is ${show(ins.prompt)}, not text`, "Write the rule as a sentence.");
+    }
+    if (ins.when !== undefined && typeof ins.when !== "string") listOf(ins.when, `${where}.when`, at, "string");
+    predShape(ins.if, `${where}.if`, at);
+  });
+}
+
+/** A step id, `"end"`, `{ step, clear? }` or `{ flow, input? }`. */
+function nextShape(value: unknown, where: string, at: string): void {
+  if (value === undefined || typeof value === "string") return;
+  if (isObject(value) && (typeof value.step === "string" || typeof value.flow === "string")) {
+    listOf(value.clear, `${where}.clear`, at, "string");
+    return;
+  }
+  throw problem(at, `${where} is ${show(value)}, not a step id or a target`, 'Write a step id, "end", { step: "id" } or { flow: "id" }.');
+}
+
+/** A condition object, or code on a typed flow. */
+function predShape(value: unknown, where: string, at: string): void {
+  if (value === undefined || typeof value === "function" || isObject(value)) return;
+  throw problem(at, `${where} is ${show(value)}, not a condition`, 'Write it as an object, e.g. { known: ["nome"] }.');
+}
+
+/** Each named key, when set, must be text. */
+function text(owner: Record<string, unknown>, keys: string[], at: string): void {
+  for (const key of keys) {
+    const value = owner[key];
+    if (value !== undefined && typeof value !== "string") {
+      throw problem(at, `${key} is ${show(value)}, not text`, `Write ${key} as a string.`);
+    }
+  }
+}
+
+function oneOf(value: unknown, where: string, allowed: string[], at: string): void {
+  if (value === undefined || (typeof value === "string" && allowed.includes(value))) return;
+  throw problem(at, `${where} is ${show(value)}, which is not one of ${allowed.map((v) => `"${v}"`).join(", ")}`, "Use one of them.");
+}
+
+/** A list whose items are all strings or all objects; absent reads as empty. */
+function listOf(value: unknown, where: string, at: string, item: "string" | "object"): unknown[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    const example = item === "string" && typeof value === "string" ? `${where}: ${JSON.stringify([value])}` : `${where} as a list`;
+    throw problem(at, `${where} is ${show(value)}, not a list`, `Write ${example}.`);
+  }
+  value.forEach((entry, i) => {
+    if (item === "string" ? typeof entry !== "string" : !isObject(entry)) {
+      throw problem(at, `${where}[${i}] is ${show(entry)}, not ${item === "string" ? "text" : "an object"}`, `Write each entry of ${where} as ${item === "string" ? "a string" : "an object"}.`);
+    }
+  });
+  return value;
+}
+
+/** A plain object: not null, not a list, not a function. */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A wrong value as an error names it: short scalars verbatim, anything else by kind. */
+function show(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value.length > 40 ? `${value.slice(0, 37)}...` : value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === undefined) return "missing";
+  if (value === null) return "null";
+  return Array.isArray(value) ? "a list" : typeof value === "function" ? "a function" : "an object";
+}
+
+/** `"a"`, `"a" and "b"`, `"a", "b" and "c"`. */
+function and(items: string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 function matchesParam(def: ParamDef, value: unknown): boolean {
@@ -668,6 +863,8 @@ export function flowSpecSchema(registries: Registries): StructuredSchema {
   const branches = orNull(
     list(union([closed({ when: STRING, then: next }), closed({ if: condition, then: next })]), "Exits judged while the step asks"),
   );
+  // No understand call judges a wait, so its branches are code only.
+  const waitBranches = orNull(list(closed({ if: condition, then: next }), "Exits checked by code when the lead replies before the wait ends"));
   const stepBase = { id: STRING, label: orNull(STRING), then: nextOrNull };
   const step = union([
     closed({ ...stepBase, kind: enumOf(["prompt"]), prompt: { type: "string", description: "Guideline for the AI's next message" }, branches }),
@@ -697,7 +894,7 @@ export function flowSpecSchema(registries: Registries): StructuredSchema {
       wait: { ...duration, description: "Park this long; then = time passed, else = the lead replied" },
       businessHours: orNull(BOOLEAN),
       else: nextOrNull,
-      branches,
+      branches: waitBranches,
     }),
     eventNames.length
       ? closed({

@@ -15,7 +15,7 @@ import { logger, LoggerLevel } from "../utils/logger.js";
 import { addUsage } from "../utils/usage.js";
 import { CompactionEngine } from "./CompactionEngine.js";
 import type { IdleRequest, SpeakOutcome, TalkRequest } from "./contracts.js";
-import { validateFlow } from "./FlowSpec.js";
+import { BUILT_IN_CONDITIONS, checkPred, validateFlow } from "./FlowSpec.js";
 import { Runner, type Turn } from "./Runner.js";
 import { Speak } from "./Speak.js";
 import { Understand } from "./Understand.js";
@@ -110,6 +110,16 @@ function compactionOptions<C, D>(options: AgentOptions<C, D>): CompactionOptions
 
 /** Every name a flow uses must resolve now, not on the turn that first reaches it. */
 function validate<C, D>(options: AgentOptions<C, D>): void {
+  // A host condition under a built-in's name is never called: the built-in answers first.
+  for (const name of Object.keys(options.conditions ?? {})) {
+    if (BUILT_IN_CONDITIONS.includes(name)) {
+      throw new FlowConfigurationError(
+        `[FlowConfigurationError] condition "${name}" shadows a built-in: ${BUILT_IN_CONDITIONS.join(", ")} are reserved. Rename it.`,
+      );
+    }
+  }
+  // An agent-level `if` is judged on every turn, so an unknown name here would throw on every turn.
+  options.instructions?.forEach((ins, i) => checkPred(ins.if, "agent", `instructions[${i}].if`, options));
   const ids = new Set<string>();
   for (const flow of options.flows ?? []) {
     if (ids.has(flow.id)) {
@@ -134,6 +144,7 @@ function validate<C, D>(options: AgentOptions<C, D>): void {
   }
   const { idle } = options;
   if (idle && idle !== "silent") {
+    idle.instructions?.forEach((ins, i) => checkPred(ins.if, "idle", `instructions[${i}].if`, options));
     const known = new Set((options.tools ?? []).map((tool) => tool.id));
     for (const name of idle.tools ?? []) {
       if (!known.has(name)) {

@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { Runner } from "../src/core/Runner.js";
 import { evaluate } from "../src/core/predicate.js";
 import { falai, FlowConfigurationError } from "../src/index.js";
-import type { ActionResult, Flow, Run, Session, TurnInput } from "../src/index.js";
+import type { ActionResult, Duration, Flow, Run, Session, TurnInput } from "../src/index.js";
 import { fakeClock, MemoryScheduler } from "../src/utils/clock.js";
 import { parseDuration } from "../src/utils/duration.js";
 import { mockProvider } from "./mock-provider.js";
@@ -245,6 +245,19 @@ describe("S5: campaign start, deferred send, wake, reply into the funnel", () =>
     const { result } = await drive(runner, { sessionId: "s1", context: ai, session: saved(t1.result), wake: "campanha#camp:1:envio:1" });
     expect(result.changed).toBe(false);
     expect(result.outcomes).toEqual([{ kind: "wait", status: "skipped", code: "stale-wake", message: OUTCOME_MESSAGES["stale-wake"], key: "campanha#camp:1:envio:1", at: T0 }]);
+  });
+
+  test("a defer that is not a duration fails the step instead of throwing the turn", async () => {
+    // The handler already ran: a throw here made every replay repeat its side effect.
+    const { runner, calls } = setup([campanha, funil], { reply: () => ({ defer: "2 minutos" as Duration, detail: "x" }) });
+    const { result } = await drive(runner, { sessionId: "s1", context: ai, start: { flow: "campanha", input: { templateId: "t1", flowId: "funil" }, key: "camp:1" } });
+    expect(calls).toHaveLength(1);
+    expect(result.outcomes[0]).toMatchObject({
+      kind: "do",
+      status: "failed",
+      code: "action-failed",
+      detail: 'action "send_template" asked to defer by "2 minutos", which is not a duration. Use a value like "2m" or "1h".',
+    });
   });
 });
 

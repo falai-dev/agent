@@ -130,6 +130,22 @@ describe("falai()", () => {
     );
   });
 
+  test("agent() also checks its own instructions, its condition names and literal flow chains", () => {
+    // Each of these built fine and then failed on live turns: an unknown condition in an
+    // agent-level `if` threw on every turn, and a chain to a missing flow was skipped.
+    const agent = (options: Partial<Parameters<typeof f.agent>[0]>) =>
+      f.agent({ name: "Ana", provider: mockProvider(), flows: [], ...options });
+    expect(() => agent({ instructions: [{ prompt: "Trate como VIP.", if: { vip: true } }] })).toThrow(
+      'agent: unknown condition "vip" in instructions[0].if',
+    );
+    expect(() => agent({ idle: { prompt: "Responda.", instructions: [{ prompt: "x", if: { vip: true } }] } })).toThrow(
+      'idle: unknown condition "vip" in instructions[0].if',
+    );
+    expect(() => agent({ conditions: { known: tagsAny } })).toThrow('condition "known" shadows a built-in');
+    const chain = f.flow({ id: "vendas", name: "Vendas", steps: [{ id: "s3", say: "Já te passo.", then: { flow: "humnao" } }] });
+    expect(() => agent({ flows: [chain] })).toThrow('flow "vendas", step "s3": then names flow "humnao", which this agent does not have');
+  });
+
   test("agent().turn: one understand call scores the single message flow and extracts, one speak call asks", async () => {
     const provider = mockProvider({
       understand: [{ flows: { triagem: 90 }, fields: { nome: null } }],

@@ -53,8 +53,10 @@ type BranchSpec = { then: Next } & ({ when: string } | { if: ConditionSpec });
 
 type InstructionSpec = Omit<Instruction, "if"> & { if?: ConditionSpec };
 
-/** What a flow's names resolve against. */
-type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "conditions" | "tools">;
+/** What a flow's names resolve against. With `flows`, a literal `{ flow }` target must name one of them. */
+type Registries = Pick<AgentOptions, "fields" | "actions" | "events" | "conditions" | "tools"> & {
+  flows?: ReadonlyArray<{ id: string }>;
+};
 
 function fromSpec<C = unknown, D = InferData<FieldDefs>>(spec: FlowSpec): Flow<C, D>;
 function toSpec<C, D>(flow: Flow<C, D>): FlowSpec;
@@ -96,7 +98,7 @@ Every field means what it means on [Flow](./flow.md). The differences:
 
 - Strips `null` from every optional value, at any depth.
 - Removes `kind` from each step. Nothing else changes.
-- Throws `FlowConfigurationError` when `steps` is not a list: `[FlowConfigurationError] flow "x": has no steps list. Write steps as a list, even an empty one.`
+- Throws `FlowConfigurationError` when the JSON has the wrong shape, with the same shape checks `validateFlow` runs first: the flow or a step is not an object, a list is not a list (`steps`, `on`, `collect`, …), a step does two things or none, or its `kind` disagrees with its body. For example `[FlowConfigurationError] flow "x": has no steps list. Write steps as a list, even an empty one.`
 - Does **not** check names. The result is typed as a `Flow` but nothing is verified yet; `validateFlow` does that, and the agent runs it on every flow it is built with.
 
 ## toSpec
@@ -138,10 +140,28 @@ Every message has the form `[FlowConfigurationError] <where>: <what>. <fix>`, wh
 | Branch without a test | `branches[0] has neither when nor if` | Give the branch an AI condition (when) or a code one (if). |
 | Backward `if` with no `else` | `"if" jumps back to "quem" with no else` | Add else so the false branch has somewhere to go. |
 | Fixed question, nothing to ask | `has a question but collects nothing` | A fixed question asks for fields: add collect, or send the text with a say step. |
+| Not an object | `is null, not an object` (the flow), `steps[0] is null, not an object`, `with is "x", not an object` | Pass the flow itself: { id, name, steps }. / Write each entry of steps as an object. |
+| Not a list | `collect is "nome", not a list` (also `on`, `steps`, `clearOnStart`, `tools`, `instructions`, `branches`, `message`, `mention`, `then.clear`) | Write collect: ["nome"]. |
+| Not text | `say is 42, not text` (also `prompt`, `question`, `description`, `anchor`) | Write say as a string. |
+| Not one of the values | `onEnd is "restart", which is not one of "end", "stay", "reset"` (also `instructions[n].kind`) | Use one of them. |
+| Bad `repeat` | `repeat is "never"` | Use "once", "always" or { cooldown: "24h" }. |
+| Bad `maxAsks` | `maxAsks is "3", not a whole number of 1 or more` | Write a number like 3. |
+| Event wait without an event | `wait has no event` | Write wait: { event: "name" } to wait for an event, or a duration like "1h". |
+| Bad target | `then is 5, not a step id or a target` (also `else`, `onFail`, `branches[n].then`) | Write a step id, "end", { step: "id" } or { flow: "id" }. |
+| Step does two things | `mixes "say" and "do"` | A step does one thing. Split it into one step per kind. |
+| `kind` disagrees with the body | `has kind "do", but its body is a "say" step` | Set kind to "say", or change the body to match. |
+| AI branch on a wait | `branches[0] is a "when" branch, but a wait step is judged by code only` | Use "if", or move the branch to a talk step. |
+| Chain to a missing flow | `then names flow "humnao", which this agent does not have` (only when `registries.flows` is set, and only for an id with no `{{`) | Use one of "vendas", "suporte", or add the flow. |
 
 Parameter values are checked strictly: `"3"` is not a number, `3.5` is not an integer, and an `enum` must contain the value unless the string holds `{{`, because a template's value is only known at run time.
 
-Two checks live in the agent constructor rather than in `validateFlow`: `flow "x" is declared twice` and `idle: unknown tool "x"`.
+The agent constructor passes its own flows as `registries.flows`, so a literal chain to a flow it does not have fails the build. Five more checks live in the constructor rather than in `validateFlow`:
+
+- `flow "x" is declared twice`
+- `idle: unknown tool "x"`
+- `tool "x": parameters must be a JSON Schema object`
+- `condition "known" shadows a built-in`: `equals`, `known` and `silenced` are reserved
+- an unknown condition in an agent or idle instruction's `if`: `agent: unknown condition "vip" in instructions[0].if`
 
 ### Warnings
 

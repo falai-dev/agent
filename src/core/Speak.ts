@@ -104,6 +104,9 @@ const FINAL_SECTION =
   "## Wrap up\nAnswer the customer now, using the tool results in the conversation. Do not call any tools.";
 const SPEAK_FIRST =
   "## Situation\nThere is no new message from the customer. You speak first: open naturally, do not answer a question nobody asked.";
+/** A wake after the customer's last message went unanswered, e.g. the retry after a provider failure. */
+const ANSWER_PENDING =
+  "## Situation\nThe customer's last message, in the conversation above, has no answer yet. Answer it now.";
 
 interface ToolCall {
   toolName: string;
@@ -344,17 +347,23 @@ function buildPrompt<C, D>(
       inline,
       ...body,
       instructionsSection([{ caption: "[Always]", items: req.instructions }], scope),
-      inputSection(req.input),
+      inputSection(req.input, req.history),
       formatSection(envelope, options.fields),
     ),
   };
 }
 
-/** The customer's latest text, quoted. Without one, on anything but a message, the assistant opens the exchange. */
-function inputSection(input: SpeakRequest["input"]): string | null {
+/**
+ * The customer's latest text, quoted. Without one, on anything but a message:
+ * a customer message still unanswered at the end of the history gets its
+ * answer (the retry wake after a provider failure), otherwise the assistant
+ * opens the exchange.
+ */
+function inputSection(input: SpeakRequest["input"], history: History): string | null {
   const text = input.text?.trim();
   if (text) return `## Customer's latest message\n"${text}"`;
-  return input.kind === "message" ? null : SPEAK_FIRST;
+  if (input.kind === "message") return null;
+  return history.at(-1)?.role === "user" ? ANSWER_PENDING : SPEAK_FIRST;
 }
 
 /** The envelope restated in words, for providers that follow the schema by prompt only. */

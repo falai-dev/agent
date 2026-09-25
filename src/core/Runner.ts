@@ -14,7 +14,7 @@ import type { ActionResult, Branch, DoStep, Duration, Flow, IfStep, Next, Pred, 
 import type { History } from "../types/history.js";
 import type { Run, Session, StepOutcome, StepOutcomeCode, StepOutcomeKind, TriggerKind } from "../types/session.js";
 import { cloneDeep } from "../utils/clone.js";
-import { parseDuration } from "../utils/duration.js";
+import { isDuration, parseDuration } from "../utils/duration.js";
 import { OUTCOME_MESSAGES } from "../utils/outcomes.js";
 import { coerceField, DEFAULT_MAX_ASKS, extractMode, isKnown, pendingFields } from "../utils/schema.js";
 import { render, renderDeep } from "../utils/template.js";
@@ -350,8 +350,10 @@ export class Runner<C = unknown, D = unknown> {
   /** `silence:<flowId>:<sessionId>:<lastAssistantAtMs>`, honoured only while the blob still shows that silence. */
   private silenceWake(turn: Turn<C, D>, key: string): void {
     const rest = key.slice("silence:".length);
-    const flowId = rest.slice(0, rest.indexOf(":"));
     const ms = Number(rest.slice(rest.lastIndexOf(":") + 1));
+    // A flow id may hold a ":" itself, so cut at the session id rather than at the first ":".
+    const cut = rest.lastIndexOf(`:${turn.session.id}:`);
+    const flowId = rest.slice(0, cut === -1 ? rest.indexOf(":") : cut);
     const { lastAssistantAt } = turn.session;
     const flow = this.flows.get(flowId);
     if (!flow) {
@@ -966,6 +968,13 @@ export class Runner<C = unknown, D = unknown> {
         } catch (error) {
           result = { failed: error instanceof Error ? error.message : String(error) };
         }
+      }
+      // The handler already ran, so a defer that cannot be parsed must not throw
+      // the turn: every replay would repeat the side effect and fail again.
+      if ("defer" in result && !isDuration(String(result.defer))) {
+        result = {
+          failed: `action "${step.do}" asked to defer by "${String(result.defer)}", which is not a duration. Use a value like "2m" or "1h".`,
+        };
       }
       if ("ok" in result) {
         if (result.spoke) {

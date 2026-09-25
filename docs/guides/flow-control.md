@@ -144,7 +144,7 @@ Ends this run with `reason: 'flow'` and starts the other flow in the same turn. 
 - has `hop` one higher than the parent. A chain deeper than 5 stops: the child is skipped with `code: 'hop-limit'`.
 - repeats by default (`'always'`), so a flow may be chained into many times; its claim carries the parent's step key.
 
-`flow` is a template: `{{input.flowId}}` resolves against the run's input and context. A flow id that does not exist lands in `skipped[]` with `code: 'flow-gone'`; a child flow with a live run for the same anchor is skipped with `code: 'already-running'`. This is how one flow hands the conversation to another: the last step of a qualifying flow can `then: { flow: 'agendamento' }`.
+`flow` is a template: `{{input.flowId}}` resolves against the run's input and context. A literal flow id the agent does not have fails the agent build; a template that resolves to no flow lands in `skipped[]` with `code: 'flow-gone'`; a child flow with a live run for the same anchor is skipped with `code: 'already-running'`. This is how one flow hands the conversation to another: the last step of a qualifying flow can `then: { flow: 'agendamento' }`.
 
 ## `onEnd`: after the last step
 

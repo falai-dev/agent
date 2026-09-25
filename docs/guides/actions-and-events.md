@@ -111,7 +111,7 @@ const enviarTemplate = f.action({
 });
 ```
 
-**`defer`** is for "not now": no credits, a rate limit, a window that is closed. The run parks under the wake key `<runId>:<stepId>:<atMs>` and the host schedules it like any other wake. When it fires, the step runs again at the same visit, so `ctx.key` is the same. The outcome carries your `detail` and the `until` time.
+**`defer`** is for "not now": no credits, a rate limit, a window that is closed. The run parks under the wake key `<runId>:<stepId>:<atMs>` and the host schedules it like any other wake. When it fires, the step runs again at the same visit, so `ctx.key` is the same. The outcome carries your `detail` and the `until` time. A `defer` that is not a duration (`"2 minutos"`) cannot park anything, so the step fails instead, with `code: 'action-failed'` and a `detail` that quotes the value; the handler has already run, so throwing would make every replay repeat it.
 
 **`spoke: true`** says the action itself sent something to the customer, a template through the channel for example. The framework then treats the turn as the assistant having spoken: `lastAssistantAt` is stamped and silence flows are armed. On a message turn, it also means another run's talk step does not speak (`code: 'another-reply'`): one answer per message.
 

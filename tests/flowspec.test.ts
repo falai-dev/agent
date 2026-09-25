@@ -429,6 +429,67 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
     expect(() => toSpec(typed)).toThrow('step "a": has a question but collects nothing');
   });
 
+  test("a step that does two things, or whose kind disagrees with its body", () => {
+    // The Runner reads the body and takes the first kind it finds, so the second never ran and nothing said so.
+    const mixed = JSON.parse('{"id":"fx","name":"Fixture","steps":[{"id":"a","kind":"do","do":"notify","say":"oi"}]}') as FlowSpec;
+    expect(problem(mixed)).toContain('step "a": mixes "say" and "do". A step does one thing.');
+    expect(() => fromSpec(mixed)).toThrow('mixes "say" and "do"');
+    const wrongKind = JSON.parse('{"id":"fx","name":"Fixture","steps":[{"id":"a","kind":"do","say":"oi"}]}') as FlowSpec;
+    expect(problem(wrongKind)).toContain('step "a": has kind "do", but its body is a "say" step. Set kind to "say"');
+    expect(() => fromSpec(wrongKind)).toThrow('has kind "do"');
+  });
+
+  test("a value of the wrong shape names the flow and the key instead of crashing", () => {
+    // Stored rows and generated specs are untrusted: each of these used to be a raw TypeError, or pass and misbehave.
+    const shaped = (json: string) => problem(JSON.parse(json) as FlowSpec);
+    expect(() => validateFlow(JSON.parse("null") as FlowSpec, registries)).toThrow("[FlowConfigurationError] flow: is null, not an object.");
+    expect(() => fromSpec(JSON.parse("null") as FlowSpec)).toThrow("flow: is null, not an object.");
+    expect(shaped('{"id":"fx","name":"F","steps":[null]}')).toContain('flow "fx": steps[0] is null, not an object');
+    expect(shaped('{"id":"fx","name":"F","on":{},"steps":[]}')).toContain('flow "fx": on is an object, not a list');
+    expect(shaped('{"id":"fx","name":"F","steps":[{"id":"a","collect":"nome"}]}')).toContain(
+      'step "a": collect is "nome", not a list. Write collect: ["nome"].',
+    );
+    expect(shaped('{"id":"fx","name":"F","on":[{"message":"quer agendar"}],"steps":[{"id":"a","say":"x"}]}')).toContain(
+      'trigger #1: message is "quer agendar", not a list',
+    );
+    expect(shaped('{"id":"fx","name":"F","steps":[{"id":"a","say":"x","then":5}]}')).toContain('step "a": then is 5, not a step id or a target');
+    expect(shaped('{"id":"fx","name":"F","steps":[{"id":"a","say":"x","then":{"step":"a","clear":"nome"}}]}')).toContain(
+      'then.clear is "nome", not a list',
+    );
+    expect(shaped('{"id":"fx","name":"F","onEnd":"restart","steps":[{"id":"a","say":"x"}]}')).toContain(
+      'onEnd is "restart", which is not one of "end", "stay", "reset"',
+    );
+    expect(shaped('{"id":"fx","name":"F","on":[{"message":["oi"],"repeat":"never"}],"steps":[{"id":"a","say":"x"}]}')).toContain(
+      'repeat is "never". Use "once", "always" or { cooldown: "24h" }.',
+    );
+    expect(shaped('{"id":"fx","name":"F","steps":[{"id":"a","collect":["nome"],"maxAsks":"3"}]}')).toContain(
+      'maxAsks is "3", not a whole number of 1 or more',
+    );
+    expect(shaped('{"id":"fx","name":"F","steps":[{"id":"a","say":42}]}')).toContain('step "a": say is 42, not text');
+    expect(shaped('{"id":"fx","name":"F","instructions":[{"kind":"always","prompt":"x"}],"steps":[]}')).toContain(
+      'instructions[0].kind is "always", which is not one of "must", "never", "should"',
+    );
+    expect(shaped('{"id":"fx","name":"F","steps":[{"id":"a","wait":{"upTo":"1d"}}]}')).toContain('step "a": wait has no event');
+  });
+
+  test("a when branch on a wait step, which no call ever judges", () => {
+    const m = problem(spec([{ id: "a", kind: "wait", wait: "1h", branches: [{ when: "desistiu", then: "end" }] }]));
+    expect(m).toContain('step "a": branches[0] is a "when" branch, but a wait step is judged by code only');
+    expect(validateFlow(spec([{ id: "a", kind: "wait", wait: "1h", else: "end", branches: [{ if: { known: ["nome"] }, then: "end" }] }]), registries)).toEqual({
+      warnings: [],
+    });
+  });
+
+  test("a literal { flow } target the agent does not have, once the registries list the flows", () => {
+    const chain = spec([say("a", { flow: "humnao" })]);
+    expect(validateFlow(chain, registries)).toEqual({ warnings: [] }); // no flows listed: nothing to check against
+    expect(problem(chain, { ...registries, flows: [{ id: "fx" }, { id: "humano" }] })).toContain(
+      'step "a": then names flow "humnao", which this agent does not have. Use one of "fx", "humano", or add the flow.',
+    );
+    // A templated id resolves per run.
+    expect(validateFlow(spec([say("a", { flow: "{{input.flowId}}" })]), { ...registries, flows: [] })).toEqual({ warnings: [] });
+  });
+
   test("triggers but no steps", () => {
     const m = problem(spec([], { on: [{ message: ["oi"] }] }));
     expect(m).toContain('flow "fx": has triggers but no steps');
@@ -497,6 +558,8 @@ describe("flowSpecSchema", () => {
     expect(isStrictSchema(schema)).toBe(true);
     const kinds = Object.keys(stepVariants(schema)).sort();
     expect(kinds).toEqual(["collect", "if", "prompt", "say", "wait"]);
+    // A wait is judged by code only, so a model cannot write it a `when` branch.
+    expect(Object.keys(prop(stepVariants(schema).wait[0], "branches").items?.properties ?? {})).toEqual(["if", "then"]);
     expect(variants(prop(schema, "on").items ?? {})).toHaveLength(3);
   });
 

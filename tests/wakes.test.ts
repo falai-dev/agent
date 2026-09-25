@@ -181,6 +181,20 @@ describe("S10: wakes, versions and replays", () => {
     const b = await drive(r2, { sessionId: "s1", context: ai, session: saved(a.result), message: "hã?", id: "m2" }, { understanding: understood(), speak: () => spoken("Seu nome?") });
     expect(b.result.schedule).toEqual([{ key: `silence:cutuca:s1:${clock.now().getTime()}`, at: at(clock.now().toISOString(), "1h"), replaces: first.key }]);
   });
+
+  test("a flow id and a session id with a colon still get their silence wake", async () => {
+    // The key is `silence:<flowId>:<sessionId>:<ms>`; splitting at the first ":" read the flow as "follow".
+    const clock = fakeClock(T0);
+    const followUp = f.flow({ id: "follow:up", name: "Follow up", on: [{ silence: "1h" }], steps: [{ id: "p", prompt: "Oi?" }] });
+    const runner = new Runner<Ctx, Data>({ name: "Ana", provider: mockProvider(), fields: f.fields, flows: [triagem, followUp], clock });
+    const t0 = await drive(runner, { sessionId: "wa:5511", context: ai, message: "quer saber como funciona", id: "m1" }, { understanding: understood(), speak: () => spoken("Nome?") });
+    const wake = t0.result.schedule[0];
+    expect(wake.key).toBe(`silence:follow:up:wa:5511:${Date.parse(T0)}`);
+    clock.advance("1h");
+    const tw = await drive(runner, { sessionId: "wa:5511", context: ai, session: saved(t0.result), wake: wake.key }, { speak: () => spoken("Ainda aí?") });
+    expect(tw.result.skipped).toEqual([]);
+    expect(tw.result.started.map((s) => s.flowId)).toEqual(["follow:up"]);
+  });
 });
 
 describe("pendingWakes: what a saved session waits on", () => {
