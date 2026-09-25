@@ -142,8 +142,9 @@ describe("falai()", () => {
       'idle: unknown condition "vip" in instructions[0].if',
     );
     expect(() => agent({ conditions: { known: tagsAny } })).toThrow('condition "known" shadows a built-in');
+    // A jump to a flow the agent lacks warns instead: a host that dropped one bad row keeps the rest of its agent.
     const chain = f.flow({ id: "vendas", name: "Vendas", steps: [{ id: "s3", say: "Já te passo.", then: { flow: "humnao" } }] });
-    expect(() => agent({ flows: [chain] })).toThrow('flow "vendas", step "s3": then names flow "humnao", which this agent does not have');
+    expect(() => agent({ flows: [chain] })).not.toThrow();
   });
 
   test("agent().turn: one understand call scores the single message flow and extracts, one speak call asks", async () => {

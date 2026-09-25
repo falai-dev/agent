@@ -81,7 +81,7 @@ A `wait` step parks the run. There are two kinds.
 
 - **Ten seconds or less**, when the next step is a `say` or a talk step: no wake at all. The delay rides on that message as `afterMs` (`wait: '3s'` gives `afterMs: 3000`) and the run keeps moving. Any other short wait behaves like a long one.
 - **Longer**: the run parks with `waiting: { kind: 'timer', key, until, setAt }`, and `schedule[]` gets `{ key, at }`. `businessHours: true` moves `at` forward to the next open hour, using the agent's `businessHours` function.
-- A message, or an inbound event, while parked: every timer wait with an `else` takes it at Ingest, outcome `code: 'replied'`. An `if` branch on the wait step is checked first and wins over `else`; `when` branches on a wait step are not judged.
+- A message, or an inbound event, while parked: every timer wait with an `else` takes it at Ingest, outcome `code: 'replied'`. An `if` branch on the wait step is checked first and wins over `else`; `when` branches on a wait step are not judged, and `validateFlow` warns about them.
 - The wake fires: `code: 'no-reply'`, `then`. Unless the customer wrote after `waiting.setAt` and the step has an `else`: then `code: 'replied'`, `else`. The reply beat the job.
 
 **Event**: `{ wait: { event: 'meeting_booked', upTo?: '7d' }, else? }`. The event arrives: `code: 'event-arrived'`, `then`. `upTo` passes (default 30 days): `code: 'no-event'`, `else`, or the run ends when there is no `else`.

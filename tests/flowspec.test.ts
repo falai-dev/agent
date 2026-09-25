@@ -480,20 +480,23 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
     expect(shaped('{"id":"fx","name":"F","steps":[{"id":"a","wait":{"upTo":"1d"}}]}')).toContain('step "a": wait has no event');
   });
 
-  test("a when branch on a wait step, which no call ever judges", () => {
-    const m = problem(spec([{ id: "a", kind: "wait", wait: "1h", branches: [{ when: "desistiu", then: "end" }] }]));
-    expect(m).toContain('step "a": branches[0] is a "when" branch, but a wait step is judged by code only');
+  test("a when branch on a wait step, which no call ever judges, warns", () => {
+    // A warning, not a throw: editors offered this branch, and a stored row that has one must keep running.
+    const { warnings } = validateFlow(spec([{ id: "a", kind: "wait", wait: "1h", branches: [{ when: "desistiu", then: "end" }] }]), registries);
+    expect(warnings).toEqual([
+      'flow "fx", step "a": branches[0] is a "when" branch on a wait step, which no call judges, so a reply goes to else. Use "if", or move the branch to a talk step.',
+    ]);
     expect(validateFlow(spec([{ id: "a", kind: "wait", wait: "1h", else: "end", branches: [{ if: { known: ["nome"] }, then: "end" }] }]), registries)).toEqual({
       warnings: [],
     });
   });
 
-  test("a literal { flow } target the agent does not have, once the registries list the flows", () => {
+  test("a literal { flow } target the agent does not have warns, once the registries list the flows", () => {
     const chain = spec([say("a", { flow: "humnao" })]);
     expect(validateFlow(chain, registries)).toEqual({ warnings: [] }); // no flows listed: nothing to check against
-    expect(problem(chain, { ...registries, flows: [{ id: "fx" }, { id: "humano" }] })).toContain(
-      'step "a": then names flow "humnao", which this agent does not have. Use one of "fx", "humano", or add the flow.',
-    );
+    expect(validateFlow(chain, { ...registries, flows: [{ id: "fx" }, { id: "humano" }] }).warnings).toEqual([
+      'flow "fx", step "a": then names flow "humnao", which this agent does not have; a run skips this move with flow-gone. Use one of "fx", "humano", or add the flow.',
+    ]);
     // A templated id resolves per run.
     expect(validateFlow(spec([say("a", { flow: "{{input.flowId}}" })]), { ...registries, flows: [] })).toEqual({ warnings: [] });
   });

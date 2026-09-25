@@ -103,7 +103,7 @@ const FINAL_SECTION =
   "## Wrap up\nAnswer the customer now, using the tool results in the conversation. Do not call any tools.";
 const SPEAK_FIRST =
   "## Situation\nThere is no new message from the customer. You speak first: open naturally, do not answer a question nobody asked.";
-/** A wake after the customer's last message went unanswered, e.g. the retry after a provider failure. */
+/** The retry wake after a provider failure, when the customer's last message is still unanswered. */
 const ANSWER_PENDING =
   "## Situation\nThe customer's last message, in the conversation above, has no answer yet. Answer it now.";
 
@@ -351,16 +351,19 @@ function buildPrompt<C, D>(
 }
 
 /**
- * The customer's latest text, quoted. Without one, on anything but a message:
- * a customer message still unanswered at the end of the history gets its
- * answer (the retry wake after a provider failure), otherwise the assistant
- * opens the exchange.
+ * The customer's latest text, quoted. Without one, on anything but a message,
+ * the assistant opens the exchange. The one exception is the retry of a step
+ * the provider failed, while the history still ends with the customer's
+ * message: that message gets its answer. A history that merely ends with a
+ * customer message is not enough, because a host may skip a message on
+ * purpose (an away message, a filtered first contact) and a follow-up must
+ * not answer it.
  */
 function inputSection(input: SpeakRequest["input"], history: History): string | null {
   const text = input.text?.trim();
   if (text) return `## Customer's latest message\n"${text}"`;
   if (input.kind === "message") return null;
-  return history.at(-1)?.role === "user" ? ANSWER_PENDING : SPEAK_FIRST;
+  return input.retry && history.at(-1)?.role === "user" ? ANSWER_PENDING : SPEAK_FIRST;
 }
 
 /** The envelope restated in words, for providers that follow the schema by prompt only. */

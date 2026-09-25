@@ -120,17 +120,27 @@ describe("Speak.run: talk step", () => {
     expect(provider.calls[1].seen).not.toContain("You speak first");
   });
 
-  test("a wake after an unanswered customer message answers it instead of speaking first", async () => {
-    // The retry wake after a provider failure: the customer's question is the
-    // last thing in the history and nobody answered it yet.
+  test("the retry wake answers the customer message the failed attempt left unanswered", async () => {
+    // The provider failed on the customer's question; its retry wake re-runs the step.
     const provider = mockProvider({ speak: [{ message: "Custa R$ 99 por mês." }] });
     await new Speak(agentOptions(provider)).run(
-      talkRequest({ input: { kind: "wake" }, history: [assistantMessage("Oi!"), userMessage("quanto custa?")] }),
+      talkRequest({ input: { kind: "wake", retry: true }, history: [assistantMessage("Oi!"), userMessage("quanto custa?")] }),
     );
     expect(provider.calls[0].prompt).toContain(
       "## Situation\nThe customer's last message, in the conversation above, has no answer yet. Answer it now.",
     );
     expect(provider.calls[0].seen).not.toContain("You speak first");
+  });
+
+  test("any other wake speaks first, even when the host's history ends with a customer message", async () => {
+    // A host may skip a message on purpose, like a WhatsApp away message. The
+    // follow-up that fires later must not answer it.
+    const provider = mockProvider({ speak: [{ message: "Oi, conseguiu ver as fotos?" }] });
+    await new Speak(agentOptions(provider)).run(
+      talkRequest({ input: { kind: "wake" }, history: [assistantMessage("Te mandei as fotos."), userMessage("Estou fora, respondo depois.")] }),
+    );
+    expect(provider.calls[0].prompt).toContain("You speak first");
+    expect(provider.calls[0].seen).not.toContain("has no answer yet");
   });
 
   test("a slug Gemini rejects rides under an alias and maps back; a slug without a definition is a string", async () => {

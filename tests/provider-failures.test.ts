@@ -238,4 +238,13 @@ describe("Runner decides whether to wait", () => {
     expect(isTalk(talk) && talk.step.id).toBe("quem");
     expect(isTalk(talk) && talk.pending).toEqual(["nome"]);
   });
+
+  test("the retry wake tells the speak call it is a retry, so the unanswered message gets its answer", async () => {
+    const { result } = await failTurn(START, { code: "provider-unavailable", retryable: true });
+    const runner = runnerAt(new Date(Date.parse(START) + parseDuration("1m")).toISOString());
+    const turn = runner.begin({ sessionId: "s1", context: CTX, session: saved(result), wake: result.schedule[0].key });
+    runner.decide(turn, null);
+    const talk = await runner.advance(turn);
+    expect(talk && runner.speakRequest(turn, talk).input).toEqual({ kind: "wake", retry: true });
+  });
 });

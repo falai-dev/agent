@@ -791,9 +791,12 @@ export class Runner<C = unknown, D = unknown> {
     const instructions = [...(this.options.instructions ?? []), ...own.instructions].filter((ins) => !ins.if || evaluate(ins.if, ctx, conditions));
     const all = this.options.tools ?? [];
     const allowed = own.tools;
+    // deferTalk leaves a `deferred` outcome as the step's last line; the retry wake re-runs the step without adding one.
+    const last = "idle" in talk ? undefined : talk.run.outcomes.at(-1);
+    const retry = !("idle" in talk) && last?.status === "deferred" && last.stepId === talk.step.id;
     return {
       talk,
-      input: turn.what.kind === "message" ? { kind: turn.kind, text: turn.what.text } : { kind: turn.kind },
+      input: turn.what.kind === "message" ? { kind: turn.kind, text: turn.what.text } : { kind: turn.kind, ...(retry ? { retry } : {}) },
       context: turn.context,
       data: turn.session.data,
       history: this.historyOf(turn),

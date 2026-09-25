@@ -154,12 +154,10 @@ Every message has the form `[FlowConfigurationError] <where>: <what>. <fix>`, wh
 | Bad target | `then is 5, not a step id or a target` (also `else`, `onFail`, `branches[n].then`) | Write a step id, "end", { step: "id" } or { flow: "id" }. |
 | Step does two things | `mixes "say" and "do"` | A step does one thing. Split it into one step per kind. |
 | `kind` disagrees with the body | `has kind "do", but its body is a "say" step` | Set kind to "say", or change the body to match. |
-| AI branch on a wait | `branches[0] is a "when" branch, but a wait step is judged by code only` | Use "if", or move the branch to a talk step. |
-| Chain to a missing flow | `then names flow "humnao", which this agent does not have` (only when `registries.flows` is set, and only for an id with no `{{`) | Use one of "vendas", "suporte", or add the flow. |
 
 Parameter values are checked strictly: `"3"` is not a number, `3.5` is not an integer, and an `enum` must contain the value unless the string holds `{{`, because a template's value is only known at run time.
 
-The agent constructor passes its own flows as `registries.flows`, so a literal chain to a flow it does not have fails the build. Five more checks live in the constructor rather than in `validateFlow`:
+The agent constructor passes its own flows as `registries.flows`, so a literal chain to a flow it does not have is a warning in the log (see below). Five more checks live in the constructor rather than in `validateFlow`:
 
 - `flow "x" is declared twice`
 - `idle: unknown tool "x"`
@@ -174,6 +172,8 @@ The agent constructor passes its own flows as `registries.flows`, so a literal c
 | `flow "f", step "s": then jumps back to "quem" without clear; the fields collected since stay known and those steps skip. Add clear: [...] to re-ask them.` | A `then`, `else`, `onFail` or branch target points at the same or an earlier step and clears nothing, so a collect step it lands on is skipped with `code: 'already-known'`. |
 | `flow "f", step "s": collects "nome", "empresa" with no prompt and no ask; the model has nothing to go on. Add a prompt or an ask per field.` | A collect step with no `prompt` and no `question`, where no listed field has an `ask` on the step or on the agent. |
 | `flow "f": collect lists "confirmado", which is only taken from the answer to a step that asks it, and no step does. Add it to a step's collect, or set extract: 'anywhere' on the field.` | A field in the flow's `collect` with `extract: 'asked'` (every boolean, by default) that no step's `collect` lists, so nothing can ever fill it. |
+| `flow "f", step "s": then names flow "humnao", which this agent does not have; a run skips this move with flow-gone. Use one of "vendas", "suporte", or add the flow.` | A literal `{ flow }` target missing from `registries.flows`; only checked when that list is set, and never for an id with `{{`. A warning rather than an error, so a host that drops one bad row keeps the rest of its agent. |
+| `flow "f", step "s": branches[0] is a "when" branch on a wait step, which no call judges, so a reply goes to else. Use "if", or move the branch to a talk step.` | No call judges a wait step, so an AI condition there never fires. `flowSpecSchema` no longer offers one. |
 
 ## flowSpecSchema
 

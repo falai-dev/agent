@@ -353,14 +353,12 @@ export function validateFlow<C = unknown, D = LooseData>(
       return to;
     }
     if ("flow" in next) {
-      // A templated id resolves per run; only a literal one can be checked now.
+      // A templated id resolves per run; only a literal one can be checked now. A warning, not a throw:
+      // a host that drops one bad row keeps the rest of its agent, and the Runner skips this move as flow-gone.
       const known = registries.flows?.map((f) => f.id);
       if (known && !next.flow.includes("{{") && !known.includes(next.flow)) {
-        throw problem(
-          at,
-          `${where} names flow "${next.flow}", which this agent does not have`,
-          known.length ? `Use one of ${known.map((id) => `"${id}"`).join(", ")}, or add the flow.` : "Add the flow to the agent.",
-        );
+        const fix = known.length ? `Use one of ${known.map((id) => `"${id}"`).join(", ")}, or add the flow.` : "Add the flow to the agent.";
+        warnings.push(`${at}: ${where} names flow "${next.flow}", which this agent does not have; a run skips this move with flow-gone. ${fix}`);
       }
       return undefined;
     }
@@ -486,9 +484,13 @@ export function validateFlow<C = unknown, D = LooseData>(
       if (branch.when === undefined && branch.if === undefined) {
         throw problem(at, `${where} has neither when nor if`, "Give the branch an AI condition (when) or a code one (if).");
       }
-      // No understand call judges a wait, so an AI condition there could never fire.
+      // No understand call judges a wait, so an AI condition there never fires. A warning, not a throw: the
+      // flow still runs as it did, a reply goes to `else`, and editors that offered the branch keep their rows.
       if (branch.when !== undefined && step.wait !== undefined) {
-        throw problem(at, `${where} is a "when" branch, but a wait step is judged by code only`, 'Use "if", or move the branch to a talk step.');
+        warnings.push(
+          `${at}: ${where} is a "when" branch on a wait step, which no call judges, so a reply goes to else. ` +
+            'Use "if", or move the branch to a talk step.',
+        );
       }
       pred(branch.if, at, `${where}.if`);
       edge(i, branch.then, at, `${where}.then`);

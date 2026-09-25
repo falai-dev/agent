@@ -160,7 +160,7 @@ The code forks. No model call.
 | `{ step: 'passo', clear: ['campo'] }` | Delete the listed fields from `session.data` and forget how many times the run asked them, then jump. The way to ask something again. |
 | `{ flow: 'outro', input? }` | End this run (reason `'flow'`) and start `outro` in the same turn, one hop deeper. The child gets `input`, or this run's `input` when absent. It holds the floor when this run did, or when no run did: a `mention` flow that chains does not take the message from the run it was routed to. `flow` is a template. |
 
-Entering a step counts a visit; the visit is part of every key minted there, so a step visited twice sends twice. A `{ step }` jump to an id that no longer exists ends the run with `code: 'step-gone'`; a `{ flow }` whose template resolves to an unknown flow is skipped with `code: 'flow-gone'`. A literal flow id the agent does not have fails the agent build.
+Entering a step counts a visit; the visit is part of every key minted there, so a step visited twice sends twice. A `{ step }` jump to an id that no longer exists ends the run with `code: 'step-gone'`; a `{ flow }` whose template resolves to an unknown flow is skipped with `code: 'flow-gone'`. A literal flow id the agent does not have is skipped the same way, and the agent build logs a warning for it.
 
 ## Caps
 

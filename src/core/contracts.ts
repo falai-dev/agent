@@ -70,8 +70,11 @@ export interface IdleRequest<C = unknown, D = unknown> {
 
 export interface SpeakRequest<C = unknown, D = unknown> {
   talk: TalkRequest<C, D> | IdleRequest<C, D>;
-  /** What started this turn. A wake has no text: the assistant speaks first. */
-  input: { kind: InputKind; text?: string };
+  /**
+   * What started this turn. A wake has no text: the assistant speaks first, unless `retry` says this
+   * talk step failed at the provider and is running again, with the customer's message still unanswered.
+   */
+  input: { kind: InputKind; text?: string; retry?: boolean };
   context: C;
   data: Partial<D>;
   history: History;
