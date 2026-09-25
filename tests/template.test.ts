@@ -35,6 +35,7 @@ describe("render", () => {
   test("a comma left before the end of a sentence goes with the value", () => {
     const blank = { context: { lead: { name: "", greeting: "Bom dia" } } };
     expect(render("Oi, {{context.lead.name}}!", blank)).toBe("Oi!");
+    expect(render("Oi, {{context.lead.name}}, tudo bem?", blank)).toBe("Oi, tudo bem?");
     expect(render("{{context.lead.greeting}}, {{context.lead.name}}! Tudo bem?", blank)).toBe(
       "Bom dia! Tudo bem?",
     );
