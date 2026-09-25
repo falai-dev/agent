@@ -39,6 +39,7 @@ export interface OpenSearchClient {
 }
 
 export interface OpenSearchStoreOptions {
+  client: OpenSearchClient;
   /** Index name. Default `agent_sessions`. */
   indices?: { sessions?: string };
   /** Create the index with its mappings on `initialize()`. Default true. */
@@ -58,8 +59,8 @@ export class OpenSearchStore<D = unknown> implements Store<D> {
   private readonly autoCreateIndices: boolean;
   private readonly refresh: Refresh;
 
-  constructor(client: OpenSearchClient, options: OpenSearchStoreOptions = {}) {
-    this.client = client;
+  constructor(options: OpenSearchStoreOptions) {
+    this.client = options.client;
     this.index = options.indices?.sessions ?? "agent_sessions";
     this.autoCreateIndices = options.autoCreateIndices ?? true;
     this.refresh = options.refresh ?? false;

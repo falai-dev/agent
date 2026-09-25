@@ -410,12 +410,13 @@ console.log(await store.load("s1")); // null on a first turn
 
 ## OpenSearchStore
 
-Over `@opensearch-project/opensearch`'s client; Elasticsearch 7.x fits the same calls. One document per session, with `blob` stored but not indexed. The constructor takes the client first and the options second.
+Over `@opensearch-project/opensearch`'s client; Elasticsearch 7.x fits the same calls. One document per session, with `blob` stored but not indexed. Like the other stores, the constructor takes one object with the client in it.
 
 ### Signature
 
 ```ts fragment
 interface OpenSearchStoreOptions {
+  client: OpenSearchClient;
   /** Index name. Default `agent_sessions`. */
   indices?: { sessions?: string };
   /** Create the index with its mappings on `initialize()`. Default true. */
@@ -436,7 +437,7 @@ interface OpenSearchClient {
 }
 
 class OpenSearchStore<D = unknown> implements Store<D> {
-  constructor(client: OpenSearchClient, options?: OpenSearchStoreOptions);
+  constructor(options: OpenSearchStoreOptions);
   /** Create the index with its mappings when it is missing and `autoCreateIndices` is on. */
   initialize(): Promise<void>;
 }
@@ -480,7 +481,7 @@ import type { OpenSearchClient } from "@falai/agent";
 // const client = new Client({ node: process.env.OPENSEARCH_URL });   // from @opensearch-project/opensearch
 declare const client: OpenSearchClient;
 
-const store = new OpenSearchStore<{ nome: string }>(client, { indices: { sessions: "conversas" }, refresh: "wait_for" });
+const store = new OpenSearchStore<{ nome: string }>({ client, indices: { sessions: "conversas" }, refresh: "wait_for" });
 await store.initialize();
 console.log(await store.load("s1")); // null on a first turn
 ```

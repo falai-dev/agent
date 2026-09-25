@@ -156,7 +156,7 @@ const viaRedis = new RedisStore({ redis, keyPrefix: "agent:", sessionTTL: 7 * 24
 const viaMongo = new MongoStore({ client: mongo, databaseName: "app" });
 const sqlite = new SQLiteStore({ db });
 await sqlite.initialize();
-const search = new OpenSearchStore(opensearch, { refresh: "wait_for" });
+const search = new OpenSearchStore({ client: opensearch, refresh: "wait_for" });
 await search.initialize();
 
 console.log([postgres, viaPrisma, viaRedis, viaMongo, sqlite, search].length); // 6

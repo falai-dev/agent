@@ -2,7 +2,9 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
-## [4.0.0]
+## [4.0.0] - Unreleased
+
+Published as alpha builds on the `alpha` tag while the three products move to it; the latest is `4.0.0-alpha.14`. It becomes 4.0.0 once every product runs it in production and works.
 
 One model for flows, automations and signals. The migration guide is [docs/migration/v3-to-v4.md](./docs/migration/v3-to-v4.md); this entry is its summary.
 
@@ -18,7 +20,7 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **At most two model calls per text turn.** One `understand` call routes the message, detects mentions, judges branches and extracts fields in a single envelope; one `speak` call phrases the reply with the step's pending fields, plus one call per tool round. Today's pipeline spent two to four calls before the reply. A lone eligible flow starts with no call only when no catch-all passes and `idle` is `'silent'`; otherwise the understand call scores it. A `wake` to a `do` or `wait` step costs none. Every result carries `llmCalls`, so the budget is a test, not a promise.
 
-- **`Store { load, save(session, expectedVersion) }` replaces `PersistenceAdapter`.** The seven adapters survive as `MemoryStore`, `PostgresStore`, `PrismaStore`, `RedisStore`, `MongoStore`, `SQLiteStore` and `OpenSearchStore`, persisting the v4 blob and a version; message repositories, `SessionRepository`, `PersistenceManager`, `autoSave` and `restoreSession` are gone. The framework never calls a store: `load`, `turn`, `save`, and a stale version throws `SessionConflictError` so the same input is replayed. The session blob is `{ v: 4, version, data, runs, claims, inputs, lastUserAt, lastAssistantAt }`; `migrateSession(blob, { sessionId, flowIdOf })` turns a 3.x `SessionState` into it once, keeping `data` verbatim, the current step as one `asking` run, and once-fired signals as claims, and throws on a blob it does not recognise instead of yielding a fresh conversation.
+- **`Store { load, save(session, expectedVersion) }` replaces `PersistenceAdapter`.** The seven adapters survive as `MemoryStore`, `PostgresStore`, `PrismaStore`, `RedisStore`, `MongoStore`, `SQLiteStore` and `OpenSearchStore`, persisting the v4 blob and a version; message repositories, `SessionRepository`, `PersistenceManager`, `autoSave` and `restoreSession` are gone. The framework never calls a store: `load`, `turn`, `save`, and a stale version throws `SessionConflictError` so the same input is replayed. The session blob is `{ v: 4, version, data, runs, claims, inputs, lastUserAt, lastAssistantAt }`; `migrateSession(blob, { sessionId, flowIdOf })` turns a 3.x `SessionState` into it once, keeping `data` verbatim, the current step as one `asking` run, and once-fired signals as claims, and throws on a blob it does not recognise instead of yielding a fresh conversation. `OpenSearchStore` takes one options object with the client in it, `new OpenSearchStore({ client })`, like the other six; it used to take the client as a separate first argument.
 
 - **Stored flows are the framework's own JSON.** `FlowSpec` is a flow with flat `{ id, kind, ... }` steps and JSON predicates; `fromSpec` / `toSpec` convert, `validateFlow` names the unknown field, action, event, condition or step, and `flowSpecSchema` returns the closed schema to hand a model that writes flows. Host actions, events and conditions register once on the agent and are referenced by name, so a flow typed in a chat, drawn in an editor or written in TypeScript is the same object.
 

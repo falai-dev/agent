@@ -141,7 +141,7 @@ const harnesses: Record<string, () => Promise<Harness>> = {
 
   OpenSearchStore: async () => {
     const client = createFakeOpenSearch();
-    const store = new OpenSearchStore<TestData>(client);
+    const store = new OpenSearchStore<TestData>({ client });
     await store.initialize();
     return {
       store,
@@ -480,24 +480,24 @@ describe("MongoStore filters", () => {
 describe("OpenSearchStore requests", () => {
   test("initialize creates the index with its mappings only when missing", async () => {
     const missing = createFakeOpenSearch(false);
-    await new OpenSearchStore<TestData>(missing, { indices: { sessions: "conversas" } }).initialize();
+    await new OpenSearchStore<TestData>({ client: missing, indices: { sessions: "conversas" } }).initialize();
     expect(missing.calls.map((c) => c.method)).toEqual(["indices.exists", "indices.create"]);
     const create = missing.calls[1].params as { index: string; body: { mappings: { properties: Record<string, unknown> } } };
     expect(create.index).toBe("conversas");
     expect(create.body.mappings.properties.blob).toEqual({ type: "object", enabled: false });
 
     const present = createFakeOpenSearch(true);
-    await new OpenSearchStore<TestData>(present).initialize();
+    await new OpenSearchStore<TestData>({ client: present }).initialize();
     expect(present.calls.map((c) => c.method)).toEqual(["indices.exists"]);
 
     const off = createFakeOpenSearch(false);
-    await new OpenSearchStore<TestData>(off, { autoCreateIndices: false }).initialize();
+    await new OpenSearchStore<TestData>({ client: off, autoCreateIndices: false }).initialize();
     expect(off.calls).toHaveLength(0);
   });
 
   test("first save is index with op_type create; later saves are a scripted CAS update", async () => {
     const client = createFakeOpenSearch(true);
-    const store = new OpenSearchStore<TestData>(client, { refresh: "wait_for" });
+    const store = new OpenSearchStore<TestData>({ client, refresh: "wait_for" });
     await store.save(session("s1"), 0);
     const index = client.calls[0].params as { id: string; op_type: string; refresh: unknown; body: Record<string, unknown> };
     expect(client.calls[0].method).toBe("index");
@@ -522,7 +522,7 @@ describe("OpenSearchStore requests", () => {
 
   test("409 on create, noop on update and 404 on update all map to SessionConflictError", async () => {
     const client = createFakeOpenSearch(true);
-    const store = new OpenSearchStore<TestData>(client);
+    const store = new OpenSearchStore<TestData>({ client });
     await store.save(session("s1"), 0);
     const onCreate = await rejection(store.save(session("s1"), 0), SessionConflictError);
     expect(onCreate.actualVersion).toBe(1);
