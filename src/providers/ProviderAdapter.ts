@@ -290,6 +290,8 @@ export abstract class ProviderAdapter implements AiProvider {
   public abstract readonly capabilities: ProviderCapabilities;
 
   protected readonly provider: Provider;
+  /** `provider` without the fallback chain: the one model this adapter was built for. */
+  private readonly primary: Provider;
   protected readonly primaryModel: string;
   protected readonly backupModels: string[];
   protected readonly retryConfig: RetryConfig;
@@ -304,6 +306,7 @@ export abstract class ProviderAdapter implements AiProvider {
     this.primaryModel = init.model;
     this.backupModels = init.backupModels ?? [];
     this.retryConfig = resolveRetryConfig(init.retryConfig);
+    this.primary = init.provider;
 
     if (init.fallbacks && init.fallbacks.length > 0) {
       const coreProviders: Provider[] = [
@@ -337,9 +340,14 @@ export abstract class ProviderAdapter implements AiProvider {
    * boot when it is `null` — that model cannot serve this framework's turns).
    * Log `calls`: `0/3 and 3/3` is what makes the next model swap's regression
    * obvious. Costs `samples × 2` short calls, and errors propagate.
+   *
+   * It asks the primary alone, never the fallback chain. The answer configures
+   * this adapter's model; a call the chain handed to a fallback would score
+   * another model as this one. Each fallback is an adapter of its own: probe it
+   * the same way.
    */
   async probeJsonWithTools(opts?: ProbeOptions): Promise<JsonWithToolsProbe> {
-    return probeJsonWithTools(this.provider, {
+    return probeJsonWithTools(this.primary, {
       model: this.primaryModel,
       ...(opts ?? {}),
     });

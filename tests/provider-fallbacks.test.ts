@@ -68,3 +68,31 @@ describe("cross-provider fallbacks walk to the plan", () => {
     expect(calls[1]).toBe("https://api.z.ai/api/anthropic/v1/messages");
   });
 });
+
+describe("the tool-calling probe", () => {
+  test("measures the primary alone, never a fallback", async () => {
+    // A plan that rate-limits the probe must fail it, not let the next model
+    // answer: that answer configured the primary's shape.
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string | URL | Request, _init?: RequestInit) => {
+      calls.push(String(url));
+      return String(url).includes("openrouter.ai")
+        ? new Response('{"error":{"message":"The model `deepseek/x` does not exist"}}', {
+            status: 404,
+          })
+        : zaiOk();
+    }) as typeof fetch;
+
+    const provider = new OpenRouterProvider({
+      apiKey: "gateway-key",
+      model: "deepseek/x",
+      fetchImpl,
+      fallbacks: [
+        new ZaiProvider({ apiKey: "plan-key", model: "glm-5.3-flash", fetchImpl }),
+      ],
+    });
+
+    await expect(provider.probeJsonWithTools({ samples: 1 })).rejects.toThrow("404");
+    expect(calls.every((url) => url.includes("openrouter.ai"))).toBe(true);
+  });
+});
