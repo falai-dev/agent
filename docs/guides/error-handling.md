@@ -150,7 +150,7 @@ Most things that go wrong inside a turn become outcome lines, not exceptions:
 
 The full detail vocabulary is in [outcomes](../reference/outcomes.md).
 
-Two errors outside the four classes: a `compaction` option out of range throws a plain `Error` at construction (`compactionThreshold must be between 0.5 and 0.95, got 2`), and `PrismaStore` throws a `TypeError` when the client has no model by the given name.
+Two errors outside the four classes: a `compaction` option out of range throws a plain `Error` at construction (`[CompactionEngine] compactionThreshold is 2: it must be between 0.5 and 0.95. Use 0.8 unless you measured otherwise.`), and `PrismaStore` throws a `TypeError` when the client has no model by the given name. [Errors](../reference/errors.md) lists the other wiring errors thrown at construction.
 
 ## Catching by class
 

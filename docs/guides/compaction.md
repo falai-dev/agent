@@ -34,13 +34,13 @@ With `maxTokens: 2000` the turn compacts when the history is estimated at 1600 t
 
 | Field | Meaning | Default |
 |---|---|---|
-| `maxTokens` | the token budget for the history | required |
+| `maxTokens` | the token budget for the history; more than 0 | required |
 | `compactionThreshold` | compact when the estimate reaches this share of `maxTokens`; between 0.5 and 0.95 | `0.8` |
 | `preserveRecentCount` | the newest messages are never changed or removed; at least 2 | `4` |
 | `maxToolResultChars` | characters kept of a tool result before it is cut; more than 0 | `5000` |
 | `enabled` | `false` turns compaction off without removing the config | `true` when the config is present |
 
-A value out of range throws at construction, as a plain `Error`: `compactionThreshold must be between 0.5 and 0.95, got 2`, `preserveRecentCount must be >= 2, got 1`, `maxToolResultChars must be > 0, got 0`.
+A value out of range throws at construction, as a plain `Error` that names the value and the fix, for example `[CompactionEngine] compactionThreshold is 2: it must be between 0.5 and 0.95. Use 0.8 unless you measured otherwise.` The same goes for a `maxTokens` of 0 or less, a `preserveRecentCount` under 2 and a `maxToolResultChars` of 0 or less.
 
 ## When it runs
 

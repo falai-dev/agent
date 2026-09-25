@@ -60,7 +60,7 @@ Eight phases, one order for every input kind (`message`, `wake`, `event`, `start
 - **AI handles language, code handles decisions.** Routing, extraction, phrasing → the model. Eligibility, pending fields, movement, waits, claims → code.
 - **Schema-first:** fields live on the agent, not on flows. `falai<C>().fields(defs)` binds the data type for every `collect`, `ask`, `clearOnStart` and `ctx.set`.
 - **`when`/`if` split:** `when` is an AI-judged string (costs tokens, only where fresh customer text exists), `if` is a code predicate or its JSON form (`{ equals, known, silenced, <condition>: arg }`), free.
-- **Deterministic keys:** `runId = ${flowId}#${triggerKey}`, message/action `key = ${runId}:${stepId}:${visit}`. Three wake shapes: a step wait or deferral `${runId}:${stepId}:${atMs}`, a provider retry `${runId}:${stepId}:${visit}:retry:${atMs}`, a silence `silence:${flowId}:${sessionId}:${lastAssistantAtMs}`. A replay of the same input mints the same keys.
+- **Deterministic keys:** `runId = ${flowId}#${triggerKey}`, message/action `key = ${runId}:${stepId}:${visit}`. Four wake shapes: a step wait or deferral `${runId}:${stepId}:${atMs}`, a provider retry `${runId}:${stepId}:${visit}:retry:${atMs}`, a delayed start (an event trigger's `after`, or a start pushed to working hours) `${runId}:start:${atMs}`, a silence `silence:${flowId}:${sessionId}:${lastAssistantAtMs}`. A replay of the same input mints the same keys.
 - **Pure core:** no I/O beyond the provider and the host's `do` handlers. Tests inject `clock` and a scripted provider.
 - **The stored flow is the framework's JSON:** `FlowSpec` (flat steps with `kind`) ↔ `Flow` via `fromSpec` / `toSpec`; `validateFlow` at agent build; `flowSpecSchema` for a model that writes flows.
 
@@ -142,7 +142,7 @@ All providers implement the `AiProvider` interface. Every adapter is built on `@
 
 - `falai<C>().fields(defs).agent(options)` builds the agent; `f.flow`, `f.fromSpec`, `f.action`, `f.event`, `f.condition` give typed values.
 - `agent.turn(input)` for every input kind; `agent.turnStream(input)` yields `{ delta }` chunks then `{ done, result }`.
-- The host loop: `load` → `turn` → if `changed`, `save(session, loadedVersion)` → send `messages[]` (honouring `afterMs`, keyed) → enqueue `schedule[]` with the key in the payload and `encodeURIComponent(key)` as the job id (wake keys hold `:` and `#`, which BullMQ-style queues reject) → at fire time `turn({ wake: key })`.
+- The host loop: `load` → `turn` → if `changed`, `save(session, loadedVersion)` → send `messages[]` (honouring `afterMs`, keyed) → enqueue `schedule[]` with the key in the payload and `encodeURIComponent(key)` as the job id (wake keys hold `:`, which BullMQ rejects in a custom job id) → at fire time `turn({ wake: key })`.
 - `silenced: 'reason'` is the one gate: `do` steps still run, nothing is phrased, zero calls.
 - Outcome lines carry a stable `code` (`already-known`, `stale-wake`, `max-asks`, …) and the English `message` the framework copies from `OUTCOME_MESSAGES` in `src/utils/outcomes.ts`. Add a code there and the compiler forces a sentence for it. `detail` is only ever text someone else wrote: the host's `silenced` reason, an action's own words, the field a line is about. The package emits no Portuguese; a product maps the code to its own copy.
 - `migrateSession(blob, { sessionId, flowIdOf })` at the host's deserialisation choke point; it throws on garbage.

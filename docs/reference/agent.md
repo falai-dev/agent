@@ -86,7 +86,7 @@ class Agent<C, D> {
 
 `Idle` is `{ prompt: Template; tools?: string[]; instructions?: Instruction[] } | 'silent'`. Its `tools` list must name tools registered on the agent.
 
-`AgentCompactionConfig` is `{ maxTokens: number; compactionThreshold?: number; preserveRecentCount?: number; maxToolResultChars?: number; enabled?: boolean }`. Defaults: `compactionThreshold` `0.8` — compaction runs when the history passes 80% of `maxTokens` (allowed 0.5 to 0.95); keep the 4 most recent messages (at least 2); cut each tool result at 5000 characters (more than 0); `enabled: true`. Values outside those ranges throw at construction.
+`AgentCompactionConfig` is `{ maxTokens: number; compactionThreshold?: number; preserveRecentCount?: number; maxToolResultChars?: number; enabled?: boolean }`. `maxTokens` must be more than 0. Defaults: `compactionThreshold` `0.8` — compaction runs when the history passes 80% of `maxTokens` (allowed 0.5 to 0.95); keep the 4 most recent messages (at least 2); cut each tool result at 5000 characters (more than 0); `enabled: true`. Values outside those ranges throw at construction.
 
 ## turn()
 
