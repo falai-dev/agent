@@ -30,11 +30,8 @@ export interface AnthropicProviderOptions {
   /** Idle-stream deadline and retry budget */
   retryConfig?: { timeout?: number; retries?: number };
   /**
-   * Replacement `fetch`, for tests that script the wire.
-   *
-   * v3 note: this replaces the injected SDK client. There is no SDK now, so a
-   * test drives the same bytes the provider really receives rather than an
-   * SDK's idea of them.
+   * Replacement `fetch`, for tests that script the wire. There is no vendor
+   * SDK, so a test drives the same bytes the provider really receives.
    */
   fetchImpl?: typeof fetch;
 }

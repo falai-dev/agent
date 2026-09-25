@@ -61,11 +61,9 @@ export interface RetryConfig {
   /**
    * How long a stream may stay SILENT before it is considered wedged.
    *
-   * In v2 this was a total wall-clock cap on a non-streaming call, so a healthy
-   * but long generation died at the one-minute mark. It now bounds silence
-   * instead: time to the first byte, and the gap between any two after it. A
-   * request that never gets a reply still fails at the same moment; one that is
-   * steadily producing tokens is left alone.
+   * It bounds silence, not the whole call: time to the first byte, and the gap
+   * between any two after it. A request that never gets a reply fails at that
+   * moment; one that is steadily producing tokens is left alone, however long.
    */
   timeout: number;
   /** Retries AFTER the first attempt, so `0` still performs one call. */
@@ -90,10 +88,8 @@ export function resolveRetryConfig(input?: { timeout?: number; retries?: number 
 /**
  * Request defaults sent with every call.
  *
- * Only the fields every supported shape has. In v2 each provider took its own
- * vendor's SDK parameter type here — which is how one vendor's package ended
- * up in the dependency tree of consumers who used a different vendor, and how
- * a field set on one provider silently vanished on another.
+ * Only the fields every supported shape has, so a field set on one provider
+ * means the same on another and no vendor's package enters the dependency tree.
  */
 export interface RequestConfig {
   temperature?: number;
@@ -476,8 +472,7 @@ export abstract class ProviderAdapter implements AiProvider {
               tokensUsed: acc.promptTokens + (acc.completionTokens ?? 0),
               promptTokens: acc.promptTokens,
               completionTokens: acc.completionTokens,
-              // New in v3: the cache-hit subset of the prompt, which the old
-              // adapters never read and which is billed far cheaper.
+              // The cache-hit subset of the prompt, billed far cheaper.
               cachedInputTokens: acc.cachedInputTokens,
             }
           : {}),

@@ -618,6 +618,8 @@ Do not pick from that list. Ask the model you ship.
 
 Every `ProviderAdapter` subclass has `probeJsonWithTools(opts?)`. It asks the bound model, on the wire, both ways, and reports which shape called the tool on every sample.
 
+The probe asks the adapter's own model, never its fallbacks, one call at a time. A rate-limited fallback cannot make a working primary look broken, and a primary that fails the probe throws. A `FallbackAiProvider` has no probe of its own: probe each adapter you put in it.
+
 ```ts fragment
 interface JsonWithToolsProbe {
   /** The shape to configure, or null when neither called the tool on every sample. */

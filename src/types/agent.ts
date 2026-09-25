@@ -145,7 +145,7 @@ export interface ScheduleEntry {
 export type EndReason = "end" | "flow" | "reset" | "skipped" | "failed" | "replaced";
 
 export interface TurnResult<D = unknown> {
-  /** Version unchanged; the host bumps it on save. */
+  /** Version unchanged by a turn; `Store.save` bumps it and returns the saved session. */
   session: Session<D>;
   /** False: save nothing, send nothing. */
   changed: boolean;

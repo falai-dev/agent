@@ -37,7 +37,7 @@
 | Lint + fix | `bun run lint:fix` |
 | Test | `bun test tests/*.test.ts tests/scenarios/*.test.ts` |
 | Clean | `bun run clean` |
-| Publish current version | `bun run release` |
+| Publish current version | `bun run release:alpha` while the version is an alpha (`bun run release` once 4.0.0 is `latest`) |
 
 ## Architecture
 
@@ -60,7 +60,7 @@ Eight phases, one order for every input kind (`message`, `wake`, `event`, `start
 - **AI handles language, code handles decisions.** Routing, extraction, phrasing → the model. Eligibility, pending fields, movement, waits, claims → code.
 - **Schema-first:** fields live on the agent, not on flows. `falai<C>().fields(defs)` binds the data type for every `collect`, `ask`, `clearOnStart` and `ctx.set`.
 - **`when`/`if` split:** `when` is an AI-judged string (costs tokens, only where fresh customer text exists), `if` is a code predicate or its JSON form (`{ equals, known, silenced, <condition>: arg }`), free.
-- **Deterministic keys:** `runId = ${flowId}#${triggerKey}`, message/action `key = ${runId}:${stepId}:${visit}`, wake `key = ${runId}:${stepId}:${atMs}`. A replay of the same input mints the same keys.
+- **Deterministic keys:** `runId = ${flowId}#${triggerKey}`, message/action `key = ${runId}:${stepId}:${visit}`. Three wake shapes: a step wait or deferral `${runId}:${stepId}:${atMs}`, a provider retry `${runId}:${stepId}:${visit}:retry:${atMs}`, a silence `silence:${flowId}:${sessionId}:${lastAssistantAtMs}`. A replay of the same input mints the same keys.
 - **Pure core:** no I/O beyond the provider and the host's `do` handlers. Tests inject `clock` and a scripted provider.
 - **The stored flow is the framework's JSON:** `FlowSpec` (flat steps with `kind`) ↔ `Flow` via `fromSpec` / `toSpec`; `validateFlow` at agent build; `flowSpecSchema` for a model that writes flows.
 
@@ -75,12 +75,13 @@ src/
 │   ├── Understand.ts    # the one judging call (schemaName 'understand')
 │   ├── Speak.ts         # the one phrasing call + tool rounds (schemaName 'speak'), streaming
 │   ├── Prompt.ts        # prompt sections shared by both calls
+│   ├── predicate.ts     # evaluate(): a code predicate or its JSON form (equals, known, silenced, named conditions)
 │   ├── contracts.ts     # the seams: UnderstandRequest/Understanding, SpeakRequest/SpeakOutcome
 │   ├── FlowSpec.ts      # JSON form, fromSpec/toSpec, validateFlow, flowSpecSchema
 │   ├── Migrate.ts       # assertSession (v4 shape check), migrateSession (3.x blob → v4), InvalidSessionError
 │   └── CompactionEngine.ts
 ├── persistence/         # Store implementations: Memory, Postgres, Prisma, Redis, Mongo, SQLite, OpenSearch
-├── providers/           # LLM adapters over @providerkit/core: Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, Z.ai
+├── providers/           # LLM adapters over @providerkit/core: Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, Z.ai, Fallback
 ├── types/               # flow, session, agent, tool, ai, history, schema, errors
 ├── utils/               # schema (pending/coerce/wire), template, duration, clock, history, json, logger
 └── index.ts             # Public API surface (all exports)
@@ -100,12 +101,14 @@ src/
 
 ## Providers
 
-All providers implement the `AiProvider` interface:
+All providers implement the `AiProvider` interface. Every adapter is built on `@providerkit/core` and calls its API over HTTP; there is no vendor SDK.
 
-- `GeminiProvider` — Google Gemini (`@google/genai`)
-- `OpenAIProvider` — OpenAI (`openai` SDK)
-- `AnthropicProvider` — Anthropic (`@anthropic-ai/sdk`)
+- `GeminiProvider` — Google Gemini
+- `OpenAIProvider` — OpenAI
+- `AnthropicProvider` — Anthropic
 - `OpenRouterProvider` — OpenRouter (OpenAI-compatible)
+- `DeepSeekProvider` — DeepSeek (OpenAI-compatible; JSON mode with the schema in the prompt)
+- `FallbackAiProvider` — tries a list of providers in order
 - `ZaiProvider` — Z.ai Coding Plan (Anthropic-compatible; the flat-rate plan hosting GLM — bare model ids, explicit no-thinking marker)
 
 ## Persistence
@@ -118,7 +121,7 @@ All providers implement the `AiProvider` interface:
 - **Mock provider:** `tests/mock-provider.ts` — `mockProvider({ understand: [...], speak: [...] })` shifts scripted replies per `parameters.schemaName` and records `.calls`; it throws when a script runs dry, so a test that spends an extra model call fails loudly.
 - **Clock:** pass `clock` to the agent; never read `Date.now()` in core code.
 - **Property tests:** files ending in `.property.test.ts` use `fast-check`.
-- **Scenarios:** `tests/scenarios/s01…s13` play the design's walkthroughs end to end and assert `llmCalls`, message keys and outcome `detail` strings.
+- **Scenarios:** `tests/scenarios/s00…s14` play the design's walkthroughs end to end and assert `llmCalls`, message keys and outcome `code`s.
 - **Strict schemas:** `tests/helpers.ts` has `isStrictSchema`; every envelope the framework sends must pass it.
 
 ## Coding Conventions
@@ -139,7 +142,7 @@ All providers implement the `AiProvider` interface:
 
 - `falai<C>().fields(defs).agent(options)` builds the agent; `f.flow`, `f.fromSpec`, `f.action`, `f.event`, `f.condition` give typed values.
 - `agent.turn(input)` for every input kind; `agent.turnStream(input)` yields `{ delta }` chunks then `{ done, result }`.
-- The host loop: `load` → `turn` → if `changed`, `save(session, loadedVersion)` → send `messages[]` (honouring `afterMs`, keyed) → enqueue `schedule[]` with `jobId = key` → at fire time `turn({ wake: key })`.
+- The host loop: `load` → `turn` → if `changed`, `save(session, loadedVersion)` → send `messages[]` (honouring `afterMs`, keyed) → enqueue `schedule[]` with the key in the payload and `encodeURIComponent(key)` as the job id (wake keys hold `:` and `#`, which BullMQ-style queues reject) → at fire time `turn({ wake: key })`.
 - `silenced: 'reason'` is the one gate: `do` steps still run, nothing is phrased, zero calls.
 - Outcome lines carry a stable `code` (`already-known`, `stale-wake`, `max-asks`, …) and the English `message` the framework copies from `OUTCOME_MESSAGES` in `src/utils/outcomes.ts`. Add a code there and the compiler forces a sentence for it. `detail` is only ever text someone else wrote: the host's `silenced` reason, an action's own words, the field a line is about. The package emits no Portuguese; a product maps the code to its own copy.
 - `migrateSession(blob, { sessionId, flowIdOf })` at the host's deserialisation choke point; it throws on garbage.

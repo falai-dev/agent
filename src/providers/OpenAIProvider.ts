@@ -39,8 +39,7 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
     supportsNativeJsonSchema: true,
     supportsStreaming: true,
     supportsStreamingToolCalls: true,
-    // v3: the shape auto-caches repeated prefixes and now reports the hit
-    // count, which the old adapter never read.
+    // The shape auto-caches repeated prefixes and reports the hit count.
     supportsPromptCaching: true,
   };
 

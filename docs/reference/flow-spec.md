@@ -92,7 +92,7 @@ Every field means what it means on [Flow](./flow.md). The differences:
 | `waitEvent` | `wait: { event }` | An event. |
 | `if` | `if` step | A code fork. |
 
-`fromSpec` drops `kind`; `toSpec` derives it from the step's shape by this table. A talk step with neither `prompt` nor `collect` makes `toSpec` throw.
+`fromSpec` drops `kind`; `toSpec` derives it from the step's shape by this table. A talk step with neither `prompt` nor `collect` makes `toSpec` throw: `[FlowConfigurationError] flow "x", step "y": has neither prompt nor collect. A talk step needs a guideline, fields to collect, or both.`
 
 ## fromSpec
 
@@ -123,6 +123,9 @@ Every message has the form `[FlowConfigurationError] <where>: <what>. <fix>`, wh
 | Reserved step id | `uses the reserved id "end"` | "end" ends the run; pick another id. |
 | Duplicate step id | `duplicates an earlier step id` | Give each step its own id. |
 | Triggers, no steps | `has triggers but no steps` | Add at least one step or remove `on`. |
+| Trigger with no kind | `names no trigger kind` (`<where>` is `flow "id", trigger #n`; the v3 `{ kind: 'message', when }` shape lands here) | A trigger is one of `message`, `mention`, `silence`, `event`. A flow the host starts itself has no `on` at all. |
+| Only exclusions | `every message phrase starts with "!", so nothing can ever match it` (also `mention`) | A "!" phrase rules the trigger out. Add at least one plain phrase saying when it should fire, or use an empty list for a catch-all. |
+| Step does nothing | `does nothing` | A step talks (`prompt` / `collect`), says (`say`), acts (`do`), waits (`wait`) or forks (`if`). |
 | Unknown field | `unknown field "x" in collect` (the flow's or a step's; also `ask`, `clearOnStart`, `then.clear`, `while.equals`, `if.known`, …) | Add it to the agent's fields or fix the slug. |
 | Unknown tool | `unknown tool "x"` (flow or step `tools`) | Register it in the agent's tools or fix the name. |
 | Unknown action | `unknown action "x"` | Register it in actions or fix the name. |

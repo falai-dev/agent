@@ -131,7 +131,7 @@ Then three bookkeeping moves. `lastAssistantAt` is set when anything went out. T
 
 ## 8. Return
 
-`TurnResult`: `session` (version unchanged; the host bumps it on save), `changed`, `messages` in emission order, `schedule`, `outcomes`, `started`, `ended` (each with a reason), `skipped` (triggers that matched but did not start, with the reason), `llmCalls`. `changed` is `false` when the input was ignored — a repeated message id, a wake with no session, a wake nothing is waiting for — or when the session came back identical with no message, no wake, no outcome and no skip to show for the turn.
+`TurnResult`: `session` (version unchanged by the turn; `Store.save` bumps it and returns the saved session), `changed`, `messages` in emission order, `schedule`, `outcomes`, `started`, `ended` (each with a reason), `skipped` (triggers that matched but did not start, with the reason), `llmCalls`. `changed` is `false` when the input was ignored — a repeated message id, a wake with no session, a wake nothing is waiting for — or when the session came back identical with no message, no wake, no outcome and no skip to show for the turn.
 
 ## The budget
 

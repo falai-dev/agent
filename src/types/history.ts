@@ -176,13 +176,3 @@ export interface Event<
   /** Unique event identifier */
   id?: string;
 }
-
-/**
- * An emitted event (staged for inclusion)
- */
-export interface EmittedEvent<
-  TData = MessageEventData | ToolEventData | StatusEventData
-> extends Event<TData> {
-  /** Whether this event has been committed */
-  committed?: boolean;
-}

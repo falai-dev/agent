@@ -5,16 +5,11 @@
 /**
  * The normalized provider failure, and the kinds it comes in.
  *
- * v3 re-exports these from `@providerkit/core` rather than keeping a second
- * copy. The taxonomy is wider there — thirteen kinds named by what actually
- * fixes them, where this package had eight — so a caller can now tell an
+ * `ProviderError` comes from `@providerkit/core` and is re-exported here. Its
+ * thirteen kinds are named by what fixes them, so a caller can tell an
  * exhausted balance from a per-minute throttle, a plan that never included the
- * API from a wrong key, and an outgrown context window from a bad request.
- *
- * Breaking: the kind lives on `error.kind`, not `error.code`, and the spellings
- * changed with the taxonomy (`rate_limited` is `rate`, `overloaded` is
- * `overload`, `invalid_request` splits into `invalid`, `context`, `model` and
- * `content`). `schema_rejected` is gone: nothing ever produced it.
+ * API from a wrong key, and an outgrown context window from a bad request. The
+ * kind lives on `error.kind`.
  */
 export { ProviderError } from "@providerkit/core";
 export type { ErrorKind } from "@providerkit/core";

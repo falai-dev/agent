@@ -6,9 +6,10 @@
  * hands back raw values keyed by their real ids. It never writes session
  * data: Runner validates, coerces and applies.
  *
- * Two shortcuts cost zero calls: a single eligible message flow with nothing
- * else to judge starts outright, and a turn with nothing AI-conditioned
- * returns an empty Understanding.
+ * Zero calls when there is nothing to judge: no candidate flow, or only the
+ * floor's own, and no mention, branch or field. A lone eligible message flow
+ * starts unscored only when no catch-all passes and `idle` is `'silent'`;
+ * Runner decides that and sends no request. Otherwise this call scores it.
  *
  * The envelope is built for two kinds of provider at once. Gemini enforces
  * the schema, so every section is a closed object with every property

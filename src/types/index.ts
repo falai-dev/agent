@@ -85,7 +85,6 @@ export type {
 
 export type {
   AssistantHistoryItem,
-  EmittedEvent,
   Event,
   History,
   HistoryItem,

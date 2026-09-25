@@ -8,12 +8,10 @@ import type { HistoryItem } from "./history.js";
 /**
  * How hard the model thinks before answering.
  *
- * v3 takes `@providerkit/core`'s effort union, which every provider speaks:
- * "none" | "low" | "medium" | "high" | "max". Absent means the provider's own
- * default and is never sent. v2's "minimal" is spelled "low"; `summary` and
- * `includeThoughts` are gone because they are no longer choices — the shapes
- * that need them get them switched on whenever an effort is set, which is the
- * only setting that ever produced reasoning output.
+ * `@providerkit/core`'s effort union, which every provider speaks: "none" |
+ * "low" | "medium" | "high" | "max". Absent means the provider's own default
+ * and is never sent. The shapes that need a thought summary switched on get it
+ * whenever an effort is set, so there is no separate setting for it.
  */
 export interface ReasoningConfig {
   effort?: Effort;

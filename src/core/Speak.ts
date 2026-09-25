@@ -334,7 +334,7 @@ function buildPrompt<C, D>(
     "idle" in talk
       ? [guideline(talk.idle.prompt)]
       : [
-          `## Flow\n${talk.flow.name}${talk.flow.description ? `: ${talk.flow.description}` : ""}`,
+          `## Flow\n${talk.flow.name}${talk.flow.description ? `: ${render(talk.flow.description, scope)}` : ""}`,
           guideline(talk.step.prompt ?? (talk.pending.length ? DEFAULT_GUIDELINE : ANSWER_GUIDELINE)),
           pendingSection(talk.pending, options.fields, talk.step.ask ?? {}, scope),
           // `Partial<D>` is a mapped type; the guard is how it reaches an index-signature parameter without a cast.

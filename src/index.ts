@@ -111,7 +111,6 @@ export type {
   ConditionSpec,
   DoStep,
   Duration,
-  EmittedEvent,
   EndReason,
   Event,
   EventDef,

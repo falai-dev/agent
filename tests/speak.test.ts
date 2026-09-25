@@ -90,6 +90,13 @@ describe("Speak.run: talk step", () => {
     expect(call.seen).not.toContain("resposta antiga da Ana");
   });
 
+  test("the flow's description is filled like the guideline", async () => {
+    const provider = mockProvider({ speak: [{ message: "Oi!" }] });
+    const flow = { ...triagem, description: "Quem chega querendo saber se a {{context.empresa}} serve" };
+    await new Speak(agentOptions(provider)).run(talkRequest({ talk: { run, flow, step: quem, pending: ["nome"] } }));
+    expect(provider.calls[0].prompt).toContain("## Flow\nTriagem: Quem chega querendo saber se a Acme serve");
+  });
+
   test("a step with no prompt and nothing left to collect is told to answer, not to collect", async () => {
     const provider = mockProvider({ speak: [{ message: "Claro, funciona assim." }] });
     const step = { id: "quem", collect: ["nome" as const], ask: quem.ask };

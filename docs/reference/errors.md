@@ -149,7 +149,7 @@ import type { AiProvider, DataOf, Session, TurnResult } from "@falai/agent";
 
 declare const provider: AiProvider;
 declare function send(text: string, key: string, afterMs: number): Promise<void>;
-declare function enqueue(jobId: string, at: Date): Promise<void>;
+declare function enqueue(jobId: string, at: Date, payload: { sessionId: string; key: string }): Promise<void>;
 declare function sleep(ms: number): Promise<void>;
 
 const f = falai().fields({
@@ -215,7 +215,8 @@ async function handle(sessionId: string, text: string, id: string): Promise<Turn
   }
 
   for (const m of result.messages) await send(m.text, m.key, m.afterMs);
-  for (const s of result.schedule) await enqueue(s.key, s.at);
+  // The key rides in the payload for turn({ wake: key }); BullMQ refuses a ":" in a custom id, so the job id is encoded.
+  for (const s of result.schedule) await enqueue(encodeURIComponent(s.key), s.at, { sessionId, key: s.key });
   return result;
 }
 

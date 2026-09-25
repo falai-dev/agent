@@ -40,8 +40,7 @@ export interface GeminiProviderOptions {
   config?: RequestConfig;
   /** Idle-stream deadline and retry budget */
   retryConfig?: { timeout?: number; retries?: number };
-  /** Replacement `fetch`, for tests that script the wire. Replaces v2's
-   *  injected SDK client — see {@link AnthropicProviderOptions.fetchImpl}. */
+  /** Replacement `fetch`, for tests that script the wire — see {@link AnthropicProviderOptions.fetchImpl}. */
   fetchImpl?: typeof fetch;
 }
 

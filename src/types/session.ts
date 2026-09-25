@@ -127,7 +127,7 @@ export interface StepOutcome {
 export interface Session<D = unknown> {
   id: string;
   v: 4;
-  /** Optimistic-concurrency version; the host bumps it on save. */
+  /** Optimistic-concurrency version. A turn leaves it unchanged; `Store.save` bumps it and returns the saved session. */
   version: number;
   data: Partial<D>;
   /** Live runs only. */
