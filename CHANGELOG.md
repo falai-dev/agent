@@ -4,7 +4,7 @@ All notable changes to `@falai/agent` will be documented in this file.
 
 ## [4.0.0] - Unreleased
 
-Published as alpha builds on the `alpha` tag while the three products move to it; the latest is `4.0.0-alpha.14`. It becomes 4.0.0 once every product runs it in production and works.
+Published as alpha builds on the `alpha` tag while the three products move to it; the latest is `4.0.0-alpha.15`. It becomes 4.0.0 once every product runs it in production and works.
 
 One model for flows, automations and signals. The migration guide is [docs/migration/v3-to-v4.md](./docs/migration/v3-to-v4.md); this entry is its summary.
 
