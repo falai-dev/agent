@@ -33,9 +33,13 @@ export class SessionConflictError extends Error {
         public readonly actualVersion: number | undefined,
     ) {
         super(
-            `[SessionConflictError] Session "${sessionId}" was modified concurrently: ` +
-            `expected version ${expectedVersion}, found ${actualVersion ?? 'none'}. ` +
-            `Reload the session and retry the operation.`
+            // A row that vanished between load and save (a TTL expiry, a delete) is not a race.
+            actualVersion === undefined && expectedVersion > 0
+                ? `[SessionConflictError] Session "${sessionId}" is gone from the store: it was at version ${expectedVersion} ` +
+                  `and has since been deleted or expired. Load it again; a load that finds nothing starts a new conversation.`
+                : `[SessionConflictError] Session "${sessionId}" was modified concurrently: ` +
+                  `expected version ${expectedVersion}, found ${actualVersion ?? 'none'}. ` +
+                  `Reload the session and retry the operation.`
         );
         this.name = 'SessionConflictError';
     }

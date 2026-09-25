@@ -319,6 +319,14 @@ describe("validateFlow throws, naming the flow, the step and the offender", () =
   test("equals is not coerced: a string is not a boolean", () => {
     const m = problem(spec([{ id: "a", kind: "if", if: { equals: { confirmado: "sim" } }, else: "end" }]));
     expect(m).toContain('step "a": if.equals gives "confirmado" a string, but the field is a boolean');
+    // A value off an enum is not a type error, and "an integer" takes its article.
+    expect(problem(spec([{ id: "a", kind: "if", if: { equals: { tamanho: "5" } }, else: "end" }]))).toContain(
+      'if.equals gives "tamanho" "5", which is not one of "1-10", "11-50", "51-200", "200+". Use one of the listed values.',
+    );
+    const withInteger = { ...registries, fields: { ...f.fields, pessoas: { type: "integer" as const } } };
+    expect(problem(spec([{ id: "a", kind: "if", if: { equals: { pessoas: "x" } }, else: "end" }]), withInteger)).toContain(
+      'if.equals gives "pessoas" a string, but the field is an integer. Write an integer; values are not coerced.',
+    );
   });
 
   test("do names not in actions", () => {

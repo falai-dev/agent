@@ -261,6 +261,7 @@ return nil
 `ARGV` is the expected version, the next version, the blob, now as ISO text and the TTL in seconds. `nil` back is success; a version back is the conflict (`actualVersion` is that number); `'missing'` means the hash is gone (`actualVersion` is `undefined`).
 
 - `sessionTTL` defaults to `7 * 24 * 60 * 60` = 604800 seconds and is reset on every save. `0` never expires.
+- A session that expires takes its parked runs and claims with it. A wait longer than the TTL (an event wait defaults to 30 days) wakes to no session, and a `once` flow can fire again. Set `sessionTTL` above your longest wait, or to `0`.
 - `load` returns `null` when the hash has no fields.
 
 ### Example

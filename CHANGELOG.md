@@ -105,6 +105,12 @@ One model for flows, automations and signals. The migration guide is [docs/migra
 
 - **An action that defers by something that is not a duration fails its step instead of throwing the turn.** `{ defer: "2 minutos" }` threw outside the guard around the handler, so the turn failed after the side effect had happened, and every replay did it again. The step now fails with `code: 'action-failed'` and a `detail` that quotes the value, and `onFail` applies.
 
+- **`if.equals` words its two mistakes like an action parameter does.** A value off a field's enum read "gives a string, but the field is a string", and an integer field read "a integer". It now reads `if.equals gives "etapa" "frio", which is not one of "novo", "quente". Use one of the listed values.` and `…but the field is an integer. Write an integer; values are not coerced.`
+
+- **A session that vanished between load and save says so.** `SessionConflictError` read "modified concurrently … found none" when the row had been deleted or had expired (a Redis TTL), which sent the reader looking for a race. That case now reads `Session "s1" is gone from the store: it was at version 3 and has since been deleted or expired. Load it again; a load that finds nothing starts a new conversation.` The class and `actualVersion: undefined` are unchanged.
+
+- **Constructor errors follow the house format.** The providers, `FallbackAiProvider`, `CompactionEngine` and `fakeClock` threw bare sentences ("Gemini API key is required", "compactionThreshold must be between 0.5 and 0.95, got 1.2"); each now names the class, the option, why it matters and what to pass, e.g. `[GeminiProvider] model is empty: there is no default. Pass one, e.g. { model: "gemini-2.5-flash" }.` The Gemini example no longer names a preview model. `compaction.maxTokens` of 0 or less is now rejected at construction instead of compacting every turn.
+
 - **A flow id with a `:` gets its silence wake.** The wake key is `silence:<flowId>:<sessionId>:<ms>`, and the flow id was read up to the first `:`, so `follow:up` was looked up as `follow` and every wake was skipped as `flow-gone`. The key is now cut at the session id.
 
 ### Unchanged

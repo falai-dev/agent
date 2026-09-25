@@ -50,10 +50,8 @@ export class AnthropicProvider extends ProviderAdapter {
   };
 
   constructor(options: AnthropicProviderOptions) {
-    if (!options.apiKey) throw new Error("Anthropic API key is required");
-    if (!options.model) {
-      throw new Error("Model is required. Example: 'claude-sonnet-5' or 'claude-opus-5'");
-    }
+    if (!options.apiKey) throw new Error(`[AnthropicProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.ANTHROPIC_API_KEY } and check the variable is set.`);
+    if (!options.model) throw new Error(`[AnthropicProvider] model is empty: there is no default. Pass one, e.g. { model: "claude-sonnet-5" }.`);
 
     super({
       provider: createAnthropicProvider({

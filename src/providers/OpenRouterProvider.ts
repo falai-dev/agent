@@ -59,8 +59,10 @@ export class OpenRouterProvider extends OpenAICompatibleProvider {
   };
 
   constructor(options: OpenRouterProviderOptions) {
-    if (!options.apiKey) throw new Error("OpenRouter API key is required");
-    if (!options.model) throw new Error("Model is required. See https://openrouter.ai/models");
+    if (!options.apiKey) throw new Error(`[OpenRouterProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.OPENROUTER_API_KEY } and check the variable is set.`);
+    if (!options.model) {
+      throw new Error(`[OpenRouterProvider] model is empty: there is no default. Pass one, e.g. { model: "anthropic/claude-sonnet-5" }; the ids are listed at https://openrouter.ai/models.`);
+    }
 
     super({
       id: "openrouter",

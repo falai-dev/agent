@@ -51,7 +51,7 @@ export class ZaiProvider extends ProviderAdapter {
   };
 
   constructor(options: ZaiProviderOptions) {
-    if (!options.apiKey) throw new Error("Z.ai Coding Plan API key is required");
+    if (!options.apiKey) throw new Error(`[ZaiProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.ZAI_API_KEY } and check the variable is set.`);
 
     const model = options.model ?? "glm-5.3-flash";
     super({

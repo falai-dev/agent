@@ -59,7 +59,7 @@ From `src/types/errors.ts`, `src/core/Migrate.ts` and `@providerkit/core`.
 | Class | Thrown by | When | What to do |
 |-------|-----------|------|------------|
 | `FlowConfigurationError` | `f.agent()` / `new Agent()`, `validateFlow`, `fromSpec` | A flow cannot run as written: a flow id or step id declared twice; a step with no id, or with the reserved id `"end"`; an unknown field in `collect` / `ask` / `clearOnStart`; an unknown action, event, condition or tool; a `then` pointing at a step that does not exist; an action `with` missing a required parameter; a duration that does not parse; a talk step with neither `prompt` nor `collect`. Also thrown at run time when a JSON predicate names a condition the agent does not have. | Fix the flow. It is a bug in the flow or the registries, never something to retry. |
-| `SessionConflictError` | every `Store.save` | The stored version is not `expectedVersion`: another turn saved first, or a `save(…, 0)` found a row. | Load the session again and replay the same input. Nothing was sent, so nothing is duplicated. |
+| `SessionConflictError` | every `Store.save` | The stored version is not `expectedVersion`: another turn saved first, a `save(…, 0)` found a row, or the row was deleted or expired after it was loaded (`actualVersion` is `undefined`). | Load the session again and replay the same input. Nothing was sent, so nothing is duplicated. |
 | `InvalidSessionError` | every `Store.load`, `assertSession`, `migrateSession` | A stored row is not a v4 session and not a recognisable 3.x one: wrong `v`, an `id` that does not match the row, a missing `data`, a run with a bad `status`, text that is not JSON. | Repair or delete the row. The framework never replaces a bad row with a fresh conversation, because that would re-ask every field and re-fire every once-flow. |
 | `ProviderError` | the built-in providers, `FallbackAiProvider` | A model call failed after the provider's own retries, backup models and fallbacks. `kind` says what would fix it. | Match on `kind` (table below). |
 
@@ -80,8 +80,8 @@ The bracket names the class, the text before the colon says what is wrong and wh
 [FlowConfigurationError] flow "triagem": has no steps list. Write steps as a list, even an empty one.
 [FlowConfigurationError] flow "a" is declared twice: flow ids must be unique. Rename one of them.
 [FlowConfigurationError] idle: unknown tool "buscar_preco". Register it in the agent's tools or fix the name.
-[SessionConflictError] Session "s1" was modified concurrently: expected version 1, found 2. Reload the session and retry the operation.
-[SessionConflictError] Session "s1" was modified concurrently: expected version 0, found none. Reload the session and retry the operation.
+[SessionConflictError] Session "s1" was modified concurrently: expected version 3, found 4. Reload the session and retry the operation.
+[SessionConflictError] Session "s1" is gone from the store: it was at version 3 and has since been deleted or expired. Load it again; a load that finds nothing starts a new conversation.
 [InvalidSessionError] stored session "s1" is unreadable: v is 3, expected 4. Repair or delete the row; it is never replaced by a fresh conversation.
 [InvalidSessionError] stored session "s1" is unreadable: expected an object, got "garbage". Repair or delete the row; it is never replaced by a fresh conversation.
 [InvalidSessionError] stored session "s1" is unreadable: data is missing, expected an object; not a 3.x session either. Repair or delete the row; it is never replaced by a fresh conversation.
@@ -124,11 +124,13 @@ The same `ProviderError` means two different things depending on which of the tw
 
 A few throws are plain `Error` or `TypeError`. One happens at run time: a reply that parses to a blank message with no tool calls throws `Error: No response from <provider>` out of `generateMessage`, after the provider's retries and backup models have run. A speak call swallows it and defers the step; an understand call hands it to you, so catch `Error`, not only `ProviderError`. The rest are wiring bugs at construction:
 
-- A provider built without a key or model: `Gemini API key is required`, `Model is required. Example: 'gpt-5.6' or 'gpt-5.5'`.
+- A provider built without a key or model: `[GeminiProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.GEMINI_API_KEY } and check the variable is set.`, `[OpenAIProvider] model is empty: there is no default. Pass one, e.g. { model: "gpt-5.6" }.`
 - `createOpenAICompatibleProvider` without `name`, `baseURL`, `apiKey` or `model`.
 - `FallbackAiProvider` with an empty `providers` list.
 - `PrismaStore` whose client has no delegate for the model: `[TypeError] PrismaStore cannot use model "agentSession": …`.
-- `compaction` options out of range (`compactionThreshold` outside 0.5–0.95, `preserveRecentCount` below 2, `maxToolResultChars` at or below 0).
+- `compaction` options out of range (`maxTokens` at or below 0, `compactionThreshold` outside 0.5–0.95, `preserveRecentCount` below 2, `maxToolResultChars` at or below 0): `[CompactionEngine] compactionThreshold is 1.2: it must be between 0.5 and 0.95. Use 0.8 unless you measured otherwise.`
+
+Each follows the same `[Class] what: why. how to fix.` shape as the package classes; only the class is plain `Error`.
 
 ## Example
 

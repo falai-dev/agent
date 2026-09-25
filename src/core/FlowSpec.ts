@@ -549,11 +549,10 @@ export function checkPred(value: LoosePred | undefined, at: string, where: strin
         checkSlug(fields, field, at, `${where}.equals`);
         const def = fields[field];
         if (!matches(def, given)) {
-          throw problem(
-            at,
-            `${where}.equals gives "${field}" a ${describe(given)}, but the field is a ${def.type}`,
-            `Write a ${def.type}; values are not coerced.`,
-          );
+          const { listed, expected, got, fix } = mismatch(def, given);
+          throw listed
+            ? problem(at, `${where}.equals gives "${field}" ${got}, which is not ${expected}`, fix)
+            : problem(at, `${where}.equals gives "${field}" ${article(got)} ${got}, but the field is ${expected}`, `Write ${expected}; values are not coerced.`);
         }
       }
     } else if (name === "known") {
@@ -772,16 +771,16 @@ function matches(def: ScalarDef, value: unknown): boolean {
  * What a rejected value should have been and what it was. A value of the right type that is
  * not a listed one names the listed values: "must be a string, got string" would say nothing.
  */
-function mismatch(def: ParamDef, value: unknown): { expected: string; got: string; fix: string } {
+function mismatch(def: ParamDef, value: unknown): { listed: boolean; expected: string; got: string; fix: string } {
   const scalar = def.type === "array" ? def.items : def;
   const { enum: allowed, ...typeOnly } = scalar;
   const items = def.type === "array" && Array.isArray(value) ? value : [value];
   const off = allowed ? items.findIndex((item) => matches(typeOnly, item) && !matches(scalar, item)) : -1;
   if (!allowed || off === -1) {
-    return { expected: describeDef(def), got: describe(value), fix: "Values are not coerced; write the right type." };
+    return { listed: false, expected: describeDef(def), got: describe(value), fix: "Values are not coerced; write the right type." };
   }
   const list = (v: unknown) => JSON.stringify(v);
-  return { expected: `one of ${allowed.map(list).join(", ")}`, got: list(items[off]), fix: "Use one of the listed values." };
+  return { listed: true, expected: `one of ${allowed.map(list).join(", ")}`, got: list(items[off]), fix: "Use one of the listed values." };
 }
 
 function describe(value: unknown): string {

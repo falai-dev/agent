@@ -106,3 +106,11 @@ describe("FallbackAiProvider", () => {
     expect(chunks).toEqual(["Hello from secondary"]);
   });
 });
+
+describe("FallbackAiProvider construction", () => {
+  it("an empty providers list says what to pass", () => {
+    expect(() => new FallbackAiProvider({ providers: [] })).toThrow(
+      "[FallbackAiProvider] providers is empty: there is nothing to call. Pass at least one, e.g. { providers: [primary, backup] }.",
+    );
+  });
+});

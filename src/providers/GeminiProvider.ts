@@ -56,10 +56,8 @@ export class GeminiProvider extends ProviderAdapter {
   };
 
   constructor(options: GeminiProviderOptions) {
-    if (!options.apiKey) throw new Error("Gemini API key is required");
-    if (!options.model) {
-      throw new Error("Model is required. Example: 'gemini-3.1-pro-preview'");
-    }
+    if (!options.apiKey) throw new Error(`[GeminiProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.GEMINI_API_KEY } and check the variable is set.`);
+    if (!options.model) throw new Error(`[GeminiProvider] model is empty: there is no default. Pass one, e.g. { model: "gemini-2.5-flash" }.`);
 
     super({
       provider: createGeminiProvider({

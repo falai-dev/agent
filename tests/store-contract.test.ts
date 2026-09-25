@@ -204,6 +204,8 @@ for (const [name, make] of Object.entries(harnesses)) {
       const { store } = await make();
       const error = await rejection(store.save(session("ghost"), 3), SessionConflictError);
       expect(error.actualVersion).toBeUndefined();
+      // A vanished row is not a race, and the message says so.
+      expect(error.message).toContain('Session "ghost" is gone from the store: it was at version 3');
       expect(await store.load("ghost")).toBeNull();
     });
 

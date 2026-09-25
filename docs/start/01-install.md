@@ -19,16 +19,18 @@ This page puts the package in a project and runs the first example.
 ## Add it to your project
 
 ```bash
-bun add @falai/agent
+bun add @falai/agent@alpha
 ```
 
 With npm or pnpm:
 
 ```bash
-npm install @falai/agent
+npm install @falai/agent@alpha
 # or
-pnpm add @falai/agent
+pnpm add @falai/agent@alpha
 ```
+
+4.0 is in alpha. Plain `@falai/agent`, with no tag, still installs 3.x, and this tutorial will not compile against it.
 
 The package ships an ESM build, a CommonJS build and its own TypeScript types. There is nothing else to install.
 

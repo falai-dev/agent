@@ -154,13 +154,13 @@ describe("CompactionEngine.validateOptions", () => {
     test("rejects compactionThreshold below 0.5", () => {
         expect(() =>
             CompactionEngine.validateOptions(makeOptions({ compactionThreshold: 0.3 }))
-        ).toThrow("compactionThreshold must be between 0.5 and 0.95");
+        ).toThrow("[CompactionEngine] compactionThreshold is 0.3: it must be between 0.5 and 0.95.");
     });
 
     test("rejects compactionThreshold above 0.95", () => {
         expect(() =>
             CompactionEngine.validateOptions(makeOptions({ compactionThreshold: 0.99 }))
-        ).toThrow("compactionThreshold must be between 0.5 and 0.95");
+        ).toThrow("[CompactionEngine] compactionThreshold is 0.99: it must be between 0.5 and 0.95.");
     });
 
     test("accepts compactionThreshold at boundaries", () => {
@@ -175,19 +175,25 @@ describe("CompactionEngine.validateOptions", () => {
     test("rejects preserveRecentCount below 2", () => {
         expect(() =>
             CompactionEngine.validateOptions(makeOptions({ preserveRecentCount: 1 }))
-        ).toThrow("preserveRecentCount must be >= 2");
+        ).toThrow("[CompactionEngine] preserveRecentCount is 1: it must be 2 or more.");
+    });
+
+    test("rejects maxTokens of 0", () => {
+        expect(() =>
+            CompactionEngine.validateOptions(makeOptions({ maxTokens: 0 }))
+        ).toThrow("[CompactionEngine] maxTokens is 0: it must be above 0.");
     });
 
     test("rejects maxToolResultChars of 0", () => {
         expect(() =>
             CompactionEngine.validateOptions(makeOptions({ maxToolResultChars: 0 }))
-        ).toThrow("maxToolResultChars must be > 0");
+        ).toThrow("[CompactionEngine] maxToolResultChars is 0: it must be above 0.");
     });
 
     test("rejects negative maxToolResultChars", () => {
         expect(() =>
             CompactionEngine.validateOptions(makeOptions({ maxToolResultChars: -5 }))
-        ).toThrow("maxToolResultChars must be > 0");
+        ).toThrow("[CompactionEngine] maxToolResultChars is -5: it must be above 0.");
     });
 });
 

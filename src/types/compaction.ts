@@ -9,6 +9,7 @@ import type { HistoryItem } from "./history.js";
  * Configuration for the compaction engine.
  *
  * Validation constraints:
+ * - `maxTokens` must be > 0
  * - `compactionThreshold` must be between 0.5 and 0.95
  * - `preserveRecentCount` must be >= 2
  * - `maxToolResultChars` must be > 0

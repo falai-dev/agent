@@ -97,18 +97,18 @@ class GenericOpenAICompatibleProvider extends OpenAICompatibleProvider {
 
   constructor(options: OpenAICompatibleOptions) {
     if (!options.name) {
-      throw new Error("An OpenAI-compatible provider needs a `name`.");
+      throw new Error('[OpenAICompatibleProvider] name is empty: it labels the provider in logs and errors. Pass one, e.g. { name: "ollama" }.');
     }
     if (!options.baseURL) {
-      throw new Error(`[${options.name}] A \`baseURL\` is required.`);
+      throw new Error(`[${options.name}] baseURL is empty: there is no server to call. Pass one, e.g. { baseURL: "http://localhost:11434/v1" }.`);
     }
     if (!options.apiKey) {
       throw new Error(
-        `[${options.name}] An \`apiKey\` is required — use any non-empty string for servers that ignore it.`
+        `[${options.name}] apiKey is empty: the provider cannot authenticate. Pass your key, or any non-empty string for a server that ignores it.`
       );
     }
     if (!options.model) {
-      throw new Error(`[${options.name}] A \`model\` is required.`);
+      throw new Error(`[${options.name}] model is empty: there is no default. Pass the id your server serves, e.g. { model: "llama3.3" }.`);
     }
 
     super({

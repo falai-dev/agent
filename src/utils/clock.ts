@@ -34,7 +34,7 @@ export function fakeClock(iso: string): FakeClock {
 
 function parseIso(iso: string): number {
   const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) throw new Error(`fakeClock: "${iso}" is not a date.`);
+  if (Number.isNaN(ms)) throw new Error(`[fakeClock] "${iso}" is not a date: Date.parse cannot read it. Pass ISO text, e.g. "2026-09-20T10:00:00.000Z".`);
   return ms;
 }
 

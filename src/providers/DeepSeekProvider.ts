@@ -51,10 +51,8 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
   };
 
   constructor(options: DeepSeekProviderOptions) {
-    if (!options.apiKey) throw new Error("DeepSeek API key is required");
-    if (!options.model) {
-      throw new Error("Model is required. Example: 'deepseek-chat' or 'deepseek-reasoner'");
-    }
+    if (!options.apiKey) throw new Error(`[DeepSeekProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.DEEPSEEK_API_KEY } and check the variable is set.`);
+    if (!options.model) throw new Error(`[DeepSeekProvider] model is empty: there is no default. Pass one, e.g. { model: "deepseek-chat" }.`);
 
     super({
       id: "deepseek",

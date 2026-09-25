@@ -567,3 +567,18 @@ describe("a bound effort reaches the wire", () => {
     expect(generationConfig.thinkingConfig).toBeUndefined();
   });
 });
+
+describe("a provider built without a key or a model", () => {
+  test("names the provider, the empty option and what to pass", () => {
+    expect(() => new GeminiProvider({ apiKey: "", model: "gemini-2.5-flash" })).toThrow(
+      "[GeminiProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.GEMINI_API_KEY } and check the variable is set.",
+    );
+    expect(() => new GeminiProvider({ apiKey: "k", model: "" })).toThrow(
+      '[GeminiProvider] model is empty: there is no default. Pass one, e.g. { model: "gemini-2.5-flash" }.',
+    );
+    expect(() => new OpenAIProvider({ apiKey: "", model: "gpt-5.6" })).toThrow("[OpenAIProvider] apiKey is empty");
+    expect(() => new AnthropicProvider({ apiKey: "k", model: "" })).toThrow("[AnthropicProvider] model is empty");
+    expect(() => new OpenRouterProvider({ apiKey: "k", model: "" })).toThrow("[OpenRouterProvider] model is empty");
+    expect(() => new DeepSeekProvider({ apiKey: "", model: "deepseek-chat" })).toThrow("[DeepSeekProvider] apiKey is empty");
+  });
+});

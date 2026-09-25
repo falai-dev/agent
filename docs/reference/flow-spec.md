@@ -130,6 +130,7 @@ Every message has the form `[FlowConfigurationError] <where>: <what>. <fix>`, wh
 | Unknown condition | `unknown condition "x" in if` | Register it in conditions or use equals, known, silenced. |
 | `equals` shape | `if.equals is not an object` | Write equals as { field: value }. |
 | `equals` type | `if.equals gives "orcamento" a string, but the field is a number` | Write a number; values are not coerced. |
+| `equals` off the list | `if.equals gives "etapa" "frio", which is not one of "novo", "quente"` | Use one of the listed values. |
 | `known` shape | `if.known is not a list` | Write known as [field, ...]. |
 | `silenced` shape | `if.silenced is not a boolean` | Write true or false. |
 | Bad duration | `wait has duration "5 min", which does not parse` (also `silence`, `after`, `repeat.cooldown`, `wait.upTo`) | Write a number and a unit: "30s", "5m", "24h" or "3d". |

@@ -23,7 +23,7 @@ export interface RedisStoreOptions {
   redis: RedisClient;
   /** Prefix of every key. Default `agent:`. */
   keyPrefix?: string;
-  /** Seconds a session lives after its last save; `0` keeps it forever. Default 7 days. */
+  /** Seconds a session lives after its last save; `0` keeps it forever. Default 7 days. Keep it above your longest wait: an expired session loses its parked runs and claims. */
   sessionTTL?: number;
 }
 

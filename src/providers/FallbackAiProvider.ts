@@ -38,7 +38,7 @@ export class FallbackAiProvider implements AiProvider {
 
   constructor(options: FallbackAiProviderOptions) {
     if (!options.providers || options.providers.length === 0) {
-      throw new Error("FallbackAiProvider requires at least one provider");
+      throw new Error("[FallbackAiProvider] providers is empty: there is nothing to call. Pass at least one, e.g. { providers: [primary, backup] }.");
     }
 
     this.name = `fallback(${options.providers.map((p) => p.name).join("->")})`;

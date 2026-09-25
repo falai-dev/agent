@@ -19,13 +19,20 @@ export class CompactionEngine {
      * Validate CompactionOptions. Throws on invalid values.
      */
     static validateOptions(options: CompactionOptions): void {
+        if (typeof options.maxTokens !== "number" || !(options.maxTokens > 0)) {
+            throw new Error(
+                `[CompactionEngine] maxTokens is ${String(options.maxTokens)}: it must be above 0. ` +
+                `Set it to the most history, in tokens, each call should carry, e.g. 100000.`
+            );
+        }
         if (
             typeof options.compactionThreshold !== "number" ||
             options.compactionThreshold < 0.5 ||
             options.compactionThreshold > 0.95
         ) {
             throw new Error(
-                `compactionThreshold must be between 0.5 and 0.95, got ${options.compactionThreshold}`
+                `[CompactionEngine] compactionThreshold is ${String(options.compactionThreshold)}: it must be between 0.5 and 0.95. ` +
+                `Use 0.8 unless you measured otherwise.`
             );
         }
         if (
@@ -33,7 +40,7 @@ export class CompactionEngine {
             options.preserveRecentCount < 2
         ) {
             throw new Error(
-                `preserveRecentCount must be >= 2, got ${options.preserveRecentCount}`
+                `[CompactionEngine] preserveRecentCount is ${String(options.preserveRecentCount)}: it must be 2 or more. Use 4, the default.`
             );
         }
         if (
@@ -41,7 +48,7 @@ export class CompactionEngine {
             options.maxToolResultChars <= 0
         ) {
             throw new Error(
-                `maxToolResultChars must be > 0, got ${options.maxToolResultChars}`
+                `[CompactionEngine] maxToolResultChars is ${String(options.maxToolResultChars)}: it must be above 0. Use 5000, the default.`
             );
         }
     }

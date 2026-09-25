@@ -45,8 +45,8 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
   };
 
   constructor(options: OpenAIProviderOptions) {
-    if (!options.apiKey) throw new Error("OpenAI API key is required");
-    if (!options.model) throw new Error("Model is required. Example: 'gpt-5.6' or 'gpt-5.5'");
+    if (!options.apiKey) throw new Error(`[OpenAIProvider] apiKey is empty: the provider cannot authenticate. Pass { apiKey: process.env.OPENAI_API_KEY } and check the variable is set.`);
+    if (!options.model) throw new Error(`[OpenAIProvider] model is empty: there is no default. Pass one, e.g. { model: "gpt-5.6" }.`);
 
     super({
       id: "openai",
