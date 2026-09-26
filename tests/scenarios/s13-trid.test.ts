@@ -46,6 +46,15 @@ describe("S13: say / wait 3s / say / prompt in one turn", () => {
     expect(r.schedule).toEqual([]);
   });
 
+  test("the speak call sees the says this turn already sent, in order, so it does not repeat them", async () => {
+    const { agent, provider } = build([trid], { script: { understand: [routed()], speak: [spoken("Qual modelo?")] } });
+    await agent.turn(message("quero um iphone", "m1"));
+    const prompt = provider.calls[1].prompt;
+    const sent = prompt.indexOf("## Already sent");
+    expect(sent).toBeGreaterThan(prompt.indexOf("## Customer's latest message"));
+    expect(prompt.slice(sent)).toMatch(/"Oi! Aqui é da TRID\."\n- "Chegou o iPhone 17, pronta entrega\."/);
+  });
+
   test("the model named in the first message skips the question; the run ends in one turn with zero speak calls", async () => {
     const { agent, provider } = build([trid], { script: { understand: [routed({ fields: { modelo: "17 Pro" } })] } });
     const r = await agent.turn(message("quero um iphone 17 pro", "m1"));

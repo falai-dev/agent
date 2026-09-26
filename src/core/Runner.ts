@@ -800,6 +800,7 @@ export class Runner<C = unknown, D = unknown> {
       context: turn.context,
       data: turn.session.data,
       history: this.historyOf(turn),
+      said: [...turn.messages],
       now: turn.now,
       instructions,
       tools: allowed ? all.filter((tool) => allowed.includes(tool.id)) : all,

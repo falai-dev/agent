@@ -8,7 +8,7 @@
  */
 
 import type { TokenUsage } from "../types/ai.js";
-import type { Idle } from "../types/agent.js";
+import type { Idle, OutboundMessage } from "../types/agent.js";
 import type { FieldDef, Flow, Instruction, StepBase, TalkStep } from "../types/flow.js";
 import type { History } from "../types/history.js";
 import type { Run, StepOutcomeCode } from "../types/session.js";
@@ -78,6 +78,11 @@ export interface SpeakRequest<C = unknown, D = unknown> {
   context: C;
   data: Partial<D>;
   history: History;
+  /**
+   * What this turn already sent before the reply, in order: a `say`, a fixed question. `history` ends
+   * before the turn, so without these the model cannot see them and says the same thing again.
+   */
+  said: OutboundMessage[];
   now: Date;
   /** Already filtered by their `if`; `when` stays for the prompt. */
   instructions: Instruction<C, D>[];

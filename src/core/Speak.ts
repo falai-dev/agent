@@ -345,6 +345,7 @@ function buildPrompt<C, D>(
       ...body,
       instructionsSection([{ caption: "[Always]", items: req.instructions }], scope),
       inputSection(req.input, req.history),
+      saidSection(req.said),
       formatSection(envelope, options.fields),
     ),
   };
@@ -364,6 +365,21 @@ function inputSection(input: SpeakRequest["input"], history: History): string | 
   if (text) return `## Customer's latest message\n"${text}"`;
   if (input.kind === "message") return null;
   return input.retry && history.at(-1)?.role === "user" ? ANSWER_PENDING : SPEAK_FIRST;
+}
+
+/**
+ * What this turn already sent before the reply. It sits after the customer's message because that is
+ * when it went out; `history` stops before the turn, so it is the only place the model sees it.
+ */
+function saidSection(said: SpeakRequest["said"]): string | null {
+  const lines = said.map(({ text, media }) =>
+    `- ${[text.trim() && `"${text.trim()}"`, media && `[media: ${media.slug}]`].filter(Boolean).join(" ")}`);
+  if (!lines.length) return null;
+  return [
+    "## Already sent",
+    "You already sent these messages this turn, in this order, and your reply goes out right after them. Do not repeat what they say.",
+    ...lines,
+  ].join("\n");
 }
 
 /** The envelope restated in words, for providers that follow the schema by prompt only. */

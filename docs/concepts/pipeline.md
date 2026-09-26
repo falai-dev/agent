@@ -115,6 +115,7 @@ The prompt is built per call, in `src/core/Speak.ts`, in this order:
 - the known fields, as settled facts
 - the instructions whose `if` holds: agent, then flow, then step
 - the customer's message, or, on anything but a message (a wake, an event, a start), a note that there is no new message and the assistant speaks first
+- what this turn already sent before the reply (a `say`, a fixed question), in order, so the reply does not say it again
 - the response format
 
 The envelope is `{ message, ...pending fields of this step }`, every property required and nullable, so one call both answers and extracts. Tools run in rounds. Each round is one call; the model may call tools, their results go back as history, and it is asked again. After `maxToolLoops` rounds (default 5; `0` disables tools) it is asked once more without tools, so a message always comes back. Field values merge across rounds, last one wins. A provider failure or an empty message returns `deferred` instead of throwing; phase 7 re-parks the step.
