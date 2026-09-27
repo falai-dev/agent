@@ -188,9 +188,10 @@ export type TalkStep<C = unknown, D = unknown> = (
   /** Per-flow wording for a field; the field's own `ask` is the default. */
   ask?: Partial<Record<keyof D & string, string>>;
   /**
-   * A fixed first question, sent word for word with no model call when the step
-   * first asks: every field it collects is still unknown and none was asked yet.
-   * Any later ask is the AI's own wording. Needs `collect`.
+   * A fixed first question, sent word for word when the step first asks: every
+   * field it collects is still unknown and none was asked yet. No model call,
+   * unless the customer's message asks something: then the step answers first
+   * and the question follows. Any later ask is the AI's own wording. Needs `collect`.
    */
   question?: Template;
   /** Times a field may be asked before it is skipped. Default 3. */

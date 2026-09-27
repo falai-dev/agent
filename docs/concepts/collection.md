@@ -78,7 +78,7 @@ export { agenda };
 
 No step asks for `orcamento`. It is still on the flow's list, so when the customer mentions a budget while this flow holds the conversation, the value is noted. A field on the list that only an answer can fill (`extract: 'asked'`, every boolean by default) and that no step asks can never be filled; `validateFlow` warns about it.
 
-Step one asks with fixed text: `question`. Its first ask goes out word for word, with no model call. It goes out only when every field the step collects is still missing. If the customer's first message already gave the name, the step is skipped. A later ask is the model's own wording, so a customer who replies with a question gets an answer.
+Step one asks with fixed text: `question`. Its first ask goes out word for word, with no model call. It goes out only when every field the step collects is still missing. If the customer's first message already gave the name, the step is skipped. If that message asks something instead, the model answers it first and the question follows, word for word. A later ask is the model's own wording, so a customer who replies with a question gets an answer.
 
 ## Known and pending
 

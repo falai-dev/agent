@@ -168,6 +168,66 @@ describe("S14: a fixed question", () => {
     expect(t2.session.runs[0]).toMatchObject({ stepId: "c", status: "asking", asked: { confirmado: 1 }, visits: { c: 2, ok: 1 } });
   });
 
+  describe("when the lead's message asks something", () => {
+    // TRID, 27/09: every price question met the next fixed question, word for word, and went unanswered.
+    const loja = f.flow({
+      id: "loja",
+      name: "Loja",
+      on: [{ message: ["quer comprar"] }],
+      steps: [
+        { id: "modelo", collect: ["modelo"] },
+        { id: "q", collect: ["nome"], question: "Qual é o seu nome?" },
+      ],
+    });
+    const asking = (judged: Record<string, unknown>) =>
+      build([loja], {
+        script: {
+          understand: [understood({ flows: { loja: 90 } }), understood({ fields: { modelo: "15 Pro" }, ...judged })],
+          speak: [spoken("Qual modelo?"), spoken("O 15 Pro sai por R$ 3.999.")],
+        },
+      });
+
+    test("the step answers first, then its fixed question goes out word for word", async () => {
+      const { agent, provider } = asking({ asks: true });
+      const t1 = await agent.turn(message("quero comprar", "m1"));
+      const t2 = await agent.turn(message("o 15 pro, quanto tá?", "m2", { session: saved(t1) }));
+      expect(t2.messages.map((m) => [m.kind, m.text, m.stepId])).toEqual([
+        ["ai", "O 15 Pro sai por R$ 3.999.", "q"],
+        ["verbatim", "Qual é o seu nome?", "q"],
+      ]);
+      expect(t2.llmCalls).toBe(2);
+      expect(t2.session.runs[0]).toMatchObject({ stepId: "q", status: "asking", asked: { nome: 1 } });
+      // The answer knows the question that follows, and reads no field: the question's own answer does.
+      const speak = provider.calls[3].input;
+      expect(speak.prompt).toContain('this question goes out word for word, so do not ask it or anything like it:\n"Qual é o seu nome?"');
+      expect(Object.keys((speak.parameters?.jsonSchema as StructuredSchema).properties ?? {})).not.toContain("nome");
+      // A flow with a fixed question has the message judged for it.
+      expect((provider.calls[2].input.parameters?.jsonSchema as StructuredSchema).properties?.asks).toBeDefined();
+    });
+
+    test("a message that only answers gets the fixed question with no speak call", async () => {
+      const { agent } = asking({ asks: false });
+      const t1 = await agent.turn(message("quero comprar", "m1"));
+      const t2 = await agent.turn(message("o 15 pro", "m2", { session: saved(t1) }));
+      expect(t2.messages.map((m) => [m.kind, m.text])).toEqual([["verbatim", "Qual é o seu nome?"]]);
+      expect(t2.llmCalls).toBe(1);
+    });
+
+    test("an unjudged message counts as asking: the answer still comes first", async () => {
+      const { agent } = asking({});
+      const t1 = await agent.turn(message("quero comprar", "m1"));
+      const t2 = await agent.turn(message("o 15 pro, quanto tá?", "m2", { session: saved(t1) }));
+      expect(t2.messages.map((m) => m.kind)).toEqual(["ai", "verbatim"]);
+    });
+
+    test("with no fixed question anywhere, the message is not judged for one", async () => {
+      const semFixa = f.flow({ id: "loja", name: "Loja", on: [{ message: ["quer comprar"] }], steps: [{ id: "modelo", collect: ["modelo"] }] });
+      const { agent, provider } = build([semFixa], { script: { understand: [understood({ flows: { loja: 90 } })], speak: [spoken("Qual modelo?")] } });
+      await agent.turn(message("quero comprar", "m1"));
+      expect((provider.calls[0].input.parameters?.jsonSchema as StructuredSchema).properties?.asks).toBeUndefined();
+    });
+  });
+
   test("a run staying on the step answers in the AI's words", async () => {
     const faq = f.flow({ id: "faq", name: "FAQ", onEnd: "stay", steps: [{ id: "q", collect: ["nome"], question: "Qual é o seu nome?" }] });
     const { agent, provider } = build([faq], { script: { understand: [understood()], speak: [spoken("Posso ajudar em mais alguma coisa?")] } });

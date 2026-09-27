@@ -147,6 +147,7 @@ Every row but the last is asserted by a scenario in `tests/scenarios/`; the comp
 | Each tool round | +1 | one more speak call | S8, S9 |
 | A wake or start that reaches a talk step | 1 | speak only; there is no message to understand | S2, S5, S12 |
 | A step's first ask with a fixed `question` | 0 | the text goes out as written | S14 |
+| The same, when the customer's message asks something | 1 | the answer, then the text as written | S14 |
 | A wake or start that runs only `do`, `wait` and `if` steps | 0 | code only | S5 (the start; its defer test covers the wake) |
 | Any input under `silenced` (a plain reason) | 0 | `do` steps run, nobody speaks; `{ reason, understand: true }` still spends the understand call | S2, S12 |
 | A message with `idle: 'silent'` and no eligible flow | 0 | nothing to judge, nobody speaks | S9 |

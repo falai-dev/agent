@@ -33,10 +33,15 @@ import { Aliases, describeField, factsSection, joinSections, stablePrefix } from
 
 export const UNDERSTAND_SCHEMA_NAME = "understand";
 
-const SECTIONS = ["flows", "mentions", "extract", "branches", "fields"] as const;
+const SECTIONS = ["flows", "mentions", "extract", "branches", "fields", "asks"] as const;
 
 export class Understand<C = unknown, D = unknown> {
-  constructor(private readonly options: AgentOptions<C, D>) {}
+  /** Some flow opens a step with a fixed question: whether the lead asked something decides if it waits. */
+  private readonly judgesAsks: boolean;
+
+  constructor(private readonly options: AgentOptions<C, D>) {
+    this.judgesAsks = (options.flows ?? []).some((flow) => flow.steps.some((step) => "question" in step && step.question !== undefined));
+  }
 
   async run(req: UnderstandRequest<C, D>): Promise<Understanding> {
     const candidates = candidateFlows(req);
@@ -47,7 +52,7 @@ export class Understand<C = unknown, D = unknown> {
     if (onlyRouting && candidates.length <= (req.floor ? 1 : 0)) return empty(0);
 
     const aliases = new Aliases();
-    const jsonSchema = buildEnvelope(req, candidates, aliases);
+    const jsonSchema = buildEnvelope(req, candidates, aliases, this.judgesAsks);
     const { system, turn: prompt } = this.buildPrompt(req, candidates, aliases, jsonSchema);
 
     // Provider failures propagate: in this phase the turn throws and the host retries the input.
@@ -115,7 +120,7 @@ function branchKey(branch: { runId: string; stepId: string; index: number }): st
 
 // ── Envelope ────────────────────────────────────────────────────────────
 
-function buildEnvelope<C, D>(req: UnderstandRequest<C, D>, candidates: Flow<C, D>[], aliases: Aliases): StructuredSchema {
+function buildEnvelope<C, D>(req: UnderstandRequest<C, D>, candidates: Flow<C, D>[], aliases: Aliases, judgesAsks: boolean): StructuredSchema {
   const properties: Record<string, StructuredSchema> = {};
 
   if (candidates.length) {
@@ -148,6 +153,9 @@ function buildEnvelope<C, D>(req: UnderstandRequest<C, D>, candidates: Flow<C, D
     const defs: FieldDefs = {};
     for (const [slug, def] of Object.entries(req.fields)) defs[aliases.of(slug, "d")] = def;
     properties.fields = toWireSchema(defs, { nullable: true });
+  }
+  if (judgesAsks) {
+    properties.asks = { type: ["boolean", "null"], description: "The message asks something the reply must answer" };
   }
 
   return { type: "object", properties, required: Object.keys(properties), additionalProperties: false };
@@ -283,6 +291,9 @@ const OUTPUT_LINES: Record<Section, string> = {
   extract: "- extract: per item id, an object with the values pulled from the message; null values when the item was not brought up",
   branches: "- branches: true or false per question id",
   fields: "- fields: one value per detail, null when the customer did not give it",
+  asks:
+    "- asks: true when the message asks something the reply has to answer (a question, a request for a price, a photo, " +
+    "whether an item is in stock, a store fact); false when it only answers the assistant, greets or confirms",
 };
 
 /**
@@ -290,7 +301,7 @@ const OUTPUT_LINES: Record<Section, string> = {
  * null for anything extracted, so a prompt-only model never reads a
  * placeholder as a default value.
  */
-const PLACEHOLDER: Record<Section, unknown> = { flows: 0, mentions: false, extract: null, branches: false, fields: null };
+const PLACEHOLDER: Record<Section, unknown> = { flows: 0, mentions: false, extract: null, branches: false, fields: null, asks: false };
 
 function outputSection(schema: StructuredSchema): string {
   const present = SECTIONS.filter((s) => schema.properties?.[s] !== undefined);
@@ -357,12 +368,14 @@ function parseReply(reply: Record<string, unknown>, aliases: Aliases): Understan
   for (const [key, raw] of entries(reply.extract)) {
     if (isRecord(raw)) extract[aliases.real(key)] = given(raw);
   }
+  const asks = coerceField({ type: "boolean" }, reply.asks);
   return {
     flows,
     mentions: booleans(reply.mentions, aliases),
     extract,
     branches: booleans(reply.branches, aliases),
     fields: given(Object.fromEntries(entries(reply.fields).map(([k, v]) => [aliases.real(k), v]))),
+    ...(asks.ok && typeof asks.value === "boolean" ? { asks: asks.value } : {}),
     llmCalls: 1,
   };
 }

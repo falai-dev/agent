@@ -97,6 +97,10 @@ const DEFAULT_GUIDELINE =
   "Collect what is still missing below, in the flow of the conversation, one or two things per message.";
 /** A step with no prompt and nothing left to collect: the step an `onEnd: 'stay'` run answers from. */
 const ANSWER_GUIDELINE = "Answer the customer's message, in the flow of the conversation.";
+/** The step's fixed question follows this reply (`fixedAfter`): the reply answers the lead and leaves the asking to it. */
+const ANSWER_BEFORE_QUESTION =
+  "Answer what the customer's message asks, in the flow of the conversation. Ask nothing yourself: right after your reply, " +
+  "this question goes out word for word, so do not ask it or anything like it:";
 const TOOLS_SECTION =
   "## Tools\nCall the tools provided when you need to look something up or act before answering. Once you have what you need, answer the customer.";
 const FINAL_SECTION =
@@ -158,7 +162,8 @@ export class Speak<C = unknown, D = unknown> {
   /** The round loop shared by both entry points: yields deltas, returns the outcome. */
   private async *rounds(req: SpeakRequest<C, D>, streaming: boolean): AsyncGenerator<string, SpeakOutcome> {
     const talk = req.talk;
-    const envelope = buildEnvelope(this.options.fields, "idle" in talk ? [] : talk.pending);
+    // Fields are read by the fixed question's own answer, never by the reply that precedes it.
+    const envelope = buildEnvelope(this.options.fields, "idle" in talk || talk.fixedAfter !== undefined ? [] : talk.pending);
     const { system, turn: prompt } = buildPrompt(this.options, req, envelope);
     const maxLoops = this.options.maxToolLoops ?? DEFAULT_MAX_TOOL_LOOPS;
     const tools = maxLoops > 0 ? req.tools : [];
@@ -332,8 +337,12 @@ function buildPrompt<C, D>(
       ? [guideline(talk.idle.prompt)]
       : [
           `## Flow\n${talk.flow.name}${talk.flow.description ? `: ${render(talk.flow.description, scope)}` : ""}`,
-          guideline(talk.step.prompt ?? (talk.pending.length ? DEFAULT_GUIDELINE : ANSWER_GUIDELINE)),
-          pendingSection(talk.pending, options.fields, talk.step.ask ?? {}, scope),
+          ...(talk.fixedAfter !== undefined
+            ? [`${GUIDELINE_HEADING}\n${ANSWER_BEFORE_QUESTION}\n"${talk.fixedAfter}"`]
+            : [
+                guideline(talk.step.prompt ?? (talk.pending.length ? DEFAULT_GUIDELINE : ANSWER_GUIDELINE)),
+                pendingSection(talk.pending, options.fields, talk.step.ask ?? {}, scope),
+              ]),
           // `Partial<D>` is a mapped type; the guard is how it reaches an index-signature parameter without a cast.
           factsSection(options.fields, isRecord(req.data) ? req.data : {}),
         ];

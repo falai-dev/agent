@@ -87,6 +87,8 @@ export interface Turn<C = unknown, D = unknown> {
   /** A short `wait` waiting to ride on the next message. */
   afterMs: number;
   talk?: TalkRequest<C, D>;
+  /** Understand's judgment that the lead's message asks something; absent when nothing judged it. */
+  asks?: boolean;
   /** Speak already happened (or was skipped): a talk step reached now waits for the next message. */
   speakDone: boolean;
   /** Runs still to move this phase; `follow` appends children. */
@@ -641,6 +643,7 @@ export class Runner<C = unknown, D = unknown> {
     if (turn.ignored || turn.what.kind !== "message") return;
     turn.llmCalls += understanding?.llmCalls ?? 0;
     turn.usage = addUsage(turn.usage, understanding?.usage);
+    if (understanding?.asks !== undefined) turn.asks = understanding.asks;
     const key = turn.triggerKey;
     const asker = this.asker(turn);
 
@@ -747,24 +750,41 @@ export class Runner<C = unknown, D = unknown> {
       await this.drain(turn);
     }
     const speaker = this.speaker(turn);
-    if (speaker && !("idle" in speaker) && this.askFixed(turn, speaker)) {
-      turn.talk = undefined;
-      return null;
+    if (!speaker || "idle" in speaker || !this.fixedDue(speaker)) return speaker;
+    // A question the lead asked gets its answer first: the step speaks, and its fixed question follows in settle.
+    // Unjudged counts as asked, and so does the retry of a failed answer: a question sent over the lead's own drops it.
+    const answerFirst = turn.what.kind === "message" ? turn.asks !== false : this.retrying(speaker);
+    if (answerFirst && speaker.step.question !== undefined) {
+      speaker.fixedAfter = render(speaker.step.question, this.scope(turn, speaker.run));
+      return speaker;
     }
-    return speaker;
+    this.askFixed(turn, speaker);
+    turn.talk = undefined;
+    return null;
+  }
+
+  /** The step failed at the provider and runs again on its retry wake: deferTalk left `deferred` as its last line. */
+  private retrying({ run, step }: TalkRequest<C, D>): boolean {
+    const last = run.outcomes.at(-1);
+    return last?.status === "deferred" && last.stepId === step.id;
   }
 
   /**
-   * Send the step's fixed question when this is its first ask: every field it collects still unknown, none asked yet,
-   * and the run not staying (a staying run answers the lead). The question counts as one ask of each field. False when
-   * the AI should phrase the ask instead.
+   * The step's fixed question is due: this is its first ask, with every field it collects still unknown and none asked
+   * yet, and the run is not staying (a staying run answers the lead). Otherwise the AI phrases the ask.
    */
-  private askFixed(turn: Turn<C, D>, { run, step, pending }: TalkRequest<C, D>): boolean {
+  private fixedDue({ run, step, pending }: TalkRequest<C, D>): boolean {
     const { question, collect = [] } = step;
     if (question === undefined || run.staying) return false;
-    if (pending.length !== collect.length || pending.some((field) => (run.asked[field] ?? 0) > 0)) return false;
+    return pending.length === collect.length && pending.every((field) => (run.asked[field] ?? 0) === 0);
+  }
+
+  /** Send the step's fixed question when it is due. It counts as one ask of each field. */
+  private askFixed(turn: Turn<C, D>, talk: TalkRequest<C, D>): boolean {
+    const { run, step, pending } = talk;
+    if (!this.fixedDue(talk) || step.question === undefined) return false;
     const key = this.stepKey(run, step);
-    turn.messages.push({ text: render(question, this.scope(turn, run)), kind: "verbatim", afterMs: turn.afterMs, key, runId: run.id, stepId: step.id });
+    turn.messages.push({ text: render(step.question, this.scope(turn, run)), kind: "verbatim", afterMs: turn.afterMs, key, runId: run.id, stepId: step.id });
     turn.afterMs = 0;
     turn.spokeBy.add(run.id);
     turn.spoke = true;
@@ -794,9 +814,7 @@ export class Runner<C = unknown, D = unknown> {
     const instructions = [...(this.options.instructions ?? []), ...own.instructions].filter((ins) => !ins.if || evaluate(ins.if, ctx, conditions));
     const all = this.options.tools ?? [];
     const allowed = own.tools;
-    // deferTalk leaves a `deferred` outcome as the step's last line; the retry wake re-runs the step without adding one.
-    const last = "idle" in talk ? undefined : talk.run.outcomes.at(-1);
-    const retry = !("idle" in talk) && last?.status === "deferred" && last.stepId === talk.step.id;
+    const retry = !("idle" in talk) && this.retrying(talk);
     return {
       talk,
       input: turn.what.kind === "message" ? { kind: turn.kind, text: turn.what.text } : { kind: turn.kind, ...(retry ? { retry } : {}) },
@@ -1274,7 +1292,15 @@ export class Runner<C = unknown, D = unknown> {
     this.outcome(turn, run, { kind: talkKind(step), status: "ok", key, llmCalls: spoken.llmCalls, stepId: step.id });
     if (!turn.session.runs.includes(run)) return;
     const pending = step.collect?.length ? pendingFields(step, turn.session.data, run.asked) : [];
-    for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
+    if (talk.fixedAfter !== undefined) {
+      // The reply only answered the lead; the step's own question goes out after it and counts the ask.
+      if (this.askFixed(turn, { run, flow, step, pending })) {
+        run.status = "asking";
+        return;
+      }
+    } else {
+      for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
+    }
     if (run.staying) {
       // Each answer is a new visit, so a new key, even while a field is still pending; that field's max-asks is reported once, when it gets there.
       const maxAsks = step.maxAsks ?? DEFAULT_MAX_ASKS;

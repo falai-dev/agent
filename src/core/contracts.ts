@@ -48,6 +48,11 @@ export interface Understanding {
   branches: Record<string, boolean>;
   /** field → raw value the lead gave, or nothing. */
   fields: Record<string, unknown>;
+  /**
+   * The lead's message asks something a reply must answer. Judged only while a flow has a fixed
+   * `question`: one that would go out now waits for the answer when this is not `false`.
+   */
+  asks?: boolean;
   llmCalls: number;
   usage?: TokenUsage;
 }
@@ -61,6 +66,11 @@ export interface TalkRequest<C = unknown, D = unknown> {
   step: StepBase<D> & TalkStep<C, D>;
   /** `step.collect` minus known minus at `maxAsks`, in order. */
   pending: string[];
+  /**
+   * The step's fixed question, rendered. It goes out word for word right after this reply, so the
+   * reply only answers what the lead asked: it asks nothing and reads no field.
+   */
+  fixedAfter?: string;
 }
 
 /** No run holds the floor; the idle speaker answers. */
