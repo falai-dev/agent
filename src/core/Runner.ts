@@ -61,6 +61,8 @@ export interface Turn<C = unknown, D = unknown> {
   readonly silenced?: string;
   /** The host gate allows the understand call even though the assistant cannot speak. */
   readonly understandAllowed: boolean;
+  /** The host gate only stops messages: a talk or `say` step is skipped and the run goes on. */
+  readonly skipSilenced: boolean;
   /** Set by a short-circuit: the input is a no-op and nothing is saved. */
   ignored: boolean;
   messages: TurnResult<D>["messages"];
@@ -209,6 +211,7 @@ export class Runner<C = unknown, D = unknown> {
       context: input.context as C,
       silenced,
       understandAllowed: typeof input.silenced === "object" && input.silenced.understand === true,
+      skipSilenced: typeof input.silenced === "object" && input.silenced.skip === true,
       ignored: false,
       messages: [],
       schedule: [],
@@ -888,6 +891,12 @@ export class Runner<C = unknown, D = unknown> {
     return ok;
   }
 
+  /** `silenced: { skip: true }`: the message this step would send is dropped, and the run takes `then` as if it had gone out. */
+  private skipSilenced(turn: Turn<C, D>, run: Run, flow: Flow<C, D>, step: Step<C, D>, kind: StepOutcomeKind): void {
+    this.outcome(turn, run, { kind, status: "skipped", key: this.stepKey(run, step), code: "silenced", detail: turn.silenced, next: nextLabel(step.then) });
+    this.follow(turn, run, flow, step, step.then);
+  }
+
   private async execute(turn: Turn<C, D>, run: Run, flow: Flow<C, D>, step: Step<C, D>, resuming: boolean): Promise<void> {
     const data: Record<string, unknown> = turn.session.data;
     const key = this.stepKey(run, step);
@@ -910,6 +919,7 @@ export class Runner<C = unknown, D = unknown> {
       }
       if (turn.silenced !== undefined) {
         if (resuming) run.status = "asking"; // the gate is closed; it speaks when the gate opens
+        else if (turn.skipSilenced) this.skipSilenced(turn, run, flow, step, kind);
         else this.endRun(turn, run, "skipped", "silenced", kind, turn.silenced);
         return;
       }
@@ -928,7 +938,8 @@ export class Runner<C = unknown, D = unknown> {
 
     if (isSay(step)) {
       if (turn.silenced !== undefined) {
-        this.endRun(turn, run, "skipped", "silenced", "say", turn.silenced);
+        if (turn.skipSilenced) this.skipSilenced(turn, run, flow, step, "say");
+        else this.endRun(turn, run, "skipped", "silenced", "say", turn.silenced);
         return;
       }
       if (step.once) {

@@ -886,4 +886,48 @@ describe("silenced: the host gate is one mouth", () => {
     expect(t3.result.messages).toEqual([]);
     expect(t3.result.outcomes.map((o) => [o.kind, o.status, o.code, o.detail])).toEqual([["do", "ok", undefined, undefined], ["say", "skipped", "silenced", "pausa"]]);
   });
+
+  // A closed channel window stops the message, not the run: the follow-up's last step, the alert, still has to run.
+  const followUp = f.flow({
+    id: "retoma",
+    name: "Retoma",
+    steps: [
+      { id: "w", wait: "1h" },
+      { id: "p", prompt: "Cutuque." },
+      { id: "s", say: "Estamos aqui." },
+      { id: "avisa", do: "notify", with: {} },
+    ],
+  });
+
+  test("silenced: { skip: true } skips each message step and the run goes on to its do step", async () => {
+    const { runner, clock, calls } = setup([followUp]);
+    const t1 = await drive(runner, { sessionId: "s1", context: ai, start: { flow: "retoma", key: "k" } });
+    clock.advance("1h");
+    const t2 = await drive(runner, {
+      sessionId: "s1",
+      context: ai,
+      session: saved(t1.result),
+      wake: t1.result.schedule[0].key,
+      silenced: { reason: "janela fechada", skip: true },
+    });
+    expect(t2.talk).toBeNull();
+    expect(t2.result.messages).toEqual([]);
+    expect(t2.result.llmCalls).toBe(0);
+    expect(calls.map((c) => c.key)).toEqual(["retoma#k:avisa:1"]);
+    expect(t2.result.outcomes.map((o) => [o.kind, o.status, o.code, o.detail, o.stepId])).toEqual([
+      ["wait", "ok", "no-reply", undefined, "w"],
+      ["prompt", "skipped", "silenced", "janela fechada", "p"],
+      ["say", "skipped", "silenced", "janela fechada", "s"],
+      ["do", "ok", undefined, undefined, "avisa"],
+    ]);
+    expect(t2.result.ended.map((r) => [r.id, r.reason])).toEqual([["retoma#k", "end"]]);
+  });
+
+  test("silenced: { skip: true } leaves an asking run asking: its question waits for the gate", async () => {
+    const { runner } = setup([triagem]);
+    const t1 = await drive(runner, message("quer", "m1"), { understanding: routedTo("triagem"), speak: () => spoken("Nome?") });
+    const t2 = await drive(runner, message("oi", "m2", { session: saved(t1.result), silenced: { reason: "janela fechada", skip: true } }));
+    expect(t2.result.session.runs[0]).toMatchObject({ id: "triagem#m1", status: "asking", stepId: "quem" });
+    expect(t2.result.messages).toEqual([]);
+  });
 });

@@ -212,6 +212,8 @@ const history: History = [
 
 A run that was already asking stays asking and speaks when the gate opens. A run that reaches a new talk step while silenced ends, and the log says `code: 'silenced'` with your reason in `detail`. Keep calling `turn()` for every inbound even while a human owns the customer, so waits resolve and the state stays true. `silenced: { reason, understand: true }` still spends the understand call, so fields keep landing while nothing is said.
 
+A closed 24-hour window stops messages, not the follow-up. Pass `silenced: { reason, skip: true }` for a gate like that: a talk or `say` step is skipped (`status: 'skipped'`, `code: 'silenced'`) and the run takes the step's `then`, so the `do` step after it still alerts the team. Keep the plain string for a human owner or a paused assistant, where the whole run must stop.
+
 **`context`** is the per-turn data your flows and actions read, such as the customer record. It is typed once, `falai<Ctx>()`, and passed on every input. Ana has none. [Agent](../reference/agent.md) has the full `TurnInput`.
 
 ## Sessions from before v4

@@ -126,10 +126,10 @@ Every input carries the common fields, plus exactly one of the four kinds.
 ### Silenced
 
 ```ts fragment
-type Silenced = string | { reason: string; understand?: boolean };
+type Silenced = string | { reason: string; understand?: boolean; skip?: boolean };
 ```
 
-A string closes the gate: `do` steps still run, nothing is phrased, zero model calls. A talk or `say` step reached while the gate is closed ends its run with `code: 'silenced'` (`detail` = your reason); a run that was already asking stays asking and speaks when the gate opens. `{ reason, understand: true }` keeps the understand call on, so routing, mentions and extraction still happen while the assistant stays quiet. Predicates see the reason as `ctx.silenced`.
+A string closes the gate: `do` steps still run, nothing is phrased, zero model calls. A talk or `say` step reached while the gate is closed ends its run with `code: 'silenced'` (`detail` = your reason); a run that was already asking stays asking and speaks when the gate opens. `{ reason, understand: true }` keeps the understand call on, so routing, mentions and extraction still happen while the assistant stays quiet. `{ reason, skip: true }` is for a gate that only stops messages, such as a closed channel window: the talk or `say` step is skipped with the same `code: 'silenced'` and the run takes its `then`. Predicates see the reason as `ctx.silenced`.
 
 ## TurnResult
 

@@ -78,8 +78,12 @@ export interface AgentOptions<C = unknown, D = unknown> {
 
 // ── turn() input ────────────────────────────────────────────────────────
 
-/** The host's reason the assistant cannot speak. Zero calls unless `understand: true`. */
-export type Silenced = string | { reason: string; understand?: boolean };
+/**
+ * The host's reason the assistant cannot speak. Zero calls unless `understand: true`.
+ * A talk or `say` step a run reaches under it ends the run; with `skip: true` the step is
+ * skipped and the run goes on, for a gate that only stops messages (a closed channel window).
+ */
+export type Silenced = string | { reason: string; understand?: boolean; skip?: boolean };
 
 type ContextField<C> = undefined extends C ? { context?: C } : { context: C };
 
