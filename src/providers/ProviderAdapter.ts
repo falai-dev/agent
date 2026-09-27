@@ -100,7 +100,9 @@ export interface RequestConfig {
    * How hard the model thinks, bound as this provider's default. What absent
    * means is the shape's own business, not one rule: on Gemini it is the
    * model's dynamic thinking; on the OpenAI and OpenRouter dialects nothing is
-   * sent and not thinking is the default anyway; on the Anthropic shape — so
+   * sent, so the model decides — `medium` on GPT-5 and older, and on
+   * OpenRouter GLM 5.3 Flash thinks on most of the hosts that serve it. Set
+   * `"none"` where a turn must not think; on the Anthropic shape — so
    * `AnthropicProvider` and `ZaiProvider` — `@providerkit/core` resolves an
    * absent effort to `"none"`, and Z.ai is sent an explicit disabled marker
    * because its endpoint reads silence as thinking ON. Set a level to ask for
