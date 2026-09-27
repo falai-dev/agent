@@ -29,6 +29,7 @@ export const OUTCOME_MESSAGES = {
 
   "already-known": "every field this step collects is known",
   "asked-fixed": "the step's fixed question went out word for word",
+  "fixed-in-reply": "the customer asked something, so the reply answered it and asked the step's fixed question",
   "another-reply": "another run already answered this turn",
   "already-sent": "this message was already sent once",
   branch: "a branch of this step fired",

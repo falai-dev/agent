@@ -78,6 +78,7 @@ export type StepOutcomeCode =
   // A step
   | "already-known"
   | "asked-fixed"
+  | "fixed-in-reply"
   | "another-reply"
   | "already-sent"
   | "branch"

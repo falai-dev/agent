@@ -751,11 +751,12 @@ export class Runner<C = unknown, D = unknown> {
     }
     const speaker = this.speaker(turn);
     if (!speaker || "idle" in speaker || !this.fixedDue(speaker)) return speaker;
-    // A question the lead asked gets its answer first: the step speaks, and its fixed question follows in settle.
-    // Unjudged counts as asked, and so does the retry of a failed answer: a question sent over the lead's own drops it.
+    // A question the lead asked gets its answer: the step speaks once, answering it and asking the fixed question.
+    // Appending the text word for word after an answer could repeat or contradict it. Unjudged counts as asked,
+    // and so does the retry of a failed answer: a question sent over the lead's own drops it.
     const answerFirst = turn.what.kind === "message" ? turn.asks !== false : this.retrying(speaker);
     if (answerFirst && speaker.step.question !== undefined) {
-      speaker.fixedAfter = render(speaker.step.question, this.scope(turn, speaker.run));
+      speaker.fixedQuestion = render(speaker.step.question, this.scope(turn, speaker.run));
       return speaker;
     }
     this.askFixed(turn, speaker);
@@ -1289,18 +1290,11 @@ export class Runner<C = unknown, D = unknown> {
     }
     for (const [field, raw] of Object.entries(spoken.fields)) this.writeField(turn, field, raw);
     Object.assign(turn.session.data, spoken.data);
-    this.outcome(turn, run, { kind: talkKind(step), status: "ok", key, llmCalls: spoken.llmCalls, stepId: step.id });
+    const fixed = talk.fixedQuestion !== undefined ? { code: "fixed-in-reply" as const } : {};
+    this.outcome(turn, run, { kind: talkKind(step), status: "ok", key, llmCalls: spoken.llmCalls, stepId: step.id, ...fixed });
     if (!turn.session.runs.includes(run)) return;
     const pending = step.collect?.length ? pendingFields(step, turn.session.data, run.asked) : [];
-    if (talk.fixedAfter !== undefined) {
-      // The reply only answered the lead; the step's own question goes out after it and counts the ask.
-      if (this.askFixed(turn, { run, flow, step, pending })) {
-        run.status = "asking";
-        return;
-      }
-    } else {
-      for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
-    }
+    for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
     if (run.staying) {
       // Each answer is a new visit, so a new key, even while a field is still pending; that field's max-asks is reported once, when it gets there.
       const maxAsks = step.maxAsks ?? DEFAULT_MAX_ASKS;

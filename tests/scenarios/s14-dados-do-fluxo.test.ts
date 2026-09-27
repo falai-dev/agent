@@ -183,23 +183,23 @@ describe("S14: a fixed question", () => {
       build([loja], {
         script: {
           understand: [understood({ flows: { loja: 90 } }), understood({ fields: { modelo: "15 Pro" }, ...judged })],
-          speak: [spoken("Qual modelo?"), spoken("O 15 Pro sai por R$ 3.999.")],
+          speak: [spoken("Qual modelo?"), spoken("O 15 Pro sai por R$ 3.999. Qual é o seu nome?")],
         },
       });
 
-    test("the step answers first, then its fixed question goes out word for word", async () => {
+    test("one reply answers the question and asks the fixed one", async () => {
       const { agent, provider } = asking({ asks: true });
       const t1 = await agent.turn(message("quero comprar", "m1"));
       const t2 = await agent.turn(message("o 15 pro, quanto tá?", "m2", { session: saved(t1) }));
-      expect(t2.messages.map((m) => [m.kind, m.text, m.stepId])).toEqual([
-        ["ai", "O 15 Pro sai por R$ 3.999.", "q"],
-        ["verbatim", "Qual é o seu nome?", "q"],
-      ]);
+      expect(t2.messages.map((m) => [m.kind, m.text, m.stepId])).toEqual([["ai", "O 15 Pro sai por R$ 3.999. Qual é o seu nome?", "q"]]);
       expect(t2.llmCalls).toBe(2);
+      expect(t2.outcomes.map((o) => o.code)).toContain("fixed-in-reply");
       expect(t2.session.runs[0]).toMatchObject({ stepId: "q", status: "asking", asked: { nome: 1 } });
-      // The answer knows the question that follows, and reads no field: the question's own answer does.
+      // The question comes last, after the customer's message, so a voice rule does not outrank it.
+      // The reply reads no field: the understand call already read this message.
       const speak = provider.calls[3].input;
-      expect(speak.prompt).toContain('this question goes out word for word, so do not ask it or anything like it:\n"Qual é o seu nome?"');
+      expect(speak.prompt).toContain('## The step\'s question\n"Qual é o seu nome?"\nEnd your message with this question, in these words.');
+      expect(speak.prompt.indexOf("## The step's question")).toBeGreaterThan(speak.prompt.indexOf("## Customer's latest message"));
       expect(Object.keys((speak.parameters?.jsonSchema as StructuredSchema).properties ?? {})).not.toContain("nome");
       // A flow with a fixed question has the message judged for it.
       expect((provider.calls[2].input.parameters?.jsonSchema as StructuredSchema).properties?.asks).toBeDefined();
@@ -213,11 +213,34 @@ describe("S14: a fixed question", () => {
       expect(t2.llmCalls).toBe(1);
     });
 
-    test("an unjudged message counts as asking: the answer still comes first", async () => {
+    test("an unjudged message counts as asking: the reply answers and asks", async () => {
       const { agent } = asking({});
       const t1 = await agent.turn(message("quero comprar", "m1"));
       const t2 = await agent.turn(message("o 15 pro, quanto tá?", "m2", { session: saved(t1) }));
-      expect(t2.messages.map((m) => m.kind)).toEqual(["ai", "verbatim"]);
+      expect(t2.messages.map((m) => m.kind)).toEqual(["ai"]);
+      expect(t2.session.runs[0]).toMatchObject({ asked: { nome: 1 } });
+    });
+
+    test("a lead who only asks questions still moves the step on at maxAsks", async () => {
+      const curto = f.flow({
+        id: "loja",
+        name: "Loja",
+        on: [{ message: ["quer comprar"] }],
+        steps: [{ id: "q", collect: ["nome"], question: "Qual é o seu nome?", maxAsks: 2 }],
+      });
+      const { agent } = build([curto], {
+        script: {
+          understand: [understood({ flows: { loja: 90 }, asks: true }), understood({ asks: true }), understood({ asks: true })],
+          speak: [spoken("Sai por R$ 3.999. Qual é o seu nome?"), spoken("Tem 1 ano de garantia. Como você se chama?"), spoken("Aceita Pix, sim.")],
+        },
+      });
+      const t1 = await agent.turn(message("quanto tá o 15 pro?", "m1"));
+      const t2 = await agent.turn(message("e a garantia?", "m2", { session: saved(t1) }));
+      expect(t2.session.runs[0]).toMatchObject({ stepId: "q", asked: { nome: 2 } });
+      // The engine counts the asks; the step does not wait for the lead to answer.
+      const t3 = await agent.turn(message("aceita pix?", "m3", { session: saved(t2) }));
+      expect(t3.outcomes).toContainEqual(expect.objectContaining({ code: "max-asks", detail: "nome" }));
+      expect(t3.session.runs).toHaveLength(0);
     });
 
     test("with no fixed question anywhere, the message is not judged for one", async () => {

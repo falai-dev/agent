@@ -97,10 +97,8 @@ const DEFAULT_GUIDELINE =
   "Collect what is still missing below, in the flow of the conversation, one or two things per message.";
 /** A step with no prompt and nothing left to collect: the step an `onEnd: 'stay'` run answers from. */
 const ANSWER_GUIDELINE = "Answer the customer's message, in the flow of the conversation.";
-/** The step's fixed question follows this reply (`fixedAfter`): the reply answers the lead and leaves the asking to it. */
-const ANSWER_BEFORE_QUESTION =
-  "Answer what the customer's message asks, in the flow of the conversation. Ask nothing yourself: right after your reply, " +
-  "this question goes out word for word, so do not ask it or anything like it:";
+/** The lead asked something on a step with a fixed question (`fixedQuestion`): one reply answers it and asks the question. */
+const ANSWER_THEN_FIXED = "Answer what the customer's message asks, then ask the step's question below, in the same message.";
 const TOOLS_SECTION =
   "## Tools\nCall the tools provided when you need to look something up or act before answering. Once you have what you need, answer the customer.";
 const FINAL_SECTION =
@@ -163,7 +161,7 @@ export class Speak<C = unknown, D = unknown> {
   private async *rounds(req: SpeakRequest<C, D>, streaming: boolean): AsyncGenerator<string, SpeakOutcome> {
     const talk = req.talk;
     // Fields are read by the fixed question's own answer, never by the reply that precedes it.
-    const envelope = buildEnvelope(this.options.fields, "idle" in talk || talk.fixedAfter !== undefined ? [] : talk.pending);
+    const envelope = buildEnvelope(this.options.fields, "idle" in talk || talk.fixedQuestion !== undefined ? [] : talk.pending);
     const { system, turn: prompt } = buildPrompt(this.options, req, envelope);
     const maxLoops = this.options.maxToolLoops ?? DEFAULT_MAX_TOOL_LOOPS;
     const tools = maxLoops > 0 ? req.tools : [];
@@ -337,8 +335,8 @@ function buildPrompt<C, D>(
       ? [guideline(talk.idle.prompt)]
       : [
           `## Flow\n${talk.flow.name}${talk.flow.description ? `: ${render(talk.flow.description, scope)}` : ""}`,
-          ...(talk.fixedAfter !== undefined
-            ? [`${GUIDELINE_HEADING}\n${ANSWER_BEFORE_QUESTION}\n"${talk.fixedAfter}"`]
+          ...(talk.fixedQuestion !== undefined
+            ? [`${GUIDELINE_HEADING}\n${ANSWER_THEN_FIXED}`]
             : [
                 guideline(talk.step.prompt ?? (talk.pending.length ? DEFAULT_GUIDELINE : ANSWER_GUIDELINE)),
                 pendingSection(talk.pending, options.fields, talk.step.ask ?? {}, scope),
@@ -355,6 +353,7 @@ function buildPrompt<C, D>(
       instructionsSection([{ caption: "[Always]", items: req.instructions }], scope),
       inputSection(req.input, req.history),
       saidSection(req.said),
+      "idle" in talk ? null : fixedQuestionSection(talk.fixedQuestion),
       formatSection(envelope, options.fields),
     ),
   };
@@ -388,6 +387,20 @@ function saidSection(said: SpeakRequest["said"]): string | null {
     "## Already sent",
     "You already sent these messages this turn, in this order, and your reply goes out right after them. Do not repeat what they say.",
     ...lines,
+  ].join("\n");
+}
+
+/**
+ * The step's fixed question, for the reply to end with. It sits last, after the customer's message: in the
+ * middle of the prompt, a voice instruction ("end with a question") outranked it and the reply asked its own.
+ */
+function fixedQuestionSection(question: string | undefined): string | null {
+  if (question === undefined) return null;
+  return [
+    "## The step's question",
+    `"${question}"`,
+    "End your message with this question, in these words. Change them only where your answer already covered part of it " +
+      "or where they would contradict your answer. Ask nothing else.",
   ].join("\n");
 }
 

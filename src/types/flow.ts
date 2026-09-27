@@ -190,8 +190,9 @@ export type TalkStep<C = unknown, D = unknown> = (
   /**
    * A fixed first question, sent word for word when the step first asks: every
    * field it collects is still unknown and none was asked yet. No model call,
-   * unless the customer's message asks something: then the step answers first
-   * and the question follows. Any later ask is the AI's own wording. Needs `collect`.
+   * unless the customer's message asks something: then one AI reply answers it
+   * and asks this question, in these words where they fit. Either way it counts
+   * as one ask. Any later ask is the AI's own wording. Needs `collect`.
    */
   question?: Template;
   /** Times a field may be asked before it is skipped. Default 3. */

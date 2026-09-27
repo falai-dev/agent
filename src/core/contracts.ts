@@ -67,10 +67,11 @@ export interface TalkRequest<C = unknown, D = unknown> {
   /** `step.collect` minus known minus at `maxAsks`, in order. */
   pending: string[];
   /**
-   * The step's fixed question, rendered. It goes out word for word right after this reply, so the
-   * reply only answers what the lead asked: it asks nothing and reads no field.
+   * The step's fixed question, rendered, when the lead's message asked something. The reply answers it
+   * and asks this question in the same message, in the owner's words where they fit. It reads no field:
+   * the understand call already read the lead's message.
    */
-  fixedAfter?: string;
+  fixedQuestion?: string;
 }
 
 /** No run holds the floor; the idle speaker answers. */
