@@ -20,6 +20,8 @@ export type InputKind = "message" | "wake" | "event" | "start";
 
 /** Everything the understand call may judge this turn. Runner filters by `if` and `repeat` first. */
 export interface UnderstandRequest<C = unknown, D = unknown> {
+  /** The session's id: the model call carries it, so a gateway can keep the conversation on one cached route. */
+  sessionId: string;
   text: string;
   history: History;
   context: C;
@@ -80,6 +82,8 @@ export interface IdleRequest<C = unknown, D = unknown> {
 }
 
 export interface SpeakRequest<C = unknown, D = unknown> {
+  /** See `UnderstandRequest.sessionId`. */
+  sessionId: string;
   talk: TalkRequest<C, D> | IdleRequest<C, D>;
   /**
    * What started this turn. A wake has no text: the assistant speaks first, unless `retry` says this

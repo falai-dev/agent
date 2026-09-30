@@ -159,6 +159,7 @@ describe("falai()", () => {
     const context: LeadContext = { lead: { id: "l1", tags: [], owner: "ai" } };
     const r = await agent.turn({ sessionId: "s1", context, message: "oi", id: "m1" });
     expect(provider.calls.map((c) => c.schemaName)).toEqual(["understand", "speak"]);
+    expect(provider.calls.map((c) => c.input.sessionId)).toEqual(["s1", "s1"]);
     expect(r.llmCalls).toBe(2);
     expect(r.messages).toEqual([
       { text: "Oi! Como você se chama?", kind: "ai", afterMs: 0, key: "triagem#m1:quem:1", runId: "triagem#m1", stepId: "quem" },

@@ -48,6 +48,7 @@ const triagem: Flow<undefined, Data> = {
 
 function request(over: Partial<UnderstandRequest<undefined, Data>> = {}): UnderstandRequest<undefined, Data> {
   return {
+    sessionId: "s1",
     text: "pode sim",
     history: [],
     context: undefined,

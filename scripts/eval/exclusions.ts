@@ -62,6 +62,7 @@ const HISTORY = [{ role: "assistant" as const, content: "Consigo marcar uma conv
 async function ask(provider: AiProvider, flow: Flow<undefined, Data>, text: string): Promise<boolean | null> {
   const options: AgentOptions<undefined, Data> = { name: "Ana", provider, fields, flows: [flow] };
   const req: UnderstandRequest<undefined, Data> = {
+    sessionId: "eval",
     text,
     history: HISTORY,
     context: undefined,

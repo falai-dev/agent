@@ -578,6 +578,7 @@ export class Runner<C = unknown, D = unknown> {
     }
     if (!judging && !Object.keys(fields).length) return null;
     return {
+      sessionId: turn.session.id,
       text: turn.what.text,
       history: this.historyOf(turn),
       context: turn.context,
@@ -817,6 +818,7 @@ export class Runner<C = unknown, D = unknown> {
     const allowed = own.tools;
     const retry = !("idle" in talk) && this.retrying(talk);
     return {
+      sessionId: turn.session.id,
       talk,
       input: turn.what.kind === "message" ? { kind: turn.kind, text: turn.what.text } : { kind: turn.kind, ...(retry ? { retry } : {}) },
       context: turn.context,

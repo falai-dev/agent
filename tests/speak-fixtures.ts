@@ -74,6 +74,7 @@ export function talkRequest(
 ): SpeakRequest<Ctx, Data> {
   const { pending = ["nome", "tamanho"], ...rest } = overrides;
   return {
+    sessionId: "s1",
     talk: { run, flow: triagem, step: quem, pending },
     input: { kind: "message", text: "quero saber como funciona" },
     context,
@@ -89,6 +90,7 @@ export function talkRequest(
 
 export function idleRequest(overrides: Partial<SpeakRequest<Ctx, Data>> = {}): SpeakRequest<Ctx, Data> {
   return {
+    sessionId: "s1",
     talk: { idle: { prompt: "Responda pela empresa; não invente preços." } },
     input: { kind: "message", text: "obrigado" },
     context,

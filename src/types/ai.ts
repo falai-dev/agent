@@ -54,6 +54,12 @@ export interface GenerateMessageInput<TContext = unknown> {
   };
   /** Abort signal for cancellation */
   signal?: AbortSignal;
+  /**
+   * The conversation this call belongs to. Gateways that route and cache per
+   * conversation read it (OpenCode Go takes it as `x-opencode-session`);
+   * every other endpoint ignores it. A turn sets it to the session id.
+   */
+  sessionId?: string;
 }
 
 /**

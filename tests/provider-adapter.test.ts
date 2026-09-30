@@ -19,7 +19,8 @@ import { OpenRouterProvider } from "../src/providers/OpenRouterProvider.js";
 import { DeepSeekProvider } from "../src/providers/DeepSeekProvider.js";
 import { AnthropicProvider } from "../src/providers/AnthropicProvider.js";
 import { GeminiProvider } from "../src/providers/GeminiProvider.js";
-import { toMessages } from "../src/providers/ProviderAdapter.js";
+import { ProviderAdapter, toMessages } from "../src/providers/ProviderAdapter.js";
+import { createPresetProvider } from "@providerkit/core";
 import type { GenerateMessageInput } from "../src/types/ai.js";
 import type { HistoryItem } from "../src/types/history.js";
 
@@ -38,15 +39,17 @@ function sse(frames: string[]): Response {
   );
 }
 
-/** One canned reply per call, in order. Records every request body. */
+/** One canned reply per call, in order. Records every request body and its headers. */
 function scripted(replies: (() => Response)[]) {
   const bodies: Record<string, unknown>[] = [];
+  const headers: Headers[] = [];
   const fetchImpl = (async (_url: string, init: RequestInit) => {
     bodies.push(JSON.parse(init.body as string) as Record<string, unknown>);
+    headers.push(new Headers(init.headers));
     const next = replies[Math.min(bodies.length - 1, replies.length - 1)];
     return next();
   }) as unknown as typeof fetch;
-  return { bodies, fetchImpl };
+  return { bodies, headers, fetchImpl };
 }
 
 const chat = (...deltas: Record<string, unknown>[]) =>
@@ -580,5 +583,33 @@ describe("a provider built without a key or a model", () => {
     expect(() => new AnthropicProvider({ apiKey: "k", model: "" })).toThrow("[AnthropicProvider] model is empty");
     expect(() => new OpenRouterProvider({ apiKey: "k", model: "" })).toThrow("[OpenRouterProvider] model is empty");
     expect(() => new DeepSeekProvider({ apiKey: "", model: "deepseek-chat" })).toThrow("[DeepSeekProvider] apiKey is empty");
+  });
+});
+
+describe("the session id reaches the gateway", () => {
+  // OpenCode Go routes and caches per conversation, and refuses a call with no session header.
+  class OpencodeGo extends ProviderAdapter {
+    readonly name = "opencode-go";
+    readonly capabilities = {
+      supportsTools: true,
+      supportsNativeJsonSchema: true,
+      supportsStreaming: true,
+      supportsStreamingToolCalls: true,
+      supportsPromptCaching: true,
+    };
+    constructor(fetchImpl: typeof fetch) {
+      const model = "mimo-v2.6-flash";
+      super({ provider: createPresetProvider("opencode-go", { apiKey: "k", model, fetchImpl }), model });
+    }
+  }
+
+  test("each call sends its own session id as x-opencode-session", async () => {
+    const { headers, fetchImpl } = scripted([() => chat({ content: "ok" })]);
+    const go = new OpencodeGo(fetchImpl);
+
+    await go.generateMessage(input({ sessionId: "conv-1" }));
+    await go.generateMessage(input({ sessionId: "conv-2" }));
+
+    expect(headers.map((h) => h.get("x-opencode-session"))).toEqual(["conv-1", "conv-2"]);
   });
 });

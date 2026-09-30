@@ -379,6 +379,7 @@ export abstract class ProviderAdapter implements AiProvider {
         : {}),
       ...(input.parameters?.reasoning?.effort ? { effort: input.parameters.reasoning.effort } : {}),
       ...(json ? { json } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     };
 
     const attempt = (model: string) =>

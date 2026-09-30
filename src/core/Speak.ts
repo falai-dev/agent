@@ -181,6 +181,7 @@ export class Speak<C = unknown, D = unknown> {
         ...(system ? { system } : {}),
         history,
         context: req.context,
+        sessionId: req.sessionId,
         tools: offerTools ? wireTools : undefined,
         parameters: { jsonSchema: envelope.schema, schemaName: "speak" },
       };

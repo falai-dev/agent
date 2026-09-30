@@ -101,6 +101,7 @@ const branches: UnderstandRequest["branches"] = [
 
 function request(over: Partial<UnderstandRequest<Ctx, Data>> = {}): UnderstandRequest<Ctx, Data> {
   return {
+    sessionId: "s1",
     text: "oi",
     history: [{ role: "assistant", content: "Oi! Quantas pessoas trabalham aí?" }],
     context: { empresa: "Zeta" },

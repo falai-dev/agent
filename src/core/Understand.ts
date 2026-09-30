@@ -61,6 +61,7 @@ export class Understand<C = unknown, D = unknown> {
       ...(system ? { system } : {}),
       history: req.history,
       context: req.context,
+      sessionId: req.sessionId,
       parameters: { jsonSchema, schemaName: UNDERSTAND_SCHEMA_NAME },
     });
 
