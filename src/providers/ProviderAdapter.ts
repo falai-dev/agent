@@ -25,12 +25,10 @@ import {
   isCompleteJson,
   parseToolArgs,
   probeJsonWithTools,
-  requireContent,
-  streamWatch,
   streamWithBackupModels,
-  watchChunks,
   withFallbackProviders,
   withStreamRetry,
+  withWatchdog,
   type ChatMessage,
   type Effort,
   type FallbackOptions,
@@ -59,11 +57,15 @@ import { logger } from "../utils/logger.js";
 /** Provider timeout (ms) + retry count, after defaults are applied. */
 export interface RetryConfig {
   /**
-   * How long a stream may stay SILENT before it is considered wedged.
+   * How long a stream may stay SILENT, once the response has started, before
+   * it is considered dead.
    *
-   * It bounds silence, not the whole call: time to the first byte, and the gap
-   * between any two after it. A request that never gets a reply fails at that
-   * moment; one that is steadily producing tokens is left alone, however long.
+   * It bounds silence, not the whole call: the gap between any two bytes,
+   * keep-alives included, so a provider that pings while it works is left
+   * alone. The wait for the first chunk, and a stream that sends only
+   * keep-alives, are bounded by core's progress clock instead (five minutes,
+   * `STREAM_PROGRESS_MS`): some backends send nothing for minutes on a large
+   * turn and are healthy the whole time.
    */
   timeout: number;
   /** Retries AFTER the first attempt, so `0` still performs one call. */
@@ -290,6 +292,12 @@ export abstract class ProviderAdapter implements AiProvider {
   protected readonly provider: Provider;
   /** `provider` without the fallback chain: the one model this adapter was built for. */
   private readonly primary: Provider;
+  /**
+   * `provider` behind core's watchdog, for this adapter's own calls only. Kept
+   * apart from `coreProvider`, which another adapter's fallback chain wraps in
+   * its own watchdog.
+   */
+  private readonly watched: Provider;
   protected readonly primaryModel: string;
   protected readonly backupModels: string[];
   protected readonly retryConfig: RetryConfig;
@@ -321,6 +329,7 @@ export abstract class ProviderAdapter implements AiProvider {
     } else {
       this.provider = init.provider;
     }
+    this.watched = withWatchdog(this.provider, { idleMs: this.retryConfig.timeout });
   }
 
   /**
@@ -386,22 +395,7 @@ export abstract class ProviderAdapter implements AiProvider {
       withStreamRetry<ProviderChunk>(
         (signal) => {
           acc.model = model;
-          const watch = streamWatch({
-            provider: this.name,
-            idleMs: this.retryConfig.timeout,
-            signal,
-          });
-          return requireContent(
-            this.name,
-            watchChunks(
-              watch,
-              this.provider.createStream(messages, tools, {
-                ...opts,
-                model,
-                signal: watch.signal,
-              }),
-            ),
-          );
+          return this.watched.createStream(messages, tools, { ...opts, model, signal });
         },
         {
           maxAttempts: this.retryConfig.retries + 1,

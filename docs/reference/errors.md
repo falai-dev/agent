@@ -96,8 +96,8 @@ Named by what fixes them, from `@providerkit/core`.
 | `kind` | Meaning | Retry? |
 |--------|---------|--------|
 | `aborted` | Your own `AbortSignal` fired. | Never. |
-| `timeout` | The stream stayed silent past `retryConfig.timeout` (default 60 s), or the provider sent 408. | Yes. |
-| `network` | The request never reached the provider: socket, DNS, proxy. | Yes. |
+| `timeout` | The response went silent past `retryConfig.timeout` (default 60 s, keep-alives count as life), sent no chunk for 5 minutes, or the provider sent 408. | Yes. |
+| `network` | The request never reached the provider (socket, DNS, proxy), or the stream ended before the provider's end signal. | Yes. |
 | `overload` | Theirs and temporary: a 5xx, Anthropic's 529, "overloaded". | Yes, and worth a different model. |
 | `rate` | 429 per-minute throttle. | Wait `retryAfterMs`, or rotate key or model. |
 | `quota` | Balance or usage window exhausted. | Waiting minutes will not fix it. |

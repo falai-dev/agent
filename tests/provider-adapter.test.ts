@@ -348,6 +348,37 @@ describe("what happens when a turn fails", () => {
     ).rejects.toThrow();
   });
 
+  // The watch must hear every byte the provider reads, not just every chunk.
+  // Wired to chunks alone, a provider that pings while it works is cut at
+  // `timeout` with half its answer already streamed, and that cannot be retried.
+  test("keep-alives are not silence: a turn that pings past the timeout is not cut", async () => {
+    const encoder = new TextEncoder();
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const head = JSON.stringify({ id: "1", model: "m", choices: [{ index: 0, delta: { content: "worth " } }] });
+    const rest = await chat({ content: "the wait" }).text();
+    // Honours the abort, as a real fetch does: the watchdog cuts a turn by
+    // aborting its request, and a body that ignored it would hide the cut.
+    const fetchImpl = (async (_url: string, init: RequestInit) =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+            controller.enqueue(encoder.encode(`data: ${head}\n\n`));
+            for (let i = 0; i < 10; i++) {
+              await sleep(20);
+              if (init.signal?.aborted) return;
+              controller.enqueue(encoder.encode(": keep-alive\n\n"));
+            }
+            controller.enqueue(encoder.encode(rest));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      )) as unknown as typeof fetch;
+    const provider = deepseek(fetchImpl, { retryConfig: { timeout: 100, retries: 0 } });
+    expect((await provider.generateMessage(input())).message).toBe("worth the wait");
+  });
+
   test("a throttle retries the same model and recovers", async () => {
     const { bodies, fetchImpl } = scripted([
       failure(429, "slow down"),

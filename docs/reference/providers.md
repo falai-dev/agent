@@ -468,7 +468,7 @@ What the adapter does on every call, from `src/providers/ProviderAdapter.ts`:
 3. Merges `defaults`, then `parameters.maxOutputTokens` as `maxTokens` and `parameters.reasoning.effort` as `effort`.
 4. Streams with a silence watchdog of `retryConfig.timeout` ms and `retryConfig.retries + 1` attempts, then moves to the next backup model when the error kind allows.
 5. Folds the chunks: text becomes `delta` chunks, tool call fragments are assembled and their arguments parsed, usage lands on `metadata` (`tokensUsed`, `promptTokens`, `completionTokens`, `cachedInputTokens`).
-6. Parses the accumulated text leniently into `structured`. Text that looks like an envelope but did not parse is dropped rather than handed to the customer. A message that is blank after parsing, with no tool calls, throws `Error: No response from <provider>` — after the retries and backup models, so the caller's path (a deferred speak step, or the host replaying the turn) is what picks it up. A stream that never produced any content is caught earlier, inside the retry, as a `ProviderError` of kind `overload`.
+6. Parses the accumulated text leniently into `structured`. Text that looks like an envelope but did not parse is dropped rather than handed to the customer. A message that is blank after parsing, with no tool calls, throws `Error: No response from <provider>` — after the retries and backup models, so the caller's path (a deferred speak step, or the host replaying the turn) is what picks it up. A stream that never produced any content is caught earlier, inside the retry, as a `ProviderError` of kind `overload`. A stream that stops before the provider's end signal (no finish reason, no `[DONE]`) throws a `ProviderError` of kind `network` once what arrived is delivered, so half an answer is never read as a whole one.
 
 ## Retries, backup models and fallbacks
 
@@ -480,7 +480,7 @@ Three layers, innermost first. All from `src/providers/ProviderAdapter.ts` and `
 | Backup model | `backupModels` | Retries exhausted with a backup-eligible kind, or `kind === "model"` (the endpoint does not serve that id). | Next model on the list, same provider. |
 | Fallback | `fallbacks` (per provider) or `FallbackAiProvider` | The provider fails or is on cooldown. | Next provider. Cooldowns per `kind`; a server-supplied `Retry-After` always wins over the default interval. |
 
-The `timeout` bounds silence, not the whole call: a stream that keeps producing tokens is left alone, one that goes quiet for 60 s is cut and retried.
+The `timeout` bounds silence, not the whole call: a stream that keeps producing tokens is left alone, one that goes quiet for 60 s is cut and retried. Keep-alives count as life. The wait for the first chunk, and a stream that sends only keep-alives, are cut at 5 minutes by `@providerkit/core`'s progress clock.
 
 ## Reasoning
 
