@@ -13,14 +13,14 @@
  * scripted `fetch` so the provider under test is the real one.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 import { OpenAIProvider } from "../src/providers/OpenAIProvider.js";
 import { OpenRouterProvider } from "../src/providers/OpenRouterProvider.js";
 import { DeepSeekProvider } from "../src/providers/DeepSeekProvider.js";
 import { AnthropicProvider } from "../src/providers/AnthropicProvider.js";
 import { GeminiProvider } from "../src/providers/GeminiProvider.js";
 import { ProviderAdapter, toMessages } from "../src/providers/ProviderAdapter.js";
-import { createPresetProvider } from "@providerkit/core";
+import { createPresetProvider, type Provider, type ProviderChunk } from "@providerkit/core";
 import type { GenerateMessageInput } from "../src/types/ai.js";
 import type { HistoryItem } from "../src/types/history.js";
 
@@ -377,6 +377,58 @@ describe("what happens when a turn fails", () => {
       )) as unknown as typeof fetch;
     const provider = deepseek(fetchImpl, { retryConfig: { timeout: 100, retries: 0 } });
     expect((await provider.generateMessage(input())).message).toBe("worth the wait");
+  });
+
+  // A provider that rotates through models of its own (an OpenCode Go chain)
+  // is given a long timeout so this outer watch never cuts the rotation short.
+  // Core's progress clock defaults to five minutes; left there, it would.
+  test("a timeout past five minutes raises the wait for the first chunk with it", async () => {
+    class Chain extends ProviderAdapter {
+      readonly name = "chain";
+      readonly capabilities = {
+        supportsTools: true,
+        supportsNativeJsonSchema: true,
+        supportsStreaming: true,
+        supportsStreamingToolCalls: true,
+        supportsPromptCaching: true,
+      };
+      constructor(provider: Provider) {
+        super({ provider, model: "m", retryConfig: { timeout: 10 * 60_000, retries: 0 } });
+      }
+    }
+    // Six minutes of nothing, as when three of its models go silent in turn.
+    const rotating: Provider = {
+      id: "chain",
+      model: "m",
+      async *createStream(_messages, _tools, opts): AsyncGenerator<ProviderChunk> {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 6 * 60_000);
+          opts?.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(opts.signal?.reason);
+          });
+        });
+        yield { type: "delta", content: "after the rotation" };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    };
+    const chain = new Chain(rotating);
+
+    jest.useFakeTimers();
+    try {
+      const outcome = chain.generateMessage(input()).then(
+        (out) => out.message,
+        (error: unknown) => String(error),
+      );
+      // Bun has no async advance: step the clock, letting the stream's awaits run between steps.
+      for (let elapsed = 0; elapsed < 7 * 60_000; elapsed += 10_000) {
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+        jest.advanceTimersByTime(10_000);
+      }
+      expect(await outcome).toBe("after the rotation");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("a throttle retries the same model and recovers", async () => {

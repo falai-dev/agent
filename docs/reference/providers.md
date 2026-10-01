@@ -480,7 +480,7 @@ Three layers, innermost first. All from `src/providers/ProviderAdapter.ts` and `
 | Backup model | `backupModels` | Retries exhausted with a backup-eligible kind, or `kind === "model"` (the endpoint does not serve that id). | Next model on the list, same provider. |
 | Fallback | `fallbacks` (per provider) or `FallbackAiProvider` | The provider fails or is on cooldown. | Next provider. Cooldowns per `kind`; a server-supplied `Retry-After` always wins over the default interval. |
 
-The `timeout` bounds silence, not the whole call: a stream that keeps producing tokens is left alone, one that goes quiet for 60 s is cut and retried. Keep-alives count as life. The wait for the first chunk, and a stream that sends only keep-alives, are cut at 5 minutes by `@providerkit/core`'s progress clock.
+The `timeout` bounds silence, not the whole call: a stream that keeps producing tokens is left alone, one that goes quiet for 60 s is cut and retried. Keep-alives count as life. The wait for the first chunk, and a stream that sends only keep-alives, are cut by `@providerkit/core`'s progress clock: at 5 minutes, or at `timeout` when that is longer. A provider that rotates through models of its own, each watched on its own (an OpenCode Go chain), takes a long `timeout` so this watch never cuts the rotation short.
 
 ## Reasoning
 

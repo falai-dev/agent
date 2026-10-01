@@ -20,6 +20,7 @@
 
 import {
   ProviderError,
+  STREAM_PROGRESS_MS,
   classify,
   isBackupEligible,
   isCompleteJson,
@@ -63,9 +64,9 @@ export interface RetryConfig {
    * It bounds silence, not the whole call: the gap between any two bytes,
    * keep-alives included, so a provider that pings while it works is left
    * alone. The wait for the first chunk, and a stream that sends only
-   * keep-alives, are bounded by core's progress clock instead (five minutes,
-   * `STREAM_PROGRESS_MS`): some backends send nothing for minutes on a large
-   * turn and are healthy the whole time.
+   * keep-alives, are bounded by core's progress clock instead: five minutes
+   * (`STREAM_PROGRESS_MS`), or `timeout` when that is longer. Some backends
+   * send nothing for minutes on a large turn and are healthy the whole time.
    */
   timeout: number;
   /** Retries AFTER the first attempt, so `0` still performs one call. */
@@ -329,7 +330,15 @@ export abstract class ProviderAdapter implements AiProvider {
     } else {
       this.provider = init.provider;
     }
-    this.watched = withWatchdog(this.provider, { idleMs: this.retryConfig.timeout });
+    // A timeout past five minutes raises the progress clock with it. A provider
+    // that rotates through models of its own (an OpenCode Go chain, each model
+    // watched on its own) is given a long timeout so this outer watch never
+    // cuts the rotation short. Core's five-minute progress default would cut
+    // it anyway, after two or three silent models, and skip the rest.
+    this.watched = withWatchdog(this.provider, {
+      idleMs: this.retryConfig.timeout,
+      progressMs: Math.max(this.retryConfig.timeout, STREAM_PROGRESS_MS),
+    });
   }
 
   /**
