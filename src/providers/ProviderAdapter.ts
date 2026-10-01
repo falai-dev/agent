@@ -20,7 +20,6 @@
 
 import {
   ProviderError,
-  STREAM_PROGRESS_MS,
   classify,
   isBackupEligible,
   isCompleteJson,
@@ -330,15 +329,9 @@ export abstract class ProviderAdapter implements AiProvider {
     } else {
       this.provider = init.provider;
     }
-    // A timeout past five minutes raises the progress clock with it. A provider
-    // that rotates through models of its own (an OpenCode Go chain, each model
-    // watched on its own) is given a long timeout so this outer watch never
-    // cuts the rotation short. Core's five-minute progress default would cut
-    // it anyway, after two or three silent models, and skip the rest.
-    this.watched = withWatchdog(this.provider, {
-      idleMs: this.retryConfig.timeout,
-      progressMs: Math.max(this.retryConfig.timeout, STREAM_PROGRESS_MS),
-    });
+    // No progressMs: core raises it to idleMs when that is longer, so a long
+    // timeout (an OpenCode Go chain rotating under it) is not cut at five minutes.
+    this.watched = withWatchdog(this.provider, { idleMs: this.retryConfig.timeout });
   }
 
   /**

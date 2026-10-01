@@ -381,7 +381,8 @@ describe("what happens when a turn fails", () => {
 
   // A provider that rotates through models of its own (an OpenCode Go chain)
   // is given a long timeout so this outer watch never cuts the rotation short.
-  // Core's progress clock defaults to five minutes; left there, it would.
+  // Core's progress clock is five minutes unless idle is longer; pass the
+  // adapter's own five-minute value and it cuts the rotation again.
   test("a timeout past five minutes raises the wait for the first chunk with it", async () => {
     class Chain extends ProviderAdapter {
       readonly name = "chain";
