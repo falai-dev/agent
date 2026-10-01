@@ -20,7 +20,7 @@ import { DeepSeekProvider } from "../src/providers/DeepSeekProvider.js";
 import { AnthropicProvider } from "../src/providers/AnthropicProvider.js";
 import { GeminiProvider } from "../src/providers/GeminiProvider.js";
 import { ProviderAdapter, toMessages } from "../src/providers/ProviderAdapter.js";
-import { createPresetProvider, type Provider, type ProviderChunk } from "@providerkit/core";
+import { ProviderError, createPresetProvider, type Provider, type ProviderChunk } from "@providerkit/core";
 import type { GenerateMessageInput } from "../src/types/ai.js";
 import type { HistoryItem } from "../src/types/history.js";
 
@@ -346,6 +346,40 @@ describe("what happens when a turn fails", () => {
     await expect(
       deepseek(fetchImpl, { retryConfig: { retries: 0 } }).generateMessage(input()),
     ).rejects.toThrow();
+  });
+
+  // Thinking spends the same `maxTokens` as the answer. A turn that spent all of
+  // it thinking used to come back as an empty string; it now fails as `invalid`,
+  // and the cap is the caller's, so no retry and no backup model can help.
+  test("a turn that thought until maxTokens ran out fails as invalid, with no retry or backup", async () => {
+    const { bodies, fetchImpl } = scripted([
+      () =>
+        sse([
+          JSON.stringify({ id: "1", model: "m", choices: [{ index: 0, delta: { reasoning_content: "Let me weigh…" } }] }),
+          JSON.stringify({ id: "1", model: "m", choices: [{ index: 0, delta: {}, finish_reason: "length" }] }),
+          JSON.stringify({
+            id: "1",
+            model: "m",
+            choices: [],
+            usage: { prompt_tokens: 10, completion_tokens: 2048, completion_tokens_details: { reasoning_tokens: 2048 } },
+          }),
+          "[DONE]",
+        ]),
+    ]);
+    const provider = deepseek(fetchImpl, { backupModels: ["backup"], config: { maxTokens: 2048 } });
+    const failure = await provider.generateMessage(input()).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ProviderError);
+    expect((failure as ProviderError).kind).toBe("invalid");
+    expect((failure as ProviderError).message).toContain("raise maxTokens or lower effort");
+    expect(bodies).toHaveLength(1);
+  });
+
+  test("a turn that only thought and stopped is overload, not an answer", async () => {
+    const { fetchImpl } = scripted([() => chat({ reasoning_content: "Hmm." })]);
+    const failure = await deepseek(fetchImpl, { retryConfig: { retries: 0 } })
+      .generateMessage(input())
+      .catch((error: unknown) => error);
+    expect((failure as ProviderError).kind).toBe("overload");
   });
 
   // The watch must hear every byte the provider reads, not just every chunk.

@@ -8,6 +8,7 @@
  * 4. auto_compact - summarize old messages via LLM provider
  */
 
+import { classify } from "@providerkit/core";
 import log from "loglevel";
 import type { HistoryItem } from "../types/history.js";
 import type { TokenUsage } from "../types/ai.js";
@@ -178,13 +179,24 @@ export class CompactionEngine {
                 history: [],
                 context: {},
                 parameters: {
-                    maxOutputTokens: 1024,
+                    // Thinking spends this cap too, at whatever effort the host's
+                    // provider runs. 1024 fit the summary but not the thinking: in
+                    // production a ~250-token answer at effort "high" spent all of
+                    // a 2,048 cap thinking (OpenCode Go, 2026-09-30). 8192 is the
+                    // most every built-in provider's common models accept
+                    // (DeepSeek chat and the older Claude models stop there), so a
+                    // larger cap would 400 on them.
+                    maxOutputTokens: 8192,
                     jsonSchema: {},
                 },
             });
 
             return { text: result.message, usage: readUsage(result.metadata) };
-        } catch {
+        } catch (error) {
+            // Kind and message, or a cap spent thinking reads like an outage.
+            log.warn(
+                `CompactionEngine: the summary call failed (${classify(error)}: ${error instanceof Error ? error.message : String(error)}), falling back to aggressive truncation`
+            );
             return null;
         }
     }
@@ -344,10 +356,7 @@ export class CompactionEngine {
             };
         }
 
-        // Fallback: LLM summarization failed — aggressive truncation
-        log.warn(
-            "CompactionEngine: LLM summarization failed, falling back to aggressive truncation"
-        );
+        // Fallback: LLM summarization failed (logged with its reason) — aggressive truncation
         const truncated = CompactionEngine.aggressiveTruncate(
             microCompacted,
             options

@@ -76,7 +76,7 @@ The speak call phrases the reply. If the provider fails here, or answers with an
 | A spent balance with no stated reset | `provider-quota` | Ends `failed` |
 | The key was rejected or has no access to the model | `provider-auth` | Ends `failed` |
 | The prompt is past the model's context window | `provider-context` | Ends `failed` |
-| The provider refused the request, or the model does not exist | `provider-invalid` | Ends `failed` |
+| The provider refused the request, the model does not exist, or the model spent all of `maxTokens` thinking and never answered | `provider-invalid` | Ends `failed` |
 
 A failure that waits returns with an outcome `{ kind: "prompt" | "collect", status: "deferred", code, until }`, a `schedule[]` entry keyed `${runId}:${stepId}:${visit}:retry:${atMs}`, and `llmCalls` counting the call that failed. The backoff is 1 minute, then 5, 15, an hour, six hours (`RETRY_BACKOFF` in `src/core/Runner.ts`); the attempt number is the count of trailing `deferred` outcomes for that step on that run. A provider that stated a reset later than the next rung is woken at the reset instead. When the wake fires, the step runs again at the same visit, so its message carries the same key it would have carried the first time.
 

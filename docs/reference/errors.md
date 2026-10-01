@@ -98,7 +98,7 @@ Named by what fixes them, from `@providerkit/core`.
 | `aborted` | Your own `AbortSignal` fired. | Never. |
 | `timeout` | The response went silent past `retryConfig.timeout` (default 60 s, keep-alives count as life), sent no chunk for 5 minutes, or the provider sent 408. | Yes. |
 | `network` | The request never reached the provider (socket, DNS, proxy), or the stream ended before the provider's end signal. | Yes. |
-| `overload` | Theirs and temporary: a 5xx, Anthropic's 529, "overloaded". | Yes, and worth a different model. |
+| `overload` | Theirs and temporary: a 5xx, Anthropic's 529, "overloaded", or a turn that ended with no text and no tool call. | Yes, and worth a different model. |
 | `rate` | 429 per-minute throttle. | Wait `retryAfterMs`, or rotate key or model. |
 | `quota` | Balance or usage window exhausted. | Waiting minutes will not fix it. |
 | `entitlement` | The plan never included this API. | No; neither a new key nor a top-up fixes it. |
@@ -106,7 +106,7 @@ Named by what fixes them, from `@providerkit/core`.
 | `model` | The model id does not exist or is not served here. | No; the built-in providers do try the next `backupModels` entry. |
 | `context` | The prompt outgrew the context window. | No; send less. Compaction is the framework's answer. |
 | `content` | Safety filter or refusal. | No. |
-| `invalid` | Any other 4xx: a bug in what was sent. | No. |
+| `invalid` | Any other 4xx: a bug in what was sent. Also a turn that spent its whole `maxTokens` thinking and never answered: raise `config.maxTokens` or lower `config.effort`. | No. |
 | `unknown` | Nothing above matched. | No. |
 
 `isTransient` is true for `timeout`, `network`, `overload` and `rate`. `isBackupEligible` is what the provider uses to decide whether to try the next backup model.
