@@ -2,9 +2,9 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
-## [4.0.0] - Unreleased
+## [4.0.0] - 2026-10-02
 
-Published as alpha builds on the `alpha` tag while the three products move to it; `npm view @falai/agent dist-tags.alpha` names the latest. It becomes 4.0.0 once every product runs it in production and works.
+The first stable v4. It ran as alpha builds on the `alpha` tag while the three products moved to it; all three now run it in production, so `@falai/agent` with no tag installs 4.x. Projects on `^3` stay on 3.x until they change their range.
 
 One model for flows, automations and signals. The migration guide is [docs/migration/v3-to-v4.md](./docs/migration/v3-to-v4.md); this entry is its summary.
 

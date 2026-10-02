@@ -68,14 +68,14 @@ console.log(r.messages[0]?.text);
 ## Install
 
 ```bash
-bun add @falai/agent@alpha
+bun add @falai/agent
 # or
-npm install @falai/agent@alpha
+npm install @falai/agent
 # or
-pnpm add @falai/agent@alpha
+pnpm add @falai/agent
 ```
 
-4.0 is in alpha. Plain `@falai/agent`, with no tag, still installs 3.x, and the examples here will not compile against it.
+This is 4.x. Projects on 3.x need the [migration guide](./docs/migration/v3-to-v4.md): v4 is a clean break, and 3.x code will not compile against it.
 
 Requires Node 22.12+ or Bun 1.0+. Set a provider API key in your environment (for example `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `DEEPSEEK_API_KEY`).
 
