@@ -6,7 +6,7 @@
 
 **@falai/agent** — A conversational state engine for TypeScript where the AI understands, but the code is in control.
 
-- **Version:** 4.x (`4.0.0-alpha.N` until the eval gate passes); check package.json
+- **Version:** 4.x; check package.json
 - **License:** MIT
 - **Runtime:** Node 22.12+ or Bun 1.0+. The floor is 22.12, not 22: the CJS build `require()`s
   `@providerkit/core`, which is ESM-only, and `require(esm)` landed in 22.12.
@@ -37,7 +37,7 @@
 | Lint + fix | `bun run lint:fix` |
 | Test | `bun test tests/*.test.ts tests/scenarios/*.test.ts` |
 | Clean | `bun run clean` |
-| Publish current version | `bun run release:alpha` while the version is an alpha (`bun run release` once 4.0.0 is `latest`) |
+| Publish current version | `bun run release` (an alpha version: `bun run release:alpha`) |
 
 ## Architecture
 
