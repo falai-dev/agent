@@ -15,9 +15,9 @@ export { ProviderError } from "@providerkit/core";
 export type { ErrorKind } from "@providerkit/core";
 
 /**
- * Thrown by the persistence layer when a session save carries a stale
- * `version` — i.e. another writer persisted the session after this one
- * loaded it (concurrent turn() calls, parallel webhooks, two tabs).
+ * Thrown when you save a session with a stale `version`: another writer
+ * saved it after you loaded it (concurrent turn() calls, parallel webhooks,
+ * two tabs).
  *
  * Handlers should reload the session and retry or surface the conflict.
  */

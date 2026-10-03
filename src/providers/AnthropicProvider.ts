@@ -2,7 +2,7 @@
  * Anthropic (Claude).
  *
  * Anthropic has no native schema mode, so a structured request carries the
- * schema as an extra system block — placed after the cached one, where a
+ * schema as an extra system block after the cached one, where a
  * per-call schema cannot invalidate the system prompt's cache. That, the
  * thinking budget, its 529, and its cache-token accounting all live in
  * `@providerkit/core`; this file is the constructor.
@@ -16,7 +16,7 @@ import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 export interface AnthropicProviderOptions {
   /** Anthropic API key */
   apiKey: string;
-  /** Model to use (required) — e.g. "claude-sonnet-5" or "claude-opus-5" */
+  /** Required model, e.g. "claude-sonnet-5" or "claude-opus-5". */
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];

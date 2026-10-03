@@ -11,15 +11,15 @@ import type { RequestConfig } from "./ProviderAdapter.js";
 export interface OpenAIProviderOptions {
   /** OpenAI API key */
   apiKey: string;
-  /** Model to use (required) — e.g. "gpt-5.6", "gpt-5.4-mini" */
+  /** Required model, e.g. "gpt-5.6" or "gpt-5.4-mini". */
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
   /**
    * Fallback providers, tried in order after this one fails or exhausts.
    * Accepts both @falai/agent AiProviders (like ZaiProvider) and
-   * @providerkit/core Providers — the seam that makes a coding-plan primary
-   * degrade to anything else rather than fail the turn.
+   * @providerkit/core Providers, so a coding-plan primary can fall back to
+   * another provider rather than fail the turn.
    */
   fallbacks?: Array<AiProvider | Provider>;
   /** Organization id, sent as the `OpenAI-Organization` header */

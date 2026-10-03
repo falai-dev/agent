@@ -2,7 +2,7 @@
  * Z.ai Coding Plan.
  *
  * The flat-rate plan hosts GLM on an Anthropic-compatible endpoint with
- * Bearer auth and its own thinking dialect — all of that lives in
+ * Bearer auth and its own thinking dialect. That lives in
  * `@providerkit/core` (adapter + preset); this file is the constructor, the
  * family default for cheap high-volume work.
  *

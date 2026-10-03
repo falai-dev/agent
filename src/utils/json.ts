@@ -84,7 +84,7 @@ function parseLenient(text: string): unknown {
 
 /**
  * Whether text is shaped like a protocol envelope rather than a reply to a
- * person — an opening brace or a code fence. Text that fails to parse AND
+ * person: an opening brace or a code fence. Text that fails to parse AND
  * looks like this is never user-worthy: it is a broken envelope, and showing
  * it is the leak this module exists to prevent.
  */
@@ -140,8 +140,8 @@ export function tryParseJSONResponse(text: string): unknown {
  * Find a complete JSON object embedded in surrounding text.
  *
  * {@link parseJSONResponse} requires the WHOLE string to be the object. A model
- * told to answer in JSON sometimes answers twice instead — the conversational
- * text for the user, and then the protocol envelope repeating it — and such a
+ * told to answer in JSON sometimes writes conversational text for the user,
+ * then the protocol envelope repeating it. Such a
  * turn parses as nothing, so the envelope travels on as user-visible content.
  * This scans for the first balanced `{...}` that parses as an object, ignoring
  * braces that sit inside string literals.

@@ -3,7 +3,7 @@
  *
  * Under a JSON schema the real message lives in `structured.message`; otherwise
  * it's the raw/accumulated text passed as `fallbackText`. A blank result with no
- * tool calls means the model produced nothing usable — providers throw on that
+ * tool calls means the model produced nothing usable. Providers throw on that
  * so the retry/backup path runs instead of emitting an empty message. Shared by
  * the streaming and non-streaming empty-completion guards across all providers.
  */
@@ -23,8 +23,8 @@ export function effectiveMessageText(
  * effective message ({@link effectiveMessageText}) and no tool calls. When that
  * holds, throw `No response from <provider>` so the caller's retry/backup path
  * runs instead of surfacing an empty turn. Lifting this above the providers
- * keeps the streaming and non-streaming guards — six call sites across three
- * providers — from drifting on what counts as empty.
+ * keeps the streaming and non-streaming guards (six call sites across three
+ * providers) from drifting on what counts as empty.
  */
 export function assertUsableCompletion(
   structured: unknown,

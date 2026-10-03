@@ -1,5 +1,5 @@
 /**
- * @falai/agent — Conversational state engine for TypeScript
+ * @falai/agent: conversational state engine for TypeScript
  *
  * The AI understands. The code is in control.
  */

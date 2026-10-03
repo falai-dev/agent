@@ -20,7 +20,7 @@ import { ProviderAdapter, type RequestConfig } from "./ProviderAdapter.js";
 export interface GeminiProviderOptions {
   /** Gemini API key */
   apiKey: string;
-  /** Model to use (required) — e.g. "gemini-3.1-pro-preview" */
+  /** Required model, e.g. "gemini-3.1-pro-preview". */
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
@@ -40,7 +40,7 @@ export interface GeminiProviderOptions {
   config?: RequestConfig;
   /** Idle-stream deadline and retry budget */
   retryConfig?: { timeout?: number; retries?: number };
-  /** Replacement `fetch`, for tests that script the wire — see {@link AnthropicProviderOptions.fetchImpl}. */
+  /** Replacement `fetch` for tests. See {@link AnthropicProviderOptions.fetchImpl}. */
   fetchImpl?: typeof fetch;
 }
 

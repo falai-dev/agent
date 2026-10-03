@@ -116,8 +116,8 @@ export interface Spoken {
 
 /**
  * Why a speak call failed, and whether a later wake could still fix it. A kind
- * no wake can fix — wrong key, a prompt past the context window, a spent
- * balance with no stated reset — ends the step instead of re-running two model
+ * no wake can fix (a wrong key, a prompt past the context window, a spent
+ * balance with no stated reset) ends the step instead of re-running two model
  * calls against the same wall every fifteen minutes.
  */
 export interface Deferral {
