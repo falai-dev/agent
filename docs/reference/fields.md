@@ -51,7 +51,7 @@ The slug (the key in `fields`) is the name in `session.data`, in `collect`, in t
 
 `DataOf<typeof f>` is the shortcut for a bound toolkit: `type Data = DataOf<typeof f>`.
 
-Properties are readonly — `fields()` takes the definitions as a `const` type, so the data type is read-only; the framework writes `session.data`, your code reads it.
+Properties are readonly because `fields()` takes the definitions as a `const` type, so the data type is read-only; the framework writes `session.data`, your code reads it.
 
 ## Behaviour
 

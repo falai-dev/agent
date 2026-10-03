@@ -59,7 +59,7 @@ interface ToolPermissionResult {
 |---|---|---|---|
 | `id` | `string` | required | The name the model calls, and the name a `tools: [...]` list uses to point at this tool. Ids are not checked for uniqueness: two tools with one id are both sent to the provider, and the first one's handler runs for any call under that id. |
 | `description` | `string` | none | What the tool does and when to use it, for the model. |
-| `parameters` | `StructuredSchema` | none | A JSON Schema **object** for `args`, passed to the provider as given: `{ type: "object", properties: { … }, required: [ … ] }`. An action's shorthand map (`{ cidade: { type: "string" } }`) is not one, and `f.agent()` rejects it — most providers accept the malformed declaration and simply never call the tool. |
+| `parameters` | `StructuredSchema` | none | A JSON Schema **object** for `args`, passed to the provider as given: `{ type: "object", properties: { … }, required: [ … ] }`. An action's shorthand map (`{ cidade: { type: "string" } }`) is not one, and `f.agent()` rejects it. Most providers accept the malformed declaration and simply never call the tool. |
 | `handler` | `(args, ctx) => ToolResult \| Promise<ToolResult>` | required | Your code. Returning nothing counts as `{}`. |
 | `isReadOnly` | `(input) => boolean` | none | The call only reads. Used as the fallback for `isConcurrencySafe`. |
 | `isConcurrencySafe` | `(input) => boolean` | falls back to `isReadOnly`, then `false` | The call may run in parallel with other safe calls of the same round. |
@@ -107,7 +107,7 @@ One speak call is a loop of provider rounds:
 3. When it calls no tools, the loop ends and its message is the reply.
 4. After `maxToolLoops` rounds with calls, one more round runs with no tools and a "wrap up" section, so a message always comes back.
 
-Every round is one model call and counts in `TurnResult.llmCalls`. A text turn therefore costs one understand call plus one call per speak round: up to `maxToolLoops` rounds with tools and one to wrap up, so six speak calls with the default, seven model calls in all. A round that fails at the provider, or a final message that is empty, defers the talk step — or ends the run, when no wait can fix what failed: see [Outcomes](./outcomes.md), the `provider-*` codes. Rounds that already completed still count in `TurnResult.usage`.
+Every round is one model call and counts in `TurnResult.llmCalls`. A text turn therefore costs one understand call plus one call per speak round: up to `maxToolLoops` rounds with tools and one to wrap up, so six speak calls with the default, seven model calls in all. A round that fails at the provider, or a final message that is empty, defers the talk step or ends the run when no wait can fix what failed. See [Outcomes](./outcomes.md), the `provider-*` codes. Rounds that already completed still count in `TurnResult.usage`.
 
 Within a round, consecutive calls that are safe (not destructive, and `isConcurrencySafe` true; when `isConcurrencySafe` is not defined, `isReadOnly` true) run together with `Promise.all`; any other call runs alone, in order. `data` patches merge in call order, not in the order the calls finished. Field values the model reports in its structured reply are checked and coerced; tool `data` is not.
 

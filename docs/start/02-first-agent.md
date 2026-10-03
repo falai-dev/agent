@@ -70,7 +70,7 @@ f.flow({
 
 A flow is a trigger plus an ordered list of steps.
 
-- `on` holds the triggers: when a run of this flow starts. `{ message: [] }` means "when the customer writes". The empty list is a catch-all; put phrases in it once you have a second flow, and the model routes between them — see [Triggers](../guides/triggers.md).
+- `on` holds the triggers: when a run of this flow starts. `{ message: [] }` means "when the customer writes". The empty list is a catch-all; put phrases in it once you have a second flow, and the model routes between them. See [Triggers](../guides/triggers.md).
 - `steps` run in order. Both steps here are talk steps: the model speaks. `collect` lists the fields the step needs; `prompt` is a guideline for what to say. A step may have one or both.
 - `id` is required on the flow and on every step. No step may be called `end`: that word, used as a `then` or `else` target, ends the run. Ids are stable names the framework uses in keys and logs.
 

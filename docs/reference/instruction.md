@@ -47,7 +47,7 @@ The list the model sees is built in this order: agent, then flow, then step. For
 ## Behaviour
 
 - Instructions reach the **speak call only**. The understand call (routing, mentions, branches, extraction) never sees them.
-- `if` is judged by code when the speak request is built, with a `PredCtx` of `{ context, data, input, run, silenced, now }`. `run` is the speaking run; while the idle speaker answers, `run` is absent and `input` is `undefined` for every instruction it judges — agent-level and `idle`-level alike. Write `if` predicates on the agent and on `idle` so they work without a run.
+- `if` is judged by code when the speak request is built, with a `PredCtx` of `{ context, data, input, run, silenced, now }`. `run` is the speaking run; while the idle speaker answers, `run` is absent and `input` is `undefined` for every instruction it judges, both agent-level and `idle`-level. Write `if` predicates on the agent and on `idle` so they work without a run.
 - `when` is not judged by code. It is appended to the line as `(apply only when: a OR b)` and the model decides.
 - Each surviving instruction becomes one line under a `## Instructions` heading, in this exact form:
 

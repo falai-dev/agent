@@ -26,7 +26,7 @@ const store = new MemoryStore();
 console.log(await store.load("demo")); // null: no session yet
 ```
 
-`MemoryStore` forgets everything when the process stops. For production, PostgreSQL — the driver is yours to install: `bun add pg`.
+`MemoryStore` forgets everything when the process stops. For production, use PostgreSQL. Install the driver yourself: `bun add pg`.
 
 ```ts
 import { Pool } from "pg";

@@ -79,7 +79,7 @@ Known fields are never asked again and never read again. Once `nome` is `"Bia"`,
 
 A customer who will not answer must not block the flow. `maxAsks` on a step caps how many times each of its fields is asked; the default is 3. `porte` uses 2: after two replies without a size, the log says `code: 'max-asks'` with `tamanho` in `detail`, `tamanho` stays unknown, and the run moves on to `confirma`.
 
-Read `r.outcomes` when something surprises you. Every skip and every drop is one line there, with a `code` you can switch on and an English `message` beside it. A skip carries the step id; a dropped value does not — it is read before any step runs.
+Read `r.outcomes` when something surprises you. Every skip and every drop is one line there, with a `code` you can switch on and an English `message` beside it. A skip carries the step id; a dropped value does not, because it is read before any step runs.
 
 ## Confirmation
 

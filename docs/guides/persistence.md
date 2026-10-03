@@ -46,7 +46,7 @@ console.log((await store.save(fresh, 0)).version); // 1
 console.log((await store.load("demo"))?.version); // 1
 ```
 
-Nobody writes that literal in real code — it is here to show the insert. In an app the session comes from `turn()`.
+Nobody writes that literal in real code. It is here to show the insert. In an app the session comes from `turn()`.
 
 The session blob is the unit of consistency. Two turns on the same session both load version 3; both run; the first save moves the row to 4 and the second throws. Nothing the loser computed reaches the customer, because you send messages only after a save succeeds. You load again and replay the same input on version 4.
 

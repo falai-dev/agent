@@ -25,7 +25,7 @@ const r = await agent.turn({ sessionId: "demo", message: "quanto custa o plano p
 console.log(r.messages[0]?.text);
 ```
 
-The rule reaches every reply the agent phrases. Here no flow is running, so the reply comes from `idle` — the speaker that answers when nothing holds the floor. It costs no extra model call: it is text inside the speak call the turn already makes.
+The rule reaches every reply the agent phrases. Here no flow is running, so the reply comes from `idle`, the speaker that answers when nothing holds the floor. It costs no extra model call: it is text inside the speak call the turn already makes.
 
 ## The shape
 
@@ -153,7 +153,7 @@ console.log(r.llmCalls); // 1
 
 A named condition the agent does not register fails with a `FlowConfigurationError`. On a flow or a step it fails when you build the agent. On the agent itself it fails on the first turn that phrases a reply.
 
-Use `if` for anything the code already knows: the plan, the hour, a tag, a field being known. Use `when` only for what needs the conversation to judge: tone, intent, a topic. One form never fires here: `{ silenced: true }` is always false on an instruction, because a silenced turn phrases nothing and reads no instruction at all. Put it on a trigger, an `if` step or a branch instead — those still run while the gate is closed.
+Use `if` for anything the code already knows: the plan, the hour, a tag, a field being known. Use `when` only for what needs the conversation to judge: tone, intent, a topic. One form never fires here: `{ silenced: true }` is always false on an instruction, because a silenced turn phrases nothing and reads no instruction at all. Put it on a trigger, an `if` step or a branch instead. Those still run while the gate is closed.
 
 ## `when` goes to the model as text
 

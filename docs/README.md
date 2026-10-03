@@ -23,27 +23,27 @@ Five pages that build one agent from install to production. Start at [Install](.
 
 One page per task. Each shows the code you write and what the framework does with it. Open [Triggers](./guides/triggers.md) first, since every flow starts with one; the rest stand alone.
 
-- [Triggers](./guides/triggers.md) — message, mention, silence, event, manual start
-- [Conditions](./guides/conditions.md) — `when` (the model) versus `if` (your code)
-- [Branching](./guides/branching.md) — forks while a step is asking
-- [Flow control](./guides/flow-control.md) — `then`, `else`, `onEnd`, `while`, chaining flows
-- [Actions and events](./guides/actions-and-events.md) — what your code does and what it reports
-- [Instructions](./guides/instructions.md) — rules the model follows at agent, flow or step level
-- [Error handling](./guides/error-handling.md) — what throws, what stays put and retries on a timer, what you replay
-- [Persistence](./guides/persistence.md) — `Store`, the version check on save, the seven built-in stores
-- [Streaming](./guides/streaming.md) — `turnStream` and its chunks
-- [Compaction](./guides/compaction.md) — trimming long histories once per turn
-- [Flows from JSON](./guides/flows-from-json.md) — `FlowSpec`, `fromSpec`, `validateFlow`
-- [Testing](./guides/testing.md) — a fake clock, an in-memory store, a scripted provider
+- [Triggers](./guides/triggers.md): message, mention, silence, event, manual start
+- [Conditions](./guides/conditions.md): `when` (the model) versus `if` (your code)
+- [Branching](./guides/branching.md): forks while a step is asking
+- [Flow control](./guides/flow-control.md): `then`, `else`, `onEnd`, `while`, chaining flows
+- [Actions and events](./guides/actions-and-events.md): what your code does and what it reports
+- [Instructions](./guides/instructions.md): rules the model follows at agent, flow or step level
+- [Error handling](./guides/error-handling.md): what throws, what stays put and retries on a timer, what you replay
+- [Persistence](./guides/persistence.md): `Store`, the version check on save, the seven built-in stores
+- [Streaming](./guides/streaming.md): `turnStream` and its chunks
+- [Compaction](./guides/compaction.md): trimming long histories once per turn
+- [Flows from JSON](./guides/flows-from-json.md): `FlowSpec`, `fromSpec`, `validateFlow`
+- [Testing](./guides/testing.md): a fake clock, an in-memory store, a scripted provider
 
 ## Concepts
 
 Four pages explain the design. Start with [Architecture](./concepts/architecture.md).
 
-- [Architecture](./concepts/architecture.md) — agent, flow, trigger, step, field, run, turn
-- [Pipeline](./concepts/pipeline.md) — the eight phases of one turn and what each costs
-- [Runs and waits](./concepts/runs-and-waits.md) — who is speaking (the floor), timers (wakes), keys and claims
-- [Collection](./concepts/collection.md) — how fields get filled
+- [Architecture](./concepts/architecture.md): agent, flow, trigger, step, field, run, turn
+- [Pipeline](./concepts/pipeline.md): the eight phases of one turn and what each costs
+- [Runs and waits](./concepts/runs-and-waits.md): who is speaking (the floor), timers (wakes), keys and claims
+- [Collection](./concepts/collection.md): how fields get filled
 
 ## Reference
 
