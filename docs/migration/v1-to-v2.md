@@ -7,11 +7,11 @@ order: 1
 
 # v1 → v2 migration
 
-**Version:** 2.0.0 — Clean break (no shims, no aliases)
+**Version:** 2.0.0. Clean break (no shims, no aliases)
 
 ## Summary
 
-v2 is a clean break — no shims, no aliases. The surface is smaller and the primitives are fewer: `Route` becomes `Flow`, three behavioral types collapse into `Instruction`, `EnhancedTool` folds into `Tool`, and all flow control converges on a single `Directive` shape. This guide covers every breaking change with rename tables and before/after code samples.
+v2 is a clean break: no shims, no aliases. The surface is smaller and the primitives are fewer: `Route` becomes `Flow`, three behavioral types collapse into `Instruction`, `EnhancedTool` folds into `Tool`, and all flow control converges on a single `Directive` shape. This guide covers every breaking change with rename tables and before/after code samples.
 
 Other notable changes covered below: the `pendingTransition` session field becomes `pendingDirective`, `Tool.name` collapses into `Tool.id`, the `ConditionTemplate` union is replaced by separate `when` (AI) and `if` (code) fields, `FlowOptions.onComplete` is string-only at the top level, `createAgent` becomes the headline API, agent identity collapses from three fields (`description`, `identity`, `personality`) into one (`persona`), multi-step batching is replaced by `auto: true` steps, and `step.branches` is added as an explicit (non-breaking) alternative to implicit fork.
 
@@ -20,13 +20,13 @@ Other notable changes covered below: the `pendingTransition` session field becom
 ## Table of Contents
 
 1. [Persistence: `pendingTransition` → `pendingDirective`](#1-persistence-pendingtransition--pendingdirective)
-2. [Removed in v2 — Full Surface List](#2-removed-in-v2--full-surface-list)
+2. [Removed in v2: full surface list](#2-removed-in-v2-full-surface-list)
 3. [Route → Flow Rename](#3-route--flow-rename)
 4. [Guideline / Rule / Prohibition → Instruction](#4-guideline--rule--prohibition--instruction)
 5. [`condition` / `action` → `when` / `prompt`](#5-condition--action--when--prompt)
 6. [`onComplete` Cleanup](#6-oncomplete-cleanup)
 7. [Flow Completion: Farewell Removal + Idle-State Release](#7-flow-completion-farewell-removal--idle-state-release)
-8. [`createAgent` — The New Headline API](#8-createagent--the-new-headline-api)
+8. [`createAgent`: the new entry point](#8-createagent-the-new-entry-point)
 9. [Tool / EnhancedTool Merge](#9-tool--enhancedtool-merge)
 10. [ConditionTemplate → `when` / `if` Split](#10-conditiontemplate--when--if-split)
 11. [Dispatch Replaces `transitionTo` / `nextStepFlow`](#11-dispatch-replaces-transitionto--nextstepflow)
@@ -42,7 +42,7 @@ The `SessionState.pendingTransition` field is removed. Its replacement is `Sessi
 
 v2 also adds a `signals` column for forward-compat with the v2.x Signals feature. It's unused at runtime but must be present in your schema.
 
-**There is no auto-migration.** If a v1 record carries `pendingTransition` but no `pendingDirective`, v2 ignores it — the pending transition is lost. Run the backfill before deploying v2.
+**There is no auto-migration.** If a v1 record carries `pendingTransition` but no `pendingDirective`, v2 ignores it, so the pending transition is lost. Run the backfill before deploying v2.
 
 ### PostgreSQL / SQLite
 
@@ -114,7 +114,7 @@ repeat
 until cursor == "0"
 ```
 
-> **Note:** Redis stores serialized JSON. The field-name swap is sufficient if your `pendingTransition` shape was `{ targetFlowId: string }`. The v2 runtime expects `{ goTo: { flow: string } }` — adjust the transform if your v1 shape was different.
+> **Note:** Redis stores serialized JSON. The field-name swap is sufficient if your `pendingTransition` shape was `{ targetFlowId: string }`. The v2 runtime expects `{ goTo: { flow: string } }`. Adjust the transform if your v1 shape was different.
 
 ### OpenSearch
 
@@ -154,7 +154,7 @@ Run `npx prisma migrate dev --name v2-directive-migration`.
 
 ---
 
-## 2. Removed in v2 — Full Surface List
+## 2. Removed in v2: full surface list
 
 v2 is a clean break. These symbols are gone with no aliases:
 
@@ -166,7 +166,7 @@ v2 is a clean break. These symbols are gone with no aliases:
 | `FlowTransitionConfig` | `Directive` | `{ nextStep: 'X', condition: 'Y' }` → `{ goTo: 'X', reason: 'Y' }` |
 | `FlowCompletionHandler` | `hooks.onComplete: (ctx) => Directive \| void` | Inline the signature change. |
 | `FlowOptions.endStep` | Last step's `prompt` | Move closing text to the last step. |
-| `Flow.endStepSpec` | Removed | Internal — gone with `endStep`. |
+| `Flow.endStepSpec` | Removed | Internal; removed with `endStep`. |
 | `Step.endFlow()` | Implicit terminus | `.endFlow(opts)` → just make it the last step. |
 | `Agent.nextStepFlow()` | `Agent.dispatch()` | See [§11](#11-dispatch-replaces-transitionto--nextstepflow). |
 | `Agent.transitionTo()` | `Agent.dispatch()` | See [§11](#11-dispatch-replaces-transitionto--nextstepflow). |
@@ -203,7 +203,7 @@ v2 is a clean break. These symbols are gone with no aliases:
 ```typescript
 type StoppedReason =
   | 'needs_input'       // unchanged
-  | 'last_step'         // last step ran — no successor
+  | 'last_step'         // last step ran; no successor
   | 'completed'         // explicit { complete: true } directive
   | 'aborted'           // { abort: '...' } directive
   | 'goto'              // goTo/goToStep directive short-circuited
@@ -221,7 +221,7 @@ type StoppedReason =
 
 ## 3. Route → Flow Rename
 
-The `Route` domain noun has been renamed to `Flow` across the entire `@falai/agent` package. This is a clean break with no compatibility shims, no dual-naming layer, and no runtime fallback for legacy field names. Every public symbol, configuration option, persisted column/field, adapter method, constant, error class, and utility function that referenced "Route" as a noun now uses "Flow". The verb form `route()` and the gerund "routing" (as used in prose and the `routing.ts` module) are preserved — routing-as-an-action remains the correct verb for selecting a flow.
+The `Route` domain noun has been renamed to `Flow` across the entire `@falai/agent` package. This is a clean break with no compatibility shims, no dual-naming layer, and no runtime fallback for legacy field names. Every public symbol, configuration option, persisted column/field, adapter method, constant, error class, and utility function that referenced "Route" as a noun now uses "Flow". The verb form `route()` and the gerund "routing" (as used in prose and the `routing.ts` module) are preserved, because routing-as-an-action remains the correct verb for selecting a flow.
 
 ### Symbol Rename Table
 
@@ -237,8 +237,8 @@ The `Route` domain noun has been renamed to `Flow` across the entire `@falai/age
 | `RoutingEngineOptions` | `FlowRouterOptions` | Type | Update type annotations |
 | `RoutingDecisionOutput` | `FlowRoutingDecisionOutput` | Type | Update type annotations |
 | `RouteConfigurationError` | `FlowConfigurationError` | Error | Update catch blocks |
-| `END_ROUTE` | Removed | Constant | Implicit terminus — remove all references |
-| `END_ROUTE_ID` | Removed | Constant | Implicit terminus — remove all references |
+| `END_ROUTE` | Removed | Constant | Implicit terminus; remove all references |
+| `END_ROUTE_ID` | Removed | Constant | Implicit terminus; remove all references |
 | `generateRouteId` | `generateFlowId` | Utility | Update calls |
 | `enterRoute` | `enterFlow` | Utility | Update calls |
 | `StepRef.routeId` | `StepRef.flowId` | Type | Update field access |
@@ -290,7 +290,7 @@ These are **not** renamed:
 
 | Old | New |
 |-----|-----|
-| `'end_route'` | Removed — use `'last_step'` or `'completed'` |
+| `'end_route'` | Removed; use `'last_step'` or `'completed'` |
 | `'route_complete'` | `'last_step'` (no successor) or `'completed'` (explicit directive) |
 
 ### Adapter Method Rename Table
@@ -665,7 +665,7 @@ sed -i '' 's/\bRouteLifecycleHooks\b/FlowLifecycleHooks/g' src/**/*.ts
 sed -i '' 's/\bRouteConfigurationError\b/FlowConfigurationError/g' src/**/*.ts
 sed -i '' 's/\bRoutingEngine\b/FlowRouter/g' src/**/*.ts
 
-# Constants (END_ROUTE removed — delete all references)
+# Constants (END_ROUTE removed; delete all references)
 sed -i '' '/END_ROUTE/d; /END_FLOW/d' src/**/*.ts
 
 # Methods and fields
@@ -687,7 +687,7 @@ sed -i '' "s/'end_route'/'last_step'/g" src/**/*.ts
 sed -i '' "s/'route_complete'/'completed'/g" src/**/*.ts
 
 # Configuration
-sed -i '' 's/routes:/flows:/g' src/**/*.ts  # Be careful — review matches manually
+sed -i '' 's/routes:/flows:/g' src/**/*.ts  # Review matches manually
 
 # Import paths (if importing from @falai/agent internals)
 sed -i '' 's/core\/Route/core\/Flow/g' src/**/*.ts
@@ -720,12 +720,12 @@ No. This is a clean break. The old names are removed entirely.
 Yes. The framework no longer reads or writes the legacy column/field names. Deploy the data migration first, then deploy the new code.
 
 **Q: What about the `route()` method I see on `FlowRouter`?**
-That's the verb form — it means "to route a message to a flow." It is intentionally preserved.
+That's the verb form: it means "to route a message to a flow." It is intentionally preserved.
 
-**Q: My tests assert on `'end_route'` or `'route_complete'` — what do I do?**
+**Q: My tests assert on `'end_route'` or `'route_complete'`. What do I do?**
 `'end_route'` has been removed entirely (implicit terminus replaces it). Update to `'last_step'`. `'route_complete'` becomes `'last_step'` (no successor) or `'completed'` (explicit directive). TypeScript will flag these as type errors if you miss any.
 
-**Q: I have custom IDs that don't use the `route_` prefix — do I need to migrate them?**
+**Q: I have custom IDs that don't use the `route_` prefix. Do I need to migrate them?**
 Only IDs generated by `generateRouteId()` (now `generateFlowId()`) use the prefix. If you set custom IDs on your flows, they are unaffected by the prefix change.
 
 
@@ -784,7 +784,7 @@ const agent = createAgent({
 });
 ```
 
-The same applies at flow and step scope. `FlowOptions.rules`, `FlowOptions.prohibitions`, `FlowOptions.guidelines`, and `StepOptions.guidelines` are all removed — use `instructions` at each level.
+The same applies at flow and step scope. `FlowOptions.rules`, `FlowOptions.prohibitions`, `FlowOptions.guidelines`, and `StepOptions.guidelines` are all removed. Use `instructions` at each level.
 
 ### Prompt Rendering Change
 
@@ -817,8 +817,8 @@ console.log(response.appliedInstructions);
 | `agent.getProhibitions()` | `agent.instructions.filter(i => i.kind === 'never')` |
 | `flow.createGuideline(g)` | `flow.createInstruction(g)` |
 | `flow.getGuidelines()` | `flow.getInstructions()` |
-| `flow.getRules()` | Removed — use flow instructions |
-| `flow.getProhibitions()` | Removed — use flow instructions |
+| `flow.getRules()` | Removed; use flow instructions |
+| `flow.getProhibitions()` | Removed; use flow instructions |
 | `step.addGuideline(g)` | `step.addInstruction(g)` |
 | `step.getGuidelines()` | `step.getInstructions()` |
 
@@ -922,7 +922,7 @@ agent.createFlow({
 agent.createFlow({
   title: "Booking",
   onComplete: "Confirmation",          // ← string sugar
-  hooks: { onComplete: () => {...} },   // ← function form — conflict!
+  hooks: { onComplete: () => {...} },   // ← function form; conflicts with onComplete
 });
 ```
 
@@ -983,11 +983,11 @@ agent.createFlow({
 
 When `reentrant: true`, the router can re-select this flow after it completes. On re-entry, fields declared in `requiredFields` / `optionalFields` are cleared so the flow starts fresh.
 
-`onComplete` always wins over `reentrant` — if `onComplete` returns a target, the session goes there instead.
+`onComplete` always wins over `reentrant`: if `onComplete` returns a target, the session goes there instead.
 
 ---
 
-## 8. `createAgent` — The New Headline API
+## 8. `createAgent`: the new entry point
 
 `createAgent` is the recommended entry point in v2. It's equivalent to `new Agent(options)` but reads better in examples and enables stronger generic inference.
 
@@ -1026,14 +1026,14 @@ const agent = createAgent({
 const response = await agent.respond("Book a trip to Paris for 2 next Friday");
 ```
 
-`new Agent(options)` still works — `createAgent` is sugar, not a replacement.
+`new Agent(options)` still works. `createAgent` is shorthand, not a replacement.
 
 
 ---
 
 ## 9. Tool / EnhancedTool Merge
 
-`EnhancedTool` is removed. Its optional metadata fields are now part of the base `Tool` interface. `Tool.name` is also removed — `Tool.id` is the sole identifier and is what the LLM sees as the tool name.
+`EnhancedTool` is removed. Its optional metadata fields are now part of the base `Tool` interface. `Tool.name` is also removed. `Tool.id` is the sole identifier and is what the LLM sees as the tool name.
 
 ```typescript
 // ─── v1 ───
@@ -1065,7 +1065,7 @@ const tool: Tool = {
 };
 ```
 
-Choose descriptive IDs — the LLM sees them. The optional fields that moved to `Tool`: `isConcurrencySafe`, `isReadOnly`, `isDestructive`, `interruptBehavior`, `maxResultSizeChars`, `validateInput`, `checkPermissions`.
+Choose descriptive IDs. The model sees them. The optional fields that moved to `Tool`: `isConcurrencySafe`, `isReadOnly`, `isDestructive`, `interruptBehavior`, `maxResultSizeChars`, `validateInput`, `checkPermissions`.
 
 ### New: `ToolContext.dispatch` and `ToolResult.directive`
 
@@ -1119,7 +1119,7 @@ The v1 `ConditionTemplate` type (a union of `string | function | Array<string | 
 
 ### Rules
 
-- `when` accepts **only strings** — passing a function throws `FlowConfigurationError` at construction.
+- `when` accepts **only strings**. Passing a function throws `FlowConfigurationError` at construction.
 - `if` accepts **only functions**.
 - When both are set: `if` runs first (free); `when` runs only if `if` passes (saves tokens).
 - Arrays are AND-conjunctions.
@@ -1174,7 +1174,7 @@ await agent.dispatch({ goTo: "Feedback", reason: "user requested feedback" }, se
 await agent.dispatch("Billing"); // string sugar for { goTo: "Billing" }
 ```
 
-`dispatch` sets `session.pendingDirective` — the directive is applied at the start of the next turn (not immediately). For synchronous in-place application without a `respond()` call, use `agent.applyDirective(directive, session)`.
+`dispatch` sets `session.pendingDirective`; the directive is applied at the start of the next turn (not immediately). For synchronous in-place application without a `respond()` call, use `agent.applyDirective(directive, session)`.
 
 ### Deprecated method removal (Dispatch & session access)
 
@@ -1200,7 +1200,7 @@ await agent.dispatch("Billing"); // string sugar for { goTo: "Billing" }
 
 ## 12. Agent Identity → `persona`
 
-Three v1 agent fields — `description`, `identity`, `personality` — collapse into a single `persona` field. `persona` is a `Template<TContext>` covering role, tone, and self-concept. Merge your old copy into one coherent prompt.
+Three v1 agent fields (`description`, `identity`, `personality`) collapse into a single `persona` field. `persona` is a `Template<TContext>` covering role, tone, and self-concept. Merge your old copy into one coherent prompt.
 
 ### Before / After
 
@@ -1235,7 +1235,7 @@ const flow: FlowOptions = {
   personality: 'Formal and precise',
 };
 
-// After — use a flow-level instruction
+// After: use a flow-level instruction
 const flow: FlowOptions = {
   title: 'Billing',
   instructions: [
@@ -1256,7 +1256,7 @@ const flow: FlowOptions = {
   knowledgeBase: { policies: { /* ... */ } },
 };
 
-// After — move to agent level
+// After: move to agent level
 const agent = createAgent({
   terms: [{ name: 'PNR', description: 'Passenger Name Record' }],
   knowledgeBase: { policies: { /* ... */ } },
@@ -1275,7 +1275,7 @@ Multi-step batching (`maxStepsPerBatch`, `BatchExecutor`, `BatchPromptBuilder`) 
 |-----|-----|
 | `AgentOptions.maxStepsPerBatch` | `AgentOptions.maxAutoStepsPerTurn` (default `10`) |
 | `BatchExecutor`, `BatchPromptBuilder`, `needsInput` | Removed |
-| Batch events (`batch_start`, `step_included`, `batch_complete`, …) | Step events (`step_entered`, `step_skipped`, `step_completed`) — `auto: boolean` in payload |
+| Batch events (`batch_start`, `step_included`, `batch_complete`, …) | Step events (`step_entered`, `step_skipped`, `step_completed`), with `auto: boolean` in the payload |
 | `StoppedReason: 'max_steps_reached'` | `'max_auto_steps'` |
 
 **Restructure pattern:** N tiny ask-steps batched into one call → one step with `collect: [field1, field2, field3]` and a prompt that asks for whatever is still missing. Pre-extraction handles the "user dumped everything in one message" case.
@@ -1293,7 +1293,7 @@ Multi-step batching (`maxStepsPerBatch`, `BatchExecutor`, `BatchPromptBuilder`) 
     context.isReturning ? 'Welcome back. Confirm?' : 'Confirm your order?' },
 ```
 
-**Validation:** an `auto: true` step throws `FlowConfigurationError` if it sets `prompt`, `collect`, `tools`, or `finalize`. `onEnter`, `prepare`, `onExit`, `branches`, `requires`, `skip` are all allowed. No schema change — auto-steps does not touch `SessionState`, existing persistence adapters need no migration.
+**Validation:** an `auto: true` step throws `FlowConfigurationError` if it sets `prompt`, `collect`, `tools`, or `finalize`. `onEnter`, `prepare`, `onExit`, `branches`, `requires`, `skip` are all allowed. No schema change: auto-steps do not touch `SessionState`, so existing persistence adapters need no migration.
 
 ---
 
@@ -1303,7 +1303,7 @@ This is **optional**. The implicit-fork pattern (multiple successor steps each w
 
 ### When to convert
 
-- The source step exists solely to route — it's a decision point, not a conversation node.
+- The source step exists solely to route: it makes a decision, not a reply.
 - Three or more successors with `when` conditions where the decision tree is hard to follow.
 - You want code-only routing (`if`) to skip LLM evaluation entirely.
 - You need mixed targets: some branches go to local steps, others jump to other flows or emit full Directives.
@@ -1316,7 +1316,7 @@ This is **optional**. The implicit-fork pattern (multiple successor steps each w
 ### Before / After
 
 ```typescript
-// Before — routing scattered across 4 target steps
+// Before: routing scattered across 4 target steps
 {
   steps: [
     { id: 'triage', prompt: 'How can I help?' },
@@ -1327,7 +1327,7 @@ This is **optional**. The implicit-fork pattern (multiple successor steps each w
   ],
 }
 
-// After — routing declared once at the source
+// After: routing declared once at the source
 {
   steps: [
     {
@@ -1352,7 +1352,7 @@ Runtime behavior is identical: AI evaluates entries in declaration order; first 
 
 ### Mixed targets
 
-Branches can route to local step ids, flow ids (sugar for `goTo`), or full Directives — implicit forks can only target steps in the same flow:
+Branches can route to local step ids, flow ids (sugar for `goTo`), or full Directives. Implicit forks can only target steps in the same flow:
 
 ```typescript
 branches: [
@@ -1363,13 +1363,13 @@ branches: [
 ]
 ```
 
-Upgrade an AI condition to a code condition by swapping `when` for `if` — the LLM call goes away:
+Upgrade an AI condition to a code condition by swapping `when` for `if`. The model call goes away:
 
 ```typescript
-// Before: AI evaluates this — costs tokens
+// Before: AI evaluates this; costs tokens
 { when: 'user is on the enterprise plan', then: 'enterprise_path' }
 
-// After: code evaluates this — free
+// After: code evaluates this; free
 { if: ({ data }) => data.plan === 'enterprise', then: 'enterprise_path' }
 ```
 
@@ -1408,4 +1408,4 @@ If both commands return clean (no matches; exit code 0), your migration is compl
 
 ## Cross-References
 
-- [CHANGELOG](../../CHANGELOG.md) — full v2.0 release notes
+- [CHANGELOG](../../CHANGELOG.md): full v2.0 release notes

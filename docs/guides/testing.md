@@ -216,7 +216,7 @@ console.log("ok");
 
 What each assertion pins down:
 
-- `llmCalls` is the budget. A turn that spends more than you scripted throws inside the provider, so an unexpected third call cannot pass silently. `usage` is absent in tests unless your scripted provider reports token counts — real providers do, and the turn adds them up.
+- `llmCalls` is the budget. A turn that spends more than you scripted throws inside the provider, so an unexpected third call cannot pass silently. `usage` is absent in tests unless your scripted provider reports token counts. Real providers do, and the turn adds them up.
 - `messages[].key` is `${runId}:${stepId}:${visit}`, and `runId` is `${flowId}#${triggerKey}`. The trigger key of a message turn is the message `id` you passed; of a silence wake, the `lastAssistantAt` timestamp in milliseconds.
 - `schedule[].key` is what your queue job carries (its id is the key encoded, since BullMQ refuses a `:` in one) and what you pass back as `wake`. The silence key is `silence:${flowId}:${sessionId}:${ms}`; a timer wait's key is `${runId}:${stepId}:${atMs}`.
 - `outcomes[]` is the execution log, one line per step. Assert on `code`, which is stable across versions, not on `message`, the English sentence beside it; see [outcomes](../reference/outcomes.md).
@@ -275,7 +275,7 @@ The same holds inside one session: feed the same `{ message, id }` to the sessio
 ## Other things worth a test
 
 - A `silenced` turn: `agent.turn({ …, silenced: "humano no comando" })` spends zero calls, phrases nothing, and still runs `do` steps. Assert `llmCalls === 0` and `messages.length === 0`.
-- A speak failure: leave the `speak` queue empty so the scripted provider throws inside the turn. `agent.turn()` still returns — no try/catch needed. Assert the outcome `{ status: "deferred", code: "provider-unavailable" }` and a `schedule[]` key ending in `:retry:<ms>`. See [error handling](./error-handling.md).
+- A speak failure: leave the `speak` queue empty so the scripted provider throws inside the turn. `agent.turn()` still returns, with no try/catch needed. Assert the outcome `{ status: "deferred", code: "provider-unavailable" }` and a `schedule[]` key ending in `:retry:<ms>`. See [error handling](./error-handling.md).
 - A stale wake: fire a key the session no longer waits for and assert `changed === false` and the outcome `code: 'stale-wake'`.
 - Actions: register `f.action` handlers that push `ctx.key` and `ctx.dedupeKey` to an array, and assert the list. The keys are the same on a replay.
 - The prompt: keep every `GenerateMessageInput` your provider receives and assert on `input.prompt` (which instructions reached it) and `input.tools` (which tools were offered). The repo's own scripted provider, `tests/mock-provider.ts`, records them as `calls[].prompt` and `calls[].input`.

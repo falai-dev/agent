@@ -12,15 +12,15 @@ import type { RequestConfig } from "./ProviderAdapter.js";
 export interface DeepSeekProviderOptions {
   /** DeepSeek API key */
   apiKey: string;
-  /** Model to use (required) — e.g. "deepseek-chat", "deepseek-reasoner" */
+  /** Required model, e.g. "deepseek-chat" or "deepseek-reasoner". */
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
   /**
    * Fallback providers, tried in order after this one fails or exhausts.
    * Accepts both @falai/agent AiProviders (like ZaiProvider) and
-   * @providerkit/core Providers — the seam that makes a coding-plan primary
-   * degrade to anything else rather than fail the turn.
+   * @providerkit/core Providers, so a coding-plan primary can fall back to
+   * another provider rather than fail the turn.
    */
   fallbacks?: Array<AiProvider | Provider>;
   /** Custom base URL (default: "https://api.deepseek.com") */
@@ -28,7 +28,7 @@ export interface DeepSeekProviderOptions {
   /** Request defaults sent with every call */
   config?: RequestConfig;
   /**
-   * See {@link JsonWithTools} — and reach for it here first. The measured
+   * Check {@link JsonWithTools} first. The measured
    * DeepSeek flash models called a tool 0/5 with the schema on the response
    * format, and narrated it instead.
    */

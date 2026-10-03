@@ -10,7 +10,7 @@
  * field and knows it is blank. Then the placeholder goes and `tidy` closes the
  * gap it left, so "Ola {{context.lead.name}}, tudo bem?" sends "Ola, tudo bem?"
  * and never "Ola , tudo bem?". Two things count as blank: an empty string, and
- * a path that walks THROUGH a null — `context.lead` being `null` means there
+ * a path that walks THROUGH a null. When `context.lead` is `null`, there
  * is no lead, so "the lead's name" is blank, not mistyped. A null at the end of
  * a path is still unknown: a field that collected nothing keeps its braces.
  */

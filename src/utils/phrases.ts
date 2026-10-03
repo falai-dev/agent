@@ -2,7 +2,7 @@
  * Splitting an AI-judged phrase list into what counts and what rules it out.
  *
  * A trigger's phrases are alternatives: one match is enough. That makes the
- * list useless for saying "but not this" — and "but not this" is what keeps a
+ * list useless for saying "but not this", which is what keeps a
  * classifier honest. A customer answering "pode sim" to an offer of a meeting
  * is agreeing to the meeting, not asking for a human, and without a way to say
  * so every cheerful yes reads as a handoff request.

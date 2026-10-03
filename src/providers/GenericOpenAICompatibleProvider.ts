@@ -4,8 +4,8 @@
  * Most "OpenAI-compatible" endpoints (Azure OpenAI, Groq, Together, Fireworks,
  * vLLM, LM Studio, Ollama, a self-hosted gateway…) differ from OpenAI only in
  * base URL, headers, and how structured output is requested. `createOpenAICompatibleProvider`
- * builds a working provider from that config alone — no subclass required — so
- * adding one ("fake" provider, same wire protocol, different base URL) is a few lines:
+ * builds a provider from that config without a subclass. Adding another
+ * endpoint with the same protocol takes a few lines:
  *
  *   const ollama = createOpenAICompatibleProvider({
  *     name: "ollama",
@@ -40,7 +40,7 @@ export interface OpenAICompatibleOptions {
   name: string;
   /** Base URL of the OpenAI-compatible endpoint. */
   baseURL: string;
-  /** API key. Local servers often ignore it — pass any non-empty string. */
+  /** API key. Local servers often ignore it; pass any non-empty string. */
   apiKey: string;
   /** Primary model / deployment name. */
   model: string;
@@ -57,14 +57,14 @@ export interface OpenAICompatibleOptions {
   /** Extra request headers (e.g. Azure's `api-key`, a gateway's auth header). */
   defaultHeaders?: Record<string, string>;
   /**
-   * How structured output is requested. Defaults to `"json_schema"` — the
+   * How structured output is requested. Defaults to `"json_schema"`, the
    * broadest enforced mode for arbitrary compatible endpoints (`responses.parse`
    * is OpenAI-only). See {@link StructuredOutputMode}.
    */
   structuredOutput?: StructuredOutputMode;
   /**
    * See {@link JsonWithTools}. Only affects calls that carry tools, and the
-   * answer is the model's, not the endpoint's — measure the one you serve.
+   * answer is the model's, not the endpoint's. Measure the one you serve.
    */
   jsonWithTools?: JsonWithTools;
   /** Default request parameters merged into every call. */
@@ -86,7 +86,7 @@ const DEFAULT_CAPABILITIES: ProviderCapabilities = {
 
 /**
  * Concrete OpenAI-compatible provider configured entirely from
- * {@link OpenAICompatibleOptions}. Kept private — construct via
+ * {@link OpenAICompatibleOptions}. Kept private. Construct via
  * {@link createOpenAICompatibleProvider}; subclass {@link OpenAICompatibleProvider}
  * directly if you need behavior beyond these knobs (e.g. provider-specific
  * error classification or streaming hooks).

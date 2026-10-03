@@ -1,5 +1,5 @@
 /**
- * OpenRouter — one OpenAI-compatible endpoint in front of many models.
+ * OpenRouter: one OpenAI-compatible endpoint for many models.
  */
 
 import type { AiProvider, ProviderCapabilities } from "../types/ai.js";
@@ -10,15 +10,15 @@ import type { Provider } from "@providerkit/core";
 export interface OpenRouterProviderOptions {
   /** OpenRouter API key */
   apiKey: string;
-  /** Model to use (required) — see https://openrouter.ai/models */
+  /** Required model. See https://openrouter.ai/models. */
   model: string;
   /** Backup models to try if the primary fails (default: []) */
   backupModels?: string[];
   /**
    * Fallback providers, tried in order after this one fails or exhausts.
    * Accepts both @falai/agent AiProviders (like ZaiProvider) and
-   * @providerkit/core Providers — the seam that makes a coding-plan primary
-   * degrade to anything else rather than fail the turn.
+   * @providerkit/core Providers, so a coding-plan primary can fall back to
+   * another provider rather than fail the turn.
    */
   fallbacks?: Array<AiProvider | Provider>;
   /** Site URL for OpenRouter's rankings */
@@ -28,12 +28,12 @@ export interface OpenRouterProviderOptions {
   /**
    * Preferred upstream hosts, in order. OpenRouter's prompt cache lives on the
    * upstream host's account and default routing hops between them, so every hop
-   * is a cold cache — worse latency and a higher effective input cost across a
-   * conversation's rounds. Fallbacks stay on: this is a preference, not a lock.
+   * is a cold cache, with worse latency and a higher effective input cost across
+   * a conversation's rounds. Fallbacks stay on: this is a preference, not a lock.
    */
   providerOrder?: string[];
   /**
-   * See {@link JsonWithTools} — and reach for it here first. One gateway serves
+   * Check {@link JsonWithTools} first. One gateway serves
    * hundreds of models and they do not agree: measured through this provider,
    * `z-ai/glm-5.3-flash` called a tool 0/10 with the schema on the response
    * format and 8/8 with it in the prompt, while `qwen3.8-flash` went the other

@@ -1,5 +1,5 @@
 ---
-title: "@falai/agent v4 — one Flow (design v2)"
+title: "@falai/agent v4: one Flow (design v2)"
 description: "Design record for @falai/agent 4.0: flows, automations and signals become one Flow with triggers, runs, waits and per-field asks. Not part of the docs sidebar."
 type: concept
 order: 99
@@ -45,11 +45,11 @@ sidebar: false
 >   English; the authored content it carries (prompts, `ask` texts, instructions, knowledge) and
 >   the outcome `detail` strings the host shows in *Execuções* stay in the product's language.
 
-# @falai/agent v4 — one Flow (design v2)
+# @falai/agent v4: one Flow (design v2)
 
 ## 1. Mental model
 
-A **Flow** is a trigger plus an ordered list of steps. The trigger says when a **run** starts: the lead asks for this (`message`: the AI routes the conversation here), the lead mentions this (`mention`: the AI detects it, the run reacts beside the conversation), something happens in the host (`event` with a payload), the lead goes quiet (`silence`), or nothing — the host starts it (*Início manual*). Each step is one of five things: the AI talks (`prompt` / `collect`), a fixed message goes out (`say`), the host does something (`do`), the run waits (`wait`), or the code forks (`if`). Fields live on the agent schema, each with its own *como perguntar*; they land in any order and a step ends when its fields are known. A **session** (one per conversation) holds many runs; at most one run is asking a question at a time. One method, `agent.turn()`, takes whatever just happened, moves the runs by code, spends at most two LLM calls (understand the lead, phrase the reply) plus one per tool round, and hands back the messages to send, the timers to set and a per-step outcome line. The framework never sends, never sleeps, never saves; the host does those three things after a successful compare-and-swap. Product side: one page (*Fluxos*, sections *Funil* / *Atendimento*), one card (*Quando X → faça Y*), one editor, one assistant tool, one drawer (*Execuções*).
+A **Flow** is a trigger plus an ordered list of steps. The trigger says when a **run** starts: the lead asks for this (`message`: the AI routes the conversation here), the lead mentions this (`mention`: the AI detects it, the run reacts beside the conversation), something happens in the host (`event` with a payload), the lead goes quiet (`silence`), or the host starts it by hand (*Início manual*). Each step is one of five things: the AI talks (`prompt` / `collect`), a fixed message goes out (`say`), the host does something (`do`), the run waits (`wait`), or the code forks (`if`). Fields live on the agent schema, each with its own *como perguntar*; they land in any order and a step ends when its fields are known. A **session** (one per conversation) holds many runs; at most one run is asking a question at a time. One method, `agent.turn()`, takes whatever just happened, moves the runs by code, spends at most two LLM calls (understand the lead, phrase the reply) plus one per tool round, and hands back the messages to send, the timers to set and a per-step outcome line. The framework never sends, never sleeps, never saves; the host does those three things after a successful compare-and-swap. Product side: one page (*Fluxos*, sections *Funil* / *Atendimento*), one card (*Quando X → faça Y*), one editor, one assistant tool, one drawer (*Execuções*).
 
 Child: "A flow is a list of steps that starts when something happens. The AI does the talking. The code does the rest." Junior: "`agent.turn({ message: 'oi' })` returns the messages to send."
 
@@ -62,7 +62,7 @@ Child: "A flow is a list of steps that starts when something happens. The AI doe
 | Step `prompt` / `auto` / `reply` | `prompt` stays (AI talks); `reply` → `say`; `auto` → `do`, `if`, `wait`. |
 | `collect` | Stays as step completion: a talk step ends when its fields are known, skipped without a call when already known. `{ collect: [...] }` alone asks with the schema's `ask`. |
 | `requires`, `skip`, `requiredFields`, `optionalFields` | Die. Order, known-field skipping, `if` steps and `maxAsks` cover every use. |
-| `branches` (`when`/`if` mid-step exits) | Stay as `branches[]` on talk and `wait` steps, judged while the step is asking — `if` free, `when` inside the understand call. There is no standalone `when` step: AI forks only exist where fresh text exists. |
+| `branches` (`when`/`if` mid-step exits) | Stay as `branches[]` on talk and `wait` steps, judged while the step is asking: `if` free, `when` inside the understand call. There is no standalone `when` step: AI forks only exist where fresh text exists. |
 | `onComplete`, `reentrant` | → `onEnd` (`'end' \| 'stay' \| 'reset'`), `repeat` on the trigger, `clearOnStart`. |
 | prepare / finalize / onEnter / onExit | Die → a `do` step at that position. |
 | Directive, `dispatch`, `pendingDirective`, `flow.merge/validate`, five appliers | Die. Every position change goes through one `advance()`. Tools return `{ value?, data? }`. |
@@ -79,7 +79,7 @@ Child: "A flow is a list of steps that starts when something happens. The AI doe
 | PersistenceAdapter ×7, `restoreSession`, `autoSave` | → `Store { load, save(expectedVersion) }`, `SessionConflictError`, `MemoryStore`, one `PostgresStore` reference. |
 | `respondStream` | → `agent.turnStream()`. |
 
-Core modules removed: ResponsePipeline, FlowRouter, ResponseModal, Signal*, AutoChainExecutor, StepLifecycle, DirectiveChainTracker, PersistenceManager, five adapters — about half of `src/core`. One `Runner` with one `advance()` plus `Understand.ts`, `Speak.ts`, `Envelope.ts`, `Migrate.ts`.
+Core modules removed: ResponsePipeline, FlowRouter, ResponseModal, Signal*, AutoChainExecutor, StepLifecycle, DirectiveChainTracker, PersistenceManager, five adapters, about half of `src/core`. One `Runner` with one `advance()` plus `Understand.ts`, `Speak.ts`, `Envelope.ts`, `Migrate.ts`.
 
 ## 3. Public TypeScript API
 
@@ -120,7 +120,7 @@ type Step<C, D, Cond, A extends ActionMap, E> = { id: string; label?: string; th
 interface Flow<C, D, Cond, A extends ActionMap, E> {
   id: string; name: string; description?: string;
   on?: Trigger<C, D, Cond, E>[];        // absent or [] = Início manual
-  anchor?: string;                      // 'session' (default) or a host anchor name — "vale por conversa / por lead"
+  anchor?: string;                      // 'session' (default) or a host anchor name: "vale por conversa / por lead"
   while?: Pred<C, D, Cond>;             // re-checked whenever the run moves; default = trigger `if`
   collect?: (keyof D)[];                // the data this flow needs; steps' collect orders the asks
   clearOnStart?: (keyof D)[];
@@ -177,7 +177,7 @@ const conditions = {                                                     // plus
 };
 ```
 
-**S1 — Triagem, complete.** The confirmation is a collected boolean; a "no" clears it and re-asks; `avisa` runs only after the lead's ok.
+**S1: Triagem, complete.** The confirmation is a collected boolean; a "no" clears it and re-asks; `avisa` runs only after the lead's ok.
 
 ```ts
 const triagem = f.flow({
@@ -195,7 +195,7 @@ const triagem = f.flow({
 });
 ```
 
-**S2 — Retomar quem sumiu, complete.** Started by the silence timer the framework arms after it speaks; any reply ends the run; while a human owns the lead the seller gets a reminder instead.
+**S2: Retomar quem sumiu, complete.** Started by the silence timer the framework arms after it speaks; any reply ends the run; while a human owns the lead the seller gets a reminder instead.
 
 ```ts
 const retomar = f.flow({
@@ -208,7 +208,7 @@ const retomar = f.flow({
     { id: 'w1',     wait: '2d', else: 'end' },
     { id: 'p2',     prompt: 'Última tentativa, curta e sem pressão: fica à disposição quando quiser retomar.' },
     { id: 'w2',     wait: '3d', else: 'end' },
-    { id: 'n1',     do: 'notify', with: { recipient: 'leadAssignee', message: '{{data.nome}} não respondeu a duas retomadas — vale um contato manual.' }, then: 'end' },
+    { id: 'n1',     do: 'notify', with: { recipient: 'leadAssignee', message: '{{data.nome}} não respondeu a duas tentativas de retomar a conversa. Entre em contato.' }, then: 'end' },
     { id: 'lembra', do: 'notify', with: { recipient: 'leadAssignee', message: 'Hora de fazer follow-up com {{data.nome}}.' } },
   ],
 });
@@ -254,7 +254,7 @@ const r = await agent.turn({ sessionId: 'demo', message: 'oi' });   // README: o
 console.log(r.messages[0].text);
 ```
 
-Stored flows load as `FlowSpec`: the same object as JSON with a **flat step** `{ id, kind: 'prompt' | 'collect' | 'say' | 'do' | 'wait' | 'waitEvent' | 'if', ...props, then?, else? }`, `do` names, condition names and field slugs resolved through the agent's registries. `validateFlow(spec, agent)` throws `FlowConfigurationError` naming the unknown field, action, event, condition or step id, the reserved id `end`, a missing `else` on a backward `if`, and warns on a backward edge without `clear`. `flowSpecSchema(agent)` returns FlowSpec's JSON schema with the workspace's actions (with their parameter schemas), events, conditions and fields enumerated — a closed schema Gemini accepts; it is the response schema of the host's generation call.
+Stored flows load as `FlowSpec`: the same object as JSON with a **flat step** `{ id, kind: 'prompt' | 'collect' | 'say' | 'do' | 'wait' | 'waitEvent' | 'if', ...props, then?, else? }`, `do` names, condition names and field slugs resolved through the agent's registries. `validateFlow(spec, agent)` throws `FlowConfigurationError` naming the unknown field, action, event, condition or step id, the reserved id `end`, a missing `else` on a backward `if`, and warns on a backward edge without `clear`. `flowSpecSchema(agent)` returns FlowSpec's JSON schema with the workspace's actions (with their parameter schemas), events, conditions and fields enumerated, a closed schema Gemini accepts; it is the response schema of the host's generation call.
 
 ## 4. The turn pipeline
 
@@ -264,14 +264,14 @@ Eight phases, one order for every input; only 3 and 6 spend LLM calls. `turn()` 
 2. **Ingest** (code).
    - `message` / inbound `event`: `lastUserAt = at ?? clock()`; a keyed `id` already in `session.inputs` → no-op, `changed: false`. Every run parked on a timer `wait` with `else` takes `else` (oldest first); a `wait: { event }` on this event takes `then`.
    - Outbound `event`: stamps `lastAssistantAt`, nothing else.
-   - `wake` starting with `silence:`: honored only when its `lastAssistantAtMs` equals `session.lastAssistantAt` and the lead has not written since (`lastUserAt`, and the anchor's `lastInboundAt` for lead-anchored flows, both `< lastAssistantAt`); it then goes through the start order below with `trigger.kind: 'silence'`. Otherwise `ignorado: silêncio quebrado`, `changed: false`. Any other `wake`: the run whose `waiting.key` equals it, else `ignorado: wake antigo`. A timer `wait` with `else` whose lead wrote after `waiting.setAt` takes `else` — the reply beat the job.
+   - `wake` starting with `silence:`: honored only when its `lastAssistantAtMs` equals `session.lastAssistantAt` and the lead has not written since (`lastUserAt`, and the anchor's `lastInboundAt` for lead-anchored flows, both `< lastAssistantAt`); it then goes through the start order below with `trigger.kind: 'silence'`. Otherwise `ignorado: silêncio quebrado`, `changed: false`. Any other `wake`: the run whose `waiting.key` equals it, else `ignorado: wake antigo`. A timer `wait` with `else` whose lead wrote after `waiting.setAt` takes `else`: the reply beat the job.
    - `event` / `start`: flows with a matching trigger start, in this order: `if` (payload as `input`) → `repeat` via claims (cooldown = interval check on `claims[key].at`) → `hop < 5` else `pulado: limite de encadeamento` → one active run per (flow, anchor) against `session.runs` and `claims.active`: a live run still parked on its own `after` timer is **replaced** (`ended.reason: 'replaced'`, its job self-skips), any other live run → `pulado: já em andamento` → `after` parks the new run.
    - Every run about to move re-checks `while` with fresh context; false → ends `pulado: premissa mudou`. Silence-triggered runs add the premise "no lead message since the run started" → `pulado: lead escreveu nesse meio-tempo`.
 3. **Understand** (≤1 call, `schemaName: 'understand'`). Only for `message` and inbound events with text; skipped under `silenced` unless `understand: true`, and when nothing is AI-conditioned. Candidates: the floor holder's flow (always, whatever its trigger), `message` flows passing `if` + `repeat`, `mention` flows with non-empty `mention` passing `if` + `repeat`. Envelope, every property required and nullable: `{ flows: { id: 0-100 }, mentions: { id: boolean }, extract: { id: {...} }, branches: { 'runId/stepId/i': boolean }, fields: { every pending field with extract 'anywhere' } }`. Shortcuts: exactly one eligible `message` flow, no floor, no catch-all passing and `idle: 'silent'` → it starts, no scoring (with a catch-all or the idle speaker, a low score has somewhere to go, so it is scored); zero candidates and zero pending fields → zero calls (S9).
 4. **Decide** (code). Runs starting this turn apply `clearOnStart` first. Extracted values are checked: unknown keys dropped (`ignorado: campo desconhecido`), strings coerced to number/boolean, enum membership enforced, otherwise `campo descartado: valor fora da lista`; then written to `session.data` (one `known`: not `undefined | null | ''`). Mention runs start in flow order (a trigger `if` with `extract` sees `input` now); `mention: []` code-only detectors start here without the call. The first true branch of the asking step takes its `then`. Routing: if a run took or resumed the floor in Ingest, routing is skipped (scores recorded, not applied). Otherwise the floor (any run `running`/`asking`, not `waiting`) stays unless another flow scores ≥ current + 15 and ≥ 40; no floor → best ≥ 40 starts (a `suspended` run of that flow resumes instead), then a `message: []` catch-all, else the `idle` speaker.
 5. **Run** (code). If no run is `asking`, the most recently `suspended` returns to `asking`. The Runner advances every run that can move, oldest first, through `advance()`: `do` runs the handler with `key = ${runId}:${stepId}:${visit}` (`run.visits[stepId]` increments on entry; at-least-once, before the save); `failed` writes a `failed` outcome and continues to `then` unless `onFail`; `skipped` continues; `defer` re-parks under a fresh wake key; `spoke: true` makes it the turn's speaker. `say` appends a message (`once` → claim `${flowId}:${stepId}:${sessionId}`). `wait ≤ 10s` carries as `afterMs` to the next message emitted this turn, or schedules a real wake if none follows; longer waits park with `waiting` and a `schedule` entry, snapped by `businessHours`. `if` picks `then`/`else`. A talk step whose fields are all known is skipped (0 calls); otherwise it is queued for phase 6 and the current asker becomes `suspended` (a run started this turn by routing never suspends one that took the floor in Ingest). Flow missing from the agent → `pulado: fluxo desativado ou removido`; step missing → `pulado: passo removido`. Caps: 50 steps per run per turn → `falhou: laço de passos`; hop 5.
-6. **Speak** (≤1 call + tool rounds, `schemaName: 'speak'`). One talk step speaks. Talk step = `prompt`, `collect`, `say`. Rules: a `say` or `spoke: true` emitted this turn by a run **other than** the floor holder, in reply to a user message, silences the floor's talk (`pulado: outra resposta já saiu`; the run stays `asking`) — a run's own `say` never silences its own talk. Under `silenced` no message-producing step runs and no run advances past one: an `asking` run stays `asking`; a run whose talk step was reached by a wake, event or start ends `silenciado: <reason>` (an earlier `if: { silenced: true }` routes around it); `do` steps still run; zero calls. Prompt = identity + flow + step guideline + this step's pending fields with their `ask` (all of them; the step prompt says how many to ask) + known fields as facts + tools + instructions + history. A wake states *não há mensagem nova do cliente; você fala primeiro*. Envelope `{ message, ...pending fields of this step }`, all required and nullable, shallow-merged last-wins across tool rounds. Provider failure: in phase 3 the turn throws `ProviderError` (nothing ran, nothing saved; the host retries the input); in phase 6 the turn returns with the talk step re-parked under `${runId}:${stepId}:${visit}:retry:${atMs}` (+1m, +5m, +15m), outcome `deferred: IA indisponível`, session saved, phase 5 effects not repeated.
-7. **Settle** (code, the ONE applier). A collect step stays `asking` until its fields are known, a branch fires, or a field hits `maxAsks` (default 3 → `campo pulado: perguntado 3 vezes`); `asked[field]` increments when the step spoke with the field pending and the next lead message left it unknown — detours count, the ceiling is documented. A prompt without `collect` advances after speaking once. `then`: step (visits++), `{ step, clear }` (clears, then jumps), `'end'` → `onEnd`, `{ flow }` (template resolved against `input`/`context`; this run ends `reason: 'flow'`, the new run has `trigger.kind: 'flow'`, key `${parentRunId}:${stepId}:${visit}`, hop+1, and holds the floor). When no run is `asking`, the most recently suspended resumes. If the assistant spoke last, every `silence` flow passing `if` and `repeat` gets `schedule: { key: silence:${flowId}:${sessionId}:${lastAssistantAtMs}, at, replaces: <previous key> }`.
+6. **Speak** (≤1 call + tool rounds, `schemaName: 'speak'`). One talk step speaks. Talk step = `prompt`, `collect`, `say`. Rules: a `say` or `spoke: true` emitted this turn by a run **other than** the floor holder, in reply to a user message, silences the floor's talk (`pulado: outra resposta já saiu`; the run stays `asking`). A run's own `say` never silences its own talk. Under `silenced` no message-producing step runs and no run advances past one: an `asking` run stays `asking`; a run whose talk step was reached by a wake, event or start ends `silenciado: <reason>` (an earlier `if: { silenced: true }` routes around it); `do` steps still run; zero calls. Prompt = identity + flow + step guideline + this step's pending fields with their `ask` (all of them; the step prompt says how many to ask) + known fields as facts + tools + instructions + history. A wake states *não há mensagem nova do cliente; você fala primeiro*. Envelope `{ message, ...pending fields of this step }`, all required and nullable, shallow-merged last-wins across tool rounds. Provider failure: in phase 3 the turn throws `ProviderError` (nothing ran, nothing saved; the host retries the input); in phase 6 the turn returns with the talk step re-parked under `${runId}:${stepId}:${visit}:retry:${atMs}` (+1m, +5m, +15m), outcome `deferred: IA indisponível`, session saved, phase 5 effects not repeated.
+7. **Settle** (code, the ONE applier). A collect step stays `asking` until its fields are known, a branch fires, or a field hits `maxAsks` (default 3 → `campo pulado: perguntado 3 vezes`); `asked[field]` increments when the step spoke with the field pending and the next lead message left it unknown. Detours count; the ceiling is documented. A prompt without `collect` advances after speaking once. `then`: step (visits++), `{ step, clear }` (clears, then jumps), `'end'` → `onEnd`, `{ flow }` (template resolved against `input`/`context`; this run ends `reason: 'flow'`, the new run has `trigger.kind: 'flow'`, key `${parentRunId}:${stepId}:${visit}`, hop+1, and holds the floor). When no run is `asking`, the most recently suspended resumes. If the assistant spoke last, every `silence` flow passing `if` and `repeat` gets `schedule: { key: silence:${flowId}:${sessionId}:${lastAssistantAtMs}, at, replaces: <previous key> }`.
 8. **Return**: `session` (version unchanged; the host bumps it), `changed`, `messages` in emission order, `schedule`, `outcomes`, `started`, `ended`, `skipped`, `llmCalls`.
 
 Budget: message turn 2 calls + tool rounds (1 with a single flow and no pending fields, 0 when silenced); wake to a talk step 1; wake to `do`/`wait` 0. `llmCalls` on every result makes it a test, not a promise.
@@ -280,7 +280,7 @@ Budget: message turn 2 calls + tool rounds (1 with a single flow and no pending 
 
 ```ts
 interface Run {
-  id: string;                                  // `${flowId}#${triggerKey}` — deterministic, replay mints the same keys
+  id: string;                                  // `${flowId}#${triggerKey}`; deterministic, replay mints the same keys
   flowId: string; anchor: string; dedupeKey: string; stepId: string | null;
   status: 'running' | 'asking' | 'waiting' | 'suspended';
   trigger: { kind: 'message' | 'mention' | 'silence' | 'event' | 'start' | 'flow'; key: string; payload?: unknown };
@@ -363,7 +363,7 @@ interface Session<D> {
 }
 ```
 
-`migrateSession(blob, { flowIdOf })` runs at each app's choke point (`deserializeFalaiSessionState`): no `v` → `data` verbatim; `currentFlow/currentStep` → one run `{ id: '${flowId}#legacy', stepId, status: 'asking', trigger: { kind: 'message', key: 'legacy' }, visits: {} }`; `signals.triggers[key]` and `flowHistory[].completed` → `claims['${flowIdOf(key)}:${sessionId}:']`; `pendingDirective` dropped. `migrateFlows` gives signal-triggered flows `id = trigger.signal` so `flowIdOf` is identity for ilojista's 315 live once-signals — a real ilojista blob is a test fixture. Talk-step ids survive, so 844 + 315 cursors keep position; split-out steps get `${stepId}:media` / `${stepId}:integration`.
+`migrateSession(blob, { flowIdOf })` runs at each app's choke point (`deserializeFalaiSessionState`): no `v` → `data` verbatim; `currentFlow/currentStep` → one run `{ id: '${flowId}#legacy', stepId, status: 'asking', trigger: { kind: 'message', key: 'legacy' }, visits: {} }`; `signals.triggers[key]` and `flowHistory[].completed` → `claims['${flowIdOf(key)}:${sessionId}:']`; `pendingDirective` dropped. `migrateFlows` gives signal-triggered flows `id = trigger.signal` so `flowIdOf` is identity for ilojista's 315 live once-signals. A real ilojista blob is a test fixture. Talk-step ids survive, so 844 + 315 cursors keep position; split-out steps get `${stepId}:media` / `${stepId}:integration`.
 
 ## 11. Consumer migration
 
@@ -435,7 +435,7 @@ const propostaParada = f.flow({
   id: 'proposta-parada', name: 'Proposta parada',
   on: [{ event: 'stage_entered', if: { inStage: 'proposta-enviada' }, after: '3d', businessHours: true }],
   steps: [
-    { id: 'p1', prompt: 'A proposta foi enviada há três dias sem retorno. Pergunte, em uma frase, se ficou alguma dúvida — use o que já sabe sobre {{data.empresa}}.' },
+    { id: 'p1', prompt: 'A proposta foi enviada há três dias sem retorno. Pergunte, em uma frase, se ficou alguma dúvida. Use o que já sabe sobre {{data.empresa}}.' },
     { id: 'w1', wait: '2d', else: 'end' },
     { id: 'n1', do: 'notify', with: { recipient: 'leadAssignee', message: 'Proposta de {{data.nome}} sem resposta há 5 dias.' } },
   ],

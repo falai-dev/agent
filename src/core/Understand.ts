@@ -199,7 +199,7 @@ function floorSection<C, D>(
   ];
   const step = flow.steps.find((s) => s.id === run.stepId);
   if (step && ("collect" in step || "prompt" in step)) {
-    lines.push(`Current step: ${step.id}${step.prompt ? ` — ${t(step.prompt)}` : ""}`);
+    lines.push(`Current step: ${step.id}${step.prompt ? `: ${t(step.prompt)}` : ""}`);
     const pending = pendingFields(step, data, run.asked);
     if (pending.length) {
       lines.push("This step is waiting for:");
@@ -217,7 +217,9 @@ function flowsSection<C, D>(candidates: Flow<C, D>[], aliases: Aliases, t: (text
     "Score every flow from 0 to 100 by how well the message fits it. Score all of them, the current flow included.",
   ];
   candidates.forEach((flow, i) => {
-    lines.push(`${i + 1}. ${aliases.of(flow.id, "f")} — ${flow.name}${flow.description ? `: ${t(flow.description)}` : ""}`);
+    lines.push(
+      `${i + 1}. ${aliases.of(flow.id, "f")}: ${flow.name}${flow.description ? `: ${t(flow.description)}` : ""}`,
+    );
     const { counts, excludes } = splitPhrases(triggerPhrases(flow, "message"));
     if (counts.length) lines.push(`   The customer: ${counts.map(t).join("; ")}`);
     if (excludes.length) lines.push(`   Score 0 when: ${excludes.map(t).join("; ")}`);
@@ -243,7 +245,9 @@ function mentionsSection<C, D>(flows: Flow<C, D>[], aliases: Aliases, t: (text: 
       "A 'Does not count when' line overrides a match: if one of those fits, answer false.",
   ];
   for (const flow of flows) {
-    lines.push(`- ${aliases.of(flow.id, "f")} — ${flow.name}${flow.description ? `: ${t(flow.description)}` : ""}`);
+    lines.push(
+      `- ${aliases.of(flow.id, "f")}: ${flow.name}${flow.description ? `: ${t(flow.description)}` : ""}`,
+    );
     const { counts, excludes } = splitPhrases(triggerPhrases(flow, "mention"));
     if (counts.length) lines.push(`  Counts when: ${counts.map(t).join("; ")}`);
     if (excludes.length) lines.push(`  Does not count when: ${excludes.map(t).join("; ")}`);

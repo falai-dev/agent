@@ -2,7 +2,7 @@
  * The bridge between this framework's provider seam and `@providerkit/core`.
  *
  * The two seams are different shapes on purpose. Core speaks in normalized
- * chunks — `createStream(messages, tools, opts)` — because that is the only
+ * chunks through `createStream(messages, tools, opts)`, because that is the only
  * shape every vendor's wire actually is. This framework speaks in whole turns:
  * `generateMessage(input)` takes a composed prompt plus history and hands back
  * a parsed structured response, because that is what a flow step needs.
@@ -12,7 +12,7 @@
  * definitions, chunks to an accumulated turn.
  *
  * Both entry points run the SAME pipeline. `generateMessage` is
- * `generateMessageStream` drained — one code path for the streaming and
+ * `generateMessageStream` drained: one code path for the streaming and
  * non-streaming APIs, where there used to be two of everything per vendor and
  * the pair drifted (the streaming path silently lost native schema enforcement
  * because only the non-streaming one could reach `responses.parse`).
@@ -76,7 +76,7 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = { timeout: 60_000, retries: 3 };
 
 /**
  * Normalize a provider's optional retry config against the defaults. `timeout`
- * uses `||` (a 0ms timeout is degenerate — it would abort every call before it
+ * uses `||` (a 0ms timeout would abort every call before it
  * began), while `retries` uses `??` so an explicit `retries: 0` is honored
  * rather than treated as unset.
  */
@@ -102,10 +102,10 @@ export interface RequestConfig {
    * How hard the model thinks, bound as this provider's default. What absent
    * means is the shape's own business, not one rule: on Gemini it is the
    * model's dynamic thinking; on the OpenAI and OpenRouter dialects nothing is
-   * sent, so the model decides — `medium` on GPT-5 and older, and on
-   * OpenRouter GLM 5.3 Flash thinks on most of the hosts that serve it. Set
-   * `"none"` where a turn must not think; on the Anthropic shape — so
-   * `AnthropicProvider` and `ZaiProvider` — `@providerkit/core` resolves an
+   * sent, so the model decides (`medium` on GPT-5 and older).
+   * On OpenRouter, GLM 5.3 Flash thinks on most of the hosts that serve it. Set
+   * `"none"` where a turn must not think. On the Anthropic shape,
+   * `AnthropicProvider` and `ZaiProvider`, `@providerkit/core` resolves an
    * absent effort to `"none"`, and Z.ai is sent an explicit disabled marker
    * because its endpoint reads silence as thinking ON. Set a level to ask for
    * thinking where it is off; it matters most under a small `maxTokens`, where
@@ -335,18 +335,18 @@ export abstract class ProviderAdapter implements AiProvider {
   }
 
   /**
-   * Ask this provider's MODEL whether it can still call a tool while its output
-   * is pinned to a schema — the shape every turn here sends, because that is how
-   * `message` and the step's `collect` fields come back.
+   * Ask whether this provider's model can call a tool while its output is
+   * pinned to a schema. Every turn uses this shape to return `message` and
+   * the step's `collect` fields.
    *
    * Some models cannot, and they do not report it: the call has nowhere to go,
    * so the model narrates it ("let me look that up for you") and stops. On the
    * wire the turn succeeded. Downstream it reads as an agent that will not use
-   * its tools, and no instruction fixes it — which is why this is a measurement
-   * rather than a setting to reason about.
+   * its tools, and no instruction fixes it. Measure this behavior rather than
+   * guessing the right setting.
    *
    * Run it once, at boot, and pass `use` back as `jsonWithTools` (or fail the
-   * boot when it is `null` — that model cannot serve this framework's turns).
+   * boot when it is `null`, since that model cannot serve these turns).
    * Log `calls`: `0/3 and 3/3` is what makes the next model swap's regression
    * obvious. Costs `samples × 2` short calls, and errors propagate.
    *
@@ -381,7 +381,12 @@ export abstract class ProviderAdapter implements AiProvider {
     const messages = toMessages(input.history, input.prompt, input.system);
     const tools = toTools(input.tools);
     const json = toJsonOutput(input);
-    const acc: Accumulator = { text: "", model: this.primaryModel, reasoning: "", calls: new Map() };
+    const acc: Accumulator = {
+      text: "",
+      model: this.primaryModel,
+      reasoning: "",
+      calls: new Map(),
+    };
 
     const opts: StreamOptions = {
       ...this.defaults,

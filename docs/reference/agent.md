@@ -86,7 +86,7 @@ class Agent<C, D> {
 
 `Idle` is `{ prompt: Template; tools?: string[]; instructions?: Instruction[] } | 'silent'`. Its `tools` list must name tools registered on the agent.
 
-`AgentCompactionConfig` is `{ maxTokens: number; compactionThreshold?: number; preserveRecentCount?: number; maxToolResultChars?: number; enabled?: boolean }`. `maxTokens` must be more than 0. Defaults: `compactionThreshold` `0.8` — compaction runs when the history passes 80% of `maxTokens` (allowed 0.5 to 0.95); keep the 4 most recent messages (at least 2); cut each tool result at 5000 characters (more than 0); `enabled: true`. Values outside those ranges throw at construction.
+`AgentCompactionConfig` is `{ maxTokens: number; compactionThreshold?: number; preserveRecentCount?: number; maxToolResultChars?: number; enabled?: boolean }`. `maxTokens` must be more than 0. Defaults: `compactionThreshold` `0.8`, so compaction runs when the history passes 80% of `maxTokens` (allowed 0.5 to 0.95); keep the 4 most recent messages (at least 2); cut each tool result at 5000 characters (more than 0); `enabled: true`. Values outside those ranges throw at construction.
 
 ## turn()
 
@@ -196,10 +196,10 @@ if (r.usage) {
 - **Construction validates everything.** `f.agent()` throws `FlowConfigurationError` when:
   - two flows share an id
   - `idle.tools` names a tool that is not registered
-  - a tool's `parameters` is not a JSON Schema object (`{ type: "object", properties, required }`) — the shape a function declaration needs, and easy to confuse with an action's `{ name: { type } }` map
+  - a tool's `parameters` is not a JSON Schema object (`{ type: "object", properties, required }`), the shape a function declaration needs. Do not use an action's `{ name: { type } }` map
   - `validateFlow` rejects any flow (see [Flow](flow.md#what-validateflow-rejects))
 
-  Warnings — a backward jump without `clear`, a `collect` with no prompt and no `ask` — are logged with the `[Agent]` prefix. Compaction options outside their ranges throw a plain `Error`.
+  Warnings (a backward jump without `clear`, a `collect` with no prompt and no `ask`) are logged with the `[Agent]` prefix. Compaction options outside their ranges throw a plain `Error`.
 - **The input is never mutated.** `turn()` deep-copies `session` and works on the copy. `result.session` is that copy.
 - **Ignored inputs.** A wake with no `session`, a wake whose key no live run holds, a silence wake after the customer wrote, and a message whose `id` is in the session's last 50 input ids all return `changed: false` with one `skipped` outcome line whose `code` says which: `no-session`, `stale-wake`, `silence-broken` or `duplicate-input`.
 - **`changed` is computed, not flagged.** It is `true` when the session differs from the one you passed, or when there is anything in `messages`, `schedule`, `outcomes` or `skipped`.

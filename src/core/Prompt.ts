@@ -35,7 +35,7 @@ export function identitySection(
  * The stable half goes out as a system message so a provider can cache it: on
  * Anthropic that block is the one thing carrying a `cache_control` marker, and
  * a cache read is a tenth the price of the tokens it replaces. Sent as part of
- * the trailing user turn — which is where the whole prompt used to go — it sat
+ * the trailing user turn (where the whole prompt used to go), it sat
  * behind text that changes every turn, so nothing was ever cached and both
  * calls of every turn re-billed the identity and the knowledge base in full.
  *

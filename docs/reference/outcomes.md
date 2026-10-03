@@ -73,7 +73,7 @@ interface TurnResult<D = unknown> {
 | `runId` | `string` | `${flowId}#${triggerKey}`. Absent on lines that belong to no run (an ignored input, a dropped value, the idle speaker). |
 | `flowId` | `string` | The run's flow. Absent whenever `runId` is absent. |
 | `stepId` | `string` | The step the line is about. Absent when the run has not entered a step, and whenever `runId` is absent. |
-| `key` | `string` | Three shapes: `${runId}:${stepId}:${visit}` on a step line, the input's own key on an ignored input, `idle:${triggerKey}` on the idle speaker's `ok` line. Absent on three kinds of line. A run-ending line. A wait line written during Ingest (`replied`, `no-reply`, `no-event`, `event-arrived`, `awaiting-trigger`) — a message turn writes `replied` too, when the customer's reply resolves a parked `wait`. And a `collect / skipped` line for a value the model gave that could not be written (`unknown-field`, `bad-value`, `not-in-enum`). |
+| `key` | `string` | Three shapes: `${runId}:${stepId}:${visit}` on a step line, the input's own key on an ignored input, `idle:${triggerKey}` on the idle speaker's `ok` line. Absent on three kinds of line. A run-ending line. A wait line written during Ingest (`replied`, `no-reply`, `no-event`, `event-arrived`, `awaiting-trigger`); a message turn writes `replied` too, when the customer's reply resolves a parked `wait`. And a `collect / skipped` line for a value the model gave that could not be written (`unknown-field`, `bad-value`, `not-in-enum`). |
 | `kind` | `StepOutcomeKind` | What kind of step. `prompt` and `collect` are both talk steps: `collect` when the step has a non-empty `collect` list. `idle` is the idle speaker. |
 | `status` | `StepOutcomeStatus` | See below. |
 | `code` | `StepOutcomeCode` | Why the line says what it says. Switch on this; it is stable across versions. Absent when the line needs no reason (a step that simply ran). |
@@ -143,7 +143,7 @@ Grouped by what produced it. `kind` and `status` are given as `kind / status`. A
 | `prompt` or `collect / skipped` | `silenced`, `detail` = your reason | The step was reached fresh while `silenced`. The run ends (`reason: 'skipped'`). A step that was already asking stays asking silently and writes no line. | |
 | `prompt` or `collect / deferred` | `provider-unavailable`, `provider-quota` | Waiting can still fix it: the provider was down, slow, rate-limited, or returned an empty message; or a usage window said when it reopens. The step is re-parked under `${runId}:${stepId}:${visit}:retry:${atMs}` at +1m, +5m, +15m, +1h, +6h, or at the stated reset when that is later. `until` set. | |
 | `prompt` or `collect / failed` | `provider-auth`, `provider-context`, `provider-invalid`, `provider-quota` | Waiting cannot fix it: a rejected key, a prompt past the context window, a request the provider refused, a spent balance with no stated reset. No wake; the run ends `failed`. | |
-| `prompt` or `collect / failed` | `provider-unavailable` | The retryable ladder ran out — six failures on the same step. The run ends `failed`. | |
+| `prompt` or `collect / failed` | `provider-unavailable` | The retry ladder ran out after six failures on the same step. The run ends `failed`. | |
 
 ### Say steps
 

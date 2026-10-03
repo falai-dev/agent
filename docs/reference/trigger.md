@@ -36,7 +36,7 @@ type TriggerKind = "message" | "mention" | "silence" | "event" | "start" | "flow
 | `if` | `Pred<C, D>` | none | Code gate. The flow is not offered to the model when it is false. |
 | `repeat` | `Repeat` | `'once'` | |
 
-The run takes the conversation: it becomes the asker and holds the floor — only one run asks at a time.
+The run takes the conversation: it becomes the asker and holds the floor. Only one run asks at a time.
 
 ### mention
 
@@ -51,7 +51,7 @@ The run starts beside the conversation. It is meant for `do` and `say` steps: it
 
 ### Phrases that rule a trigger out
 
-Phrases are alternatives — one match is enough — so a list alone can only say "any of these". A phrase that opens with `!` says the opposite: it stops the trigger, whatever else matched.
+Phrases are alternatives, so one match is enough. A list alone can only say "any of these". A phrase that opens with `!` says the opposite: it stops the trigger, whatever else matched.
 
 ```ts fragment
 on: [{

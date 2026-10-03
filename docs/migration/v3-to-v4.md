@@ -7,7 +7,7 @@ order: 4
 
 # v3 → v4 migration
 
-**Version:** 4.0.0 — One model for flows, automations and signals. `agent.turn()` takes any input (a message, a timer, a host event, a manual start) and returns the messages to send and the timers to set.
+**Version:** 4.0.0. One model for flows, automations and signals. `agent.turn()` takes any input (a message, a timer, a host event, a manual start) and returns the messages to send and the timers to set.
 
 ## Summary
 
@@ -266,7 +266,7 @@ const concorrente = f.flow({
 
 | Signal facet | v4 |
 |---|---|
-| `when[]` with `!` exclusions | `mention: [...]`, exclusions and all — a `!` phrase still rules the trigger out. Copy the list across unchanged |
+| `when[]` with `!` exclusions | `mention: [...]`, exclusions and all. A `!` phrase still rules the trigger out. Copy the list across unchanged |
 | `if` | trigger `if`; sees `input` after `extract` |
 | `extract` | trigger `extract` → `run.input` → `{{input.x}}`; never written to `data` |
 | `phase: 'pre'` + `halt` + `reply` | a `say` first step; another run's `say` silences the floor's reply that turn |
@@ -412,13 +412,13 @@ Host actions, events and conditions are registered once on the agent and referen
 | `Flow` class, `Step` class, `flow` namespace, `FlowOptions`, `StepOptions` | plain objects: `Flow`, `Step` |
 | `title`, `when`, `if`, `reentrant`, `requiredFields`, `optionalFields`, `onComplete`, flow `hooks` | `id` + `name`, `on[]`, `repeat`, `clearOnStart`, `onEnd`, `while` |
 | `skip`, `auto`, `reply`, step `hooks`, `prepare`, `finalize` | known-field skipping, `maxAsks`, `do`, `wait`, `say` |
-| `requires` | an `if` step: `{ if: { known: [...] }, then: '<step>', else: 'end' }`. Not known-field skipping — that answers "do I still need to ask?", while `requires` answers "may this step run at all?". They differ exactly when the customer never answers: `maxAsks` retires the field and the step proceeds with it unknown. |
+| `requires` | an `if` step: `{ if: { known: [...] }, then: '<step>', else: 'end' }`. Not known-field skipping, which answers "do I still need to ask?", while `requires` answers "may this step run at all?". They differ exactly when the customer never answers: `maxAsks` retires the field and the step proceeds with it unknown. |
 | `Signal`, `SignalContext`, `SignalFiring`, `signals`, `signalBatchSize`, `triggeredSignals` | `mention` flows, `repeat`, `claims` |
 | `ToolContext.updateContext / updateData / setField / dispatch`, `ToolResult.dataUpdate / contextUpdate / directive`, `ToolManager`, `ToolScope`, tool config helpers | `Tool.handler(args, ctx) → { value?, data? }` |
 | `PersistenceAdapter`, `SessionRepository`, `MessageRepository`, `PersistenceManager`, `SessionManager`, `restoreSession`, `createPersistedState`, `enterFlow`, `enterStep`, `completeCurrentFlow`, `mergeCollected` | `Store`, the seven `*Store` classes, `migrateSession` |
 | `SessionState`, `CollectedStateData`, `SessionData` | `Session` |
 | `AgentResponse.executedSteps / stoppedReason / endedFlows / appliedInstructions / isFlowComplete` | `TurnResult.outcomes / started / ended / skipped / messages / schedule / llmCalls` |
-| `Template` as a function, `TemplateContext`, `ConditionEvaluator`, `ConditionWhen`, `ConditionIf` | `Template = string` with `{{data.x}}` `{{context.x}}` `{{input.x}}`; `Pred` (function or JSON). **`!` exclusions are not gone** — a phrase opening with `!` still rules a trigger out. Copy the list across unchanged. |
+| `Template` as a function, `TemplateContext`, `ConditionEvaluator`, `ConditionWhen`, `ConditionIf` | `Template = string` with `{{data.x}}` `{{context.x}}` `{{input.x}}`; `Pred` (function or JSON). **`!` exclusions are not gone**: a phrase opening with `!` still rules a trigger out. Copy the list across unchanged. |
 | `Term`, `terms` | put the glossary in `knowledgeBase` or an instruction |
 | `Instruction.enabled / tags / metadata` | filter before passing |
 | `promptCache`, `PromptSectionCache`, `PromptCacheConfig` | gone; every prompt is built per call. `compaction` stays and runs once per turn on the history you pass |

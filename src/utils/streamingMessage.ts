@@ -226,7 +226,7 @@ export function extractMessageSoFar(accumulated: string): string {
  * newly revealed delta.
  *
  * Each push re-scans the full accumulated buffer (O(n) per chunk, O(n²) over a
- * stream) — deliberately kept simple and stateless: at LLM response sizes (KBs)
+ * stream). This stays simple and stateless: at LLM response sizes (KBs)
  * the cost is negligible, and it avoids carrying cross-chunk parser/escape state.
  */
 export class StreamingMessageDecoder {

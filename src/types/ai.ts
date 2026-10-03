@@ -25,7 +25,7 @@ export interface GenerateMessageInput<TContext = unknown> {
   prompt: string;
   /**
    * The part of the prompt that is the same every turn, sent as a leading
-   * system message. Split out so providers can cache it — see `stablePrefix`.
+   * system message. Split out so providers can cache it. See `stablePrefix`.
    */
   system?: string;
   /** Interaction history */

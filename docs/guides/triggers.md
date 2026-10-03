@@ -11,7 +11,7 @@ A trigger says when a run of a flow starts. It lives in the flow's `on` list. Th
 
 | Trigger | A run starts when | Judged by |
 |---|---|---|
-| `{ message: [...] }` | the customer asks for this; the run takes the conversation | the model, in the turn's one understand call — the single judging call, see [The turn](../concepts/pipeline.md) |
+| `{ message: [...] }` | the customer asks for this; the run takes the conversation | the model, in the turn's one understand call; see [The turn](../concepts/pipeline.md) |
 | `{ mention: [...] }` | the customer brings this up; the run reacts beside the conversation | the model, in the same call |
 | `{ silence: '24h' }` | the customer has been quiet this long since the assistant last spoke | code, from a wake |
 | `{ event: 'reuniao_marcada' }` | the host reports the event with `turn({ event })` | code |
@@ -51,7 +51,7 @@ The customer wrote "quanto custa?", the model matched it to the flow, and a run 
 
 `message` is a list of phrases that describe what the customer says. The model reads them, plus the flow's `name` and `description`, when it routes. It scores every candidate flow from 0 to 100; how the winner is picked is in [How a message picks its flow](#how-a-message-picks-its-flow) below.
 
-A message run takes the conversation: its talk steps ask, and it holds the floor — the right to ask the next question, which only one run has at a time — until it ends or another flow wins the floor. By default it starts once per session (`repeat: 'once'`).
+A message run takes the conversation: its talk steps ask, and it holds the floor (the right to ask the next question, which only one run has at a time) until it ends or another flow wins the floor. By default it starts once per session (`repeat: 'once'`).
 
 `message: []` is the catch-all. It is never scored. It starts when no other message flow wins and no run holds the floor. Its `if` and `repeat` still apply, and `repeat` still defaults to `'once'`: a catch-all that should pick up every new topic needs `repeat: 'always'`.
 

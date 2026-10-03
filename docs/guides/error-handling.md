@@ -82,7 +82,7 @@ A failure that waits returns with an outcome `{ kind: "prompt" | "collect", stat
 
 **The provider's own answer wins.** The table reads the failure's kind, which is an inference. When the provider sends `x-should-retry` it is not one, so that is read first: a `503` saying don't ends the step instead of spending five wakes to be told again, and a rejected request saying do gets its wake instead of ending the run. It arrives on `ProviderError.shouldRetry`.
 
-**The ladder ends.** After the sixth failure on the same step there is no seventh wake: the outcome is `status: "failed"` and the run ends. The same happens at once for a failure no wait can fix — retrying a rejected key or an oversized prompt only spends two model calls to reach the same wall. Both land in `ended` with `reason: "failed"`, so your execution log shows a conversation that stopped and why.
+**The ladder ends.** After the sixth failure on the same step there is no seventh wake: the outcome is `status: "failed"` and the run ends. The same happens at once for a failure no wait can fix. Retrying a rejected key or an oversized prompt only spends two model calls to fail again. Both land in `ended` with `reason: "failed"`, so your execution log shows a conversation that stopped and why.
 
 Actions that ran earlier in the same turn are not undone; they ran at-least-once and are idempotent on `ctx.key`. `say` steps that went out before the failure are in `messages[]` as usual.
 
@@ -94,7 +94,7 @@ The idle speaker has no step to re-park. Its failure leaves one outcome, `{ kind
 class ProviderError extends Error {
   provider: string;        // which provider failed
   kind: ErrorKind;         // what fixes it; see below
-  body?: string;           // the provider's own response text, truncated — the real reason
+  body?: string;           // the provider's own response text, truncated; the real reason
   status?: number;         // HTTP status when there was one
   retryAfterMs?: number;   // honoured when the provider said how long to wait
   isTransient: boolean;    // rate, overload, network, timeout
