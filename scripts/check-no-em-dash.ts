@@ -28,7 +28,6 @@ function filesIn(folder: string): string[] {
   return readdirSync(join(root, folder), { withFileTypes: true }).flatMap(
     (entry) => {
       const file = join(folder, entry.name);
-      if (file === "docs/rfc") return [];
       if (entry.isDirectory()) return filesIn(file);
       return codeExtensions.has(extname(file)) ||
         textExtensions.has(extname(file))
