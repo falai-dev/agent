@@ -1296,11 +1296,15 @@ export class Runner<C = unknown, D = unknown> {
     this.outcome(turn, run, { kind: talkKind(step), status: "ok", key, llmCalls: spoken.llmCalls, stepId: step.id, ...fixed });
     if (!turn.session.runs.includes(run)) return;
     const pending = step.collect?.length ? pendingFields(step, turn.session.data, run.asked) : [];
-    for (const field of pending) run.asked[field] = (run.asked[field] ?? 0) + 1;
+    // The reply asks for the first field still missing (the prompt lists them in order), so only that one is counted.
+    // Counting every pending field spent the asks of fields the reply never named: after three replies a five-field
+    // step skipped its last fields, the confirmation among them, without asking them once.
+    const askedNow = pending.slice(0, 1);
+    for (const field of askedNow) run.asked[field] = (run.asked[field] ?? 0) + 1;
     if (run.staying) {
       // Each answer is a new visit, so a new key, even while a field is still pending; that field's max-asks is reported once, when it gets there.
       const maxAsks = step.maxAsks ?? DEFAULT_MAX_ASKS;
-      for (const field of pending) {
+      for (const field of askedNow) {
         if (run.asked[field] === maxAsks) this.outcome(turn, run, { kind: "collect", status: "skipped", key, code: "max-asks", detail: field });
       }
       this.stayAt(run, step);

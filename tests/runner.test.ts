@@ -495,6 +495,24 @@ describe("if, then { step, clear }, onEnd, while, replay and the step cap", () =
   });
 });
 
+describe("a reply spends an ask only on the field it asks for", () => {
+  const booking = f.flow({
+    id: "booking", name: "Booking", on: [{ message: ["quero"] }],
+    steps: [{ id: "q", collect: ["nome", "modelo", "confirmado"], maxAsks: 2 }, { id: "avisa", do: "notify", with: {} }],
+  });
+
+  test("fields further down keep their asks while the first one is still missing", async () => {
+    const { runner } = setup([booking]);
+    const t1 = await drive(runner, message("quero", "m1"), { understanding: routedTo("booking"), speak: () => spoken("Qual seu nome?") });
+    const t2 = await drive(runner, message("hm", "m2", { session: saved(t1.result) }), { speak: () => spoken("Me diz seu nome?") });
+    expect(t2.result.session.runs[0]?.asked).toEqual({ nome: 2 });
+
+    const t3 = await drive(runner, message("prefiro não", "m3", { session: saved(t2.result) }), { speak: () => spoken("Qual o modelo?") });
+    expect(isTalk(t3.talk) && t3.talk.pending).toEqual(["modelo", "confirmado"]);
+    expect(t3.result.session.runs[0]?.asked).toEqual({ nome: 2, modelo: 1 });
+  });
+});
+
 describe("onEnd 'stay' answers every message from the last talk step, even one that only collects", () => {
   const lead = f.flow({
     id: "lead", name: "Lead", on: [{ message: ["quero"] }], onEnd: "stay",
