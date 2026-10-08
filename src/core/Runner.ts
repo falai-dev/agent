@@ -38,6 +38,8 @@ const RETRY_BACKOFF: Duration[] = ["1m", "5m", "15m", "1h", "6h"];
 const DEFAULT_EVENT_WAIT: Duration = "30d";
 const ROUTE_MIN = 40;
 const ROUTE_STICKY = 15;
+/** Pending fields one reply asks for; the speak prompt's default pace ("one or two things per message"). */
+const FIELDS_PER_REPLY = 2;
 
 /** What started the turn, already narrowed. */
 export type What =
@@ -1296,10 +1298,12 @@ export class Runner<C = unknown, D = unknown> {
     this.outcome(turn, run, { kind: talkKind(step), status: "ok", key, llmCalls: spoken.llmCalls, stepId: step.id, ...fixed });
     if (!turn.session.runs.includes(run)) return;
     const pending = step.collect?.length ? pendingFields(step, turn.session.data, run.asked) : [];
-    // The reply asks for the first field still missing (the prompt lists them in order), so only that one is counted.
-    // Counting every pending field spent the asks of fields the reply never named: after three replies a five-field
-    // step skipped its last fields, the confirmation among them, without asking them once.
-    const askedNow = pending.slice(0, 1);
+    // The speak prompt lists the pending fields in order and asks for "one or two things per message", so a reply
+    // spends an ask on the first two. Counting every pending field spent the asks of fields the reply never named:
+    // after three replies a five-field step skipped its last fields, the confirmation among them, without asking them.
+    // ponytail: a reply that asks for one field still counts the second. The exact count needs the speak envelope to
+    // report which fields the reply asked for.
+    const askedNow = pending.slice(0, FIELDS_PER_REPLY);
     for (const field of askedNow) run.asked[field] = (run.asked[field] ?? 0) + 1;
     if (run.staying) {
       // Each answer is a new visit, so a new key, even while a field is still pending; that field's max-asks is reported once, when it gets there.

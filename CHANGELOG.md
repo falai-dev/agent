@@ -6,7 +6,7 @@ All notable changes to `@falai/agent` will be documented in this file.
 
 ### Fixed
 
-- **A reply counts one ask, for the first field still missing.** Each reply added an ask to every field the step still needed, including fields it never mentioned. A step that collects five fields with the default `maxAsks: 3` skipped its last fields after three replies, without asking them once. The prompt lists pending fields in order, so the first one is the one a reply asks for. A fixed `question` still counts one ask for each field it collects.
+- **A reply counts an ask only for the first two fields still missing.** Each reply added an ask to every field the step still needed, including fields it never mentioned. A step that collects five fields with the default `maxAsks: 3` skipped its last fields after three replies, without asking them once. The prompt lists pending fields in order and asks for one or two per message, so those are the ones a reply counts. A fixed `question` still counts one ask for each field it collects.
 - Public JSDoc, prompt labels and guides no longer use em dashes, and lint rejects new ones in public copy.
 
 ## [4.0.0] - 2026-10-02

@@ -193,21 +193,21 @@ describe("Understand full request", () => {
       "- horario: 9h-18h",
       // the floor
       '"Triagem" (triagem)',
-      "Current step: porte — Entenda o porte da empresa de João.",
+      "Current step: porte: Entenda o porte da empresa de João.",
       "- tamanho (string) [1-10 | 11-50 | 51-200 | 200+]",
       "- orcamento (number): Faixa em reais",
       '- nome: "João"',
       // candidates, the floor included, with their phrases
-      "1. triagem — Triagem: Quando alguém chega",
+      "1. triagem: Triagem: Quando alguém chega",
       "quer saber como funciona; pede um orçamento; quer saber se serve para a empresa",
-      "2. agendar — Agendar: Quando o cliente quer marcar uma reunião",
+      "2. agendar: Agendar: Quando o cliente quer marcar uma reunião",
       "quer marcar; quer remarcar",
-      "3. humano — Falar com humano",
+      "3. humano: Falar com humano",
       "quer falar com uma pessoa",
       "- 90-100: explicit keywords + clear intent",
       "- 0-29: minimal/none",
       // mentions and their extraction
-      "- concorrente — Lead falou de concorrente",
+      "- concorrente: Lead falou de concorrente",
       "Counts when: o lead cita ou compara com um concorrente",
       "- trecho (string): O trecho em que o concorrente aparece",
       // branches as questions under safe aliases
@@ -279,7 +279,7 @@ describe("Understand full request", () => {
     const key = keysOf(provider.calls[0].input, "mentions")[0];
     expect(key).toMatch(/^[a-zA-Z0-9_-]+$/);
     expect(key).not.toBe("sinal:concorrente");
-    expect(provider.calls[0].prompt).toContain(`- ${key} — Lead falou de concorrente`);
+    expect(provider.calls[0].prompt).toContain(`- ${key}: Lead falou de concorrente`);
     expect(result.mentions).toEqual({ "sinal:concorrente": true });
   });
 });
