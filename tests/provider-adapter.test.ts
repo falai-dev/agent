@@ -370,7 +370,7 @@ describe("what happens when a turn fails", () => {
     const failure = await provider.generateMessage(input()).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ProviderError);
     expect((failure as ProviderError).kind).toBe("invalid");
-    expect((failure as ProviderError).message).toContain("raise maxTokens or lower effort");
+    expect((failure as ProviderError).message).toMatch(/raise maxTokens or lower effort/i);
     expect(bodies).toHaveLength(1);
   });
 
