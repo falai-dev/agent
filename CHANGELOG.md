@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.2] - 2026-10-10
+
+### Changed
+
+- **Gemini calls follow Google's deprecation notice.** The framework now takes `@providerkit/core` 0.22. For Gemini it sends a thinking level to every model except Gemini 2, and it never sends `temperature` or `topP`. Google says its next models answer `thinking_budget`, `temperature`, `top_p` and `top_k` with a 400. Before, a model id without `gemini-3` in it, such as `gemini-flash-latest`, got a thinking budget. If your agent passes `temperature` or `topP` to a Gemini model, they are now dropped and the model uses its own sampling. Other providers are unchanged.
+
 ## [4.0.1] - 2026-10-08
 
 ### Fixed
