@@ -406,6 +406,11 @@ export abstract class ProviderAdapter implements AiProvider {
         },
         {
           maxAttempts: this.retryConfig.retries + 1,
+          // `retries` is the documented knob, so it alone bounds the attempts.
+          // Core's 60 s budget (from 0.23) would otherwise drop every retry
+          // after the first once an attempt fails on `timeout`, and a caller's
+          // `retries: 3` would quietly mean 1.
+          budgetMs: Infinity,
           ...(input.signal ? { signal: input.signal } : {}),
           onRetry: ({ error, attempt: n }) =>
             logger.warn(`[${this.name}] ${model} attempt ${n} failed, retrying:`, error),
