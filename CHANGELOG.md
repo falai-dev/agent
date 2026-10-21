@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.4] - 2026-10-21
+
+### Changed
+
+- **Takes `@providerkit/core` 0.25.** A Gemini call with `config: { effort: "none" }` on Gemini 3.7+, 4 or a Pro model now sends a low thinking level, because those models answered the minimal level with a 400. Gemini tool and response schemas go out as written, with only the four shapes Gemini rejects repaired. A Gemini answer that says the input is over the token limit now fails as a `context` error, not `invalid`.
+
 ## [4.0.3] - 2026-10-21
 
 ### Changed
