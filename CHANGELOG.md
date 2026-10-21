@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.3] - 2026-10-21
+
+### Changed
+
+- **Takes `@providerkit/core` 0.24.** `ProviderAdapter` now collects streamed turns through `collectTurn`, keeps `retryConfig.retries` as the sole bound on attempts (`budgetMs: Infinity`), and inherits 0.23 and 0.24's stream-cut, finish-reason, fallback-probe and history-repair fixes.
+
 ## [4.0.2] - 2026-10-10
 
 ### Changed
