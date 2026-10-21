@@ -21,6 +21,7 @@
 import {
   ProviderError,
   classify,
+  collectTurn,
   isBackupEligible,
   isCompleteJson,
   parseToolArgs,
@@ -38,6 +39,7 @@ import {
   type Provider,
   type ProviderChunk,
   type StreamOptions,
+  type ToolCall,
   type ToolDefinition,
 } from "@providerkit/core";
 
@@ -225,48 +227,11 @@ function toJsonOutput(input: GenerateMessageInput<unknown>): StreamOptions["json
   };
 }
 
-/** What a turn accumulates into as its chunks arrive. */
-interface Accumulator {
-  text: string;
-  model: string;
-  reasoning: string;
-  reasoningDetails?: unknown[];
-  finishReason?: string;
-  promptTokens?: number;
-  completionTokens?: number;
-  cachedInputTokens?: number;
-  calls: Map<number, { name: string; arguments: string }>;
-}
-
-function fold(acc: Accumulator, chunk: ProviderChunk): string {
-  if (chunk.source) {
-    acc.model = chunk.source.model;
-  }
-  if (chunk.usage) {
-    acc.promptTokens = chunk.usage.inputTokens;
-    acc.completionTokens = chunk.usage.outputTokens;
-    acc.cachedInputTokens = chunk.usage.cachedInputTokens;
-  }
-  if (chunk.finishReason) acc.finishReason = chunk.finishReason;
-  if (chunk.reasoning) acc.reasoning += chunk.reasoning;
-  if (chunk.reasoningDetails?.length) acc.reasoningDetails = chunk.reasoningDetails;
-  for (const call of chunk.toolCalls ?? []) {
-    const entry = acc.calls.get(call.index) ?? { name: "", arguments: "" };
-    if (call.name) entry.name = call.name;
-    if (call.arguments) entry.arguments += call.arguments;
-    acc.calls.set(call.index, entry);
-  }
-  if (!chunk.content) return "";
-  acc.text += chunk.content;
-  return chunk.content;
-}
-
 type ToolCallList = NonNullable<AgentStructuredResponse["toolCalls"]>;
 
-function toolCallsOf(acc: Accumulator, label: string): ToolCallList {
+function toolCallsOf(calls: readonly ToolCall[] | undefined, label: string): ToolCallList {
   const out: ToolCallList = [];
-  for (const [, entry] of [...acc.calls.entries()].sort(([a], [b]) => a - b)) {
-    if (!entry.name) continue;
+  for (const entry of calls ?? []) {
     // Arguments arrive in fragments and the last one can be cut: a stream that
     // ended early, a model at its `max_tokens`, a gateway that double-escaped.
     // `JSON.parse` on that string throws, and the tool then ran with NOTHING —
@@ -381,12 +346,7 @@ export abstract class ProviderAdapter implements AiProvider {
     const messages = toMessages(input.history, input.prompt, input.system);
     const tools = toTools(input.tools);
     const json = toJsonOutput(input);
-    const acc: Accumulator = {
-      text: "",
-      model: this.primaryModel,
-      reasoning: "",
-      calls: new Map(),
-    };
+    let activeModel = this.primaryModel;
 
     const opts: StreamOptions = {
       ...this.defaults,
@@ -401,11 +361,16 @@ export abstract class ProviderAdapter implements AiProvider {
     const attempt = (model: string) =>
       withStreamRetry<ProviderChunk>(
         (signal) => {
-          acc.model = model;
+          activeModel = model;
           return this.watched.createStream(messages, tools, { ...opts, model, signal });
         },
         {
           maxAttempts: this.retryConfig.retries + 1,
+          // `retries` is the documented knob, so it alone bounds the attempts.
+          // Core's 60 s budget (from 0.23) would otherwise drop every retry
+          // after the first once an attempt fails on `timeout`, and a caller's
+          // `retries: 3` would quietly mean 1.
+          budgetMs: Infinity,
           ...(input.signal ? { signal: input.signal } : {}),
           onRetry: ({ error, attempt: n }) =>
             logger.warn(`[${this.name}] ${model} attempt ${n} failed, retrying:`, error),
@@ -419,22 +384,36 @@ export abstract class ProviderAdapter implements AiProvider {
         logger.warn(`[${this.name}] falling back to ${model} (${position}/${total})`),
     });
 
+    const chunks: ProviderChunk[] = [];
+    let accumulated = "";
+    let sawUsage = false;
     for await (const chunk of stream) {
-      const delta = fold(acc, chunk);
-      if (delta) yield { delta, accumulated: acc.text, done: false };
+      chunks.push(chunk);
+      if (chunk.usage) sawUsage = true;
+      if (chunk.content) {
+        accumulated += chunk.content;
+        yield { delta: chunk.content, accumulated, done: false };
+      }
     }
+    const turn = await collectTurn({
+      [Symbol.asyncIterator]: () => {
+        const it = chunks[Symbol.iterator]();
+        return { next: () => Promise.resolve(it.next()) };
+      },
+    });
 
-    const toolCalls = toolCallsOf(acc, this.name);
+    const toolCalls = toolCallsOf(turn.message.toolCalls, this.name);
+    const rawText = turn.message.content;
     let structured: TStructured | undefined;
-    if (json && acc.text) {
+    if (json && rawText) {
       // Lenient on purpose. `JSON.parse` alone rejects the envelope a model
       // writes when the schema rode in its PROMPT rather than pinning the
       // decoder — pretty-printed, with raw newlines inside the message string.
       // Every caller reads `structured?.message || message`, so a parse that
       // gives up here hands the raw protocol to the user as their reply.
-      structured = tryParseJSONResponse(acc.text) as TStructured | undefined;
+      structured = tryParseJSONResponse(rawText) as TStructured | undefined;
       if (!structured) {
-        logger.warn(`[${this.name}] Failed to parse JSON response (${acc.text.length} chars).`);
+        logger.warn(`[${this.name}] Failed to parse JSON response (${rawText.length} chars).`);
       }
     }
     // An envelope that did not parse is not text, and must not be offered as
@@ -442,7 +421,7 @@ export abstract class ProviderAdapter implements AiProvider {
     // `structured?.message || message`, so whichever of those two still holds
     // the raw bytes is what a customer ends up reading. A preamble beside a
     // tool call ("deixa eu ver aqui") is real text and stays.
-    const text = json && !structured && isJSONShaped(acc.text) ? "" : acc.text;
+    const text = json && !structured && isJSONShaped(rawText) ? "" : rawText;
 
     if (toolCalls.length > 0) {
       // The reasoning rides out with the tool calls it produced. A thinking
@@ -452,8 +431,10 @@ export abstract class ProviderAdapter implements AiProvider {
         ...(structured ?? {}),
         message: (structured as AgentStructuredResponse | undefined)?.message || text,
         toolCalls,
-        ...(acc.reasoning ? { reasoning: acc.reasoning } : {}),
-        ...(acc.reasoningDetails ? { reasoningDetails: acc.reasoningDetails } : {}),
+        ...(turn.message.reasoning ? { reasoning: turn.message.reasoning } : {}),
+        ...(turn.message.reasoningDetails
+          ? { reasoningDetails: turn.message.reasoningDetails }
+          : {}),
       } as TStructured;
     }
 
@@ -469,15 +450,15 @@ export abstract class ProviderAdapter implements AiProvider {
       accumulated: text,
       done: true,
       metadata: {
-        model: acc.model,
-        ...(acc.finishReason ? { finishReason: acc.finishReason } : {}),
-        ...(acc.promptTokens !== undefined
+        model: turn.source?.model ?? activeModel,
+        ...(turn.finishReason ? { finishReason: turn.finishReason } : {}),
+        ...(sawUsage
           ? {
-              tokensUsed: acc.promptTokens + (acc.completionTokens ?? 0),
-              promptTokens: acc.promptTokens,
-              completionTokens: acc.completionTokens,
+              tokensUsed: turn.usage.inputTokens + turn.usage.outputTokens,
+              promptTokens: turn.usage.inputTokens,
+              completionTokens: turn.usage.outputTokens,
               // The cache-hit subset of the prompt, billed far cheaper.
-              cachedInputTokens: acc.cachedInputTokens,
+              cachedInputTokens: turn.usage.cachedInputTokens,
             }
           : {}),
       },
