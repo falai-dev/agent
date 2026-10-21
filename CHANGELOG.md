@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.5] - 2026-10-21
+
+### Changed
+
+- **Takes `@providerkit/core` 0.25.2.** OpenCode Go's `400` privacy and region blocks (plus OpenRouter's data-policy `404`) now classify as `model`, and missing Go subscriptions as `entitlement`, so fallback pools rotate to the next model or provider instead of stopping on `invalid`.
+
 ## [4.0.4] - 2026-10-21
 
 ### Changed
