@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.6] - 2026-10-25
+
+### Changed
+
+- Takes `@providerkit/core` 0.26.2. OpenCode account caps, expired Z.ai plans and spent weekly or monthly limits now let fallback chains move on instead of retrying the same account. Provider reset times reach the cooldown, including metadata alongside streamed errors. Request text echoed in an error does not count as provider error evidence.
+
 ## [4.0.5] - 2026-10-21
 
 ### Changed
