@@ -126,7 +126,7 @@ export function fromSpec<C = unknown, D = LooseData>(spec: FlowSpec): Flow<C, D>
 }
 
 function fromStepSpec(step: StepSpec): Step<unknown, LooseData> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- `kind` is the one property the Flow form drops
+  // oxlint-disable-next-line no-unused-vars -- `kind` is the one property the Flow form drops
   const { kind, ...body } = step;
   return body;
 }

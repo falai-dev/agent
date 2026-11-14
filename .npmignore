@@ -2,7 +2,7 @@
 *.ts
 !*.d.ts
 tsconfig.json
-eslint.config.js
+.oxlintrc.json
 
 # Tests
 **/*.test.ts
