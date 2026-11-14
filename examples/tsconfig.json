@@ -22,8 +22,7 @@
             "@falai/agent": [
                 "../src/index.ts"
             ]
-        },
-        "baseUrl": "."
+        }
     },
     "include": [
         "./*.ts"

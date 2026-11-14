@@ -65,7 +65,7 @@ writeFileSync(
   JSON.stringify(
     {
       extends: "../../examples/tsconfig.json",
-      compilerOptions: { baseUrl: ".", paths: { "@falai/agent": ["../../src/index.ts"] }, noUnusedLocals: false, noUnusedParameters: false },
+      compilerOptions: { paths: { "@falai/agent": ["../../src/index.ts"] }, noUnusedLocals: false, noUnusedParameters: false },
       include: ["./*.ts"],
     },
     null,
