@@ -49,8 +49,8 @@
     "typecheck:examples": "tsc --noEmit --project examples/tsconfig.json",
     "check:docs": "bun run scripts/check-docs-snippets.ts",
     "eval:understand": "bun run scripts/eval/understand.ts",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
+    "lint": "oxlint src",
+    "lint:fix": "oxlint --fix src",
     "clean": "rm -rf dist",
     "prebuild": "bun run clean",
     "prepublishOnly": "bun run lint && bun run typecheck && bun run typecheck:examples && bun run check:docs && bun run build && bun run test",
@@ -87,14 +87,14 @@
     "node": ">=22.12"
   },
   "devDependencies": {
-    "@eslint/js": "^9.17.0",
+    "@gusnips/oxlint": "^0.2.0",
     "@types/bun": "^1.4.2",
     "@types/node": "^20.19.22",
     "@types/pg": "^8.15.5",
-    "eslint": "^9.17.0",
     "fast-check": "^4.5.3",
-    "typescript": "^7.0.2",
-    "typescript-eslint": "^8.18.2"
+    "oxlint": "1.93.0",
+    "oxlint-tsgolint": "7.0.2007",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@providerkit/core": "^0.26.2",

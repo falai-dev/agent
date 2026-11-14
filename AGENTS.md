@@ -10,7 +10,7 @@
 - **License:** MIT
 - **Runtime:** Node 22.12+ or Bun 1.0+. The floor is 22.12, not 22: the CJS build `require()`s
   `@providerkit/core`, which is ESM-only, and `require(esm)` landed in 22.12.
-- **Language:** TypeScript 5.3+ (strict mode)
+- **Language:** TypeScript 7 (strict mode)
 - **Module system:** Dual ESM/CJS (ESM primary). **Every relative import carries an explicit
   `.js` extension**, in `src/`, `tests/` and `examples/` alike — Node's ESM resolver does not guess one, so
   an extensionless specifier compiles fine, emits verbatim and then dies at runtime with
@@ -128,7 +128,7 @@ All providers implement the `AiProvider` interface. Every adapter is built on `@
 
 - **Strict TypeScript** — `strict: true`, no implicit any, no unused locals/params, no implicit returns.
 - **No `as any`** — Fix the underlying type mismatch. Tests may use `as unknown as T` with justification.
-- **ESLint** — `@typescript-eslint/recommended-type-checked` rules. `no-floating-promises: error`, `no-explicit-any: warn`.
+- **oxlint**: `.oxlintrc.json` extends `@gusnips/oxlint` and adds the `@typescript-eslint/recommended-type-checked` rules, run type-aware on tsgolint. `no-floating-promises: error`, `no-explicit-any: warn`. A disable comment is `// oxlint-disable-next-line <rule> -- why`.
 - **Error format:** `[ErrorClass] what: why. how to fix.` — typed error classes (`FlowConfigurationError`, `SessionConflictError`, `InvalidSessionError`, plus `ProviderError` re-exported from `@providerkit/core`).
 - **Naming:** Classes are PascalCase, files match their default export. Utilities are camelCase.
 - **Exports:** Everything public goes through `src/index.ts`. No deep imports from consumers.

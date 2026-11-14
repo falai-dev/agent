@@ -1,0 +1,37 @@
+{
+  // The shared preset holds the lint core (oxlint's correctness rules and the recommended sets).
+  // This file adds what the ESLint config had on top: typescript-eslint's recommended-type-checked
+  // rules, at the levels that config set. Type-aware rules run on tsgolint (oxlint-tsgolint),
+  // which reads the tsconfig.json at the root.
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["./node_modules/@gusnips/oxlint/base.json"],
+  // Without this, oxlint adds its unicorn and oxc plugins, which ESLint never had.
+  "plugins": [],
+  "options": { "typeAware": true },
+  "rules": {
+    // The ESLint config listed this rule twice, "error" and then "warn"; the later entry won.
+    "typescript/no-explicit-any": "warn",
+
+    // typescript-eslint's recommended-type-checked, minus no-unsafe-assignment (off in the ESLint
+    // config) and the rules the preset or oxlint's correctness category already switch on.
+    "typescript/no-misused-promises": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-enum-comparison": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-unary-minus": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/require-await": "error",
+    "typescript/restrict-plus-operands": "error",
+    "typescript/restrict-template-expressions": "error",
+    "no-unused-expressions": "error",
+    "typescript/prefer-as-const": "error",
+    "typescript/prefer-namespace-keyword": "error",
+    "typescript/triple-slash-reference": "error",
+    "typescript/no-wrapper-object-types": "error",
+    "typescript/no-unsafe-declaration-merging": "error"
+  }
+}
