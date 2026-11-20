@@ -2,6 +2,12 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.7] - 2026-11-19
+
+### Changed
+
+- Takes `@providerkit/core` 0.35.1. Anthropic-shape requests now cache multi-turn conversations (not only the system prompt) and send one system block per system message. Retired models (`410` and deprecation replies), Z.ai plan gates (`[1311]`), Google bad-key `400`s and single-turn model limits now classify by what fixes them so fallback chains move on. Retry delays follow one precedence order (headers and structured fields over prose, including Gemini wait strings). `parseToolArgs` keeps `__proto__` fields as plain data, and error bodies are bounded to 64 KiB.
+
 ## [4.0.6] - 2026-10-25
 
 ### Changed

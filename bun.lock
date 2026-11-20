@@ -5,7 +5,7 @@
     "": {
       "name": "@falai/agent",
       "dependencies": {
-        "@providerkit/core": "^0.26.2",
+        "@providerkit/core": "^0.35.1",
         "loglevel": "^1.9.2",
       },
       "devDependencies": {
@@ -89,7 +89,7 @@
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.93.0", "", { "os": "win32", "cpu": "x64" }, "sha512-ZzzIIVs/Qkm8trUWYKF0OYub5ALlv50/3gsEZbKAvWgz+yNJX6uRmQ8ySPXU2Q0/Y9m4JCOjhpmC8XUYbPHX5Q=="],
 
-    "@providerkit/core": ["@providerkit/core@0.26.2", "", { "peerDependencies": { "zod": "^4" }, "optionalPeers": ["zod"] }, "sha512-kPhMEl4JW59j/asSDWVDoQrmOzI2VICehVF25m0HDMM7HqdLp205bqtllrJo2tJcgXxmTy7+rd1JHudCoa5Htg=="],
+    "@providerkit/core": ["@providerkit/core@0.35.1", "", { "peerDependencies": { "@opentelemetry/api": "^1.10.0", "zod": "^4" }, "optionalPeers": ["@opentelemetry/api", "zod"] }, "sha512-Jm/afWgZbCF8tzFaG2DDjHaNGs01445YlPnQZUl5uL3LUvC4YnApZok8MDP4GpOoAiesWkJpmeT4mXVw2IFXzA=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
