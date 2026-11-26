@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, jest, test } from "bun:test";
+import { falai, fakeClock } from "../src/index.js";
 import { OpenAIProvider } from "../src/providers/OpenAIProvider.js";
 import { OpenRouterProvider } from "../src/providers/OpenRouterProvider.js";
 import { DeepSeekProvider } from "../src/providers/DeepSeekProvider.js";
@@ -720,6 +721,76 @@ describe("the session id reaches the gateway", () => {
       super({ provider: createPresetProvider("opencode-go", { apiKey: "k", model, fetchImpl }), model });
     }
   }
+
+  test("a fixed message and a tool-backed reply settle identically for worker and widget", async () => {
+    const f = falai().fields({ ref: { type: "string" } });
+    const flow = f.flow({
+      id: "lookup",
+      name: "Lookup",
+      steps: [
+        { id: "first", say: "Welcome." },
+        { id: "reply", prompt: "Check the item.", tools: ["lookup"] },
+      ],
+    });
+    function fixture() {
+      const wire = scripted([
+        () =>
+          chat(
+            {
+              reasoning_content: "private thought",
+              tool_calls: [{ index: 0, id: "t", function: { name: "lookup", arguments: '{"id":' } }],
+            },
+            { tool_calls: [{ index: 0, function: { arguments: '"item"}' } }] },
+          ),
+        () => chat({ content: '{"message":"In ' }, { content: 'stock."}' }),
+      ]);
+      const seen: unknown[] = [];
+      const agent = f.agent({
+        name: "Shop",
+        provider: new OpencodeGo(wire.fetchImpl),
+        flows: [flow],
+        clock: fakeClock("2026-01-01T00:00:00Z"),
+        maxToolLoops: 1,
+        tools: [
+          {
+            id: "lookup",
+            handler(args) {
+              seen.push(args);
+              return { value: "available", data: { ref: "internal receipt" } };
+            },
+          },
+        ],
+      });
+      return { agent, seen, ...wire };
+    }
+    const input = { sessionId: "shop-session", start: { flow: "lookup", key: "one" } };
+    const worker = fixture();
+    const result = await worker.agent.turn(input);
+    const widget = fixture();
+    const chunks = await Array.fromAsync(widget.agent.turnStream(input));
+    expect(
+      chunks
+        .filter((c) => "delta" in c)
+        .map((c) => c.delta)
+        .join(""),
+    ).toBe("In stock.");
+    expect(chunks.at(-1)).toEqual({ done: true, result });
+    expect(result.messages.map((m) => m.text)).toEqual(["Welcome.", "In stock."]);
+    expect(result.session.data.ref).toBe("internal receipt");
+    expect(result.llmCalls).toBe(2);
+    for (const { headers, bodies, seen } of [worker, widget]) {
+      expect(seen).toEqual([{ id: "item" }]);
+      expect(headers.map((h) => h.get("x-opencode-session"))).toEqual([
+        "shop-session",
+        "shop-session",
+      ]);
+      expect(bodies[0].tools).toHaveLength(1);
+      expect(bodies[1].tools).toBeUndefined();
+      expect(bodies[1].messages).toEqual(
+        expect.arrayContaining([expect.objectContaining({ role: "tool", content: "available" })]),
+      );
+    }
+  });
 
   test("each call sends its own session id as x-opencode-session", async () => {
     const { headers, fetchImpl } = scripted([() => chat({ content: "ok" })]);
