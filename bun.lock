@@ -5,6 +5,7 @@
     "": {
       "name": "@falai/agent",
       "dependencies": {
+        "@providerkit/agents": "^0.4.2",
         "@providerkit/core": "^0.35.1",
         "loglevel": "^1.9.2",
       },
@@ -88,6 +89,8 @@
     "@oxlint/binding-win32-ia32-msvc": ["@oxlint/binding-win32-ia32-msvc@1.93.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-0Ot3BEe/AAr2/uQhe55r8CmPlperYk2mQmxdutOru7oU0kir6IiEVHb1TG3GORRlfra97lPHVDLhgmihiKzLrg=="],
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.93.0", "", { "os": "win32", "cpu": "x64" }, "sha512-ZzzIIVs/Qkm8trUWYKF0OYub5ALlv50/3gsEZbKAvWgz+yNJX6uRmQ8ySPXU2Q0/Y9m4JCOjhpmC8XUYbPHX5Q=="],
+
+    "@providerkit/agents": ["@providerkit/agents@0.4.2", "", { "peerDependencies": { "@gusnips/server": "^0.19.0 || ^0.20.0 || ^0.21.0", "@jitl/quickjs-wasmfile-release-sync": "^0.32.0", "@modelcontextprotocol/sdk": "^1.32.2", "@opentelemetry/api": "^1.10.0", "@providerkit/core": "^0.35.1 || ^0.36.0", "quickjs-emscripten-core": "^0.32.0" }, "optionalPeers": ["@gusnips/server", "@jitl/quickjs-wasmfile-release-sync", "@modelcontextprotocol/sdk", "@opentelemetry/api", "quickjs-emscripten-core"] }, "sha512-iSURRv1F2O9093s6IFQwPIJ+6j39/a9QXgOT1RvgBSOrc/pOmsAMQKSgDVgx3nS3k1oc3JBU5bo97HLsF3KQ3A=="],
 
     "@providerkit/core": ["@providerkit/core@0.35.1", "", { "peerDependencies": { "@opentelemetry/api": "^1.10.0", "zod": "^4" }, "optionalPeers": ["@opentelemetry/api", "zod"] }, "sha512-Jm/afWgZbCF8tzFaG2DDjHaNGs01445YlPnQZUl5uL3LUvC4YnApZok8MDP4GpOoAiesWkJpmeT4mXVw2IFXzA=="],
 

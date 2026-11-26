@@ -392,9 +392,19 @@ describe("Speak.run: fallbacks", () => {
   });
 
   test("a provider failure on a tool follow-up round defers with both calls counted", async () => {
-    const provider = mockProvider({ speak: [{ toolCalls: [{ toolName: "orcamento", arguments: { pessoas: 30 } }] }] });
+    const first = { toolCalls: [{ toolName: "orcamento", arguments: { pessoas: 30 } }] };
+    const provider = mockProvider({ speak: [first] }, { usage: true });
     const out = await new Speak(agentOptions(provider)).run(talkRequest({ tools: [orcamento] }));
-    expect(out).toEqual({ deferred: { code: "provider-unavailable", retryable: true }, llmCalls: 2 });
+    const [call] = provider.calls;
+    expect(out).toEqual({
+      deferred: { code: "provider-unavailable", retryable: true },
+      llmCalls: 2,
+      usage: {
+        promptTokens: (call.system?.length ?? 0) + call.prompt.length,
+        completionTokens: JSON.stringify(first).length,
+        cachedInputTokens: 0,
+      },
+    });
   });
 
   test("an empty message defers", async () => {

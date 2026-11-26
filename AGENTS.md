@@ -101,6 +101,8 @@ src/
 
 ## Providers
 
+Both `turn()` and `turnStream()` run Speak's model and tool rounds through `@providerkit/agents/rounds`. Speak builds the prompt, checks each tool's inputs and permissions, and decodes the reply. Runner still owns flow transitions, wakes and session updates. Understand makes one structured provider call and needs no agent loop.
+
 All providers implement the `AiProvider` interface. Every adapter is built on `@providerkit/core` and calls its API over HTTP; there is no vendor SDK.
 
 - `GeminiProvider` — Google Gemini

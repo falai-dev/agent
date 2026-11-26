@@ -113,6 +113,28 @@ describe("Speak.stream", () => {
     });
   });
 
+  test("closing during a preamble does not run the tool or buy a follow-up", async () => {
+    let ran = false;
+    const tool: Tool<Ctx, Data> = {
+      id: "lookup",
+      handler() {
+        ran = true;
+        return {};
+      },
+    };
+    const provider = jsonStreamProvider([
+      { message: "Checking.", toolCalls: [{ toolName: "lookup", arguments: {} }] },
+    ]);
+    for await (const chunk of new Speak(agentOptions(provider)).stream(
+      talkRequest({ tools: [tool] }),
+    )) {
+      expect(chunk).toHaveProperty("delta");
+      break;
+    }
+    expect(ran).toBe(false);
+    expect(provider.calls).toHaveLength(1);
+  });
+
   test("a provider failure ends the stream with a deferred outcome", async () => {
     const provider = jsonStreamProvider([]);
     const { deltas, outcome } = await collect(new Speak(agentOptions(provider)).stream(talkRequest()));

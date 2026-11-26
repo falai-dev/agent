@@ -14,9 +14,10 @@
  * field values come back raw for Runner to validate.
  */
 
+import { runToolRounds } from "@providerkit/agents/rounds";
 import { ProviderError, classify, type ErrorKind } from "@providerkit/core";
 
-import type { GenerateMessageInput, TokenUsage } from "../types/ai.js";
+import type { AiProvider, GenerateMessageInput, TokenUsage } from "../types/ai.js";
 import type { AgentOptions } from "../types/agent.js";
 import type { FieldDefs } from "../types/flow.js";
 import type { History } from "../types/history.js";
@@ -148,17 +149,12 @@ export class Speak<C = unknown, D = unknown> {
 
   /** `run`, yielding the message text as it arrives; ends with `{ done, outcome }`. */
   async *stream(req: SpeakRequest<C, D>): AsyncIterable<SpeakStreamChunk> {
-    const rounds = this.rounds(req, true);
-    let next = await rounds.next();
-    while (!next.done) {
-      yield { delta: next.value };
-      next = await rounds.next();
-    }
-    yield { done: true, outcome: next.value };
+    const outcome = yield* this.rounds(req, true);
+    yield { done: true, outcome };
   }
 
   /** The round loop shared by both entry points: yields deltas, returns the outcome. */
-  private async *rounds(req: SpeakRequest<C, D>, streaming: boolean): AsyncGenerator<string, SpeakOutcome> {
+  private rounds(req: SpeakRequest<C, D>, streaming: boolean): AsyncGenerator<{ delta: string }, SpeakOutcome> {
     const talk = req.talk;
     // Fields are read by the fixed question's own answer, never by the reply that precedes it.
     const envelope = buildEnvelope(this.options.fields, "idle" in talk || talk.fixedQuestion !== undefined ? [] : talk.pending);
@@ -170,12 +166,12 @@ export class Speak<C = unknown, D = unknown> {
     let history: History = req.history;
     const fields: Record<string, unknown> = {};
     const data: Record<string, unknown> = {};
-    let llmCalls = 0;
     let usage: TokenUsage | undefined;
-    let message = "";
-
-    for (let round = 0; ; round++) {
-      const offerTools = wireTools.length > 0 && round < maxLoops;
+    const { provider } = this.options;
+    // Previously the loop compared a zero-based integer with the caller's numeric limit.
+    const toolRounds = tools.length ? Math.min(Math.ceil(maxLoops), Number.MAX_SAFE_INTEGER) : 0;
+    return runToolRounds<{ delta: string }, SpeakOutcome, CallResult<D>>(toolRounds, async function* (round, offerTools) {
+      const llmCalls = round + 1;
       const input: GenerateMessageInput<C> = {
         prompt: joinSections(prompt, offerTools ? TOOLS_SECTION : round > 0 ? FINAL_SECTION : null),
         ...(system ? { system } : {}),
@@ -185,7 +181,6 @@ export class Speak<C = unknown, D = unknown> {
         tools: offerTools ? wireTools : undefined,
         parameters: { jsonSchema: envelope.schema, schemaName: "speak" },
       };
-      llmCalls++;
       let reply: Reply;
       try {
         // ponytail: every round streams as it arrives, so a preamble the model
@@ -193,19 +188,21 @@ export class Speak<C = unknown, D = unknown> {
         // `spoken.message`. Ceiling: joined deltas exceed the final message on
         // such a round. Upgrade: hold deltas until the provider says no tool call
         // is coming, once providers report that before the end of the stream.
-        reply = yield* this.call(input, streaming);
+        reply = yield* callProvider(provider, input, streaming);
       } catch (error) {
         const deferred = deferralOf(error);
         logger.warn(`[Speak] provider failed on call ${llmCalls} (${deferred.code}): ${describeError(error)}`);
         // A round that threw still bills the rounds before it.
-        return { deferred, llmCalls, ...(usage ? { usage } : {}) };
+        return { answer: { deferred, llmCalls, ...(usage ? { usage } : {}) } };
       }
       usage = addUsage(usage, reply.usage);
-
-      const read = readReply(reply, envelope);
-      message = read.message;
-      Object.assign(fields, read.fields);
-      if (!offerTools || read.toolCalls.length === 0) break;
+      const { message, fields: harvested, toolCalls, thought } = readReply(reply, envelope);
+      Object.assign(fields, harvested);
+      if (!offerTools || !toolCalls.length) {
+        if (message.trim()) return { answer: { spoken: { message, fields, data, llmCalls, ...(usage ? { usage } : {}) } } };
+        logger.warn(`[Speak] the model returned no message after ${llmCalls} call(s); deferring.`);
+        return { answer: { deferred: UNAVAILABLE, llmCalls, ...(usage ? { usage } : {}) } };
+      }
 
       const ctx: ToolCtx<C, D> = {
         context: req.context,
@@ -214,110 +211,84 @@ export class Speak<C = unknown, D = unknown> {
         run: "idle" in talk ? undefined : talk.run,
         now: req.now,
       };
-      const executed = await this.executeRound(read.toolCalls, tools, ctx, round, read.message, read.thought);
-      // A tool call answers a question, and Gemini enforces that literally:
-      // `400 "function call turn comes immediately after a user turn or after a
-      // function response turn"`. On a first turn the host has no history yet,
-      // so the call would open the conversation. The customer's own text is the
-      // turn it answers; on a wake, where nobody spoke, the prompt stands in.
-      if (round === 0 && history.at(-1)?.role !== "user") {
-        history = [...history, userMessage(req.input.text ?? prompt)];
-      }
-      history = [...history, ...executed.items];
-      Object.assign(data, executed.data);
-    }
-
-    if (!message.trim()) {
-      logger.warn(`[Speak] the model returned no message after ${llmCalls} call(s); deferring.`);
-      return { deferred: UNAVAILABLE, llmCalls, ...(usage ? { usage } : {}) };
-    }
-    return { spoken: { message, fields, data, llmCalls, ...(usage ? { usage } : {}) } };
+      const calls = toolCalls.map((call, i) => ({ id: `call-${round}-${i}`, name: call.toolName, arguments: call.arguments }));
+      return {
+        calls: calls.map(({ name, arguments: args }) => {
+          const tool = tools.find((t) => t.id === name);
+          return {
+            canRunConcurrently: () => {
+              if (!tool || tool.isDestructive?.(args)) return false;
+              return tool.isConcurrencySafe?.(args) ?? tool.isReadOnly?.(args) ?? false;
+            },
+            run: () => executeCall(name, args, tool, ctx),
+          };
+        }),
+        record(results) {
+          // Gemini won't accept a function call as the first message. On a wake the prompt stands in for the user.
+          history = [...history];
+          if (round === 0 && history.at(-1)?.role !== "user") history.push(userMessage(req.input.text ?? prompt));
+          history.push(assistantMessage(message || null, calls, thought));
+          results.forEach((result, i) => {
+            history.push(toolMessage(calls[i].id, calls[i].name, result.content));
+            if (isRecord(result.data)) Object.assign(data, result.data);
+          });
+        },
+      };
+    });
   }
+}
 
-  /** One provider call. Streaming yields clean message deltas; both paths return the same shape. */
-  private async *call(input: GenerateMessageInput<C>, streaming: boolean): AsyncGenerator<string, Reply> {
-    if (!streaming) {
-      const out = await this.options.provider.generateMessage<C, unknown>(input);
-      return { message: out.message, structured: out.structured, usage: readUsage(out.metadata) };
-    }
-    const decoder = new StreamingMessageDecoder();
-    let message = "";
-    let structured: unknown;
-    // The counts ride on the terminal chunk, so the last one that carries any wins.
-    let usage: TokenUsage | undefined;
-    for await (const chunk of this.options.provider.generateMessageStream<C, unknown>(input)) {
-      const clean = decoder.push(chunk.accumulated);
-      if (clean.delta) yield clean.delta;
-      message = clean.message;
-      if (chunk.structured !== undefined) structured = chunk.structured;
-      usage = readUsage(chunk.metadata) ?? usage;
-    }
-    return { message, structured, usage };
+/** One provider call. Only decoded message text can leave the stream. */
+async function* callProvider<C>(
+  provider: AiProvider,
+  input: GenerateMessageInput<C>,
+  streaming: boolean,
+): AsyncGenerator<{ delta: string }, Reply> {
+  if (!streaming) {
+    const out = await provider.generateMessage<C, unknown>(input);
+    return { message: out.message, structured: out.structured, usage: readUsage(out.metadata) };
   }
-
-  /**
-   * Run one round of tool calls and turn them into history items. Consecutive
-   * concurrency-safe calls run together; anything else runs alone, in order.
-   * Data patches merge in call order whatever the completion order.
-   */
-  private async executeRound(
-    calls: ToolCall[],
-    tools: Tool<C, D>[],
-    ctx: ToolCtx<C, D>,
-    round: number,
-    preamble: string,
-    thought: Thought,
-  ): Promise<{ items: History; data: Record<string, unknown> }> {
-    const safe = (call: ToolCall): boolean => {
-      const tool = tools.find((t) => t.id === call.toolName);
-      if (!tool || tool.isDestructive?.(call.arguments)) return false;
-      return tool.isConcurrencySafe?.(call.arguments) ?? tool.isReadOnly?.(call.arguments) ?? false;
-    };
-    const results: CallResult<D>[] = [];
-    for (let i = 0; i < calls.length; ) {
-      let j = i + 1;
-      if (safe(calls[i])) while (j < calls.length && safe(calls[j])) j++;
-      results.push(...(await Promise.all(calls.slice(i, j).map((call) => this.executeCall(call, tools, ctx)))));
-      i = j;
-    }
-
-    const ids = calls.map((_, i) => `call-${round}-${i}`);
-    const items: History = [
-      assistantMessage(
-        preamble || null,
-        calls.map((call, i) => ({ id: ids[i], name: call.toolName, arguments: call.arguments })),
-        thought,
-      ),
-      ...calls.map((call, i) => toolMessage(ids[i], call.toolName, results[i].content)),
-    ];
-    const data: Record<string, unknown> = {};
-    for (const result of results) if (isRecord(result.data)) Object.assign(data, result.data);
-    return { items, data };
+  const decoder = new StreamingMessageDecoder();
+  let message = "";
+  let structured: unknown;
+  // The counts ride on the terminal chunk, so the last one that carries any wins.
+  let usage: TokenUsage | undefined;
+  for await (const chunk of provider.generateMessageStream<C, unknown>(input)) {
+    const clean = decoder.push(chunk.accumulated);
+    if (clean.delta) yield { delta: clean.delta };
+    message = clean.message;
+    if (chunk.structured !== undefined) structured = chunk.structured;
+    usage = readUsage(chunk.metadata) ?? usage;
   }
+  return { message, structured, usage };
+}
 
-  /** One tool call through its gates and handler. Never throws: the model sees `{ error }`. */
-  private async executeCall(call: ToolCall, tools: Tool<C, D>[], ctx: ToolCtx<C, D>): Promise<CallResult<D>> {
-    const tool = tools.find((t) => t.id === call.toolName);
-    if (!tool) return { content: failure(`Tool "${call.toolName}" is not available.`) };
-    try {
-      const validation = await tool.validateInput?.(call.arguments, ctx);
-      if (validation && !validation.valid) {
-        return {
-          content: failure(`Validation failed: ${validation.error ?? "invalid input"}`, {
-            correctedInput: validation.correctedInput,
-          }),
-        };
-      }
-      const permission = await tool.checkPermissions?.(call.arguments, ctx);
-      if (permission && !permission.allowed) {
-        return { content: failure(`Permission denied: ${permission.reason ?? "not allowed"}`) };
-      }
-      const result: ToolResult<D> = (await tool.handler(call.arguments, ctx)) ?? {};
-      return { content: serialize(result.value, tool.maxResultSizeChars), data: result.data };
-    } catch (error) {
-      logger.warn(`[Speak] tool "${call.toolName}" threw: ${describeError(error)}`);
-      return { content: failure(describeError(error)) };
+/** One tool call through its gates and handler. Never throws: the model sees `{ error }`. */
+async function executeCall<C, D>(
+  name: string,
+  args: Record<string, unknown>,
+  tool: Tool<C, D> | undefined,
+  ctx: ToolCtx<C, D>,
+): Promise<CallResult<D>> {
+  if (!tool) return { content: failure(`Tool "${name}" is not available.`) };
+  try {
+    const validation = await tool.validateInput?.(args, ctx);
+    if (validation && !validation.valid) {
+      return {
+        content: failure(`Validation failed: ${validation.error ?? "invalid input"}`, {
+          correctedInput: validation.correctedInput,
+        }),
+      };
     }
+    const permission = await tool.checkPermissions?.(args, ctx);
+    if (permission && !permission.allowed) {
+      return { content: failure(`Permission denied: ${permission.reason ?? "not allowed"}`) };
+    }
+    const result: ToolResult<D> = (await tool.handler(args, ctx)) ?? {};
+    return { content: serialize(result.value, tool.maxResultSizeChars), data: result.data };
+  } catch (error) {
+    logger.warn(`[Speak] tool "${name}" threw: ${describeError(error)}`);
+    return { content: failure(describeError(error)) };
   }
 }
 
