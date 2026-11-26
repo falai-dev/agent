@@ -2,6 +2,10 @@
 
 All notable changes to `@falai/agent` will be documented in this file.
 
+## [4.0.8] - 2026-11-26
+
+- `turn()` and `turnStream()` now use ProviderKit Agents to run tools between model calls. Your provider, permissions and saved sessions stay the same. Closing the stream while reading a reply closes that model stream without starting another tool round.
+
 ## [4.0.7] - 2026-11-19
 
 ### Changed
